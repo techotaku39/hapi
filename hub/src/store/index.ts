@@ -33,7 +33,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 
-const SCHEMA_VERSION: number = 21
+const SCHEMA_VERSION: number = 22
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -289,6 +289,7 @@ export class Store {
             18: () => this.migrateFromV18ToV19(),
             19: () => this.migrateFromV19ToV20(),
             20: () => this.migrateFromV20ToV21(),
+            21: () => this.migrateFromV21ToV22(),
         })
 
         if (currentVersion === 0) {
@@ -837,6 +838,14 @@ export class Store {
             DELETE FROM usage_events;
             DELETE FROM usage_scan_state;
         `)
+    }
+
+    private migrateFromV21ToV22(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {

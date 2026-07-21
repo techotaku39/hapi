@@ -13,6 +13,7 @@ import {
     setSessionModelReasoningEffort,
     setSessionServiceTier,
     setSessionActive,
+    setSessionPinned,
     setSessionTeamState,
     setSessionTodos,
     replaceSessionTodos,
@@ -99,6 +100,10 @@ export class SessionStore {
 
     setSessionActive(id: string, active: boolean, activeAt: number, namespace: string): boolean {
         return setSessionActive(this.db, id, active, activeAt, namespace)
+    }
+
+    setSessionPinned(id: string, pinned: boolean, namespace: string): boolean {
+        return setSessionPinned(this.db, id, pinned, namespace)
     }
 
     touchSessionUpdatedAt(id: string, updatedAt: number, namespace: string): boolean {

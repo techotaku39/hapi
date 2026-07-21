@@ -5,6 +5,7 @@ import {
     getPermissionModesForFlavor,
     isPermissionModeAllowedForFlavor,
     RenameSessionRequestSchema,
+    SetSessionPinnedRequestSchema,
     ResumeSessionRequestSchema,
     RewindConversationRequestSchema,
     SCRATCHLIST_MAX_ENTRIES,
@@ -88,6 +89,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 // Peer discovery wants newest activity first before limit truncation.
                 if (order === 'updatedAt') {
                     return b.updatedAt - a.updatedAt
+                }
+                if (Boolean(a.pinned) !== Boolean(b.pinned)) {
+                    return a.pinned ? -1 : 1
                 }
                 // Active sessions first (web session list)
                 if (a.active !== b.active) {
@@ -788,6 +792,23 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             }
             return c.json({ error: message }, 500)
         }
+    })
+
+    app.put('/sessions/:id/pin', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) return sessionResult
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = SetSessionPinnedRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: pinned is required' }, 400)
+        }
+
+        engine.setSessionPinned(sessionResult.sessionId, parsed.data.pinned)
+        return c.json({ ok: true })
     })
 
     app.delete('/sessions/:id', async (c) => {

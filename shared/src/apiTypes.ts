@@ -308,6 +308,12 @@ export const RenameSessionRequestSchema = z.object({
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
 
+export const SetSessionPinnedRequestSchema = z.object({
+    pinned: z.boolean()
+})
+
+export type SetSessionPinnedRequest = z.infer<typeof SetSessionPinnedRequestSchema>
+
 /**
  * An empty string clears the custom name, so unlike session rename there is no
  * `min(1)`: the machine falls back to its hostname. The length ceiling is
