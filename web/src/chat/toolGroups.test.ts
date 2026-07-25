@@ -249,6 +249,31 @@ describe('buildVisibleChatBlocks', () => {
         expect(isToolGroupBlock(visible[2]) && visible[2].presentationMode).toBe('codex-exploration')
     })
 
+    it('groups structured general Codex commands when grouped mode is selected', () => {
+        const first = makeToolBlock('codex-test-1', 'CodexBash', {
+            command: 'bun test',
+            command_actions: [{ type: 'unknown', command: 'bun test' }]
+        })
+        const second = makeToolBlock('codex-test-2', 'CodexBash', {
+            command: 'bun run typecheck',
+            command_actions: [{ type: 'unknown', command: 'bun run typecheck' }]
+        })
+
+        const classified = buildVisibleChatBlocks([first, second], {
+            hasMoreMessages: false,
+            groupingMode: 'classified'
+        })
+        const grouped = buildVisibleChatBlocks([first, second], {
+            hasMoreMessages: false,
+            groupingMode: 'grouped'
+        })
+
+        expect(classified).toEqual([first, second])
+        expect(grouped).toHaveLength(1)
+        expect(isToolGroupBlock(grouped[0]) && grouped[0].presentationMode).toBe('default')
+        expect(isToolGroupBlock(grouped[0]) && grouped[0].defaultOpen).toBe(false)
+    })
+
     it('groups contiguous eligible root tool cards', () => {
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
