@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ToolGroupingMode } from '@/chat/toolGroups'
 
-export const DEFAULT_TOOL_GROUPING_MODE: ToolGroupingMode = 'classified'
+export const DEFAULT_TOOL_GROUPING_MODE: ToolGroupingMode = 'grouped'
 
 export function getToolGroupingModeOptions(): ReadonlyArray<{ value: ToolGroupingMode; labelKey: string }> {
     return [
-        { value: 'classified', labelKey: 'settings.chat.toolGrouping.classified' },
         { value: 'grouped', labelKey: 'settings.chat.toolGrouping.grouped' },
+        { value: 'classified', labelKey: 'settings.chat.toolGrouping.classified' },
     ]
 }
 
