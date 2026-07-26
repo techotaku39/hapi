@@ -606,6 +606,7 @@ export default {
   'settings.display.typography': 'Typography',
   'settings.display.sessions': 'Session list',
   'settings.display.appearance': 'Appearance',
+  'settings.display.appearanceMode': 'Appearance mode',
   'settings.display.appearance.system': 'Follow System',
   'settings.display.appearance.dark': 'Dark',
   'settings.display.appearance.oled': 'OLED Black',

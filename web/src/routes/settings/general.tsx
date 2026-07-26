@@ -9,9 +9,9 @@ const locales: ReadonlyArray<{ value: Locale; label: string }> = [
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     return (
-        <SettingsPageContent title={t('settings.general.title')} description={t('settings.general.description')}>
-            <SettingsSection>
-                <SettingsChoiceGroup label={t('settings.language.label')} value={locale} options={locales} onChange={setLocale} />
+        <SettingsPageContent description={t('settings.general.description')}>
+            <SettingsSection title={t('settings.language.label')}>
+                <SettingsChoiceGroup hideLabel label={t('settings.language.label')} value={locale} options={locales} onChange={setLocale} />
             </SettingsSection>
         </SettingsPageContent>
     )
