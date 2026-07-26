@@ -1734,16 +1734,23 @@ export function SessionList(props: {
                             <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
                                 <div className="collapsible-inner">
                                 <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
-                                    {visibleGroupSessions.map((s) => (
-                                        <SessionItem
-                                            key={s.id}
-                                            session={s}
-                                            onSelect={props.onSelect}
-                                            showPath={false}
-                                            api={api}
-                                            selected={s.id === selectedSessionId}
-                                            showDetailedStatus={showDetailedStatus}
-                                        />
+                                    {visibleGroupSessions.map((s, index) => (
+                                        <div key={s.id} className="contents">
+                                            {shouldShowPinnedDivider(visibleGroupSessions, index) ? (
+                                                <div
+                                                    className="ml-2 my-1 border-t border-[var(--app-border)]"
+                                                    aria-hidden="true"
+                                                />
+                                            ) : null}
+                                            <SessionItem
+                                                session={s}
+                                                onSelect={props.onSelect}
+                                                showPath={false}
+                                                api={api}
+                                                selected={s.id === selectedSessionId}
+                                                showDetailedStatus={showDetailedStatus}
+                                            />
+                                        </div>
                                     ))}
                                     {group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canShowFewerSessions) ? (
                                         <div className="ml-2.5 mr-2 my-1 flex gap-1.5">
