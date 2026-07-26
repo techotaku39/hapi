@@ -11,6 +11,7 @@ export function getToolGroupingModeOptions(): ReadonlyArray<{ value: ToolGroupin
 }
 
 const STORAGE_KEY = 'hapi-tool-grouping-mode'
+const CHANGE_EVENT = 'hapi-tool-grouping-mode-change'
 
 function isBrowser(): boolean {
     return typeof window !== 'undefined' && typeof document !== 'undefined'
@@ -44,8 +45,15 @@ export function useToolGroupingMode(): {
                 setToolGroupingModeState(parseToolGroupingMode(event.newValue))
             }
         }
+        const onChange = () => {
+            setToolGroupingModeState(getInitialToolGroupingMode())
+        }
         window.addEventListener('storage', onStorage)
-        return () => window.removeEventListener('storage', onStorage)
+        window.addEventListener(CHANGE_EVENT, onChange)
+        return () => {
+            window.removeEventListener('storage', onStorage)
+            window.removeEventListener(CHANGE_EVENT, onChange)
+        }
     }, [])
 
     const setToolGroupingMode = useCallback((mode: ToolGroupingMode) => {
@@ -56,6 +64,7 @@ export function useToolGroupingMode(): {
             } else {
                 localStorage.setItem(STORAGE_KEY, mode)
             }
+            window.dispatchEvent(new Event(CHANGE_EVENT))
         } catch {
             // Ignore storage errors
         }

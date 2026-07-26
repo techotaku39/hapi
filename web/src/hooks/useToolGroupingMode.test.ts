@@ -1,8 +1,10 @@
+import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
     DEFAULT_TOOL_GROUPING_MODE,
     getInitialToolGroupingMode,
     getToolGroupingModeOptions,
+    useToolGroupingMode,
 } from './useToolGroupingMode'
 
 describe('useToolGroupingMode helpers', () => {
@@ -26,5 +28,20 @@ describe('useToolGroupingMode helpers', () => {
     it('reads the classified preference', () => {
         window.localStorage.setItem('hapi-tool-grouping-mode', 'classified')
         expect(getInitialToolGroupingMode()).toBe('classified')
+    })
+
+    it('syncs changes between hook consumers in the same window', () => {
+        const first = renderHook(() => useToolGroupingMode())
+        const second = renderHook(() => useToolGroupingMode())
+
+        act(() => first.result.current.setToolGroupingMode('classified'))
+
+        expect(first.result.current.toolGroupingMode).toBe('classified')
+        expect(second.result.current.toolGroupingMode).toBe('classified')
+
+        act(() => second.result.current.setToolGroupingMode('grouped'))
+
+        expect(first.result.current.toolGroupingMode).toBe('grouped')
+        expect(second.result.current.toolGroupingMode).toBe('grouped')
     })
 })
