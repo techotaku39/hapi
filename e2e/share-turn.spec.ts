@@ -66,7 +66,7 @@ for (const viewport of [
 
         const bytes = await readFile(path)
         const size = pngSize(bytes)
-        expect(download.suggestedFilename()).toMatch(/^HAPI-\d{14}\.png$/)
+        expect(download.suggestedFilename()).toMatch(/^HAPI-Complex HAPI turn-\d{14}\.png$/)
         expect(bytes.byteLength).toBeGreaterThan(80_000)
         expect(size.width).toBe(1920)
         expect(size.height).toBeGreaterThan(1_000)
@@ -134,7 +134,7 @@ test('localizes the share dialog and exported badge in Chinese', async ({ page }
 
 test('uses a prepared PNG while native share still has click activation', async ({ page }) => {
     await page.addInitScript(() => {
-        const state = { calls: 0, active: false, fileType: '' }
+        const state = { calls: 0, active: false, fileType: '', fileName: '' }
         Object.defineProperty(window, '__hapiShareTest', { value: state, configurable: true })
         Object.defineProperty(navigator, 'canShare', {
             configurable: true,
@@ -146,6 +146,7 @@ test('uses a prepared PNG while native share still has click activation', async 
                 state.calls += 1
                 state.active = navigator.userActivation?.isActive ?? false
                 state.fileType = data.files?.[0]?.type ?? ''
+                state.fileName = data.files?.[0]?.name ?? ''
                 return Promise.resolve()
             }
         })
@@ -162,9 +163,10 @@ test('uses a prepared PNG while native share still has click activation', async 
     })).toBe(1)
     const result = await page.evaluate(() => {
         return (window as typeof window & {
-            __hapiShareTest: { active: boolean; fileType: string }
+            __hapiShareTest: { active: boolean; fileType: string; fileName: string }
         }).__hapiShareTest
     })
     expect(result.active).toBe(true)
     expect(result.fileType).toBe('image/png')
+    expect(result.fileName).toMatch(/^HAPI-Complex HAPI turn-\d{14}\.png$/)
 })

@@ -59,8 +59,24 @@ function formatShareTimestamp(date = new Date()): string {
     ].join('')
 }
 
-function getShareFileName(): string {
-    return `HAPI-${formatShareTimestamp()}.png`
+function sanitizeShareFileNamePart(title: string): string {
+    const withoutControlCharacters = Array.from(title.normalize('NFKC'))
+        .filter((character) => {
+            const codePoint = character.codePointAt(0) ?? 0
+            return codePoint >= 32 && codePoint !== 127
+        })
+        .join('')
+    const sanitized = withoutControlCharacters
+        .replace(/[<>:"/\\|?*]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .replace(/-+/g, '-')
+        .replace(/^[ .-]+|[ .-]+$/g, '')
+        .trim()
+    return Array.from(sanitized || 'Shared turn').slice(0, 80).join('').trim()
+}
+
+function getShareFileName(title: string): string {
+    return `HAPI-${sanitizeShareFileNamePart(title)}-${formatShareTimestamp()}.png`
 }
 
 function prepareExportElement(element: HTMLElement): HTMLElement {
@@ -379,8 +395,8 @@ function downloadBlob(blob: Blob, fileName: string): void {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-async function shareImageBlob(blob: Blob): Promise<void> {
-    const file = new File([blob], getShareFileName(), { type: blob.type })
+async function shareImageBlob(blob: Blob, fileName: string): Promise<void> {
+    const file = new File([blob], fileName, { type: blob.type })
     if (!navigator.share) {
         throw new Error('Image sharing is not supported in this browser')
     }
@@ -569,7 +585,13 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                         <button
                             type="button"
                             onClick={() => {
-                                if (preparedBlob) runBlobAction(preparedBlob, shareImageBlob, 'share')
+                                if (preparedBlob) {
+                                    runBlobAction(
+                                        preparedBlob,
+                                        (blob) => shareImageBlob(blob, getShareFileName(props.title)),
+                                        'share'
+                                    )
+                                }
                             }}
                             disabled={busy !== null || !preparedBlob}
                             className="rounded-md border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] disabled:opacity-50 sm:w-32"
@@ -580,7 +602,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                     <button
                         type="button"
                         onClick={() => {
-                            void withPng((blob) => downloadBlob(blob, getShareFileName()), 'download')
+                            void withPng((blob) => downloadBlob(blob, getShareFileName(props.title)), 'download')
                         }}
                         disabled={busy !== null || !ready}
                         className="col-span-2 rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50 sm:col-span-1 sm:w-32"
