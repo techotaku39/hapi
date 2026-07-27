@@ -352,19 +352,26 @@ body {
     }
 }
 
+/* Keep the session list scrollbar on the left at every viewport size. */
+.session-list-scrollbar-left {
+    direction: rtl;
+    scrollbar-gutter: stable;
+}
+
+.session-list-scrollbar-left > * {
+    direction: ltr;
+}
+
+/* Match fixed sidebar controls to the space reserved for the left scrollbar. */
+.session-list-scrollbar-offset {
+    padding-left: 8px;
+}
+
 /* Desktop sidebar: use custom width from CSS variable.
    Kept in sync with the Tailwind `split` breakpoint (see tailwind.config.ts)
    so the sidebar width/resize applies as soon as the split view appears on
    compact tablets. */
 @media (min-width: 920px) {
-    .desktop-scrollbar-left {
-        direction: rtl;
-    }
-
-    .desktop-scrollbar-left > * {
-        direction: ltr;
-    }
-
     /* Apply resizable width to sidebar.
        Cap it against the viewport so a wide persisted width (up to 600px, from
        resizing on desktop) can't crush the detail pane on a compact split.
