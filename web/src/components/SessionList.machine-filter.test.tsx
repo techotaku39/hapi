@@ -95,6 +95,21 @@ describe('SessionList machine filter', () => {
         expect(screen.getByTitle('/work/hapi')).toBeTruthy()
     })
 
+    it('restores machine rows when the legacy layout is enabled', () => {
+        window.localStorage.setItem('hapi-legacy-session-list-layout', 'true')
+        renderSessionList([
+            makeSession({
+                id: 'session-1',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', machineId: 'machine-1', agentSessionId: 'thread-1' }
+            })
+        ])
+
+        expect(screen.queryByRole('group', { name: 'Filter sessions by machine' })).toBeNull()
+        expect(screen.getByText('Mint')).toBeTruthy()
+        expect(screen.getByText('work/hapi')).toBeTruthy()
+    })
+
     it('shows the filter bar and machine-suffixed group titles with multiple machines', () => {
         renderSessionList(multiMachineSessions)
 

@@ -27,7 +27,9 @@ import { getSessionTitle } from '@/lib/sessionTitle'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar } from '@/components/MachineFilterBar'
+import { MachineGroupHeader } from '@/components/MachineGroupHeader'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
+import { useLegacySessionListLayout } from '@/hooks/useLegacySessionListLayout'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 
 type SessionGroup = {
@@ -1021,6 +1023,7 @@ export function SessionList(props: {
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
+    const { legacySessionListLayout } = useLegacySessionListLayout()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
     const [customStart, setCustomStart] = useState('')
@@ -1079,7 +1082,7 @@ export function SessionList(props: {
         () => groupByMachine(allGroups, resolveMachineLabel),
         [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
-    const showMachineFilterBar = machineFilters.length >= 2
+    const showMachineFilterBar = !legacySessionListLayout && machineFilters.length >= 2
     // A persisted filter whose machine no longer has sessions falls back to
     // "All"; with at most one machine the bar is hidden and never filters.
     const activeMachineFilter = showMachineFilterBar && machineFilter !== null
@@ -1095,6 +1098,10 @@ export function SessionList(props: {
     const groups = useMemo(
         () => groupSessionsByDirectory(machineFilteredSessions),
         [machineFilteredSessions]
+    )
+    const legacyMachineGroups = useMemo(
+        () => groupByMachine(groupSessionsByDirectory(visibleSessions), resolveMachineLabel),
+        [visibleSessions, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
@@ -1114,6 +1121,18 @@ export function SessionList(props: {
         setCollapseOverrides(prev => {
             const next = new Map(prev)
             next.set(groupKey, !isCollapsed)
+            return next
+        })
+    }
+
+    const isMachineCollapsed = (machineId: string | null): boolean =>
+        collapseOverrides.get(`machine::${machineId ?? UNKNOWN_MACHINE_ID}`) ?? false
+
+    const toggleMachine = (machineId: string | null) => {
+        const key = `machine::${machineId ?? UNKNOWN_MACHINE_ID}`
+        setCollapseOverrides(prev => {
+            const next = new Map(prev)
+            next.set(key, !(prev.get(key) ?? false))
             return next
         })
     }
@@ -1258,7 +1277,7 @@ export function SessionList(props: {
                 </div>
             ) : null}
 
-            {showMachineFilterBar ? (
+            {!legacySessionListLayout && showMachineFilterBar ? (
                 <MachineFilterBar
                     machines={machineFilters.map((mg) => {
                         const machine = mg.machineId ? machinesById[mg.machineId] : undefined
@@ -1279,7 +1298,29 @@ export function SessionList(props: {
             ) : null}
 
             <div className="flex flex-col gap-1 px-2 pt-1 pb-2">
-                {groups.map((group) => {
+                {(legacySessionListLayout
+                    ? legacyMachineGroups.flatMap(machineGroup => [
+                        { kind: 'machine' as const, machineGroup },
+                        ...(isMachineCollapsed(machineGroup.machineId)
+                            ? []
+                            : machineGroup.projectGroups.map(group => ({ kind: 'group' as const, group })))
+                    ])
+                    : groups.map(group => ({ kind: 'group' as const, group }))
+                ).map((item) => {
+                    if (item.kind === 'machine') {
+                        const machine = item.machineGroup.machineId ? machinesById[item.machineGroup.machineId] : undefined
+                        return (
+                            <MachineGroupHeader
+                                key={`machine::${item.machineGroup.machineId ?? UNKNOWN_MACHINE_ID}`}
+                                label={item.machineGroup.label}
+                                sessionCount={item.machineGroup.totalSessions}
+                                collapsed={isMachineCollapsed(item.machineGroup.machineId)}
+                                onToggle={() => toggleMachine(item.machineGroup.machineId)}
+                                healthPresentation={presentMachineHealth(machine?.health, getMachinePlatform(machine))}
+                            />
+                        )
+                    }
+                    const group = item.group
                     const isCollapsed = isGroupCollapsed(group)
                     const visibleGroupSessions = getVisibleGroupSessions(group)
                     const hiddenSessionCount = group.sessions.length - visibleGroupSessions.length
@@ -1288,11 +1329,11 @@ export function SessionList(props: {
                     const canStartInGroupDirectory = group.directory !== 'Other'
                     // With multiple machines in the unfiltered view, disambiguate
                     // same-named directories by suffixing the machine label.
-                    const groupTitle = showMachineFilterBar && activeMachineFilter === null
+                    const groupTitle = !legacySessionListLayout && showMachineFilterBar && activeMachineFilter === null
                         ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
                         : group.displayName
                     return (
-                        <div key={group.key}>
+                        <div key={group.key} className={legacySessionListLayout ? 'ml-4' : undefined}>
                             <div
                                 className="group/project sticky top-0 z-10 flex items-center gap-2 px-1 py-1.5 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                                 onClick={() => toggleGroup(group.key, isCollapsed)}

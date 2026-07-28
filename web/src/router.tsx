@@ -39,6 +39,7 @@ import { ApiError } from '@/api/client'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useLegacySessionListLayout } from '@/hooks/useLegacySessionListLayout'
 import { fetchLatestMessages, seedMessageWindowFromSession } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
@@ -192,6 +193,7 @@ function SessionsPage() {
     const { t } = useTranslation()
     const { addToast } = useToast()
     const { sessions, isLoading, error, refetch } = useSessions(api)
+    const { legacySessionListLayout } = useLegacySessionListLayout()
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
     const [codexSessions, setCodexSessions] = useState<CodexLocalSessionSummary[]>([])
@@ -228,6 +230,9 @@ function SessionsPage() {
     }, [addToast, refetch, t])
 
     const machineLabelsById = useMachineLabels(machines)
+    const projectCount = useMemo(() => new Set(sessions.map(session =>
+        session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+    )).size, [sessions])
     const machinesById = useMemo(() => {
         const byId: Record<string, typeof machines[number]> = {}
         for (const machine of machines) {
@@ -536,7 +541,12 @@ function SessionsPage() {
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto w-full max-w-content flex items-center justify-end px-3 py-2">
+                    <div className="mx-auto flex w-full max-w-content items-center justify-between px-3 py-2">
+                        {legacySessionListLayout ? (
+                            <div className="whitespace-nowrap text-xs text-[var(--app-hint)]">
+                                {t('sessions.count', { n: sessions.length, m: projectCount })}
+                            </div>
+                        ) : <span />}
                         <div className="flex items-center gap-2">
                             <button
                                 type="button"
