@@ -15,7 +15,7 @@ import {
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
-import { SessionList } from '@/components/SessionList'
+import { filterActiveSessionsOnly, prepareSidebarSessions, SessionList } from '@/components/SessionList'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { NewSession } from '@/components/NewSession'
@@ -40,6 +40,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useLegacySessionListLayout } from '@/hooks/useLegacySessionListLayout'
+import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { fetchLatestMessages, seedMessageWindowFromSession } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
@@ -194,6 +195,7 @@ function SessionsPage() {
     const { addToast } = useToast()
     const { sessions, isLoading, error, refetch } = useSessions(api)
     const { legacySessionListLayout } = useLegacySessionListLayout()
+    const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
     const [codexSessions, setCodexSessions] = useState<CodexLocalSessionSummary[]>([])
@@ -230,9 +232,6 @@ function SessionsPage() {
     }, [addToast, refetch, t])
 
     const machineLabelsById = useMachineLabels(machines)
-    const projectCount = useMemo(() => new Set(sessions.map(session =>
-        session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
-    )).size, [sessions])
     const machinesById = useMemo(() => {
         const byId: Record<string, typeof machines[number]> = {}
         for (const machine of machines) {
@@ -242,6 +241,19 @@ function SessionsPage() {
     }, [machines])
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
+    const sidebarSessions = useMemo(
+        () => prepareSidebarSessions(sessions, selectedSessionId),
+        [sessions, selectedSessionId]
+    )
+    const visibleSidebarSessions = useMemo(
+        () => showActiveSessionsOnly
+            ? filterActiveSessionsOnly(sidebarSessions, selectedSessionId)
+            : sidebarSessions,
+        [sidebarSessions, selectedSessionId, showActiveSessionsOnly]
+    )
+    const projectCount = useMemo(() => new Set(visibleSidebarSessions.map(session =>
+        session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+    )).size, [visibleSidebarSessions])
     const selectedSession = useMemo(
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
@@ -544,7 +556,7 @@ function SessionsPage() {
                     <div className="mx-auto flex w-full max-w-content items-center justify-between px-3 py-2">
                         {legacySessionListLayout ? (
                             <div className="whitespace-nowrap text-xs text-[var(--app-hint)]">
-                                {t('sessions.count', { n: sessions.length, m: projectCount })}
+                                {t('sessions.count', { n: visibleSidebarSessions.length, m: projectCount })}
                             </div>
                         ) : <span />}
                         <div className="flex items-center gap-2">

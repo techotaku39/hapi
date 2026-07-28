@@ -61,15 +61,19 @@ export function MachineGroupHeader(props: {
 
     return (
         <div
+            onClick={props.onToggle}
             className={cn(
                 'group/machine-row relative flex w-full min-w-0 items-center gap-2 px-1 py-1.5 text-left rounded-lg select-none',
                 'border border-[var(--app-border)] bg-[var(--app-subtle-bg)]/70',
-                'transition-colors hover:bg-[var(--app-subtle-bg)]'
+                'cursor-pointer transition-colors hover:bg-[var(--app-subtle-bg)]'
             )}
         >
             <button
                 type="button"
-                onClick={props.onToggle}
+                onClick={(event) => {
+                    event.stopPropagation()
+                    props.onToggle()
+                }}
                 aria-expanded={!props.collapsed}
                 className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
             >

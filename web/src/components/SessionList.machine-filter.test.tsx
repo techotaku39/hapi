@@ -131,6 +131,9 @@ describe('SessionList machine filter', () => {
         expect(screen.queryByRole('group', { name: 'Filter sessions by machine' })).toBeNull()
         expect(screen.getByText('Mint')).toBeTruthy()
         expect(screen.getByText('work/hapi')).toBeTruthy()
+
+        fireEvent.click(screen.getAllByText('(1)')[0]!)
+        expect(screen.queryByText('work/hapi')).toBeNull()
     })
 
     it('preserves machine collapse on refresh and expands it for the selected session', () => {
