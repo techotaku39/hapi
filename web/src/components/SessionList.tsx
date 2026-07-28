@@ -1217,7 +1217,7 @@ export function SessionList(props: {
                 knownKeys.add(`sessions::${g.key}`)
             }
             if (legacySessionListLayout) {
-                for (const machineGroup of legacyMachineGroups) {
+                for (const machineGroup of machineFilters) {
                     knownKeys.add(`machine::${machineGroup.machineId ?? UNKNOWN_MACHINE_ID}`)
                 }
             }
@@ -1230,7 +1230,7 @@ export function SessionList(props: {
             }
             return changed ? next : prev
         })
-    }, [allGroups, legacyMachineGroups, legacySessionListLayout])
+    }, [allGroups, machineFilters, legacySessionListLayout])
 
     // Clean up reveal caps for groups that no longer exist.
     useEffect(() => {

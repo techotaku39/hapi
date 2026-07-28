@@ -134,6 +134,11 @@ describe('SessionList machine filter', () => {
 
         fireEvent.click(screen.getAllByText('(1)')[0]!)
         expect(screen.queryByText('work/hapi')).toBeNull()
+
+        const search = screen.getByPlaceholderText('Search sessions…')
+        fireEvent.change(search, { target: { value: 'no match' } })
+        fireEvent.change(search, { target: { value: '' } })
+        expect(screen.queryByText('work/hapi')).toBeNull()
     })
 
     it('preserves machine collapse on refresh and expands it for the selected session', () => {
