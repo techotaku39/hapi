@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import type { ToolCallBlock } from '@/chat/types'
@@ -50,7 +50,9 @@ describe('ToolCard spacing', () => {
         const inlineBody = renderDetailedBash('echo hello && pwd')
 
         expect(inlineBody).toHaveClass('mt-1')
+        expect(inlineBody).toHaveClass('gap-4')
         expect(inlineBody).not.toHaveClass('mt-3')
+        expect(inlineBody).not.toHaveClass('gap-3')
     })
 
     it('matches the dialog gap when the timing header has no subtitle', () => {
@@ -64,5 +66,18 @@ describe('ToolCard spacing', () => {
         const inlineBody = renderDetailedBash('pwd', 'pending')
 
         expect(inlineBody).toHaveClass('mt-3')
+    })
+})
+
+describe('ToolCard detail dialog', () => {
+    it('keeps the tool detail title left-aligned on mobile', () => {
+        renderDetailedBash('pwd')
+
+        fireEvent.click(screen.getByRole('button', { expanded: false }))
+
+        const dialog = screen.getByRole('dialog')
+        const title = within(dialog).getByRole('heading')
+        expect(title.parentElement).toHaveClass('text-left')
+        expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveClass('top-2')
     })
 })
