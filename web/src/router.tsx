@@ -15,7 +15,7 @@ import {
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
-import { filterActiveSessionsOnly, prepareSidebarSessions, SessionList } from '@/components/SessionList'
+import { filterActiveSessionsOnly, prepareSidebarSessions, SessionList, UNKNOWN_MACHINE_ID } from '@/components/SessionList'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { NewSession } from '@/components/NewSession'
@@ -251,9 +251,11 @@ function SessionsPage() {
             : sidebarSessions,
         [sidebarSessions, selectedSessionId, showActiveSessionsOnly]
     )
-    const projectCount = useMemo(() => new Set(visibleSidebarSessions.map(session =>
-        session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
-    )).size, [visibleSidebarSessions])
+    const projectCount = useMemo(() => new Set(visibleSidebarSessions.map(session => {
+        const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+        const machineId = session.metadata?.machineId ?? UNKNOWN_MACHINE_ID
+        return `${machineId}::${path}`
+    })).size, [visibleSidebarSessions])
     const selectedSession = useMemo(
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
