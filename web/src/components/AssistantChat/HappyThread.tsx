@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ThreadPrimitive, useAssistantState } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
 import type { HappyRuntimeExtras } from '@/lib/assistant-runtime'
-import type { SessionMetadataSummary } from '@/types/api'
+import type { Session, SessionMetadataSummary } from '@/types/api'
 import type { ConversationOutlineItem } from '@/chat/outline'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { formatMessageTimestampTitle, formatOutlineTimestamp } from '@/chat/presentation'
@@ -16,6 +16,9 @@ import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
+import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
+import { getSessionModelLabel } from '@/lib/sessionModelLabel'
+import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
 
 type ScrollAnchor = {
     id: string
@@ -33,7 +36,6 @@ type ShareTurnState = {
     id: number
     snapshots: ShareTurnSnapshot[]
     title: string
-    subtitle: string
 } | null
 
 type ShareTurnSnapshot = {
@@ -367,6 +369,7 @@ export function ConversationOutlinePanel(props: {
 
 export function HappyThread(props: {
     api: ApiClient
+    session: Session
     sessionId: string
     metadata: SessionMetadataSummary | null
     disabled: boolean
@@ -843,7 +846,6 @@ export function HappyThread(props: {
                 id: ++shareTurnIdRef.current,
                 snapshots: fallbackSnapshot ? [fallbackSnapshot] : [],
                 title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
-                subtitle: [props.metadata?.flavor, props.metadata?.host].filter(Boolean).join(' · ') || props.sessionId
             })
             return
         }
@@ -887,7 +889,6 @@ export function HappyThread(props: {
             id: ++shareTurnIdRef.current,
             snapshots: completeSnapshots,
             title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
-            subtitle: [props.metadata?.flavor, props.metadata?.host].filter(Boolean).join(' · ') || props.sessionId
         })
     }, [props.metadata, props.sessionId])
 
@@ -1002,7 +1003,16 @@ export function HappyThread(props: {
                     key={shareTurn?.id ?? 'closed'}
                     isOpen={shareTurn !== null}
                     title={shareTurn?.title ?? ''}
-                    subtitle={shareTurn?.subtitle ?? ''}
+                    flavor={props.session.metadata?.flavor ?? null}
+                    modelLabel={(() => {
+                        const label = getSessionModelLabel(props.session)
+                        return label ? `${t(label.key)}: ${label.value}` : null
+                    })()}
+                    reasoningLabel={shouldShowCodexReasoningLabel(props.session.metadata?.flavor ?? null)
+                        ? formatCodexReasoningLabel(props.session.modelReasoningEffort)
+                        : null}
+                    showFastBadge={props.session.metadata?.flavor === 'codex' && isFastServiceTier(props.session.serviceTier)}
+                    worktreeBranch={props.session.metadata?.worktree?.branch ?? null}
                     sourceSnapshots={shareTurn?.snapshots ?? []}
                     onClose={() => setShareTurn(null)}
                 />

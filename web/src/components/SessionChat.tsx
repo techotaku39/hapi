@@ -1253,6 +1253,7 @@ function SessionChatInner(props: SessionChatProps) {
                         // Without prefixes, React may reuse the wrong component's DOM/localStorage.
                         key={`thread-${props.session.id}`}
                         api={props.api}
+                        session={props.session}
                         sessionId={props.session.id}
                         metadata={props.session.metadata}
                         disabled={sessionInactive}
