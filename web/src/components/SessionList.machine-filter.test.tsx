@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
@@ -64,6 +64,29 @@ function renderSessionList(sessions: SessionSummary[]) {
     )
 }
 
+function LegacySessionListHarness(props: { sessions: SessionSummary[] }) {
+    const [sessions, setSessions] = useState(props.sessions)
+    const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+
+    return (
+        <>
+            <button type="button" onClick={() => setSessions(current => [...current])}>Refresh sessions</button>
+            <button type="button" onClick={() => setSelectedSessionId(props.sessions[0]?.id ?? null)}>Select session</button>
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={selectedSessionId}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+                machineLabelsById={{ 'machine-1': 'Mint' }}
+            />
+        </>
+    )
+}
+
 const multiMachineSessions = [
     makeSession({
         id: 'session-m1',
@@ -107,6 +130,25 @@ describe('SessionList machine filter', () => {
 
         expect(screen.queryByRole('group', { name: 'Filter sessions by machine' })).toBeNull()
         expect(screen.getByText('Mint')).toBeTruthy()
+        expect(screen.getByText('work/hapi')).toBeTruthy()
+    })
+
+    it('preserves machine collapse on refresh and expands it for the selected session', () => {
+        window.localStorage.setItem('hapi-legacy-session-list-layout', 'true')
+        const sessions = [makeSession({
+            id: 'session-1',
+            updatedAt: 100,
+            metadata: { path: '/work/hapi', machineId: 'machine-1', agentSessionId: 'thread-1' }
+        })]
+        renderWithProviders(<LegacySessionListHarness sessions={sessions} />)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Mint' }))
+        expect(screen.queryByText('work/hapi')).toBeNull()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Refresh sessions' }))
+        expect(screen.queryByText('work/hapi')).toBeNull()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Select session' }))
         expect(screen.getByText('work/hapi')).toBeTruthy()
     })
 

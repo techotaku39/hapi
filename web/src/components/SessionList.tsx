@@ -1194,8 +1194,17 @@ export function SessionList(props: {
         if (autoExpandedSelectedSessionKeyRef.current === autoExpandKey) return
         autoExpandedSelectedSessionKeyRef.current = autoExpandKey
 
-        setCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
-    }, [selectedSessionId, allGroups])
+        setCollapseOverrides(prev => {
+            const expanded = expandSelectedSessionCollapseOverrides(prev, group)
+            if (!legacySessionListLayout) return expanded
+
+            const machineKey = `machine::${group.machineId ?? UNKNOWN_MACHINE_ID}`
+            if (expanded.get(machineKey) === false) return expanded
+            const next = new Map(expanded)
+            next.set(machineKey, false)
+            return next
+        })
+    }, [selectedSessionId, allGroups, legacySessionListLayout])
 
     // Clean up stale collapse overrides
     useEffect(() => {
@@ -1207,6 +1216,11 @@ export function SessionList(props: {
                 knownKeys.add(g.key)
                 knownKeys.add(`sessions::${g.key}`)
             }
+            if (legacySessionListLayout) {
+                for (const machineGroup of legacyMachineGroups) {
+                    knownKeys.add(`machine::${machineGroup.machineId ?? UNKNOWN_MACHINE_ID}`)
+                }
+            }
             let changed = false
             for (const key of next.keys()) {
                 if (!knownKeys.has(key)) {
@@ -1216,7 +1230,7 @@ export function SessionList(props: {
             }
             return changed ? next : prev
         })
-    }, [allGroups])
+    }, [allGroups, legacyMachineGroups, legacySessionListLayout])
 
     // Clean up reveal caps for groups that no longer exist.
     useEffect(() => {
