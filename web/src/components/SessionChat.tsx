@@ -19,7 +19,7 @@ import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
 import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
-import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
+import { isQueuedForInvocation } from '@/lib/messages'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import {
     getCodexModelReasoningEfforts,
@@ -32,7 +32,8 @@ import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimeP
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
 import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
-import { useScratchlist } from '@/lib/use-scratchlist'
+import { useHubScratchlist } from '@/lib/use-hub-scratchlist'
+import { ScratchlistMigrationBanner } from '@/components/AssistantChat/ScratchlistMigrationBanner'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { consumeSharePendingTransfer } from '@/lib/sharePendingState'
@@ -312,9 +313,9 @@ function ShareSeedConsumer(props: { sessionId: string; sessionActive: boolean })
  * composer-toolbar counter and the drawer share one source of truth.
  */
 export function ScratchlistDrawerHost(props: {
-    entries: ReturnType<typeof useScratchlist>['entries']
-    onMove: ReturnType<typeof useScratchlist>['move']
-    onDelete: ReturnType<typeof useScratchlist>['remove']
+    entries: ReturnType<typeof useHubScratchlist>['entries']
+    onMove: ReturnType<typeof useHubScratchlist>['move']
+    onDelete: ReturnType<typeof useHubScratchlist>['remove']
     onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
     /**
      * Called when the operator promotes an entry to the composer.
@@ -356,14 +357,9 @@ export function ScratchlistDrawerHost(props: {
 }
 
 export function buildGoalStateMessages(
-    messages: DecryptedMessage[],
-    pendingMessages: DecryptedMessage[] = []
+    messages: DecryptedMessage[]
 ): DecryptedMessage[] {
-    const eligibleMessages = messages.filter((message) => !isUninvokedScheduledMessage(message))
-    const eligiblePendingMessages = pendingMessages.filter((message) => !isUninvokedScheduledMessage(message))
-    return eligiblePendingMessages.length > 0
-        ? mergeMessages(eligibleMessages, eligiblePendingMessages)
-        : eligibleMessages
+    return messages.filter((message) => !isUninvokedScheduledMessage(message))
 }
 
 function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
@@ -389,24 +385,23 @@ type SessionChatProps = {
     cursorChatOnDisk?: boolean
     reopenDisabledReason?: string
     messages: DecryptedMessage[]
-    pendingMessages?: DecryptedMessage[]
     messagesWarning: string | null
     hasMoreMessages: boolean
-    isLoadingMessages: boolean
+    isSyncingTail: boolean
     isLoadingMoreMessages: boolean
     isSending: boolean
-    pendingCount: number
+    unseenCount: number
     messagesVersion: number
+    historyVersion: number
     onBack: () => void
     onRefresh: () => void
-    onLoadMore: () => Promise<unknown>
+    onLoadMore: () => Promise<boolean>
     // Resolves true when the send was accepted by the underlying mutation, false when
     // pre-mutation guards (no-api / no-session / pending) rejected the call OR async
     // inactive-session resume failed. Composer state that should only be cleared on
     // actual send (pendingSchedule) must await this — see handleSend below.
     onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
-    onFlushPending: () => void
-    onAtBottomChange: (atBottom: boolean) => void
+    onViewModeChange: (mode: 'tail' | 'history') => void
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
     availableSlashCommands?: readonly SlashCommand[]
@@ -466,7 +461,7 @@ function SessionChatInner(props: SessionChatProps) {
 
     const [cursorSelectedBase, setCursorSelectedBase] = useState('auto')
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
-    const scratchlist = useScratchlist(props.session.id)
+    const scratchlist = useHubScratchlist(props.session.id, props.api)
     const [scratchlistMode, setScratchlistMode] = useState(false)
     // Mode resets across sessions implicitly: SessionChat is keyed by
     // session.id at the public-export boundary, so a session switch
@@ -919,8 +914,8 @@ function SessionChatInner(props: SessionChatProps) {
     }, [visibleMessages])
 
     const goalStateSourceMessages = useMemo(
-        () => buildGoalStateMessages(props.messages, props.pendingMessages ?? []),
-        [props.messages, props.pendingMessages]
+        () => buildGoalStateMessages(props.messages),
+        [props.messages]
     )
 
     const normalizedGoalStateMessages: NormalizedMessage[] = useMemo(() => {
@@ -1197,6 +1192,8 @@ function SessionChatInner(props: SessionChatProps) {
     const runtime = useHappyRuntime({
         session: props.session,
         blocks: visibleBlocks,
+        messagesVersion: props.messagesVersion,
+        historyVersion: props.historyVersion,
         isSending: props.isSending,
         isRunning: props.session.thinking || hasRunningChildAgent,
         onSendMessage: handleSend,
@@ -1261,17 +1258,17 @@ function SessionChatInner(props: SessionChatProps) {
                         disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
-                        onFlushPending={props.onFlushPending}
-                        onAtBottomChange={props.onAtBottomChange}
-                        isLoadingMessages={props.isLoadingMessages}
+                        onViewModeChange={props.onViewModeChange}
+                        isSyncingTail={props.isSyncingTail}
                         messagesWarning={props.messagesWarning}
                         hasMoreMessages={props.hasMoreMessages}
                         isLoadingMoreMessages={props.isLoadingMoreMessages}
                         onLoadMore={props.onLoadMore}
-                        pendingCount={props.pendingCount}
+                        unseenCount={props.unseenCount}
                         rawMessagesCount={visibleMessages.length}
                         normalizedMessagesCount={normalizedMessages.length}
                         messagesVersion={props.messagesVersion}
+                        historyVersion={props.historyVersion}
                         forceScrollToken={forceScrollToken}
                         outlineOpen={outlineOpen}
                         outlineItems={outlineItems}
@@ -1286,6 +1283,19 @@ function SessionChatInner(props: SessionChatProps) {
                                 </div>
                             </div>
                         ) : null}
+
+                        {/*
+                         * tiann/hapi#893: one-time banner shown on first
+                         * v2-load when localStorage entries got migrated to
+                         * the hub. Sits above the drawer so the operator
+                         * sees it whether or not the drawer is open.
+                         * Auto-renders nothing unless `migrationStatus ===
+                         * 'completed'`.
+                         */}
+                        <ScratchlistMigrationBanner
+                            migrationStatus={scratchlist.migrationStatus}
+                            onDismiss={scratchlist.dismissMigrationBanner}
+                        />
 
                         <div className="px-3">
                             {/*

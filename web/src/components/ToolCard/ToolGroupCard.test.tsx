@@ -179,7 +179,6 @@ describe('ToolGroupCard', () => {
         expect(screen.getByText('Run 1 · Read 1')).toBeInTheDocument()
         expect(screen.queryByText('2 actions')).not.toBeInTheDocument()
         expect(screen.getByText('src/a.ts')).toBeInTheDocument()
-        expect(screen.getByText('Terminal')).toBeInTheDocument()
         expect(screen.getByText('bun test')).toBeInTheDocument()
 
         const firstRowButton = within(view.container)

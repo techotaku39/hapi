@@ -681,7 +681,7 @@ function SessionListSearch(props: {
     return (
         <div className="px-2 pb-2">
             <div className="relative min-w-0">
-                <div className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-[var(--app-hint)]">
+                <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
                     <SearchIcon className="h-3.5 w-3.5" />
                 </div>
                 <input
@@ -863,7 +863,7 @@ function SessionItem(props: {
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item group/session-row flex w-full flex-col gap-1 px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
@@ -1250,13 +1250,14 @@ export function SessionList(props: {
     }, [allGroups])
 
     return (
-        <div className="mx-auto w-full max-w-content flex flex-col">
+        <div className="flex min-h-0 w-full flex-1 flex-col">
+            <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {renderHeader ? (
-                <div className="flex items-center justify-end px-3 py-1">
+                <div className="flex items-center justify-end px-2 py-1">
                     <button
                         type="button"
                         onClick={props.onNewSession}
-                        className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
+                        className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
                         title={t('sessions.new')}
                     >
                         <PlusIcon className="h-5 w-5" />
@@ -1310,8 +1311,10 @@ export function SessionList(props: {
                     onChange={setMachineFilter}
                 />
             ) : null}
+            </div>
 
-            <div className="flex flex-col gap-1 px-2 pt-1 pb-2">
+            <div className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
+            <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pt-1 pb-2">
                 {(legacySessionListLayout
                     ? legacyMachineGroups.flatMap(machineGroup => [
                         { kind: 'machine' as const, machineGroup },
@@ -1349,7 +1352,7 @@ export function SessionList(props: {
                     return (
                         <div key={group.key} className={legacySessionListLayout ? 'ml-4' : undefined}>
                             <div
-                                className="group/project sticky top-0 z-10 flex items-center gap-2 px-1 py-1.5 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
+                                className="group/project sticky top-0 z-10 flex items-center gap-2 py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                                 onClick={() => toggleGroup(group.key, isCollapsed)}
                                 title={group.directory}
                             >
@@ -1402,7 +1405,7 @@ export function SessionList(props: {
                                                 ? showMoreSessions(group)
                                                 : collapseSessionGroup(group)}
                                             className={cn(
-                                                'mx-2 my-1 rounded-md px-2 py-1 text-center text-xs text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]',
+                                                'ml-2.5 mr-2 my-1 rounded-md px-2 py-1 text-center text-xs text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]',
                                                 hiddenSessionCount > 0 && 'border border-dashed border-[var(--app-border)]'
                                             )}
                                         >
@@ -1417,6 +1420,7 @@ export function SessionList(props: {
                         </div>
                     )
                 })}
+            </div>
             </div>
         </div>
     )

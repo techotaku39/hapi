@@ -15,7 +15,7 @@ import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
-import { clearMessageWindow, fetchLatestMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, syncTailMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
@@ -229,7 +229,7 @@ function AppInner() {
             queryClient.invalidateQueries({ queryKey: ['session'] })
         ]
         const refreshMessages = (selectedSessionId && api)
-            ? fetchLatestMessages(api, selectedSessionId)
+            ? syncTailMessages(api, selectedSessionId)
             : Promise.resolve()
         Promise.all([...invalidations, refreshMessages])
             .catch((error) => {
@@ -259,7 +259,7 @@ function AppInner() {
             return
         }
         clearMessageWindow(event.sessionId)
-        void fetchLatestMessages(api, event.sessionId)
+        void syncTailMessages(api, event.sessionId)
     }, [api, selectedSessionId])
 
     const handleSessionSseConnect = useCallback(() => {

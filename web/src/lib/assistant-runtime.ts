@@ -46,6 +46,11 @@ export type HappyChatMessageMetadata = {
     turnCount?: number
 }
 
+export type HappyRuntimeExtras = Readonly<{
+    messagesVersion: number
+    historyVersion: number
+}>
+
 function formatCodexReviewText(review: CodexReview): string {
     const lines = ['Codex review']
     if (review.overallCorrectness) {
@@ -615,6 +620,8 @@ function extractMessageContent(message: AppendMessage): { text: string; attachme
 export function useHappyRuntime(props: {
     session: Session
     blocks: readonly VisibleChatBlock[]
+    messagesVersion: number
+    historyVersion: number
     isSending: boolean
     isRunning?: boolean
     onSendMessage: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => void
@@ -701,12 +708,18 @@ export function useHappyRuntime(props: {
         await props.onAbort()
     }, [props.onAbort])
 
+    const extras = useMemo<HappyRuntimeExtras>(() => ({
+        messagesVersion: props.messagesVersion,
+        historyVersion: props.historyVersion
+    }), [props.messagesVersion, props.historyVersion])
+
     // Memoize the adapter to avoid recreating on every render
     // useExternalStoreRuntime may use adapter identity for subscriptions
     const adapter = useMemo(() => ({
         isDisabled: props.isSending || (!props.session.active && !props.allowSendWhenInactive),
         isRunning,
         messages: convertedMessages,
+        extras,
         onNew,
         onCancel,
         adapters: props.attachmentAdapter ? { attachments: props.attachmentAdapter } : undefined,
@@ -717,6 +730,7 @@ export function useHappyRuntime(props: {
         props.allowSendWhenInactive,
         isRunning,
         convertedMessages,
+        extras,
         onNew,
         onCancel,
         props.attachmentAdapter
