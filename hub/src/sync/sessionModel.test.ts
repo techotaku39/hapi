@@ -280,6 +280,32 @@ describe('session model', () => {
         expect(store.sessions.getSession(newSession.id)?.serviceTier).toBe('fast')
     })
 
+    it('preserves pin from old session when merging into resumed session', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const oldSession = cache.getOrCreateSession(
+            'session-pin-old',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        store.sessions.setSessionPinned(oldSession.id, true, 'default')
+        const newSession = cache.getOrCreateSession(
+            'session-pin-new',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        expect(store.sessions.getSession(oldSession.id)).toBeNull()
+        expect(store.sessions.getSession(newSession.id)?.pinned).toBe(true)
+        expect(cache.getSession(newSession.id)?.pinned).toBe(true)
+    })
+
     it('persists applied session model updates, including clear-to-auto', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

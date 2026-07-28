@@ -1187,6 +1187,13 @@ export class SessionCache {
             }
         }
 
+        if (oldStored.pinned && !newStored.pinned) {
+            const updated = this.store.sessions.setSessionPinned(newSessionId, true, namespace)
+            if (!updated) {
+                throw new Error('Failed to preserve session pin during merge')
+            }
+        }
+
         if (oldStored.todos !== null && oldStored.todosUpdatedAt !== null) {
             this.store.sessions.setSessionTodos(
                 newSessionId,
