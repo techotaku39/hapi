@@ -196,6 +196,8 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             // Among inactive duplicates, keep the selected one visible
             if (a.id === selectedSessionId) return -1
             if (b.id === selectedSessionId) return 1
+            // Preserve an explicit pin when otherwise choosing by recency
+            if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
             return b.updatedAt - a.updatedAt
         })
         result.push(group[0])

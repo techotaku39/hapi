@@ -144,6 +144,26 @@ describe('deduplicateSessionsByAgentId', () => {
         expect(result[0].id).toBe('a') // selected wins despite older updatedAt
     })
 
+    it('preserves a pinned session when deduplicating by recency', () => {
+        const sessions = [
+            makeSession({ id: 'pinned', pinned: true, metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 100 }),
+            makeSession({ id: 'recent', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 200 })
+        ]
+        const result = deduplicateSessionsByAgentId(sessions)
+        expect(result).toHaveLength(1)
+        expect(result[0].id).toBe('pinned')
+    })
+
+    it('keeps the selected inactive session ahead of a pinned duplicate', () => {
+        const sessions = [
+            makeSession({ id: 'selected', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 100 }),
+            makeSession({ id: 'pinned', pinned: true, metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 200 })
+        ]
+        const result = deduplicateSessionsByAgentId(sessions, 'selected')
+        expect(result).toHaveLength(1)
+        expect(result[0].id).toBe('selected')
+    })
+
     it('active always wins over selected inactive', () => {
         const sessions = [
             makeSession({ id: 'a', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 200 }),
