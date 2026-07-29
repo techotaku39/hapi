@@ -677,7 +677,7 @@ function SessionListSearch(props: {
     const [datePickerOpen, setDatePickerOpen] = useState(false)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
     return (
-        <div className="px-2 pb-2">
+        <div className="px-2 pb-1">
             <div className="relative min-w-0">
                 <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
                     <SearchIcon className="h-3.5 w-3.5" />
@@ -1281,7 +1281,7 @@ export function SessionList(props: {
             </div>
 
             <div className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pt-1 pb-2">
+            <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pb-2">
                 {groups.map((group) => {
                     const isCollapsed = isGroupCollapsed(group)
                     const visibleGroupSessions = getVisibleGroupSessions(group)
@@ -1297,7 +1297,7 @@ export function SessionList(props: {
                     return (
                         <div key={group.key}>
                             <div
-                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
+                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
                                 onClick={() => toggleGroup(group.key, isCollapsed)}
                                 title={group.directory}
                             >
