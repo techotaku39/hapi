@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { createPortal } from 'react-dom'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -735,7 +734,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                         </div>
                     </div>
                 </div>
-                {previewImage ? createPortal(
+                {previewImage ? (
                     <ZoomableLightbox
                         open
                         onClose={() => setPreviewImage(null)}
@@ -754,8 +753,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                             className="block max-w-none select-none object-contain"
                             draggable={false}
                         />
-                    </ZoomableLightbox>,
-                    document.body
+                    </ZoomableLightbox>
                 ) : null}
 
                 {error ? (

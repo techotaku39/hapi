@@ -184,7 +184,10 @@ test('keeps code and image controls interactive in preview', async ({ page }, te
     await imageDialog.getByRole('img', { name: 'HAPI landscape export fixture' }).hover()
     await page.mouse.wheel(0, -100)
     await expect(fitButton).not.toHaveText('100%')
-    await imageDialog.getByTitle('Close').click()
+
+    await page.keyboard.press('Tab')
+    await expect(imageDialog.locator(':focus')).toHaveCount(1)
+    await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog', { name: 'HAPI landscape export fixture' })).toHaveCount(0)
     await expect(dialog).toBeVisible()
 })
