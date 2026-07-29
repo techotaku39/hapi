@@ -356,6 +356,7 @@ export class Store {
                 todos_updated_at INTEGER,
                 team_state TEXT,
                 team_state_updated_at INTEGER,
+                pinned INTEGER NOT NULL DEFAULT 0,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
