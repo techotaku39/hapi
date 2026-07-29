@@ -213,6 +213,15 @@ describe('responsive settings pages', () => {
         expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     })
 
+    it('keeps the session status description visible with its choice group', () => {
+        renderPage(<SettingsDisplayPage />)
+
+        const description = screen.getByText('Shows why a session stopped: permission, input, background work, new activity, or a scheduled message (clock icon).')
+        const choices = screen.getByRole('radiogroup', { name: 'Session list status' })
+        expect(description.parentElement?.parentElement).toBe(choices.parentElement)
+        expect(description.compareDocumentPosition(choices) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
     it('keeps chat enum choices inline', () => {
         renderPage(<SettingsChatPage />)
         fireEvent.click(screen.getByRole('radio', { name: 'Insert newline' }))
