@@ -39,7 +39,7 @@ import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
 import { CollaborationModeSelector } from './CollaborationModeSelector'
 import { CodexImportActions } from './CodexImportActions'
-import { resolveCodexImportRedirectSessionId } from './codexImportMerge'
+import { clearBatchImportedCodexSelection, resolveCodexImportRedirectSessionId } from './codexImportMerge'
 import { DirectorySection } from './DirectorySection'
 import { GrokPermissionModeSelector } from './GrokPermissionModeSelector'
 import { FastModeSelector } from './FastModeSelector'
@@ -776,6 +776,9 @@ export function NewSession(props: {
             }
 
             markCodexSessionsImported(sessionIds)
+            setSelectedCodexImportSessionId((current) =>
+                clearBatchImportedCodexSelection(current, sessionIds)
+            )
             setIsCodexImportDialogOpen(false)
             addToast({
                 title: t('codexSync.success.title'),

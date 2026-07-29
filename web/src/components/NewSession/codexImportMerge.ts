@@ -6,3 +6,10 @@ export function resolveCodexImportRedirectSessionId(
         ?? importedHapiSessionIds[0]
         ?? null
 }
+
+export function clearBatchImportedCodexSelection(
+    selectedSessionId: string | null,
+    importedSessionIds: string[]
+): string | null {
+    return selectedSessionId && importedSessionIds.includes(selectedSessionId) ? null : selectedSessionId
+}
