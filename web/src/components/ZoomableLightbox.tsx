@@ -405,7 +405,7 @@ export function ZoomableLightbox(props: ZoomableLightboxProps) {
 
     return (
         <div
-            className="fixed inset-0 z-50 h-[100dvh] w-full bg-black text-white"
+            className="pointer-events-auto fixed inset-0 z-50 h-[100dvh] w-full bg-black text-white"
             role="dialog"
             aria-modal="true"
             aria-label={ariaLabel}
