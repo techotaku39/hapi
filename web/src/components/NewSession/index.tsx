@@ -1431,6 +1431,7 @@ export function NewSession(props: {
                 confirmingLabel={t('codexSync.duplicates.confirm.confirming')}
                 onConfirm={handleMergeDuplicateSessions}
                 isPending={isMergingDuplicateSessions}
+                centerTitle
             />
         </div>
     )

@@ -886,6 +886,7 @@ function SessionItem(props: {
                     confirmingLabel={t('dialog.reopen.dismiss')}
                     onConfirm={async () => setReopenError(null)}
                     isPending={false}
+                    centerTitle
                 />
             ) : null}
 
@@ -919,6 +920,7 @@ function SessionItem(props: {
                     onConfirm={archiveSession}
                     isPending={isPending}
                     destructive
+                    centerTitle
                 />
             ) : null}
 
@@ -933,6 +935,7 @@ function SessionItem(props: {
                     onConfirm={deleteSession}
                     isPending={isPending}
                     destructive
+                    centerTitle
                 />
             ) : null}
         </>
