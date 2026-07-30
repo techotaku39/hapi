@@ -1295,15 +1295,21 @@ const sessionDetailRoute = createRoute({
 const sessionFilesRoute = createRoute({
     getParentRoute: () => sessionDetailRoute,
     path: 'files',
-    validateSearch: (search: Record<string, unknown>): { tab?: 'changes' | 'directories' } => {
+    validateSearch: (search: Record<string, unknown>): { tab?: 'changes' | 'directories'; query?: string } => {
         const tabValue = typeof search.tab === 'string' ? search.tab : undefined
         const tab = tabValue === 'directories'
             ? 'directories'
             : tabValue === 'changes'
                 ? 'changes'
                 : undefined
+        const query = typeof search.query === 'string' && search.query.length > 0
+            ? search.query
+            : undefined
 
-        return tab ? { tab } : {}
+        return {
+            ...(tab ? { tab } : {}),
+            ...(query ? { query } : {}),
+        }
     },
     component: FilesPage,
 })
@@ -1318,6 +1324,7 @@ type SessionFileSearch = {
     path: string
     staged?: boolean
     tab?: 'changes' | 'directories'
+    query?: string
 }
 
 const sessionFileRoute = createRoute({
@@ -1337,6 +1344,9 @@ const sessionFileRoute = createRoute({
             : tabValue === 'changes'
                 ? 'changes'
                 : undefined
+        const query = typeof search.query === 'string' && search.query.length > 0
+            ? search.query
+            : undefined
 
         const result: SessionFileSearch = { path }
         if (staged !== undefined) {
@@ -1344,6 +1354,9 @@ const sessionFileRoute = createRoute({
         }
         if (tab !== undefined) {
             result.tab = tab
+        }
+        if (query !== undefined) {
+            result.query = query
         }
         return result
     },
