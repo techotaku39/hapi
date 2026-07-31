@@ -13,10 +13,10 @@ const MOBILE_SECONDARY_PRIORITY: ReadonlyArray<SessionHeaderSecondaryMetadataKey
     'lastActive',
     'model',
     'reasoning',
-    'updatedAt',
-    'createdAt',
-    'worktree',
     'fastMode',
+    'createdAt',
+    'updatedAt',
+    'worktree',
 ]
 
 export function selectMobileSessionHeaderSecondary(
