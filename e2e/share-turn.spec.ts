@@ -193,6 +193,9 @@ test('keeps code and image controls interactive in preview', async ({ page }, te
 })
 
 test('preserves the desktop source width but keeps mobile export width stable', async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+    })
     await page.setViewportSize({ width: 1440, height: 1600 })
     await page.goto('/e2e-fixtures/share-turn-fixture.html?wide=1')
     const sourceWidth = await page.getByTestId('source-turn').evaluate((element) => element.getBoundingClientRect().width)
@@ -226,7 +229,20 @@ test('preserves the desktop source width but keeps mobile export width stable', 
 
 test('keeps a landscape touch device on the fixed mobile export path', async ({ page }, testInfo) => {
     await page.addInitScript(() => {
-        Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+        const nativeMatchMedia = window.matchMedia.bind(window)
+        window.matchMedia = (query: string) => {
+            if (query !== '(pointer: coarse)') return nativeMatchMedia(query)
+            return {
+                matches: true,
+                media: query,
+                onchange: null,
+                addListener: () => undefined,
+                removeListener: () => undefined,
+                addEventListener: () => undefined,
+                removeEventListener: () => undefined,
+                dispatchEvent: () => false,
+            }
+        }
     })
     await page.setViewportSize({ width: 844, height: 390 })
     await page.goto('/e2e-fixtures/share-turn-fixture.html?wide=1')

@@ -535,13 +535,12 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
         naturalHeight: number
     } | null>(null)
     const showNativeShareButton = true
-    const isTouchDevice = navigator.maxTouchPoints > 0
-        || window.matchMedia('(pointer: coarse)').matches
+    const usesCoarsePrimaryPointer = window.matchMedia('(pointer: coarse)').matches
     const preserveSourceLayout = Boolean(
         props.sourceContentWidth
         && props.sourceContentWidth > 0
         && window.matchMedia('(min-width: 640px)').matches
-        && !isTouchDevice
+        && !usesCoarsePrimaryPointer
     )
     const exportWidth = preserveSourceLayout
         ? Math.min(1240, Math.max(480, Math.ceil((props.sourceContentWidth ?? 0) + SHARE_EXPORT_HORIZONTAL_PADDING)))
