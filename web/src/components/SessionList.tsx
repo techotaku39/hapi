@@ -1326,11 +1326,17 @@ export function SessionList(props: {
                     const isCollapsed = isGroupCollapsed(group)
                     const visibleGroupSessions = getVisibleGroupSessions(group)
                     const hiddenSessionCount = group.sessions.length - visibleGroupSessions.length
-                    const canShowFewerSessions = visibleGroupSessions.length > sessionPreviewLimit
-                    const collapseCount = Math.min(
-                        sessionPreviewLimit,
-                        visibleGroupSessions.length - sessionPreviewLimit
+                    const currentLimit = Math.min(
+                        getGroupVisibleCount(group),
+                        group.sessions.length
                     )
+                    const previousLimit = getPreviousSessionVisibleCount(currentLimit, sessionPreviewLimit)
+                    const previousGroupSessions = getVisibleSessionPreview(group.sessions, {
+                        selectedSessionId,
+                        limit: previousLimit
+                    })
+                    const collapseCount = visibleGroupSessions.length - previousGroupSessions.length
+                    const canShowFewerSessions = previousLimit < currentLimit && collapseCount > 0
                     const expandCount = Math.min(sessionPreviewLimit, hiddenSessionCount)
                     const canStartInGroupDirectory = group.directory !== 'Other'
                     // With multiple machines in the unfiltered view, disambiguate
