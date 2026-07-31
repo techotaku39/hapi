@@ -76,6 +76,7 @@ describe('SessionHeader', () => {
     it('shows an inherited catalog-default Fast tier', () => {
         renderHeader(baseSession(), { serviceTier: 'priority' })
         expect(screen.getByText('fast')).toBeInTheDocument()
+        expect(screen.queryByText('reasoning default')).not.toBeInTheDocument()
     })
 
     it('shows machine label and relative last-active age in the meta row', () => {

@@ -14,6 +14,11 @@ describe('codexStatusLabels', () => {
         expect(formatCodexReasoningLabel('Ultra')).toBe('reasoning ultra')
     })
 
+    it('can omit the reasoning field label', () => {
+        expect(formatCodexReasoningLabel('xhigh', false)).toBe('xhigh')
+        expect(formatCodexReasoningLabel(null, false)).toBe('default')
+    })
+
     it('only shows the label for codex and opencode', () => {
         expect(shouldShowCodexReasoningLabel('codex')).toBe(true)
         expect(shouldShowCodexReasoningLabel('opencode')).toBe(true)
