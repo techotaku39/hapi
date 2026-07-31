@@ -1163,8 +1163,19 @@ export function SessionList(props: {
     const showMoreSessions = (group: SessionGroup) => {
         setSessionVisibleCounts(prev => {
             const next = new Map(prev)
-            const current = prev.get(group.key) ?? sessionPreviewLimit
-            next.set(group.key, getNextSessionVisibleCount(current, sessionPreviewLimit, group.sessions.length))
+            const currentLimit = Math.min(
+                prev.get(group.key) ?? sessionPreviewLimit,
+                group.sessions.length
+            )
+            const currentVisibleCount = getVisibleSessionPreview(group.sessions, {
+                selectedSessionId,
+                limit: currentLimit
+            }).length
+            next.set(group.key, getNextSessionVisibleCount(
+                Math.max(currentLimit, currentVisibleCount),
+                sessionPreviewLimit,
+                group.sessions.length
+            ))
             return next
         })
     }
