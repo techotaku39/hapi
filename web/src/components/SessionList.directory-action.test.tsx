@@ -248,7 +248,7 @@ describe('SessionList time filter', () => {
         fireEvent.click(filterButton)
         const startDate = screen.getByRole('button', { name: new Date(2026, 6, 1).toLocaleDateString() })
         fireEvent.click(startDate)
-        expect(startDate).toHaveClass('bg-[var(--app-link)]', 'text-[var(--app-bg)]')
+        expect(startDate).toHaveClass('bg-[var(--app-button)]', 'text-[var(--app-button-text)]')
         expect(startDate).not.toHaveClass('text-white')
         expect(screen.getByText('Select end date')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: `${new Date(2026, 6, 18).toLocaleDateString()}, has session activity` }))

@@ -639,7 +639,7 @@ function SessionDateRangePicker(props: {
                             title={hasSessionActivity ? activityLabel : undefined}
                             className={cn(
                                 'h-8 rounded-lg text-xs transition-colors',
-                                isEndpoint && 'bg-[var(--app-link)] text-[var(--app-bg)]',
+                                isEndpoint && 'bg-[var(--app-button)] text-[var(--app-button-text)]',
                                 isInRange && 'bg-[var(--app-link)]/15 text-[var(--app-link)]',
                                 !isEndpoint && !isInRange && isToday && 'bg-[var(--app-subtle-bg)]',
                                 !isEndpoint && !isInRange && hasSessionActivity && 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]',
