@@ -287,17 +287,13 @@ body {
     touch-action: pan-x pan-y;
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
-}
-
-html[data-telegram-app="true"],
-html[data-telegram-app="true"] body {
+    /*
+     * The application owns scrolling through `.app-scroll-y` viewports. Keep
+     * the document itself fixed so a temporarily oversized chat child (for
+     * example while an attachment image is being measured) cannot create a
+     * second, stale page scrollbar.
+     */
     overflow: hidden;
-}
-
-html:not([data-telegram-app="true"]),
-html:not([data-telegram-app="true"]) body {
-    overflow-x: hidden;
-    overflow-y: auto;
 }
 
 body {
@@ -308,6 +304,8 @@ body {
 
 #root {
     height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .app-scroll-y {
@@ -315,6 +313,17 @@ body {
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
+}
+
+/* On touch-first devices, keep the chat scrollbar from shifting centered content. */
+@media (hover: none) and (pointer: coarse) {
+    .chat-scroll-y {
+        scrollbar-gutter: stable both-edges;
+    }
+
+    .chat-scroll-content {
+        padding-inline: 0.125rem;
+    }
 }
 
 @media (hover: hover) and (pointer: fine) {
