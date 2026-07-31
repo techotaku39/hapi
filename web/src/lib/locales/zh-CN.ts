@@ -881,10 +881,14 @@ export default {
   'misc.releaseToLoadOlder': '松开加载',
   'misc.typeMessage': "输入 'continue' 继续...",
   'misc.typeAMessage': '输入消息...',
-  'misc.offline': '离线',
+  'misc.offline': 'offline',
   'misc.permissionRequired': '需要权限',
-  'misc.percentLeft': '剩余 {percent}%',
-  'misc.online': '在线',
+  'misc.online': 'online',
+  'misc.contextDetails': '上下文详情',
+  'misc.contextCache': '缓存：{value}',
+  'misc.contextUsed': '使用：{value}（{percent}%）',
+  'misc.contextUsedTokens': '使用：{value}',
+  'misc.contextRemaining': '剩余：{value}（{percent}%）',
 
   // Web Share Target 分享面板
   'share.title': '分享到 HAPI',

@@ -879,8 +879,12 @@ export default {
   'misc.typeAMessage': 'Type a message...',
   'misc.offline': 'offline',
   'misc.permissionRequired': 'permission required',
-  'misc.percentLeft': '{percent}% left',
   'misc.online': 'online',
+  'misc.contextDetails': 'Context details',
+  'misc.contextCache': 'Cache: {value}',
+  'misc.contextUsed': 'Used: {value} ({percent}%)',
+  'misc.contextUsedTokens': 'Used: {value}',
+  'misc.contextRemaining': 'Remaining: {value} ({percent}%)',
 
   // Web Share Target picker
   'share.title': 'Share to HAPI',
