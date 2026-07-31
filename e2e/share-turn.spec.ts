@@ -224,6 +224,38 @@ test('preserves the desktop source width but keeps mobile export width stable', 
     expect(pngSize(await readFile(mobilePath)).width).toBe(1920)
 })
 
+test('keeps a landscape touch device on the fixed mobile export path', async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+    })
+    await page.setViewportSize({ width: 844, height: 390 })
+    await page.goto('/e2e-fixtures/share-turn-fixture.html?wide=1')
+    await page.getByRole('button', { name: 'Open share preview' }).click()
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Download' }).click()
+    const download = await downloadPromise
+    const path = testInfo.outputPath('landscape-touch-mobile.png')
+    await download.saveAs(path)
+    expect(pngSize(await readFile(path)).width).toBe(1920)
+})
+
+test('allows three or more attachments to wrap instead of shrinking into one row', async ({ page }) => {
+    await page.goto('/e2e-fixtures/share-turn-fixture.html')
+    await page.getByTestId('source-turn').evaluate((source) => {
+        const grid = source.querySelector<HTMLElement>('.hapi-share-media-grid')
+        const firstAttachment = grid?.querySelector<HTMLButtonElement>('button')
+        if (!grid || !firstAttachment) throw new Error('Missing attachment fixture')
+        grid.appendChild(firstAttachment.cloneNode(true))
+        grid.dataset.hapiImageCount = '3'
+    })
+    await page.getByRole('button', { name: 'Open share preview' }).click()
+
+    const mediaGrid = page.getByRole('dialog').locator('.hapi-share-media-grid')
+    await expect(mediaGrid).toHaveCSS('flex-wrap', 'wrap')
+    await expect(mediaGrid.locator(':scope > button')).toHaveCount(3)
+})
+
 test('uses a prepared PNG while native share still has click activation', async ({ page }) => {
     await page.addInitScript(() => {
         const state = { calls: 0, active: false, fileType: '', fileName: '' }

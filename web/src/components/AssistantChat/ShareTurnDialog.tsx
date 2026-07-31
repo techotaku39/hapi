@@ -535,10 +535,13 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
         naturalHeight: number
     } | null>(null)
     const showNativeShareButton = true
+    const isTouchDevice = navigator.maxTouchPoints > 0
+        || window.matchMedia('(pointer: coarse)').matches
     const preserveSourceLayout = Boolean(
         props.sourceContentWidth
         && props.sourceContentWidth > 0
         && window.matchMedia('(min-width: 640px)').matches
+        && !isTouchDevice
     )
     const exportWidth = preserveSourceLayout
         ? Math.min(1240, Math.max(480, Math.ceil((props.sourceContentWidth ?? 0) + SHARE_EXPORT_HORIZONTAL_PADDING)))
@@ -735,7 +738,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                                 display: block !important;
                                 height: 0.75rem !important;
                             }
-                            .hapi-share-preview-root .hapi-share-media-grid:not([data-hapi-image-count="1"]) {
+                            .hapi-share-preview-root .hapi-share-media-grid[data-hapi-image-count="2"] {
                                 flex-wrap: nowrap !important;
                             }
                             .hapi-share-preview-root .hapi-share-media-grid > button {
