@@ -24,8 +24,10 @@ describe('StatusBar context details popover', () => {
         )
 
         const trigger = screen.getByRole('button', { name: '上下文详情' })
-        expect(trigger.textContent).toBe('ctx 258k · 65% leftctx 90k/258k · 65% left')
+        expect(trigger.textContent).toBe('ctx 258k · 65% left35% · 90k/258k')
         expect(trigger.className.split(' ')).not.toContain('hidden')
+        const progressTrack = trigger.querySelector('[aria-hidden="true"]')
+        expect((progressTrack?.firstElementChild as HTMLElement | null)?.style.width).toBe('35%')
 
         fireEvent.click(trigger)
 

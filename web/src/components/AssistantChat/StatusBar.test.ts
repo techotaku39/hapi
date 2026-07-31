@@ -8,8 +8,8 @@ import {
 } from './StatusBar'
 
 describe('context usage labels', () => {
-    it('keeps the desktop label compact and expresses remaining capacity in English', () => {
-        expect(formatContextUsageLabel(90_000, 258_000)).toBe('ctx 90k/258k · 65% left')
+    it('keeps the desktop label compact and expresses used capacity', () => {
+        expect(formatContextUsageLabel(90_000, 258_000)).toBe('35% · 90k/258k')
     })
 
     it('uses the compact middle-dot mobile label with a fixed English suffix', () => {
@@ -27,7 +27,7 @@ describe('context usage labels', () => {
     })
 
     it('keeps external and detailed percentages complementary at rounding midpoints', () => {
-        expect(formatContextUsageLabel(69, 200)).toBe('ctx 69/200 · 65% left')
+        expect(formatContextUsageLabel(69, 200)).toBe('35% · 69/200')
         expect(formatCompactContextUsageLabel(69, 200)).toBe('ctx 200 · 65% left')
         expect(getContextUsageDetails(69, 200, 0)).toMatchObject({
             usedPercentage: 35,

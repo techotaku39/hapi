@@ -134,9 +134,9 @@ function getContextPercentages(contextSize: number, maxContextSize: number): {
 }
 
 export function formatContextUsageLabel(contextSize: number, maxContextSize: number | null | undefined): string {
-    if (!maxContextSize) return `ctx ${formatTokenCount(contextSize)}`
-    const { remainingPercentage } = getContextPercentages(contextSize, maxContextSize)
-    return `ctx ${formatTokenCount(contextSize)}/${formatTokenCount(maxContextSize)} · ${remainingPercentage}% left`
+    if (!maxContextSize) return `${formatTokenCount(contextSize)} used`
+    const { usedPercentage } = getContextPercentages(contextSize, maxContextSize)
+    return `${usedPercentage}% · ${formatTokenCount(contextSize)}/${formatTokenCount(maxContextSize)}`
 }
 
 export function formatCompactContextUsageLabel(contextSize: number, maxContextSize: number | null | undefined): string {
@@ -235,6 +235,7 @@ export function StatusBar(props: {
         const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
         return getContextUsageDetails(props.contextSize, maxContextSize, props.contextCacheRead)
     }, [props.contextSize, props.contextCacheRead, props.contextWindow, props.model, props.agentFlavor])
+    const contextUsedPercentage = contextUsageDetails?.usedPercentage ?? null
 
     const permissionMode = props.permissionMode
     const displayPermissionMode = permissionMode
@@ -282,7 +283,20 @@ export function StatusBar(props: {
                                 className={`min-w-0 cursor-pointer whitespace-nowrap rounded-sm bg-transparent p-0 text-[10px] outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)] ${contextWarning?.color ?? 'text-[var(--app-hint)]'}`}
                             >
                                 <span className="sm:hidden">{compactContextUsageLabel}</span>
-                                <span className="hidden sm:inline">{contextUsageLabel}</span>
+                                <span className="hidden items-center gap-2 sm:inline-flex">
+                                    {contextUsedPercentage !== null ? (
+                                        <span
+                                            aria-hidden="true"
+                                            className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-[var(--app-link-muted)]"
+                                        >
+                                            <span
+                                                className="block h-full rounded-full bg-current"
+                                                style={{ width: `${contextUsedPercentage}%` }}
+                                            />
+                                        </span>
+                                    ) : null}
+                                    <span>{contextUsageLabel}</span>
+                                </span>
                             </button>
                         </Popover.Trigger>
                         <Popover.Portal>
