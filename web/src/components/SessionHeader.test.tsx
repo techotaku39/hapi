@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/api'
+import type { ApiClient } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { resolveSessionHeaderMachineLabel, SessionHeader } from './SessionHeader'
@@ -265,5 +266,48 @@ describe('SessionHeader', () => {
         } finally {
             vi.useRealTimers()
         }
+    })
+
+    it('toggles pin state from the header action menu', async () => {
+        const setSessionPinned = vi.fn().mockResolvedValue(undefined)
+        const api = {
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            setSessionPinned
+        } as unknown as ApiClient
+        const session: Session = {
+            id: 'session-pin',
+            namespace: 'default',
+            seq: 0,
+            createdAt: 0,
+            updatedAt: 0,
+            active: false,
+            activeAt: 0,
+            metadata: { flavor: 'codex', path: '/repo', host: 'machine' },
+            metadataVersion: 0,
+            agentState: null,
+            agentStateVersion: 0,
+            thinking: false,
+            thinkingAt: 0,
+            model: null,
+            modelReasoningEffort: null,
+            effort: null,
+            serviceTier: null,
+            pinned: false
+        }
+
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader session={session} onBack={vi.fn()} api={api} />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByTitle('More actions'))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
+
+        await waitFor(() => expect(setSessionPinned).toHaveBeenCalledWith('session-pin', true))
     })
 })
