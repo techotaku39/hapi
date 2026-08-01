@@ -35,8 +35,15 @@ import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
 import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
 import { useHubScratchlist } from '@/lib/use-hub-scratchlist'
+import { useSessions } from '@/hooks/queries/useSessions'
+import { getSessionTitle } from '@/lib/sessionTitle'
+import { formatSessionMentionTooltip } from '@/lib/sessionReference'
+import { classifySessionAttention, getSessionAttentionLabelKey } from '@/lib/sessionAttention'
+import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
+import { formatRelativeTime } from '@/lib/relativeTime'
 import { ScratchlistMigrationBanner } from '@/components/AssistantChat/ScratchlistMigrationBanner'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
+import type { OlderLoadOutcome } from '@/lib/message-window-store'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { createScratchlistAttachmentAdapter } from '@/lib/scratchlistAttachmentAdapter'
 import {
@@ -409,7 +416,8 @@ type SessionChatProps = {
     historyVersion: number
     onBack: () => void
     onRefresh: () => void
-    onLoadMore: () => Promise<boolean>
+    onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
+    onCancelLoadMore: () => void
     // Resolves true when the send was accepted by the underlying mutation, false when
     // pre-mutation guards (no-api / no-session / pending) rejected the call OR async
     // inactive-session resume failed. Composer state that should only be cleared on
@@ -476,6 +484,41 @@ function SessionChatInner(props: SessionChatProps) {
     const [cursorSelectedBase, setCursorSelectedBase] = useState('auto')
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
     const scratchlist = useHubScratchlist(props.session.id, props.api)
+    const { sessions: allSessions } = useSessions(props.api)
+    const resolveSessionMentionTooltip = useCallback((id: string, title: string) => {
+        const hit = allSessions.find((s) => s.id === id) ?? null
+        if (!hit) {
+            return {
+                model: formatSessionMentionTooltip(null, title, id),
+                session: null,
+            }
+        }
+        const attention = classifySessionAttention(hit, {
+            selected: false,
+            lastSeenAt: getSessionLastSeenAt(hit.id),
+        })
+        const attentionLabel = attention
+            ? t(getSessionAttentionLabelKey(attention))
+            : null
+        return {
+            model: formatSessionMentionTooltip(
+                {
+                    id: hit.id,
+                    title: getSessionTitle(hit),
+                    active: hit.active,
+                    lifecycleState: hit.metadata?.lifecycleState ?? null,
+                    path: hit.metadata?.path ?? null,
+                    worktreePath: hit.metadata?.worktree?.worktreePath ?? null,
+                    relativeTime: formatRelativeTime(hit.updatedAt, t),
+                    thinking: hit.thinking,
+                    attentionLabel,
+                },
+                title,
+                id
+            ),
+            session: hit,
+        }
+    }, [allSessions, t])
     const [scratchlistMode, setScratchlistMode] = useState(false)
     // Mode resets across sessions implicitly: SessionChat is keyed by
     // session.id at the public-export boundary, so a session switch
@@ -1301,6 +1344,7 @@ function SessionChatInner(props: SessionChatProps) {
                         hasMoreMessages={props.hasMoreMessages}
                         isLoadingMoreMessages={props.isLoadingMoreMessages}
                         onLoadMore={props.onLoadMore}
+                        onCancelLoadMore={props.onCancelLoadMore}
                         unseenCount={unseenCount}
                         rawMessagesCount={visibleMessages.length}
                         normalizedMessagesCount={normalizedMessages.length}
@@ -1366,6 +1410,7 @@ function SessionChatInner(props: SessionChatProps) {
                         <HappyComposer
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
+                        resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
                         onSchedule={setPendingSchedule}

@@ -6,6 +6,8 @@ import {
     filterActiveSessionsOnly,
     getSessionTimeRange,
     getNextSessionVisibleCount,
+    getPreviousSessionVisibleCount,
+    getPullToRefreshState,
     getSessionDedupKey,
     getWorktreeSessionLabel,
     getVisibleSessionPreview,
@@ -428,6 +430,22 @@ describe('getNextSessionVisibleCount', () => {
     })
 })
 
+describe('getPreviousSessionVisibleCount', () => {
+    it('collapses one batch of step size per call', () => {
+        expect(getPreviousSessionVisibleCount(20, 8)).toBe(12)
+        expect(getPreviousSessionVisibleCount(12, 8)).toBe(8)
+    })
+
+    it('never goes below the preview limit', () => {
+        expect(getPreviousSessionVisibleCount(10, 8)).toBe(8)
+        expect(getPreviousSessionVisibleCount(8, 8)).toBe(8)
+    })
+
+    it('uses a minimum batch size of one', () => {
+        expect(getPreviousSessionVisibleCount(5, 0)).toBe(4)
+    })
+})
+
 describe('expandSelectedSessionCollapseOverrides', () => {
     it('expands the collapsed project group, but preserves session preview folding', () => {
         const overrides = new Map<string, boolean>([
@@ -451,5 +469,14 @@ describe('expandSelectedSessionCollapseOverrides', () => {
         })
 
         expect(result.has('sessions::machine-1::/work/hapi')).toBe(false)
+    })
+})
+
+describe('getPullToRefreshState', () => {
+    it('requires a deliberate pull past the trigger distance', () => {
+        expect(getPullToRefreshState(15)).toBe('idle')
+        expect(getPullToRefreshState(16)).toBe('pulling')
+        expect(getPullToRefreshState(63)).toBe('pulling')
+        expect(getPullToRefreshState(64)).toBe('ready')
     })
 })

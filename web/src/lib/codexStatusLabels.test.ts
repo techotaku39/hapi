@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from './codexStatusLabels'
+import {
+    formatCodexReasoningLabel,
+    formatCompactCodexReasoningLabel,
+    shouldShowCodexReasoningLabel
+} from './codexStatusLabels'
 
 describe('codexStatusLabels', () => {
     it('formats unset and default effort as reasoning default', () => {
@@ -17,6 +21,13 @@ describe('codexStatusLabels', () => {
     it('can omit the reasoning field label', () => {
         expect(formatCodexReasoningLabel('xhigh', false)).toBe('xhigh')
         expect(formatCodexReasoningLabel(null, false)).toBe('default')
+    })
+
+    it('formats compact effort-only labels', () => {
+        expect(formatCompactCodexReasoningLabel(null)).toBe('default')
+        expect(formatCompactCodexReasoningLabel('default')).toBe('default')
+        expect(formatCompactCodexReasoningLabel('xhigh')).toBe('xhigh')
+        expect(formatCompactCodexReasoningLabel(' Ultra ')).toBe('ultra')
     })
 
     it('only shows the label for codex and opencode', () => {

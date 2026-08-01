@@ -432,6 +432,7 @@ export function SessionHeader(props: {
                     confirmingLabel={t('dialog.reopen.dismiss')}
                     onConfirm={async () => setReopenError(null)}
                     isPending={false}
+                    centerTitle
                 />
             ) : null}
 
@@ -460,6 +461,7 @@ export function SessionHeader(props: {
                 onConfirm={archiveSession}
                 isPending={isPending}
                 destructive
+                centerTitle
             />
 
             <ConfirmDialog
@@ -481,6 +483,7 @@ export function SessionHeader(props: {
                 onConfirm={handleDelete}
                 isPending={isPending}
                 destructive
+                centerTitle
             />
         </>
     )

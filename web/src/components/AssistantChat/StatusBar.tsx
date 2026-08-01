@@ -5,12 +5,17 @@ import {
     isPermissionModeAllowedForFlavor
 } from '@hapi/protocol'
 import type { PermissionModeTone } from '@hapi/protocol'
+import * as Popover from '@radix-ui/react-popover'
 import { useMemo } from 'react'
 import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
 import type { ConversationStatus } from '@/realtime/types'
 import type { ThreadGoal } from '@/types/api'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
-import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
+import {
+    formatCodexReasoningLabel,
+    formatCompactCodexReasoningLabel,
+    shouldShowCodexReasoningLabel
+} from '@/lib/codexStatusLabels'
 import { isFastServiceTier } from './codexFastMode'
 import { useTranslation } from '@/lib/use-translation'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
@@ -106,17 +111,16 @@ function getConnectionStatus(
     }
 }
 
-function getContextWarning(contextSize: number, maxContextSize: number, t: (key: string, params?: Record<string, string | number>) => string): { text: string; color: string } | null {
+function getContextWarning(contextSize: number, maxContextSize: number): { color: string } | null {
     const percentageUsed = (contextSize / maxContextSize) * 100
     const percentageRemaining = Math.max(0, 100 - percentageUsed)
 
-    const percent = Math.round(percentageRemaining)
     if (percentageRemaining <= 5) {
-        return { text: t('misc.percentLeft', { percent }), color: 'text-red-500' }
+        return { color: 'text-red-500' }
     } else if (percentageRemaining <= 10) {
-        return { text: t('misc.percentLeft', { percent }), color: 'text-amber-500' }
+        return { color: 'text-amber-500' }
     } else {
-        return { text: t('misc.percentLeft', { percent }), color: 'text-[var(--app-hint)]' }
+        return { color: 'text-[var(--app-hint)]' }
     }
 }
 
@@ -126,16 +130,62 @@ function formatTokenCount(value: number): string {
     return String(value)
 }
 
+function getContextPercentages(contextSize: number, maxContextSize: number): {
+    usedPercentage: number
+    remainingPercentage: number
+} {
+    const usedPercentage = Math.min(100, Math.max(0, Math.round((contextSize / maxContextSize) * 100)))
+    return { usedPercentage, remainingPercentage: 100 - usedPercentage }
+}
+
+export function formatContextUsageLabel(contextSize: number, maxContextSize: number | null | undefined): string {
+    if (!maxContextSize) return `${formatTokenCount(contextSize)} used`
+    const { usedPercentage } = getContextPercentages(contextSize, maxContextSize)
+    return `${usedPercentage}% · ${formatTokenCount(contextSize)} / ${formatTokenCount(maxContextSize)}`
+}
+
+export function formatCompactContextUsageLabel(contextSize: number, maxContextSize: number | null | undefined): string {
+    if (!maxContextSize) return `ctx ${formatTokenCount(contextSize)}`
+    const { remainingPercentage } = getContextPercentages(contextSize, maxContextSize)
+    return `ctx ${formatTokenCount(maxContextSize)} (${remainingPercentage}% left)`
+}
+
+export function getContextUsageDetails(
+    contextSize: number,
+    maxContextSize: number | null | undefined,
+    contextCacheRead: number | null | undefined
+): {
+    cacheRead: string | null
+    used: string
+    usedPercentage: number | null
+    remaining: string | null
+    remainingPercentage: number | null
+} {
+    if (!maxContextSize) {
+        return {
+            cacheRead: contextCacheRead && contextCacheRead > 0 ? formatTokenCount(contextCacheRead) : null,
+            used: formatTokenCount(contextSize),
+            usedPercentage: null,
+            remaining: null,
+            remainingPercentage: null
+        }
+    }
+
+    const { usedPercentage, remainingPercentage } = getContextPercentages(contextSize, maxContextSize)
+    return {
+        cacheRead: contextCacheRead && contextCacheRead > 0 ? formatTokenCount(contextCacheRead) : null,
+        used: formatTokenCount(contextSize),
+        usedPercentage,
+        remaining: formatTokenCount(Math.max(0, maxContextSize - contextSize)),
+        remainingPercentage
+    }
+}
+
 export function shouldShowCodexFastBadge(
     agentFlavor: string | null | undefined,
     serviceTier: string | null | undefined
 ): boolean {
     return agentFlavor === 'codex' && isFastServiceTier(serviceTier)
-}
-
-/** Cursor native ACP does not emit usage_update; hide the bar to avoid empty/misleading UI. */
-export function shouldShowComposerStatusBar(agentFlavor: string | null | undefined): boolean {
-    return agentFlavor !== 'cursor'
 }
 
 export function StatusBar(props: {
@@ -167,28 +217,26 @@ export function StatusBar(props: {
             if (props.contextSize === undefined) return null
             const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
             if (!maxContextSize) return null
-            return getContextWarning(props.contextSize, maxContextSize, t)
+            return getContextWarning(props.contextSize, maxContextSize)
         },
-        [props.contextSize, props.contextWindow, props.model, props.agentFlavor, t]
+        [props.contextSize, props.contextWindow, props.model, props.agentFlavor]
     )
     const contextUsageLabel = useMemo(() => {
         if (props.contextSize === undefined) return null
         const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
-        if (!maxContextSize) return `ctx ${formatTokenCount(props.contextSize)}`
-        const percentageUsed = Math.min(100, Math.round((props.contextSize / maxContextSize) * 100))
-        return `ctx ${formatTokenCount(props.contextSize)}/${formatTokenCount(maxContextSize)} (${percentageUsed}%)`
+        return formatContextUsageLabel(props.contextSize, maxContextSize)
     }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
     const compactContextUsageLabel = useMemo(() => {
         if (props.contextSize === undefined) return null
         const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
-        if (!maxContextSize) return `ctx ${formatTokenCount(props.contextSize)}`
-        const percentageLeft = Math.max(0, Math.round(100 - (props.contextSize / maxContextSize) * 100))
-        return `ctx ${formatTokenCount(maxContextSize).toUpperCase()}, ${percentageLeft}% left`
+        return formatCompactContextUsageLabel(props.contextSize, maxContextSize)
     }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
-    const cacheHitLabel = useMemo(() => {
-        if (!props.contextCacheRead || props.contextCacheRead <= 0) return null
-        return `cache ${formatTokenCount(props.contextCacheRead)}`
-    }, [props.contextCacheRead])
+    const contextUsageDetails = useMemo(() => {
+        if (props.contextSize === undefined) return null
+        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
+        return getContextUsageDetails(props.contextSize, maxContextSize, props.contextCacheRead)
+    }, [props.contextSize, props.contextCacheRead, props.contextWindow, props.model, props.agentFlavor])
+    const contextUsedPercentage = contextUsageDetails?.usedPercentage ?? null
 
     const permissionMode = props.permissionMode
     const displayPermissionMode = permissionMode
@@ -206,8 +254,12 @@ export function StatusBar(props: {
     const collaborationModeLabel = displayCollaborationMode
         ? getCodexCollaborationModeLabel(displayCollaborationMode)
         : null
-    const codexReasoningLabel = shouldShowCodexReasoningLabel(props.agentFlavor)
+    const displaysCodexReasoning = shouldShowCodexReasoningLabel(props.agentFlavor)
+    const codexReasoningLabel = displaysCodexReasoning
         ? formatCodexReasoningLabel(props.modelReasoningEffort, headerMetadata.showLabels)
+        : null
+    const compactCodexReasoningLabel = displaysCodexReasoning
+        ? formatCompactCodexReasoningLabel(props.modelReasoningEffort)
         : null
     const codexFastMode = shouldShowCodexFastBadge(props.agentFlavor, props.serviceTier)
     const goalLabel = props.agentFlavor === 'codex' && props.threadGoal
@@ -217,9 +269,9 @@ export function StatusBar(props: {
         : null
 
     return (
-        <div className="flex min-w-0 items-center justify-between gap-2 px-2 pb-1">
-            <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
-                <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex min-w-0 items-baseline justify-between gap-2 px-2 pb-1">
+            <div className="flex min-w-0 items-baseline gap-2">
+                <div className="relative top-px sm:top-0.5 flex shrink-0 items-center gap-1.5">
                     <span
                         className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
                     />
@@ -228,26 +280,72 @@ export function StatusBar(props: {
                     </span>
                 </div>
                 {contextUsageLabel ? (
-                    <span className={`min-w-0 whitespace-nowrap text-[10px] ${contextWarning?.color ?? 'text-[var(--app-hint)]'}`}>
-                        <span className="sm:hidden">
-                            {compactContextUsageLabel}
-                        </span>
-                        <span className="hidden sm:inline">
-                            {contextUsageLabel}{contextWarning ? ` · ${contextWarning.text}` : ''}
-                        </span>
-                    </span>
-                ) : null}
-                {cacheHitLabel ? (
-                    <span className="hidden whitespace-nowrap text-[10px] text-[var(--app-hint)] sm:inline">
-                        {cacheHitLabel}
-                    </span>
+                    <Popover.Root>
+                        <Popover.Trigger asChild>
+                            <button
+                                type="button"
+                                aria-label={t('misc.contextDetails')}
+                                className={`min-w-0 cursor-pointer whitespace-nowrap rounded-sm bg-transparent p-0 text-[10px] leading-4 outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)] ${contextWarning?.color ?? 'text-[var(--app-hint)]'}`}
+                            >
+                                <span className="sm:hidden">{compactContextUsageLabel}</span>
+                                <span className="hidden items-center gap-2 sm:inline-flex">
+                                    {contextUsedPercentage !== null ? (
+                                        <span
+                                            aria-hidden="true"
+                                            className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-[var(--app-link-muted)]"
+                                        >
+                                            <span
+                                                className="block h-full rounded-full bg-current"
+                                                style={{ width: `${contextUsedPercentage}%` }}
+                                            />
+                                        </span>
+                                    ) : null}
+                                    <span>{contextUsageLabel}</span>
+                                </span>
+                            </button>
+                        </Popover.Trigger>
+                        <Popover.Portal>
+                            <Popover.Content
+                                side="top"
+                                align="start"
+                                sideOffset={6}
+                                collisionPadding={8}
+                                className="z-50 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 shadow-lg"
+                            >
+                                <div className="flex max-w-[min(22rem,calc(100vw-1rem))] flex-col gap-1 text-xs leading-tight text-[var(--app-fg)]">
+                                    {contextUsageDetails?.cacheRead ? (
+                                        <span className="break-words">
+                                            {t('misc.contextCache', { value: contextUsageDetails.cacheRead })}
+                                        </span>
+                                    ) : null}
+                                    <span className="break-words">
+                                        {contextUsageDetails?.usedPercentage === null
+                                            ? t('misc.contextUsedTokens', { value: contextUsageDetails.used })
+                                            : t('misc.contextUsed', {
+                                                value: contextUsageDetails?.used ?? '',
+                                                percent: contextUsageDetails?.usedPercentage ?? 0
+                                            })}
+                                    </span>
+                                    {contextUsageDetails?.remaining && contextUsageDetails.remainingPercentage !== null ? (
+                                        <span className="break-words">
+                                            {t('misc.contextRemaining', {
+                                                value: contextUsageDetails.remaining,
+                                                percent: contextUsageDetails.remainingPercentage
+                                            })}
+                                        </span>
+                                    ) : null}
+                                </div>
+                            </Popover.Content>
+                        </Popover.Portal>
+                    </Popover.Root>
                 ) : null}
             </div>
 
-            <div className="flex min-w-0 shrink-0 items-center gap-2">
+            <div className="flex min-w-0 shrink-0 items-baseline gap-2">
                 {codexReasoningLabel ? (
                     <span className="whitespace-nowrap text-xs text-[var(--app-hint)]">
-                        {codexReasoningLabel}
+                        <span className="sm:hidden">{compactCodexReasoningLabel}</span>
+                        <span className="hidden sm:inline">{codexReasoningLabel}</span>
                     </span>
                 ) : null}
                 {codexFastMode ? (

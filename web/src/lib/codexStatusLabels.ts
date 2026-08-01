@@ -1,8 +1,13 @@
 /** Labels shared by SessionHeader and composer StatusBar for Codex/OpenCode. */
 
-export function formatCodexReasoningLabel(effort?: string | null, showLabel = true): string {
+export function formatCompactCodexReasoningLabel(effort?: string | null): string {
     const normalized = effort?.trim().toLowerCase()
-    const value = !normalized || normalized === 'default' ? 'default' : normalized
+    if (!normalized || normalized === 'default') return 'default'
+    return normalized
+}
+
+export function formatCodexReasoningLabel(effort?: string | null, showLabel = true): string {
+    const value = formatCompactCodexReasoningLabel(effort)
     return showLabel ? `reasoning ${value}` : value
 }
 
