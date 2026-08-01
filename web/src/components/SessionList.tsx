@@ -225,7 +225,7 @@ export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
 
 export function shouldShowSessionInSidebar(session: SessionSummary, selectedSessionId?: string | null): boolean {
     if (session.id === selectedSessionId) return true
-    if (session.active) return true
+    if (session.active || session.pinned) return true
     return !isSidebarEmptySessionStub(session)
 }
 

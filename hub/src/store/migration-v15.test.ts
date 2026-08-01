@@ -47,7 +47,7 @@ describe('Store V14→V15 migration: scratchlist attachments column', () => {
         }
     })
 
-    it('V15 DB reopen is idempotent: schema unchanged', () => {
+    it('latest DB reopen is idempotent: schema unchanged', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v15-idempotent-'))
         const dbPath = join(dir, 'test.db')
         let store1: Store | undefined

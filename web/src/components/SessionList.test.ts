@@ -328,6 +328,16 @@ describe('prepareSidebarSessions', () => {
         expect(result.map(session => session.id).sort()).toEqual(['real', 'stub'])
     })
 
+    it('keeps a pinned inactive stub visible', () => {
+        const sessions = [
+            makeSession({ id: 'pinned-stub', pinned: true, metadata: { path: '/work/hapi' } }),
+            makeSession({ id: 'stub', metadata: { path: '/work/hapi' } })
+        ]
+
+        const result = prepareSidebarSessions(sessions)
+        expect(result.map(session => session.id)).toEqual(['pinned-stub'])
+    })
+
     it('deduplicates before filtering stubs', () => {
         const sessions = [
             makeSession({ id: 'stub', metadata: { path: '/work/hapi' } }),
@@ -349,11 +359,12 @@ describe('prepareSidebarSessions', () => {
 })
 
 describe('shouldShowSessionInSidebar', () => {
-    it('always shows active and selected sessions', () => {
+    it('always shows active, selected, and pinned sessions', () => {
         const stub = makeSession({ id: 'stub', metadata: { path: '/work/hapi' } })
         expect(shouldShowSessionInSidebar(stub)).toBe(false)
         expect(shouldShowSessionInSidebar(stub, 'stub')).toBe(true)
         expect(shouldShowSessionInSidebar({ ...stub, active: true })).toBe(true)
+        expect(shouldShowSessionInSidebar({ ...stub, pinned: true })).toBe(true)
     })
 })
 
