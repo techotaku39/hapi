@@ -461,6 +461,28 @@ export function HappyThread(props: {
         failureCount: 0,
         autoPaused: false
     })
+
+    useLayoutEffect(() => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+
+        const updateScrollbarGutter = () => {
+            const supportsStableBothEdges = typeof CSS !== 'undefined'
+                && typeof CSS.supports === 'function'
+                && CSS.supports('scrollbar-gutter: stable both-edges')
+            const gutter = supportsStableBothEdges
+                ? Math.max(0, (viewport.offsetWidth - viewport.clientWidth) / 2)
+                : 0
+            viewport.style.setProperty('--chat-scroll-gutter-inline', `${gutter}px`)
+        }
+
+        updateScrollbarGutter()
+        if (typeof ResizeObserver === 'undefined') return
+
+        const observer = new ResizeObserver(updateScrollbarGutter)
+        observer.observe(viewport)
+        return () => observer.disconnect()
+    }, [])
     const requestOlderRef = useRef<(source: HistoryLoadSource) => Promise<OlderHistoryLoadResult>>(
         () => Promise.resolve('transient-stop')
     )
