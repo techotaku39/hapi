@@ -216,6 +216,51 @@ describe('alive incremental events', () => {
         expect(events.find((event) => event.type === 'session-updated')).toBeUndefined()
     })
 
+    it('starts a fresh grace window when an old local message is retried', async () => {
+        const store = new Store(':memory:')
+        const io = {
+            of: () => ({
+                to: () => ({ emit() {} })
+            })
+        }
+        const engine = new SyncEngine(
+            store,
+            io as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+        const now = Date.now()
+        const originalNow = Date.now
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-retry-thinking-grace',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                { requests: {}, completedRequests: {} },
+                'default'
+            )
+
+            Date.now = () => now - 20_000
+            engine.handleSessionAlive({ sid: session.id, time: now - 20_000, thinking: false })
+            await engine.sendMessage(session.id, { text: 'retry me', localId: 'stable-local-id' })
+            const storedTurnStartedAt = engine.getSession(session.id)?.activeTurnStartedAt
+
+            Date.now = () => now
+            engine.handleSessionAlive({ sid: session.id, time: now, thinking: false })
+            expect(engine.getSession(session.id)?.thinking).toBe(false)
+
+            await engine.sendMessage(session.id, { text: 'retry me', localId: 'stable-local-id' })
+            expect(engine.getSession(session.id)?.activeTurnStartedAt).toBe(storedTurnStartedAt)
+
+            Date.now = () => now + 1_000
+            engine.handleSessionAlive({ sid: session.id, time: now + 1_000, thinking: false })
+            expect(engine.getSession(session.id)?.thinking).toBe(true)
+        } finally {
+            Date.now = originalNow
+            engine.stop()
+        }
+    })
+
     it('keeps queued thinking true across false heartbeats during the grace window', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

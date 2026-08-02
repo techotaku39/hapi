@@ -342,7 +342,11 @@ export class SessionCache {
         this.pendingThinkingUntilBySessionId.delete(sessionId)
     }
 
-    markMessageQueued(sessionId: string, time: number = Date.now()): void {
+    markMessageQueued(
+        sessionId: string,
+        time: number = Date.now(),
+        activeTurnStartedAt: number = time
+    ): void {
         const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
         if (!session) return
         if (!session.active) return
@@ -353,7 +357,7 @@ export class SessionCache {
 
         session.thinking = true
         session.thinkingAt = nextTime
-        if (!wasThinking) session.activeTurnStartedAt = nextTime
+        if (!wasThinking) session.activeTurnStartedAt = activeTurnStartedAt
         session.updatedAt = Math.max(session.updatedAt, nextTime)
         this.pendingThinkingUntilBySessionId.set(session.id, nextTime + QUEUED_MESSAGE_THINKING_GRACE_MS)
 
