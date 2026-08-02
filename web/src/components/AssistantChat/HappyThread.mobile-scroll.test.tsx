@@ -3,6 +3,10 @@ import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 
+vi.mock('@/hooks/queries/useMachines', () => ({
+    useMachines: () => ({ machines: [] })
+}))
+
 vi.mock('@assistant-ui/react', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@assistant-ui/react')>()
     return {
