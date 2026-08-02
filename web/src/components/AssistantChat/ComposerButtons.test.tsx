@@ -2,7 +2,7 @@ import type { ReactElement } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { DictationButton, UnifiedButton } from './ComposerButtons'
+import { ComposerExpandButton, DictationButton, UnifiedButton } from './ComposerButtons'
 
 function renderInProviders(ui: ReactElement) {
     return render(<I18nProvider>{ui}</I18nProvider>)
@@ -101,5 +101,29 @@ describe('DictationButton', () => {
 
         fireEvent.click(getButton('Dictate'))
         expect(onVoiceToggle).toHaveBeenCalledOnce()
+    })
+})
+
+describe('ComposerExpandButton', () => {
+    afterEach(() => {
+        cleanup()
+    })
+
+    it('announces and triggers expansion', () => {
+        const onToggle = vi.fn()
+        renderInProviders(<ComposerExpandButton expanded={false} onToggle={onToggle} />)
+
+        const button = getButton('Expand message editor')
+        expect(button.getAttribute('aria-pressed')).toBe('false')
+        fireEvent.click(button)
+        expect(onToggle).toHaveBeenCalledOnce()
+    })
+
+    it('announces the collapse action while expanded', () => {
+        renderInProviders(<ComposerExpandButton expanded onToggle={() => {}} />)
+
+        const button = getButton('Collapse message editor')
+        expect(button.getAttribute('aria-pressed')).toBe('true')
+        expect(button.className).toContain('text-[var(--app-link)]')
     })
 })

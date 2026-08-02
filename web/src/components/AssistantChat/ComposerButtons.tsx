@@ -171,6 +171,77 @@ function AttachmentIcon() {
     )
 }
 
+function ComposerExpandIcon(props: { expanded: boolean }) {
+    return props.expanded ? (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M8 3v5H3" />
+            <path d="m3 3 5 5" />
+            <path d="M16 3v5h5" />
+            <path d="m21 3-5 5" />
+            <path d="M8 21v-5H3" />
+            <path d="m3 21 5-5" />
+            <path d="M16 21v-5h5" />
+            <path d="m21 21-5-5" />
+        </svg>
+    ) : (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M8 3H3v5" />
+            <path d="m3 3 5 5" />
+            <path d="M16 3h5v5" />
+            <path d="m21 3-5 5" />
+            <path d="M8 21H3v-5" />
+            <path d="m3 21 5-5" />
+            <path d="M16 21h5v-5" />
+            <path d="m21 21-5-5" />
+        </svg>
+    )
+}
+
+export function ComposerExpandButton(props: {
+    expanded: boolean
+    onToggle: () => void
+}) {
+    const { t } = useTranslation()
+    const label = props.expanded ? t('composer.collapse') : t('composer.expand')
+
+    return (
+        <button
+            type="button"
+            aria-label={label}
+            title={label}
+            aria-pressed={props.expanded}
+            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                props.expanded
+                    ? 'bg-[var(--app-bg)] text-[var(--app-link)]'
+                    : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+            }`}
+            onClick={props.onToggle}
+        >
+            <ComposerExpandIcon expanded={props.expanded} />
+        </button>
+    )
+}
+
 function AbortIcon(props: { spinning: boolean }) {
     if (props.spinning) {
         return (
@@ -248,6 +319,7 @@ export function ComposerToolbarItemPreview(props: { item: ComposerToolbarItemId;
         switch (props.item) {
             case 'attachment': return <AttachmentIcon />
             case 'settings': return <SettingsIcon />
+            case 'expand': return <ComposerExpandIcon expanded={false} />
             case 'terminal': return <TerminalIcon />
             case 'abort': return <AbortIcon spinning={false} />
             case 'switch': return <SwitchToRemoteIcon />
@@ -515,6 +587,8 @@ export function ComposerButtons(props: {
     controlsDisabled: boolean
     showSettingsButton: boolean
     onSettingsToggle: () => void
+    expanded: boolean
+    onExpandedToggle: () => void
     showTerminalButton: boolean
     terminalDisabled: boolean
     terminalLabel: string
@@ -574,7 +648,7 @@ export function ComposerButtons(props: {
             : 'justify-start'
 
     return (
-        <div className="flex items-center gap-1 px-2 pb-2">
+        <div className="flex shrink-0 items-center gap-1 px-2 pb-2">
             <div className={`flex min-w-0 flex-1 items-center gap-1 ${toolbarAlignmentClass}`}>
                 <OrderedToolbarItems layout={layout}>
                 <ToolbarItemSlot item="attachment">
@@ -601,6 +675,13 @@ export function ComposerButtons(props: {
                         <SettingsIcon />
                     </button>
                 ) : null}
+                </ToolbarItemSlot>
+
+                <ToolbarItemSlot item="expand">
+                <ComposerExpandButton
+                    expanded={props.expanded}
+                    onToggle={props.onExpandedToggle}
+                />
                 </ToolbarItemSlot>
 
                 <ToolbarItemSlot item="piModel">

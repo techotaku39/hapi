@@ -374,6 +374,7 @@ export function HappyComposer(props: {
         text: '',
         selection: { start: 0, end: 0 }
     })
+    const [isExpanded, setIsExpanded] = useState(false)
     const [showSettings, setShowSettings] = useState(false)
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
@@ -497,6 +498,24 @@ export function HappyComposer(props: {
             platformHaptic.notification('error')
         }
     }, [platformHaptic])
+
+    const handleExpandedToggle = useCallback(() => {
+        setIsExpanded((expanded) => !expanded)
+        haptic('light')
+        setTimeout(() => {
+            if (richMentionsEnabled) {
+                richInputRef.current?.focus()
+                return
+            }
+            const input = textareaRef.current
+            if (!input) return
+            try {
+                input.focus({ preventScroll: true })
+            } catch {
+                input.focus()
+            }
+        }, 0)
+    }, [haptic, richMentionsEnabled])
 
     const handleSuggestionSelect = useCallback((index: number) => {
         const suggestion = suggestions[index]
@@ -733,6 +752,12 @@ export function HappyComposer(props: {
             }
         }
 
+        if (key === 'Escape' && isExpanded) {
+            e.preventDefault()
+            handleExpandedToggle()
+            return
+        }
+
         if (key === 'Escape' && threadIsRunning) {
             e.preventDefault()
             handleAbort()
@@ -765,6 +790,8 @@ export function HappyComposer(props: {
         composerEnterBehavior,
         richMentionsEnabled,
         flushAndSend,
+        isExpanded,
+        handleExpandedToggle,
     ])
 
     useEffect(() => {
@@ -982,6 +1009,10 @@ export function HappyComposer(props: {
         haptic('light')
     }, [controlsDisabled, haptic])
 
+    const overlayPositionClass = isExpanded
+        ? 'absolute z-10 bottom-12 mb-2'
+        : 'absolute z-10 bottom-[100%] mb-2'
+
     const overlays = useMemo(() => {
         // Pi flavor: separate floating panels for model and thinking level.
         // (Pi RPC mode has no runtime permission switching → no permission panel.)
@@ -992,7 +1023,7 @@ export function HappyComposer(props: {
             if (showPiModelPanel && piModels && piModels.length > 0) {
                 const currentPiModel = selectedPiModel ?? null
                 panels.push(
-                    <div key="model" className="absolute bottom-[100%] mb-2 left-2 w-64">
+                    <div key="model" className={`${overlayPositionClass} left-2 w-64`}>
                         <PiModelPanel
                             models={piModels}
                             currentModel={currentPiModel ? { provider: currentPiModel.provider, modelId: currentPiModel.modelId } : null}
@@ -1009,7 +1040,7 @@ export function HappyComposer(props: {
             // Thinking level panel
             if (showPiThinkingPanel && selectedPiModel?.reasoning !== false) {
                 panels.push(
-                    <div key="thinking" className="absolute bottom-[100%] mb-2 left-2 w-48">
+                    <div key="thinking" className={`${overlayPositionClass} left-2 w-48`}>
                         <PiThinkingLevelPanel
                             currentLevel={effort}
                             reasoning={selectedPiModel?.reasoning}
@@ -1028,7 +1059,7 @@ export function HappyComposer(props: {
         // Non-Pi flavors: original unified gear menu
         if (showSettings && (showCollaborationSettings || showPermissionSettings || showModelSettings || showModelEffortSettings || showModelReasoningEffortSettings || showEffortSettings || showFastModeSettings)) {
             return (
-                <div className="absolute bottom-[100%] mb-2 w-full">
+                <div className={`${overlayPositionClass} w-full`}>
                     <FloatingOverlay maxHeight={320}>
                         {showCollaborationSettings ? (
                             <div className="py-2">
@@ -1340,7 +1371,7 @@ export function HappyComposer(props: {
 
         if (suggestions.length > 0) {
             return (
-                <div className="absolute bottom-[100%] mb-2 w-full">
+                <div className={`${overlayPositionClass} w-full`}>
                     <FloatingOverlay>
                         <Autocomplete
                             suggestions={suggestions}
@@ -1393,13 +1424,27 @@ export function HappyComposer(props: {
         handleEffortChange,
         handleServiceTierChange,
         handleSuggestionSelect,
+        overlayPositionClass,
         t
     ])
 
+    const shellClassName = isExpanded
+        ? `z-[60] flex min-h-0 flex-col bg-[var(--app-bg)] px-3 ${bottomPaddingClass} max-sm:fixed max-sm:inset-x-0 max-sm:top-0 max-sm:h-[var(--tg-viewport-stable-height,var(--app-viewport-height,100dvh))] max-sm:pt-[calc(0.5rem+env(safe-area-inset-top))] sm:absolute sm:inset-0 sm:pt-2`
+        : `bg-[var(--app-bg)] px-3 ${bottomPaddingClass} pt-2`
+    const innerClassName = isExpanded
+        ? 'mx-auto flex min-h-0 w-full max-w-content flex-1 flex-col'
+        : 'mx-auto w-full max-w-content'
+    const rootClassName = isExpanded
+        ? 'relative flex min-h-0 flex-1 flex-col'
+        : 'relative'
+    const editorClassName = isExpanded
+        ? 'h-full min-h-[1.5rem] flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-base leading-snug text-[var(--app-fg)] focus:outline-none'
+        : 'max-h-[7.5rem] min-h-[1.5rem] flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-base leading-snug text-[var(--app-fg)] focus:outline-none'
+
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2 bg-[var(--app-bg)]`}>
-            <div className="mx-auto w-full max-w-content">
-                <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
+        <div className={shellClassName} data-testid="composer-shell" data-expanded={isExpanded || undefined}>
+            <div className={innerClassName}>
+                <ComposerPrimitive.Root className={rootClassName} onSubmit={handleSubmit}>
                     {overlays}
 
                     <StatusBar
@@ -1450,16 +1495,22 @@ export function HappyComposer(props: {
 
                     <div
                         className={`overflow-hidden rounded-[20px] bg-[var(--app-secondary-bg)] ${
+                            isExpanded ? 'flex min-h-0 flex-1 flex-col' : ''
+                        } ${
                             sendError ? 'ring-1 ring-red-500' : ''
                         }`}
                     >
                         {attachments.length > 0 ? (
-                            <div className="flex flex-wrap gap-2 px-4 pt-3">
+                            <div className={`flex flex-wrap gap-2 px-4 pt-3 ${
+                                isExpanded ? 'max-h-[35%] shrink-0 overflow-y-auto' : ''
+                            }`}>
                                 <ComposerPrimitive.Attachments components={{ Attachment: AttachmentItem }} />
                             </div>
                         ) : null}
 
-                        <div className="flex items-center px-4 py-3">
+                        <div className={`flex px-4 py-3 ${
+                            isExpanded ? 'min-h-0 flex-1 items-stretch' : 'items-center'
+                        }`}>
                             {richMentionsEnabled ? (
                                 <RichComposerInput
                                     ref={richInputRef}
@@ -1473,8 +1524,26 @@ export function HappyComposer(props: {
                                     onPaste={handlePaste}
                                     resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                                     onEdit={handleRichEdit}
-                                    className="max-h-[7.5rem] min-h-[1.5rem] flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-base leading-snug text-[var(--app-fg)] focus:outline-none"
+                                    className={editorClassName}
                                 />
+                            ) : isExpanded ? (
+                                <ComposerPrimitive.Input
+                                    asChild
+                                    ref={textareaRef}
+                                    autoFocus={!controlsDisabled && !isTouch}
+                                    submitOnEnter={false}
+                                    cancelOnEscape={false}
+                                    onChange={handleChange}
+                                    onSelect={handleSelect}
+                                    onKeyDown={handleKeyDown}
+                                    onPaste={handlePaste}
+                                >
+                                    <textarea
+                                        placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
+                                        disabled={controlsDisabled}
+                                        className="h-full min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                    />
+                                </ComposerPrimitive.Input>
                             ) : (
                                 <ComposerPrimitive.Input
                                     ref={textareaRef}
@@ -1498,6 +1567,8 @@ export function HappyComposer(props: {
                             controlsDisabled={controlsDisabled}
                             showSettingsButton={showSettingsButton}
                             onSettingsToggle={handleSettingsToggle}
+                            expanded={isExpanded}
+                            onExpandedToggle={handleExpandedToggle}
                             showTerminalButton={showTerminalButton}
                             terminalDisabled={terminalDisabled}
                             terminalLabel={terminalLabel}
