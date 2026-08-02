@@ -23,6 +23,13 @@ import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
+import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
+import { useMachines } from '@/hooks/queries/useMachines'
+import { useMachineLabels } from '@/hooks/useMachineLabels'
+import { resolveSessionHeaderMachineLabel } from '@/components/SessionHeader'
+import { formatRelativeTime } from '@/lib/relativeTime'
+import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
+import { selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
 
 type ScrollAnchor = {
     id: string
@@ -415,6 +422,7 @@ export function ConversationOutlinePanel(props: {
 export function HappyThread(props: {
     api: ApiClient
     session: Session
+    serviceTier?: string | null
     sessionId: string
     metadata: SessionMetadataSummary | null
     disabled: boolean
@@ -438,7 +446,49 @@ export function HappyThread(props: {
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
 }) {
-    const { t } = useTranslation()
+    const { t, locale } = useTranslation()
+    const { preferences: headerMetadata } = useSessionHeaderMetadata()
+    const { machines } = useMachines(props.api, true)
+    const machineLabelsById = useMachineLabels(machines)
+    const shareMetadataItems = useMemo(() => {
+        const agentFlavor = props.session.metadata?.flavor ?? null
+        const agentLabel = agentFlavor?.trim() || null
+        const machineLabel = resolveSessionHeaderMachineLabel(props.session, machineLabelsById)
+        const modelLabel = getSessionModelLabel(props.session)
+        const reasoningEffort = props.session.modelReasoningEffort?.trim() || null
+        const reasoningLabel = reasoningEffort && shouldShowCodexReasoningLabel(agentFlavor)
+            ? formatCodexReasoningLabel(reasoningEffort, headerMetadata.showLabels)
+            : null
+        const lastActiveAt = props.session.activeAt || props.session.updatedAt || props.session.createdAt
+        const lastActiveLabel = lastActiveAt > 0 ? formatRelativeTime(lastActiveAt, t) : null
+        const createdAtLabel = formatSessionHeaderTimestamp(props.session.createdAt, locale)
+        const updatedAtLabel = formatSessionHeaderTimestamp(props.session.updatedAt, locale)
+        const worktreeBranch = props.session.metadata?.worktree?.branch?.trim() || null
+        const showFastBadge = agentFlavor === 'codex'
+            && isFastServiceTier(props.serviceTier ?? props.session.serviceTier)
+
+        return selectShareTurnMetadata(headerMetadata, {
+            agent: agentLabel ? { text: agentLabel, flavor: agentFlavor } : undefined,
+            machine: machineLabel ? {
+                text: `${headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}${machineLabel}`,
+            } : undefined,
+            lastActive: lastActiveLabel ? { text: lastActiveLabel } : undefined,
+            model: modelLabel ? {
+                text: `${headerMetadata.showLabels ? `${t(modelLabel.key)}: ` : ''}${modelLabel.value}`,
+            } : undefined,
+            reasoning: reasoningLabel ? { text: reasoningLabel } : undefined,
+            fastMode: showFastBadge ? { text: 'fast' } : undefined,
+            createdAt: createdAtLabel ? {
+                text: `${headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}${createdAtLabel}`,
+            } : undefined,
+            updatedAt: updatedAtLabel ? {
+                text: `${headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}${updatedAtLabel}`,
+            } : undefined,
+            worktree: worktreeBranch ? {
+                text: `${headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}${worktreeBranch}`,
+            } : undefined,
+        })
+    }, [headerMetadata, locale, machineLabelsById, props.serviceTier, props.session, t])
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const runtimeExtras = useAuiState((s) => s.thread.extras) as HappyRuntimeExtras | undefined
     const appliedMessagesVersion = runtimeExtras?.messagesVersion ?? props.messagesVersion
@@ -1509,16 +1559,7 @@ export function HappyThread(props: {
                     key={shareTurn?.id ?? 'closed'}
                     isOpen={shareTurn !== null}
                     title={shareTurn?.title ?? ''}
-                    flavor={props.session.metadata?.flavor ?? null}
-                    modelLabel={(() => {
-                        const label = getSessionModelLabel(props.session)
-                        return label ? `${t(label.key)}: ${label.value}` : null
-                    })()}
-                    reasoningLabel={shouldShowCodexReasoningLabel(props.session.metadata?.flavor ?? null)
-                        ? formatCodexReasoningLabel(props.session.modelReasoningEffort)
-                        : null}
-                    showFastBadge={props.session.metadata?.flavor === 'codex' && isFastServiceTier(props.session.serviceTier)}
-                    worktreeBranch={props.session.metadata?.worktree?.branch ?? null}
+                    metadataItems={shareMetadataItems}
                     sourceSnapshots={shareTurn?.snapshots ?? []}
                     sourceContentWidth={shareTurn?.sourceContentWidth ?? null}
                     onClose={() => setShareTurn(null)}

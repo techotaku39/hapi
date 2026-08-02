@@ -7,6 +7,7 @@ import { MessageMetadata, buildMessageMetadataLabels, type MessageMetadataProps 
 import { MessageTimestamp } from './MessageTimestamp'
 import { cn } from '@/lib/utils'
 import { ShareTurnButton } from './ShareTurnButton'
+import { shouldHideShareForRunningTurn } from '@/lib/shareTurnAvailability'
 
 type MessageActionsProps = {
     align: 'start' | 'end'
@@ -18,10 +19,14 @@ type MessageActionsProps = {
 export function MessageActions({ align, copyText, metadata, messageElementId }: MessageActionsProps) {
     const { copied, copy } = useCopyToClipboard()
     const { t } = useTranslation()
-    const threadIsRunning = useAuiState(({ thread }) => thread?.isRunning ?? false)
+    const hideShareButton = useAuiState(({ message, thread }) => shouldHideShareForRunningTurn(
+        thread?.messages ?? [],
+        message.id,
+        thread?.isRunning ?? false
+    ))
     const canCopy = Boolean(copyText)
     const hasMetadata = metadata ? buildMessageMetadataLabels(metadata).length > 0 : false
-    const shareButton = messageElementId && !threadIsRunning ? (
+    const shareButton = messageElementId && !hideShareButton ? (
         <ShareTurnButton
             messageElementId={messageElementId}
             fallbackText={copyText}
