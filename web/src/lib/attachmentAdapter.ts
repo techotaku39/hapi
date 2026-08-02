@@ -50,16 +50,21 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
             const id = randomId()
             const contentType = file.type || 'application/octet-stream'
 
-            yield {
-                id,
-                type: 'file',
-                name: file.name,
-                contentType,
-                file,
-                status: { type: 'running', reason: 'uploading', progress: 0 }
-            }
-
             try {
+                const previewUrl = isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES
+                    ? await fileToDataUrl(file)
+                    : undefined
+
+                yield {
+                    id,
+                    type: 'file',
+                    name: file.name,
+                    contentType,
+                    file,
+                    status: { type: 'running', reason: 'uploading', progress: 0 },
+                    previewUrl
+                } as PendingUploadAttachment
+
                 if (cancelledAttachmentIds.has(id)) {
                     return
                 }
@@ -87,8 +92,9 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     name: file.name,
                     contentType,
                     file,
-                    status: { type: 'running', reason: 'uploading', progress: 50 }
-                }
+                    status: { type: 'running', reason: 'uploading', progress: 50 },
+                    previewUrl
+                } as PendingUploadAttachment
 
                 const result = await api.uploadFile(sessionId, file.name, content, contentType)
                 if (cancelledAttachmentIds.has(id)) {
@@ -108,12 +114,6 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                         status: { type: 'incomplete', reason: 'error' }
                     }
                     return
-                }
-
-                // Generate preview URL for images under 5MB
-                let previewUrl: string | undefined
-                if (isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES) {
-                    previewUrl = await fileToDataUrl(file)
                 }
 
                 yield {
