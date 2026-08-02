@@ -52,4 +52,15 @@ describe('shouldHideShareForRunningTurn', () => {
         expect(shouldHideShareForRunningTurn(assistantOnlyMessages, 'assistant-active-1', true)).toBe(true)
         expect(shouldHideShareForRunningTurn(assistantOnlyMessages, 'assistant-active-2', true)).toBe(true)
     })
+
+    it('keeps completed turns shareable before the queued prompt is consumed', () => {
+        const runningSince = Date.UTC(2026, 7, 2, 10, 0, 0)
+        const completedMessages = [
+            { id: 'user-completed', role: 'user', createdAt: new Date(runningSince - 2_000) },
+            { id: 'assistant-completed', role: 'assistant', createdAt: new Date(runningSince - 1_000) },
+        ]
+
+        expect(shouldHideShareForRunningTurn(completedMessages, 'user-completed', true, runningSince)).toBe(false)
+        expect(shouldHideShareForRunningTurn(completedMessages, 'assistant-completed', true, runningSince)).toBe(false)
+    })
 })

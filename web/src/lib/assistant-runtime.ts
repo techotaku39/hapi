@@ -50,6 +50,7 @@ export type HappyChatMessageMetadata = {
 export type HappyRuntimeExtras = Readonly<{
     messagesVersion: number
     historyVersion: number
+    runningSince: number
 }>
 
 function formatCodexReviewText(review: CodexReview): string {
@@ -697,8 +698,9 @@ export function useHappyRuntime(props: {
 
     const extras = useMemo<HappyRuntimeExtras>(() => ({
         messagesVersion: props.messagesVersion,
-        historyVersion: props.historyVersion
-    }), [props.messagesVersion, props.historyVersion])
+        historyVersion: props.historyVersion,
+        runningSince: props.session.thinkingAt ?? 0
+    }), [props.messagesVersion, props.historyVersion, props.session.thinkingAt])
 
     // Memoize the adapter to avoid recreating on every render
     // useExternalStoreRuntime may use adapter identity for subscriptions
