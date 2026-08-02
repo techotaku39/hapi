@@ -230,6 +230,7 @@ export default {
   'session.action.rename': 'Rename',
   'session.action.pin': 'Pin session',
   'session.action.unpin': 'Unpin session',
+  'session.action.pinFailed': 'Could not update pin',
   'session.action.export': 'Export conversation',
   'session.action.syncCodex': 'Sync from Codex',
   'session.action.syncPi': 'Sync Pi history',

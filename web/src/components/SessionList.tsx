@@ -30,6 +30,7 @@ import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStat
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
+import { useToast } from '@/lib/toast-context'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -95,6 +96,7 @@ function SessionsEmptyState(props: {
     onBrowse?: () => void
 }) {
     const { t } = useTranslation()
+    const { addToast } = useToast()
     return (
         <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
             <svg
@@ -897,6 +899,19 @@ function SessionItem(props: {
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
+    const handleTogglePin = async () => {
+        try {
+            await setPinned(!s.pinned)
+        } catch (error) {
+            addToast({
+                title: t('session.action.pinFailed'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                sessionId: s.id,
+                url: `/sessions/${s.id}`
+            })
+        }
+    }
+
     const handleReopen = async () => {
         setReopenError(null)
         try {
@@ -975,7 +990,7 @@ function SessionItem(props: {
                 sessionTitle={sessionName}
                 sessionActive={s.active}
                 sessionPinned={s.pinned}
-                onTogglePin={() => void setPinned(!s.pinned)}
+                onTogglePin={() => void handleTogglePin()}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}

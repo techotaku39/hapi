@@ -4,13 +4,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
-import { ToastProvider } from '@/lib/toast-context'
+import { ToastProvider, useToast } from '@/lib/toast-context'
 import { resolveSessionHeaderMachineLabel, SessionHeader } from './SessionHeader'
 
 afterEach(() => {
     cleanup()
     localStorage.clear()
 })
+
+function ToastMessages() {
+    const { toasts } = useToast()
+    return <>{toasts.map((toast) => <div key={toast.id}>{toast.title}: {toast.body}</div>)}</>
+}
 
 function baseSession(overrides: Partial<Session> = {}): Session {
     return {
@@ -309,5 +314,28 @@ describe('SessionHeader', () => {
         fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
 
         await waitFor(() => expect(setSessionPinned).toHaveBeenCalledWith('session-pin', true))
+    })
+
+    it('shows an error toast when toggling the pin fails', async () => {
+        const api = {
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            setSessionPinned: vi.fn().mockRejectedValue(new Error('Network unavailable'))
+        } as unknown as ApiClient
+
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader session={baseSession({ pinned: false })} onBack={vi.fn()} api={api} />
+                        <ToastMessages />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByTitle('More actions'))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
+
+        expect(await screen.findByText('Could not update pin: Network unavailable')).toBeInTheDocument()
     })
 })

@@ -226,6 +226,19 @@ export function SessionHeader(props: {
         session.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
+
+    const handleTogglePin = async () => {
+        try {
+            await setPinned(!session.pinned)
+        } catch (error) {
+            addToast({
+                title: t('session.action.pinFailed'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        }
+    }
     // tiann/hapi#893: surface the scratchlist entry count in the
     // delete-confirm copy so the operator knows what cascades when they
     // confirm. Read-only hook reuses the cache filled by SessionChat -
@@ -501,7 +514,7 @@ export function SessionHeader(props: {
                 sessionActive={session.active}
                 sessionPinned={session.pinned}
                 onRename={() => setRenameOpen(true)}
-                onTogglePin={api ? () => void setPinned(!session.pinned) : undefined}
+                onTogglePin={api ? () => void handleTogglePin() : undefined}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
