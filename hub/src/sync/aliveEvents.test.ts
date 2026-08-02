@@ -169,6 +169,9 @@ describe('alive incremental events', () => {
             }
 
             expect(update.data).toEqual(expect.objectContaining({ thinking: true }))
+            expect(update.data).toEqual(expect.objectContaining({
+                activeTurnStartedAt: expect.any(Number)
+            }))
             expect(update.data).not.toHaveProperty('activeAt')
             expect((update.data as { updatedAt?: unknown }).updatedAt).toEqual(expect.any(Number))
         } finally {
@@ -221,6 +224,7 @@ describe('alive incremental events', () => {
 
         cache.handleSessionAlive({ sid: session.id, time: now, thinking: false })
         cache.markMessageQueued(session.id, now + 10)
+        const turnStartedAt = cache.getSession(session.id)?.activeTurnStartedAt
         events.length = 0
 
         const originalNow = Date.now
@@ -232,6 +236,7 @@ describe('alive incremental events', () => {
         }
 
         expect(cache.getSession(session.id)?.thinking).toBe(true)
+        expect(cache.getSession(session.id)?.activeTurnStartedAt).toBe(turnStartedAt)
         expect(events.find((event) => event.type === 'session-updated')).toBeUndefined()
     })
 

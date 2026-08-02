@@ -63,4 +63,15 @@ describe('shouldHideShareForRunningTurn', () => {
         expect(shouldHideShareForRunningTurn(completedMessages, 'user-completed', true, runningSince)).toBe(false)
         expect(shouldHideShareForRunningTurn(completedMessages, 'assistant-completed', true, runningSince)).toBe(false)
     })
+
+    it('keeps the accepted turn hidden after later keepalives', () => {
+        const runningSince = Date.UTC(2026, 7, 2, 10, 0, 0)
+        const messagesAfterConsumption = [
+            { id: 'user-active', role: 'user', createdAt: new Date(runningSince + 1) },
+            { id: 'assistant-partial', role: 'assistant', createdAt: new Date(runningSince + 5_000) },
+        ]
+
+        expect(shouldHideShareForRunningTurn(messagesAfterConsumption, 'user-active', true, runningSince)).toBe(true)
+        expect(shouldHideShareForRunningTurn(messagesAfterConsumption, 'assistant-partial', true, runningSince)).toBe(true)
+    })
 })

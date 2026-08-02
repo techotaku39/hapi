@@ -699,8 +699,8 @@ export function useHappyRuntime(props: {
     const extras = useMemo<HappyRuntimeExtras>(() => ({
         messagesVersion: props.messagesVersion,
         historyVersion: props.historyVersion,
-        runningSince: props.session.thinkingAt ?? 0
-    }), [props.messagesVersion, props.historyVersion, props.session.thinkingAt])
+        runningSince: props.session.activeTurnStartedAt ?? 0
+    }), [props.messagesVersion, props.historyVersion, props.session.activeTurnStartedAt])
 
     // Memoize the adapter to avoid recreating on every render
     // useExternalStoreRuntime may use adapter identity for subscriptions

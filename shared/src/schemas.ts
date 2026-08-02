@@ -223,6 +223,7 @@ export const SessionSchema = z.object({
     agentStateVersion: z.number(),
     thinking: z.boolean(),
     thinkingAt: z.number(),
+    activeTurnStartedAt: z.number().nullable().optional(),
     backgroundTaskCount: z.number().optional(),
     todos: TodosSchema.optional(),
     teamState: TeamStateSchema.optional(),
@@ -239,6 +240,7 @@ export type Session = z.infer<typeof SessionSchema>
 export const SessionPatchSchema = z.object({
     active: z.boolean().optional(),
     thinking: z.boolean().optional(),
+    activeTurnStartedAt: z.number().nullable().optional(),
     activeAt: z.number().optional(),
     updatedAt: z.number().optional(),
     model: z.string().nullable().optional(),
