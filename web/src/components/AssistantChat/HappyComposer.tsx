@@ -500,6 +500,13 @@ export function HappyComposer(props: {
     }, [platformHaptic])
 
     const handleExpandedToggle = useCallback(() => {
+        const currentInput = textareaRef.current
+        const selection = currentInput ? {
+            start: currentInput.selectionStart,
+            end: currentInput.selectionEnd,
+            direction: currentInput.selectionDirection,
+        } : null
+
         setIsExpanded((expanded) => !expanded)
         haptic('light')
         setTimeout(() => {
@@ -513,6 +520,14 @@ export function HappyComposer(props: {
                 input.focus({ preventScroll: true })
             } catch {
                 input.focus()
+            }
+            if (selection) {
+                const maxOffset = input.value.length
+                input.setSelectionRange(
+                    Math.min(selection.start, maxOffset),
+                    Math.min(selection.end, maxOffset),
+                    selection.direction,
+                )
             }
         }, 0)
     }, [haptic, richMentionsEnabled])
