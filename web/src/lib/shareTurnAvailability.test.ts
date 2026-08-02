@@ -42,4 +42,14 @@ describe('shouldHideShareForRunningTurn', () => {
     it('fails open when the current message is not in the thread snapshot', () => {
         expect(shouldHideShareForRunningTurn(messages, 'missing', true)).toBe(false)
     })
+
+    it('hides every visible assistant message when the active user boundary was trimmed', () => {
+        const assistantOnlyMessages = [
+            { id: 'assistant-active-1', role: 'assistant' },
+            { id: 'assistant-active-2', role: 'assistant' },
+        ]
+
+        expect(shouldHideShareForRunningTurn(assistantOnlyMessages, 'assistant-active-1', true)).toBe(true)
+        expect(shouldHideShareForRunningTurn(assistantOnlyMessages, 'assistant-active-2', true)).toBe(true)
+    })
 })

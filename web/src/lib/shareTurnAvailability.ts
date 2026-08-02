@@ -28,7 +28,7 @@ export function shouldHideShareForRunningTurn(
     if (currentIndex < 0) return false
 
     const activeUserIndex = messages.findLastIndex(isShareTurnUserMessage)
-    if (activeUserIndex >= 0) return currentIndex >= activeUserIndex
+    if (activeUserIndex < 0) return true
 
-    return currentIndex === messages.length - 1
+    return currentIndex >= activeUserIndex
 }
