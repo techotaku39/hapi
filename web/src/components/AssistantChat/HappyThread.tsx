@@ -19,7 +19,6 @@ import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
-import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
@@ -29,7 +28,7 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { resolveSessionHeaderMachineLabel } from '@/components/SessionHeader'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
-import { selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
+import { getShareTurnReasoningLabel, selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 type ScrollAnchor = {
@@ -457,10 +456,12 @@ export function HappyThread(props: {
         const agentLabel = agentFlavor?.trim() || null
         const machineLabel = resolveSessionHeaderMachineLabel(props.session, machineLabelsById)
         const modelLabel = getSessionModelLabel(props.session)
-        const reasoningEffort = props.session.modelReasoningEffort?.trim() || null
-        const reasoningLabel = reasoningEffort && shouldShowCodexReasoningLabel(agentFlavor)
-            ? formatCodexReasoningLabel(reasoningEffort, headerMetadata.showLabels)
-            : null
+        const reasoningLabel = getShareTurnReasoningLabel(
+            agentFlavor,
+            props.session.modelReasoningEffort,
+            props.session.effort,
+            headerMetadata.showLabels
+        )
         const lastActiveAt = props.session.activeAt || props.session.updatedAt || props.session.createdAt
         const lastActiveLabel = lastActiveAt > 0 ? formatRelativeTime(lastActiveAt, t) : null
         const createdAtLabel = formatSessionHeaderTimestamp(props.session.createdAt, locale)

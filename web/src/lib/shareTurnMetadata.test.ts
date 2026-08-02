@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SESSION_HEADER_METADATA } from '@/hooks/useSessionHeaderMetadata'
-import { selectShareTurnMetadata } from './shareTurnMetadata'
+import { getShareTurnReasoningLabel, selectShareTurnMetadata } from './shareTurnMetadata'
 
 describe('selectShareTurnMetadata', () => {
     const available = {
@@ -34,5 +34,10 @@ describe('selectShareTurnMetadata', () => {
             ...available,
             machine: undefined,
         }).map((item) => item.key)).toEqual(['createdAt', 'updatedAt'])
+    })
+
+    it('uses Pi effort for shared reasoning metadata', () => {
+        expect(getShareTurnReasoningLabel('pi', null, 'max', true)).toBe('reasoning max')
+        expect(getShareTurnReasoningLabel('pi', null, 'max', false)).toBe('max')
     })
 })
