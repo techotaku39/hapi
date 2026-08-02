@@ -67,6 +67,7 @@ describe('attachmentAdapter', () => {
 describe('attachmentAdapter image previews', () => {
     it('includes the preview URL in every image upload state', async () => {
         const file = new File(['image'], 'photo.png', { type: 'image/png' })
+        const readSpy = vi.spyOn(FileReader.prototype, 'readAsDataURL')
         const { emitted } = await collectAdditions(file)
 
         expect(emitted).toHaveLength(3)
@@ -82,6 +83,7 @@ describe('attachmentAdapter image previews', () => {
             previewUrl: 'data:image/png;base64,aW1hZ2U=',
             status: { type: 'requires-action' }
         })
+        expect(readSpy).toHaveBeenCalledTimes(1)
     })
 
     it('does not generate previews for non-image attachments', async () => {

@@ -81,7 +81,9 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     return
                 }
 
-                const content = await fileToBase64(file)
+                const content = previewUrl
+                    ? base64FromDataUrl(previewUrl)
+                    : await fileToBase64(file)
                 if (cancelledAttachmentIds.has(id)) {
                     return
                 }
@@ -172,20 +174,16 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
 }
 
 async function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => {
-            const result = reader.result as string
-            const base64 = result.split(',')[1]
-            if (!base64) {
-                reject(new Error('Failed to read file'))
-                return
-            }
-            resolve(base64)
-        }
-        reader.onerror = reject
-        reader.readAsDataURL(file)
-    })
+    return base64FromDataUrl(await fileToDataUrl(file))
+}
+
+function base64FromDataUrl(dataUrl: string): string {
+    const separatorIndex = dataUrl.indexOf(',')
+    const base64 = separatorIndex >= 0 ? dataUrl.slice(separatorIndex + 1) : ''
+    if (!base64) {
+        throw new Error('Failed to read file')
+    }
+    return base64
 }
 
 async function fileToDataUrl(file: File): Promise<string> {

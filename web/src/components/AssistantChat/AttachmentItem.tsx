@@ -48,6 +48,7 @@ export function AttachmentItem() {
                     src={previewUrl}
                     fileName={name}
                     label={name}
+                    galleryId="composer-attachments"
                     buttonClassName="group h-full w-full cursor-zoom-in overflow-hidden rounded-lg text-left"
                     imageClassName="h-full w-full object-cover transition-opacity group-hover:opacity-85"
                     caption={(
