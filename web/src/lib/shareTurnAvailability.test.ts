@@ -67,7 +67,7 @@ describe('shouldHideShareForRunningTurn', () => {
     it('keeps the accepted turn hidden after later keepalives', () => {
         const runningSince = Date.UTC(2026, 7, 2, 10, 0, 0)
         const messagesAfterConsumption = [
-            { id: 'user-active', role: 'user', createdAt: new Date(runningSince + 1) },
+            { id: 'user-active', role: 'user', createdAt: new Date(runningSince) },
             { id: 'assistant-partial', role: 'assistant', createdAt: new Date(runningSince + 5_000) },
         ]
 

@@ -783,8 +783,8 @@ async uploadScratchlistAttachment(
             scheduledAt?: number | null
         }
     ): Promise<void> {
-        await this.messageService.sendMessage(sessionId, payload)
-        this.sessionCache.markMessageQueued(sessionId)
+        const activeTurnStartedAt = await this.messageService.sendMessage(sessionId, payload)
+        this.sessionCache.markMessageQueued(sessionId, activeTurnStartedAt)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
     }
 

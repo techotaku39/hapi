@@ -157,6 +157,13 @@ describe('alive incremental events', () => {
             expect(engine.getSession(session.id)?.activeAt).toBe(activeAtBeforeSend)
             expect(emittedSocketUpdates.length).toBeGreaterThan(0)
 
+            const received = events.find((event) => event.type === 'message-received')
+            expect(received).toBeDefined()
+            if (!received || received.type !== 'message-received') {
+                return
+            }
+            expect(engine.getSession(session.id)?.activeTurnStartedAt).toBe(received.message.createdAt)
+
             const update = events.find((event) => {
                 return event.type === 'session-updated'
                     && typeof event.data === 'object'

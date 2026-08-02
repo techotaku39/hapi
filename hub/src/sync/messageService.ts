@@ -575,7 +575,7 @@ export class MessageService {
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
         }
-    ): Promise<void> {
+    ): Promise<number> {
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
         // internal callers).  Attachment paths live under the CLI session's
         // upload directory which `cleanupUploadDir` purges on session end; a
@@ -651,6 +651,8 @@ export class MessageService {
                 scheduledAt: msg.scheduledAt
             }
         })
+
+        return msg.createdAt
     }
 
     /**
