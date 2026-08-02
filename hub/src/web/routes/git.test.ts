@@ -121,4 +121,34 @@ describe('file search route', () => {
             ]
         })
     })
+
+    it('preserves backslashes in file names for non-Windows sessions', async () => {
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: true,
+            metadata: { path: '/project' }
+        } as unknown as Session
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            runRipgrep: async () => ({
+                success: true,
+                stdout: 'src/file\\name.ts\n'
+            }),
+            statFiles: async (_sessionId: string, paths: string[]) => ({
+                success: true,
+                entries: paths.map((path) => ({ path, size: 10, modified: 100 }))
+            })
+        } as unknown as Partial<SyncEngine>
+
+        const response = await buildApp(engine).request('/api/sessions/session-1/files?query=.ts')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: true,
+            files: [
+                { fileName: 'file\\name.ts', filePath: 'src', fullPath: 'src/file\\name.ts', fileType: 'file', size: 10, modified: 100 },
+            ]
+        })
+    })
 })
