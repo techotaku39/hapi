@@ -64,6 +64,17 @@ describe('shouldHideShareForRunningTurn', () => {
         expect(shouldHideShareForRunningTurn(completedMessages, 'assistant-completed', true, runningSince)).toBe(false)
     })
 
+    it('restores a completed turn when queued grace advances beyond its invocation timestamps', () => {
+        const completedAt = Date.UTC(2026, 7, 2, 10, 0, 0)
+        const completedTurn = [
+            { id: 'user-a', role: 'user', createdAt: new Date(completedAt - 500) },
+            { id: 'assistant-a', role: 'assistant', createdAt: new Date(completedAt - 100) },
+        ]
+
+        expect(shouldHideShareForRunningTurn(completedTurn, 'user-a', true, completedAt)).toBe(false)
+        expect(shouldHideShareForRunningTurn(completedTurn, 'assistant-a', true, completedAt)).toBe(false)
+    })
+
     it('keeps the accepted turn hidden after later keepalives', () => {
         const runningSince = Date.UTC(2026, 7, 2, 10, 0, 0)
         const messagesAfterConsumption = [

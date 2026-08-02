@@ -233,6 +233,7 @@ export class SessionCache {
 
         const wasActive = session.active
         const wasThinking = session.thinking
+        const previousActiveTurnStartedAt = session.activeTurnStartedAt
         const previousPermissionMode = session.permissionMode
         const previousModel = session.model
         const previousModelReasoningEffort = session.modelReasoningEffort
@@ -248,7 +249,11 @@ export class SessionCache {
         session.activeAt = Math.max(session.activeAt, t)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
-        if (wasThinking && !session.thinking) session.activeTurnStartedAt = null
+        if (!requestedThinking && preserveQueuedThinking) {
+            session.activeTurnStartedAt = t
+        } else if (wasThinking && !session.thinking) {
+            session.activeTurnStartedAt = null
+        }
         if (requestedThinking || pendingThinkingUntil <= hubNow) {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         }
@@ -300,8 +305,10 @@ export class SessionCache {
             || previousEffort !== session.effort
             || previousServiceTier !== session.serviceTier
             || previousCollaborationMode !== session.collaborationMode
+        const turnBoundaryChanged = previousActiveTurnStartedAt !== session.activeTurnStartedAt
         const shouldBroadcast = (!wasActive && session.active)
             || (wasThinking !== session.thinking)
+            || turnBoundaryChanged
             || modeChanged
             || (now - lastBroadcastAt > 10_000)
 

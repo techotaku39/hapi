@@ -261,7 +261,7 @@ describe('alive incremental events', () => {
         }
     })
 
-    it('keeps queued thinking true across false heartbeats during the grace window', () => {
+    it('keeps queued thinking true and advances the turn boundary across false heartbeats during grace', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
         const cache = new SessionCache(store, createPublisher(events))
@@ -288,8 +288,15 @@ describe('alive incremental events', () => {
         }
 
         expect(cache.getSession(session.id)?.thinking).toBe(true)
-        expect(cache.getSession(session.id)?.activeTurnStartedAt).toBe(turnStartedAt)
-        expect(events.find((event) => event.type === 'session-updated')).toBeUndefined()
+        expect(cache.getSession(session.id)?.activeTurnStartedAt).not.toBe(turnStartedAt)
+        expect(cache.getSession(session.id)?.activeTurnStartedAt).toBe(now + 2_000)
+        const update = events.find((event) => event.type === 'session-updated')
+        expect(update).toBeDefined()
+        if (!update || update.type !== 'session-updated') return
+        expect(update.data).toEqual(expect.objectContaining({
+            thinking: true,
+            activeTurnStartedAt: now + 2_000
+        }))
     })
 
     it('clears queued thinking after the grace window expires', () => {
