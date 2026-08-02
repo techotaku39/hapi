@@ -30,6 +30,7 @@ import { resolveSessionHeaderMachineLabel } from '@/components/SessionHeader'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 type ScrollAnchor = {
     id: string
@@ -450,6 +451,7 @@ export function HappyThread(props: {
     const { preferences: headerMetadata } = useSessionHeaderMetadata()
     const { machines } = useMachines(props.api, true)
     const machineLabelsById = useMachineLabels(machines)
+    const shareRelativeTimeTick = useMinuteTick(headerMetadata.lastActive)
     const shareMetadataItems = useMemo(() => {
         const agentFlavor = props.session.metadata?.flavor ?? null
         const agentLabel = agentFlavor?.trim() || null
@@ -488,7 +490,7 @@ export function HappyThread(props: {
                 text: `${headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}${worktreeBranch}`,
             } : undefined,
         })
-    }, [headerMetadata, locale, machineLabelsById, props.serviceTier, props.session, t])
+    }, [headerMetadata, locale, machineLabelsById, props.serviceTier, props.session, shareRelativeTimeTick, t])
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const runtimeExtras = useAuiState((s) => s.thread.extras) as HappyRuntimeExtras | undefined
     const appliedMessagesVersion = runtimeExtras?.messagesVersion ?? props.messagesVersion

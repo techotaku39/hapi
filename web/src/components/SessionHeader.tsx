@@ -25,6 +25,7 @@ import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectMobileSessionHeaderSecondary } from '@/lib/sessionHeaderMobileMetadata'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 /** Same preference order as session-list chips: display label → host → short id. */
 export function resolveSessionHeaderMachineLabel(
@@ -158,13 +159,7 @@ export function SessionHeader(props: {
     const lastActiveAt = session.activeAt || session.updatedAt || session.createdAt
     // Relative labels cross minute/hour boundaries without new patches; tick
     // once a minute so "just now" does not freeze forever on inactive sessions.
-    const [relativeTimeTick, setRelativeTimeTick] = useState(0)
-    useEffect(() => {
-        const timer = window.setInterval(() => {
-            setRelativeTimeTick((tick) => tick + 1)
-        }, 60_000)
-        return () => window.clearInterval(timer)
-    }, [])
+    const relativeTimeTick = useMinuteTick(headerMetadata.lastActive)
     const ageLabel = useMemo(
         () => (headerMetadata.lastActive && lastActiveAt > 0 ? formatRelativeTime(lastActiveAt, t) : null),
         [headerMetadata.lastActive, lastActiveAt, t, relativeTimeTick]

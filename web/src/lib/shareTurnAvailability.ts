@@ -1,6 +1,20 @@
 type ShareMessage = {
     id: string
     role: string
+    metadata?: {
+        custom?: unknown
+    }
+}
+
+function isShareTurnUserMessage(message: ShareMessage): boolean {
+    if (message.role !== 'user') return false
+
+    const custom = message.metadata?.custom as {
+        status?: string
+        invokedAt?: number | null
+    } | undefined
+
+    return custom?.status !== 'failed' && custom?.invokedAt !== null
 }
 
 export function shouldHideShareForRunningTurn(
@@ -13,7 +27,7 @@ export function shouldHideShareForRunningTurn(
     const currentIndex = messages.findIndex((message) => message.id === currentMessageId)
     if (currentIndex < 0) return false
 
-    const activeUserIndex = messages.findLastIndex((message) => message.role === 'user')
+    const activeUserIndex = messages.findLastIndex(isShareTurnUserMessage)
     if (activeUserIndex >= 0) return currentIndex >= activeUserIndex
 
     return currentIndex === messages.length - 1

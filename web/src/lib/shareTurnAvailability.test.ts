@@ -24,6 +24,21 @@ describe('shouldHideShareForRunningTurn', () => {
         expect(shouldHideShareForRunningTurn(messages, 'assistant-active', false)).toBe(false)
     })
 
+    it('does not let a failed queued attachment redefine the running turn', () => {
+        const messagesWithFailedAttachment = [
+            ...messages,
+            {
+                id: 'user-failed',
+                role: 'user',
+                metadata: { custom: { status: 'failed', invokedAt: null } },
+            },
+        ]
+
+        expect(shouldHideShareForRunningTurn(messagesWithFailedAttachment, 'user-active', true)).toBe(true)
+        expect(shouldHideShareForRunningTurn(messagesWithFailedAttachment, 'assistant-active', true)).toBe(true)
+        expect(shouldHideShareForRunningTurn(messagesWithFailedAttachment, 'user-failed', true)).toBe(true)
+    })
+
     it('fails open when the current message is not in the thread snapshot', () => {
         expect(shouldHideShareForRunningTurn(messages, 'missing', true)).toBe(false)
     })
