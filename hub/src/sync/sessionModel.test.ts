@@ -306,6 +306,38 @@ describe('session model', () => {
         expect(cache.getSession(newSession.id)?.pinned).toBe(true)
     })
 
+    it('accepts a merge target pinned concurrently during pin preservation', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const oldSession = cache.getOrCreateSession(
+            'session-pin-race-old',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        const newSession = cache.getOrCreateSession(
+            'session-pin-race-new',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        store.sessions.setSessionPinned(oldSession.id, true, 'default')
+
+        const setSessionPinned = store.sessions.setSessionPinned.bind(store.sessions)
+        store.sessions.setSessionPinned = ((sessionId, pinned, namespace) => {
+            setSessionPinned(sessionId, pinned, namespace)
+            return false
+        }) as typeof store.sessions.setSessionPinned
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        expect(store.sessions.getSession(oldSession.id)).toBeNull()
+        expect(store.sessions.getSession(newSession.id)?.pinned).toBe(true)
+        expect(cache.getSession(newSession.id)?.pinned).toBe(true)
+    })
+
     it('persists applied session model updates, including clear-to-auto', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

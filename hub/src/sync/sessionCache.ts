@@ -1187,10 +1187,17 @@ export class SessionCache {
             }
         }
 
-        if (oldStored.pinned && !newStored.pinned) {
-            const updated = this.store.sessions.setSessionPinned(newSessionId, true, namespace)
-            if (!updated) {
-                throw new Error('Failed to preserve session pin during merge')
+        if (oldStored.pinned) {
+            const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+            if (!latest) {
+                throw new Error('Session not found for merge')
+            }
+            if (!latest.pinned) {
+                const updated = this.store.sessions.setSessionPinned(newSessionId, true, namespace)
+                const nowPinned = this.store.sessions.getSessionByNamespace(newSessionId, namespace)?.pinned === true
+                if (!updated && !nowPinned) {
+                    throw new Error('Failed to preserve session pin during merge')
+                }
             }
         }
 
