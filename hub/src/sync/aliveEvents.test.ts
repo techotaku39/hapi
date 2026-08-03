@@ -261,6 +261,45 @@ describe('alive incremental events', () => {
         }
     })
 
+    it('keeps the active boundary after consumption before the first true heartbeat', async () => {
+        const store = new Store(':memory:')
+        const io = {
+            of: () => ({
+                to: () => ({ emit() {} })
+            })
+        }
+        const engine = new SyncEngine(
+            store,
+            io as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+        const now = Date.now()
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-consumed-before-thinking',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                { requests: {}, completedRequests: {} },
+                'default'
+            )
+            engine.handleSessionAlive({ sid: session.id, time: now, thinking: false })
+            await engine.sendMessage(session.id, {
+                text: 'consume before thinking',
+                localId: 'consumed-local-id'
+            })
+            const activeTurnStartedAt = engine.getSession(session.id)?.activeTurnStartedAt
+            store.messages.markMessagesInvoked(session.id, ['consumed-local-id'], now + 500)
+
+            engine.handleSessionAlive({ sid: session.id, time: now + 1_000, thinking: false })
+
+            expect(engine.getSession(session.id)?.thinking).toBe(true)
+            expect(engine.getSession(session.id)?.activeTurnStartedAt).toBe(activeTurnStartedAt)
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('keeps queued thinking true and advances the turn boundary across false heartbeats during grace', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
@@ -275,6 +314,11 @@ describe('alive incremental events', () => {
         )
 
         cache.handleSessionAlive({ sid: session.id, time: now, thinking: false })
+        store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'queued next prompt' } },
+            'queued-next-local-id'
+        )
         cache.markMessageQueued(session.id, now + 10)
         const turnStartedAt = cache.getSession(session.id)?.activeTurnStartedAt
         events.length = 0

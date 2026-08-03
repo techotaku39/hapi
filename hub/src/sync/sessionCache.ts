@@ -244,12 +244,14 @@ export class SessionCache {
         const requestedThinking = Boolean(payload.thinking)
         const hubNow = Date.now()
         const preserveQueuedThinking = !requestedThinking && pendingThinkingUntil > hubNow
+        const hasUnconsumedPrompt = preserveQueuedThinking
+            && this.store.messages.getImmediateQueuedLocalMessages(session.id).length > 0
 
         session.active = true
         session.activeAt = Math.max(session.activeAt, t)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
-        if (!requestedThinking && preserveQueuedThinking) {
+        if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
             session.activeTurnStartedAt = t
         } else if (wasThinking && !session.thinking) {
             session.activeTurnStartedAt = null
