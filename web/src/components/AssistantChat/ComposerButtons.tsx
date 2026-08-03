@@ -30,12 +30,14 @@ function OrderedToolbarItems(props: { layout: ComposerToolbarLayout; children: R
     return <>{renderItems([...props.layout.left, ...props.layout.right])}</>
 }
 
-export function getComposerToolbarAlignmentClass(mode: ComposerToolbarLayout['mode']): string {
+export function getComposerToolbarJustifyContent(
+    mode: ComposerToolbarLayout['mode'],
+): 'safe center' | 'safe end' | 'flex-start' {
     return mode === 'center'
-        ? 'justify-[safe_center]'
+        ? 'safe center'
         : mode === 'right'
-            ? 'justify-[safe_end]'
-            : 'justify-start'
+            ? 'safe end'
+            : 'flex-start'
 }
 
 function ChevronIcon() {
@@ -653,13 +655,14 @@ export function ComposerButtons(props: {
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
-    const toolbarAlignmentClass = getComposerToolbarAlignmentClass(layout.mode)
+    const toolbarJustifyContent = getComposerToolbarJustifyContent(layout.mode)
 
     return (
         <div className="flex shrink-0 items-center gap-1 px-2 pb-2">
             <div
                 data-testid="composer-toolbar-items"
-                className={`flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${toolbarAlignmentClass}`}
+                className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                style={{ justifyContent: toolbarJustifyContent }}
             >
                 <OrderedToolbarItems layout={layout}>
                 <ToolbarItemSlot item="attachment">

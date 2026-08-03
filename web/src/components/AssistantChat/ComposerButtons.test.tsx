@@ -11,7 +11,7 @@ import {
     ComposerButtons,
     ComposerExpandButton,
     DictationButton,
-    getComposerToolbarAlignmentClass,
+    getComposerToolbarJustifyContent,
     UnifiedButton,
 } from './ComposerButtons'
 
@@ -201,9 +201,9 @@ describe('ComposerButtons responsive toolbar', () => {
     })
 
     it('uses overflow-safe alignment for centered and right-aligned layouts', () => {
-        expect(getComposerToolbarAlignmentClass('center')).toBe('justify-[safe_center]')
-        expect(getComposerToolbarAlignmentClass('right')).toBe('justify-[safe_end]')
-        expect(getComposerToolbarAlignmentClass('left')).toBe('justify-start')
-        expect(getComposerToolbarAlignmentClass('split')).toBe('justify-start')
+        expect(getComposerToolbarJustifyContent('center')).toBe('safe center')
+        expect(getComposerToolbarJustifyContent('right')).toBe('safe end')
+        expect(getComposerToolbarJustifyContent('left')).toBe('flex-start')
+        expect(getComposerToolbarJustifyContent('split')).toBe('flex-start')
     })
 })
