@@ -164,10 +164,14 @@ export function SessionHeader(props: {
         exact: true,
     }) > 0
     const agentFlavor = session.metadata?.flavor ?? null
+    const telegramApp = isTelegramApp()
     const codexModelsState = useCodexModels({
         api,
         machineId: session.metadata?.machineId ?? null,
-        enabled: agentFlavor === 'codex' && session.active && session.agentState?.controlledByUser !== true
+        enabled: !telegramApp
+            && agentFlavor === 'codex'
+            && session.active
+            && session.agentState?.controlledByUser !== true
     })
     const codexModelDisplayName = agentFlavor === 'codex'
         ? resolveCodexModel(codexModelsState.models, session.model)?.displayName
@@ -355,7 +359,7 @@ export function SessionHeader(props: {
     }
 
     // In Telegram, don't render header (Telegram provides its own)
-    if (isTelegramApp()) {
+    if (telegramApp) {
         return null
     }
 

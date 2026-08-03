@@ -6,9 +6,24 @@ import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { resolveSessionHeaderMachineLabel, SessionHeader } from './SessionHeader'
 
+const mocks = vi.hoisted(() => ({
+    telegramApp: false,
+    useCodexModels: vi.fn(() => ({ models: [], isLoading: false, error: null }))
+}))
+
+vi.mock('@/hooks/useTelegram', () => ({
+    isTelegramApp: () => mocks.telegramApp
+}))
+
+vi.mock('@/hooks/queries/useCodexModels', () => ({
+    useCodexModels: mocks.useCodexModels
+}))
+
 afterEach(() => {
     cleanup()
     localStorage.clear()
+    mocks.telegramApp = false
+    mocks.useCodexModels.mockClear()
 })
 
 function baseSession(overrides: Partial<Session> = {}): Session {
@@ -169,6 +184,19 @@ describe('SessionHeader', () => {
         expect(terminal).toHaveAttribute('aria-pressed', 'true')
         terminal.click()
         expect(onToggleTerminal).toHaveBeenCalledOnce()
+    })
+
+    it('does not request the Codex model catalog in Telegram', () => {
+        mocks.telegramApp = true
+
+        const { container } = renderHeader(baseSession({
+            metadata: { flavor: 'codex', path: '/repo', host: 'machine', machineId: 'machine-1' }
+        }))
+
+        expect(container).toBeEmptyDOMElement()
+        expect(mocks.useCodexModels).toHaveBeenCalledWith(expect.objectContaining({
+            enabled: false
+        }))
     })
 
     it('shows an inherited catalog-default Fast tier', () => {
