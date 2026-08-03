@@ -30,6 +30,14 @@ function OrderedToolbarItems(props: { layout: ComposerToolbarLayout; children: R
     return <>{renderItems([...props.layout.left, ...props.layout.right])}</>
 }
 
+export function getComposerToolbarAlignmentClass(mode: ComposerToolbarLayout['mode']): string {
+    return mode === 'center'
+        ? 'justify-[safe_center]'
+        : mode === 'right'
+            ? 'justify-[safe_end]'
+            : 'justify-start'
+}
+
 function ChevronIcon() {
     return <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 3.75L5 6.25L7.5 3.75" /></svg>
 }
@@ -645,11 +653,7 @@ export function ComposerButtons(props: {
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
-    const toolbarAlignmentClass = layout.mode === 'center'
-        ? 'justify-center'
-        : layout.mode === 'right'
-            ? 'justify-end'
-            : 'justify-start'
+    const toolbarAlignmentClass = getComposerToolbarAlignmentClass(layout.mode)
 
     return (
         <div className="flex shrink-0 items-center gap-1 px-2 pb-2">

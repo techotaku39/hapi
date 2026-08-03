@@ -56,6 +56,17 @@ export interface TextInputState {
     selection: { start: number; end: number }
 }
 
+export function getComposerEscapeAction(input: {
+    hasSuggestions: boolean
+    threadIsRunning: boolean
+    isExpanded: boolean
+}): 'clearSuggestions' | 'abort' | 'collapse' | null {
+    if (input.hasSuggestions) return 'clearSuggestions'
+    if (input.threadIsRunning) return 'abort'
+    if (input.isExpanded) return 'collapse'
+    return null
+}
+
 /**
  * One rejected send.  `id` is bumped per failure so two failures with the
  * same `text` still trigger a fresh restore (the dedupe key is the id, not
@@ -760,23 +771,21 @@ export function HappyComposer(props: {
                 handleSuggestionSelect(indexToSelect)
                 return
             }
-            if (key === 'Escape') {
+        }
+
+        if (key === 'Escape') {
+            const action = getComposerEscapeAction({
+                hasSuggestions: suggestions.length > 0,
+                threadIsRunning,
+                isExpanded,
+            })
+            if (action) {
                 e.preventDefault()
-                clearSuggestions()
+                if (action === 'clearSuggestions') clearSuggestions()
+                else if (action === 'abort') handleAbort()
+                else handleExpandedToggle()
                 return
             }
-        }
-
-        if (key === 'Escape' && isExpanded) {
-            e.preventDefault()
-            handleExpandedToggle()
-            return
-        }
-
-        if (key === 'Escape' && threadIsRunning) {
-            e.preventDefault()
-            handleAbort()
-            return
         }
 
         if (key === 'Tab' && e.shiftKey && onPermissionModeChange && permissionModes.length > 0) {

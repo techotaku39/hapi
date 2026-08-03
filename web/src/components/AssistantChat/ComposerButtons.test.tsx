@@ -7,7 +7,13 @@ import type { ReactElement, ReactNode } from 'react'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { ComposerButtons, ComposerExpandButton, DictationButton, UnifiedButton } from './ComposerButtons'
+import {
+    ComposerButtons,
+    ComposerExpandButton,
+    DictationButton,
+    getComposerToolbarAlignmentClass,
+    UnifiedButton,
+} from './ComposerButtons'
 
 const adapter: ChatModelAdapter = {
     async *run() {},
@@ -192,5 +198,12 @@ describe('ComposerButtons responsive toolbar', () => {
         for (const button of toolbarButtons) {
             expect(button.closest('.shrink-0')).not.toBeNull()
         }
+    })
+
+    it('uses overflow-safe alignment for centered and right-aligned layouts', () => {
+        expect(getComposerToolbarAlignmentClass('center')).toBe('justify-[safe_center]')
+        expect(getComposerToolbarAlignmentClass('right')).toBe('justify-[safe_end]')
+        expect(getComposerToolbarAlignmentClass('left')).toBe('justify-start')
+        expect(getComposerToolbarAlignmentClass('split')).toBe('justify-start')
     })
 })
