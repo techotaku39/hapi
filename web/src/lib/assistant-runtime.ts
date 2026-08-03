@@ -11,6 +11,7 @@ import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
 import { visibleBlockRole } from '@/chat/toolGroups'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
+import { buildShareHiddenByMessageId } from '@/lib/shareTurnAvailability'
 
 /**
  * Aggregated metadata for a multi-turn response group, surfaced on the
@@ -51,6 +52,7 @@ export type HappyRuntimeExtras = Readonly<{
     messagesVersion: number
     historyVersion: number
     runningSince: number
+    shareHiddenByMessageId: ReadonlySet<string>
 }>
 
 function formatCodexReviewText(review: CodexReview): string {
@@ -696,11 +698,17 @@ export function useHappyRuntime(props: {
         await props.onAbort()
     }, [props.onAbort])
 
+    const runningSince = props.session.activeTurnStartedAt ?? 0
+    const shareHiddenByMessageId = useMemo(
+        () => buildShareHiddenByMessageId(convertedMessages, isRunning, runningSince),
+        [convertedMessages, isRunning, runningSince]
+    )
     const extras = useMemo<HappyRuntimeExtras>(() => ({
         messagesVersion: props.messagesVersion,
         historyVersion: props.historyVersion,
-        runningSince: props.session.activeTurnStartedAt ?? 0
-    }), [props.messagesVersion, props.historyVersion, props.session.activeTurnStartedAt])
+        runningSince,
+        shareHiddenByMessageId
+    }), [props.messagesVersion, props.historyVersion, runningSince, shareHiddenByMessageId])
 
     // Memoize the adapter to avoid recreating on every render
     // useExternalStoreRuntime may use adapter identity for subscriptions

@@ -24,16 +24,24 @@ export function shouldHideShareForRunningTurn(
     threadIsRunning: boolean,
     runningSince = 0
 ): boolean {
-    if (!threadIsRunning) return false
+    return buildShareHiddenByMessageId(messages, threadIsRunning, runningSince).has(currentMessageId)
+}
 
-    const currentIndex = messages.findIndex((message) => message.id === currentMessageId)
-    if (currentIndex < 0) return false
-
-    const createdAt = messages[currentIndex]?.createdAt?.getTime() ?? 0
-    if (runningSince > 0 && createdAt > 0 && createdAt < runningSince) return false
+export function buildShareHiddenByMessageId(
+    messages: readonly ShareMessage[],
+    threadIsRunning: boolean,
+    runningSince = 0
+): ReadonlySet<string> {
+    if (!threadIsRunning) return new Set()
 
     const activeUserIndex = messages.findLastIndex(isShareTurnUserMessage)
-    if (activeUserIndex < 0) return true
-
-    return currentIndex >= activeUserIndex
+    const hidden = new Set<string>()
+    for (let index = 0; index < messages.length; index += 1) {
+        const message = messages[index]
+        if (!message) continue
+        const createdAt = message.createdAt?.getTime() ?? 0
+        if (runningSince > 0 && createdAt > 0 && createdAt < runningSince) continue
+        if (activeUserIndex < 0 || index >= activeUserIndex) hidden.add(message.id)
+    }
+    return hidden
 }

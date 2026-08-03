@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldHideShareForRunningTurn } from './shareTurnAvailability'
+import { buildShareHiddenByMessageId, shouldHideShareForRunningTurn } from './shareTurnAvailability'
 
 const messages = [
     { id: 'user-old', role: 'user' },
@@ -9,6 +9,10 @@ const messages = [
 ]
 
 describe('shouldHideShareForRunningTurn', () => {
+    it('builds one lookup containing only the active running turn', () => {
+        expect([...buildShareHiddenByMessageId(messages, true)]).toEqual(['user-active', 'assistant-active'])
+    })
+
     it('keeps historical turns shareable while the latest turn is running', () => {
         expect(shouldHideShareForRunningTurn(messages, 'user-old', true)).toBe(false)
         expect(shouldHideShareForRunningTurn(messages, 'assistant-old', true)).toBe(false)

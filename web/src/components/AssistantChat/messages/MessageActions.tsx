@@ -8,7 +8,6 @@ import { MessageMetadata, buildMessageMetadataLabels, type MessageMetadataProps 
 import { MessageTimestamp } from './MessageTimestamp'
 import { cn } from '@/lib/utils'
 import { ShareTurnButton } from './ShareTurnButton'
-import { shouldHideShareForRunningTurn } from '@/lib/shareTurnAvailability'
 import type { HappyRuntimeExtras } from '@/lib/assistant-runtime'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
@@ -46,12 +45,7 @@ export function MessageActions({
         const extras = thread?.extras as HappyRuntimeExtras | undefined
         const isRunning = thread?.isRunning ?? false
         return {
-            hideShareButton: shouldHideShareForRunningTurn(
-                thread?.messages ?? [],
-                message.id,
-                isRunning,
-                extras?.runningSince ?? 0
-            ),
+            hideShareButton: extras?.shareHiddenByMessageId.has(message.id) ?? isRunning,
             threadIsRunning: isRunning
         }
     })
