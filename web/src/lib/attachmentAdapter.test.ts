@@ -62,6 +62,37 @@ describe('attachmentAdapter', () => {
             status: { type: 'requires-action', reason: 'composer-send' },
         })])
     })
+
+    it('uploads an image when the initial preview read fails', async () => {
+        let readCount = 0
+        class FileReaderMock {
+            result: string | ArrayBuffer | null = null
+            onload: FileReader['onload'] = null
+            onerror: FileReader['onerror'] = null
+
+            readAsDataURL(): void {
+                readCount += 1
+                if (readCount === 1) {
+                    this.onerror?.call(this as unknown as FileReader, {} as ProgressEvent<FileReader>)
+                    return
+                }
+                this.result = 'data:image/png;base64,dXBsb2Fk'
+                this.onload?.call(this as unknown as FileReader, {} as ProgressEvent<FileReader>)
+            }
+        }
+        vi.stubGlobal('FileReader', FileReaderMock)
+
+        const file = new File(['proof'], 'proof.png', { type: 'image/png' })
+        const { emitted, uploadFile } = await collectAdditions(file)
+
+        expect(readCount).toBe(2)
+        expect(uploadFile).toHaveBeenCalledWith('session-1', 'proof.png', 'dXBsb2Fk', 'image/png')
+        expect(emitted.at(-1)).toMatchObject({
+            status: { type: 'requires-action', reason: 'composer-send' },
+            path: '/uploads/file'
+        })
+        expect(emitted.every((attachment) => attachment.previewUrl === undefined)).toBe(true)
+    })
 })
 
 describe('attachmentAdapter image previews', () => {

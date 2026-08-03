@@ -51,9 +51,14 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
             const contentType = file.type || 'application/octet-stream'
 
             try {
-                const previewUrl = isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES
-                    ? await fileToDataUrl(file)
-                    : undefined
+                let previewUrl: string | undefined
+                if (isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES) {
+                    try {
+                        previewUrl = await fileToDataUrl(file)
+                    } catch {
+                        // Preview generation is optional; retry the read for the upload payload below.
+                    }
+                }
 
                 yield {
                     id,
