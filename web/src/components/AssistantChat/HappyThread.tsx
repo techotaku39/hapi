@@ -429,6 +429,10 @@ export function HappyThread(props: {
     disabled: boolean
     onRefresh: () => void
     onRetryMessage?: (localId: string) => void
+    historyActionPending?: boolean
+    onForkConversation?: (messageLocalId?: string) => Promise<void>
+    onRewindConversation?: (messageLocalId: string) => Promise<void>
+    isLatestCompletedBoundary?: (messageId: string) => boolean
     onViewModeChange: (mode: 'tail' | 'history') => void
     isSyncingTail: boolean
     messagesWarning: string | null
@@ -1492,6 +1496,10 @@ export function HappyThread(props: {
             disabled: props.disabled,
             onRefresh: props.onRefresh,
             onRetryMessage: props.onRetryMessage,
+            historyActionPending: props.historyActionPending,
+            onForkConversation: props.onForkConversation,
+            onRewindConversation: props.onRewindConversation,
+            isLatestCompletedBoundary: props.isLatestCompletedBoundary,
             onShareTurn: handleShareTurn,
             hasMoreMessages: props.hasMoreMessages,
             isSyncingTail: props.isSyncingTail,
