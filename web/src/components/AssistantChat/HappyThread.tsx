@@ -456,7 +456,9 @@ export function HappyThread(props: {
     const { preferences: headerMetadata } = useSessionHeaderMetadata()
     const { machines } = useMachines(props.api, true)
     const machineLabelsById = useMachineLabels(machines)
-    const shareRelativeTimeTick = useMinuteTick(headerMetadata.lastActive)
+    const [shareTurn, setShareTurn] = useState<ShareTurnState>(null)
+    const shareDialogOpen = shareTurn !== null
+    const shareRelativeTimeTick = useMinuteTick(headerMetadata.lastActive && shareDialogOpen)
     const shareMetadataItems = useMemo(() => {
         const agentFlavor = props.session.metadata?.flavor ?? null
         const agentLabel = agentFlavor?.trim() || null
@@ -497,14 +499,13 @@ export function HappyThread(props: {
                 text: `${headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}${worktreeBranch}`,
             } : undefined,
         })
-    }, [headerMetadata, locale, machineLabelsById, props.serviceTier, props.session, shareRelativeTimeTick, t])
+    }, [headerMetadata, locale, machineLabelsById, props.serviceTier, props.session, shareDialogOpen, shareRelativeTimeTick, t])
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const runtimeExtras = useAuiState((s) => s.thread.extras) as HappyRuntimeExtras | undefined
     const appliedMessagesVersion = runtimeExtras?.messagesVersion ?? props.messagesVersion
     const appliedHistoryVersion = runtimeExtras?.historyVersion ?? props.historyVersion
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const contentRef = useRef<HTMLDivElement | null>(null)
-    const [shareTurn, setShareTurn] = useState<ShareTurnState>(null)
     const [pullToLoadState, setPullToLoadState] = useState<PullToLoadState>('idle')
     const pullToLoadStateRef = useRef<PullToLoadState>('idle')
     const shareTurnIdRef = useRef(0)
