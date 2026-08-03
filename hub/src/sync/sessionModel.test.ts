@@ -338,6 +338,40 @@ describe('session model', () => {
         expect(cache.getSession(newSession.id)?.pinned).toBe(true)
     })
 
+    it('preserves the latest source pin when it changes during a merge', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const oldSession = cache.getOrCreateSession(
+            'session-source-pin-race-old',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        const newSession = cache.getOrCreateSession(
+            'session-source-pin-race-new',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+
+        const getSessionByNamespace = store.sessions.getSessionByNamespace.bind(store.sessions)
+        let sourceReads = 0
+        store.sessions.getSessionByNamespace = ((sessionId, namespace) => {
+            if (sessionId === oldSession.id && ++sourceReads === 2) {
+                store.sessions.setSessionPinned(oldSession.id, true, 'default')
+            }
+            return getSessionByNamespace(sessionId, namespace)
+        }) as typeof store.sessions.getSessionByNamespace
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        expect(store.sessions.getSession(oldSession.id)).toBeNull()
+        expect(store.sessions.getSession(newSession.id)?.pinned).toBe(true)
+        expect(cache.getSession(newSession.id)?.pinned).toBe(true)
+    })
+
     it('persists applied session model updates, including clear-to-auto', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

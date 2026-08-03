@@ -1187,7 +1187,9 @@ export class SessionCache {
             }
         }
 
-        if (oldStored.pinned) {
+        const latestSourcePinned =
+            this.store.sessions.getSessionByNamespace(oldSessionId, namespace)?.pinned === true
+        if (latestSourcePinned) {
             const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
             if (!latest) {
                 throw new Error('Session not found for merge')
