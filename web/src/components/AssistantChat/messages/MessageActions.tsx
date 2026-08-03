@@ -1,7 +1,7 @@
 import * as Popover from '@radix-ui/react-popover'
 import { useState } from 'react'
 import { useAuiState } from '@assistant-ui/react'
-import { CheckIcon, CopyIcon, InfoIcon } from '@/components/icons'
+import { CheckIcon, CopyIcon, ForkIcon, InfoIcon, RewindIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useTranslation } from '@/lib/use-translation'
 import { MessageMetadata, buildMessageMetadataLabels, type MessageMetadataProps } from './MessageMetadata'
@@ -73,10 +73,10 @@ export function MessageActions({
                     title={t('message.fork')}
                     aria-label={t('message.fork')}
                     disabled={actionsLocked}
-                    className="flex h-5 items-center rounded px-1 text-[11px] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-40"
+                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-40"
                     onClick={() => setForkOpen(true)}
                 >
-                    {t('message.fork')}
+                    <ForkIcon className="h-3.5 w-3.5" />
                 </button>
             ) : null}
             {showRewind && onRewind ? (
@@ -85,10 +85,10 @@ export function MessageActions({
                     title={t('message.rewind')}
                     aria-label={t('message.rewind')}
                     disabled={actionsLocked}
-                    className="flex h-5 items-center rounded px-1 text-[11px] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-40"
+                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-40"
                     onClick={() => setRewindOpen(true)}
                 >
-                    {t('message.rewind')}
+                    <RewindIcon className="h-3.5 w-3.5" />
                 </button>
             ) : null}
         </>

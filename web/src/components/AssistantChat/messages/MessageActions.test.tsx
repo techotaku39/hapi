@@ -140,6 +140,23 @@ describe('MessageActions', () => {
         expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
     })
 
+    it('renders Fork and Rewind as compact icon actions', () => {
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            showFork: true,
+            showRewind: true,
+            onFork: async () => {},
+            onRewind: async () => {}
+        })
+
+        for (const name of ['Fork', 'Rewind']) {
+            const button = screen.getByRole('button', { name })
+            expect(button.className.split(' ')).toContain('w-5')
+            expect(button.querySelector('svg')).not.toBeNull()
+        }
+    })
+
     it('shows Fork confirm dialog and calls onFork only after confirm', async () => {
         const onFork = vi.fn(async () => {})
         renderActions({ align: 'start', copyText: 'body', showFork: true, onFork })

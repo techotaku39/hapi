@@ -43,6 +43,7 @@ import type {
     QueuedStateResponse,
     ReopenSessionResponse,
     SqliteStorageUsageResponse,
+    UsageSummaryResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor } from '@hapi/protocol'
@@ -647,15 +648,27 @@ export class ApiClient {
         return await this.request<SqliteStorageUsageResponse>('/api/storage/sqlite')
     }
 
+    async getUsageSummary(
+        range: '7d' | '30d' | 'all' = '7d',
+        timeZone: string = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    ): Promise<UsageSummaryResponse> {
+        const params = new URLSearchParams({
+            range,
+            timeZone
+        })
+        return await this.request<UsageSummaryResponse>(`/api/usage/summary?${params.toString()}`)
+    }
+
     async listMachineDirectory(
         machineId: string,
-        path: string
+        path: string,
+        options?: { includeHidden?: boolean }
     ): Promise<MachineListDirectoryResponse> {
         return await this.request<MachineListDirectoryResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/list-directory`,
             {
                 method: 'POST',
-                body: JSON.stringify({ path })
+                body: JSON.stringify({ path, includeHidden: options?.includeHidden === true })
             }
         )
     }
@@ -950,7 +963,7 @@ export class ApiClient {
         return this.getToken ? this.getToken() : this.token
     }
 
-    async fetchVoiceBackend(): Promise<{ backend: string; backends: string[] }> {
+    async fetchVoiceBackend(): Promise<{ backend: string | null; backends: string[] }> {
         return await this.request('/api/voice/backend')
     }
 
