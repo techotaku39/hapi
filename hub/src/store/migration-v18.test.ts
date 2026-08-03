@@ -38,7 +38,11 @@ describe('Store V18->V19 migration: usage scan state', () => {
             const usageRows = internalDb.prepare('SELECT COUNT(*) AS count FROM usage_events').get() as { count: number }
 
             expect(table?.name).toBe('usage_scan_state')
+<<<<<<< HEAD
             expect(version.user_version).toBe(21)
+=======
+        expect(version.user_version).toBe(20)
+>>>>>>> cdb1873c (test(hub): expect schema v20 after migration)
             expect(usageRows.count).toBe(0)
         } finally {
             store?.close()
