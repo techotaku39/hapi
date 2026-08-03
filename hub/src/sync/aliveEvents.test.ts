@@ -300,7 +300,7 @@ describe('alive incremental events', () => {
         }
     })
 
-    it('keeps queued thinking true and advances the turn boundary across false heartbeats during grace', () => {
+    it('advances the queued turn boundary on the hub clock across a lagging false heartbeat', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
         const cache = new SessionCache(store, createPublisher(events))
@@ -326,7 +326,7 @@ describe('alive incremental events', () => {
         const originalNow = Date.now
         Date.now = () => now + 2_000
         try {
-            cache.handleSessionAlive({ sid: session.id, time: now + 2_000, thinking: false })
+            cache.handleSessionAlive({ sid: session.id, time: now - 3_000, thinking: false })
         } finally {
             Date.now = originalNow
         }

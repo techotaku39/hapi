@@ -283,7 +283,7 @@ export class SessionCache {
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
-            session.activeTurnStartedAt = t
+            session.activeTurnStartedAt = hubNow
         } else if (wasThinking && !session.thinking) {
             session.activeTurnStartedAt = null
         }
