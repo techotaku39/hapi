@@ -1,8 +1,26 @@
-import type { ReactElement } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+    AssistantRuntimeProvider,
+    type ChatModelAdapter,
+    useLocalRuntime,
+} from '@assistant-ui/react'
+import type { ReactElement, ReactNode } from 'react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { ComposerExpandButton, DictationButton, UnifiedButton } from './ComposerButtons'
+import { ComposerButtons, ComposerExpandButton, DictationButton, UnifiedButton } from './ComposerButtons'
+
+const adapter: ChatModelAdapter = {
+    async *run() {},
+}
+
+function RuntimeProviders(props: { children: ReactNode }) {
+    const runtime = useLocalRuntime(adapter)
+    return (
+        <AssistantRuntimeProvider runtime={runtime}>
+            <I18nProvider>{props.children}</I18nProvider>
+        </AssistantRuntimeProvider>
+    )
+}
 
 function renderInProviders(ui: ReactElement) {
     return render(<I18nProvider>{ui}</I18nProvider>)
@@ -125,5 +143,54 @@ describe('ComposerExpandButton', () => {
         const button = getButton('Collapse message editor')
         expect(button.getAttribute('aria-pressed')).toBe('true')
         expect(button.className).toContain('text-[var(--app-link)]')
+    })
+})
+
+describe('ComposerButtons responsive toolbar', () => {
+    afterEach(cleanup)
+
+    it('keeps toolbar actions non-shrinking inside a horizontal scroll area', () => {
+        const noop = () => {}
+        render(
+            <RuntimeProviders>
+                <div style={{ width: 320 }}>
+                    <ComposerButtons
+                        canSend
+                        controlsDisabled={false}
+                        showSettingsButton
+                        onSettingsToggle={noop}
+                        expanded={false}
+                        onExpandedToggle={noop}
+                        showTerminalButton
+                        terminalDisabled={false}
+                        terminalLabel="Terminal"
+                        onTerminal={noop}
+                        showAbortButton
+                        abortDisabled={false}
+                        isAborting={false}
+                        onAbort={noop}
+                        showSwitchButton
+                        switchDisabled={false}
+                        isSwitching={false}
+                        onSwitch={noop}
+                        voiceEnabled
+                        dictationEnabled
+                        voiceStatus="disconnected"
+                        onVoiceToggle={noop}
+                        onSend={noop}
+                        onSchedule={noop}
+                        onScratchlistToggle={noop}
+                    />
+                </div>
+            </RuntimeProviders>,
+        )
+
+        const toolbar = screen.getByTestId('composer-toolbar-items')
+        expect(toolbar.className).toContain('overflow-x-auto')
+        const toolbarButtons = within(toolbar).getAllByRole('button')
+        expect(toolbarButtons.length).toBeGreaterThanOrEqual(8)
+        for (const button of toolbarButtons) {
+            expect(button.closest('.shrink-0')).not.toBeNull()
+        }
     })
 })

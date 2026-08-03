@@ -18,7 +18,11 @@ function OrderedToolbarItems(props: { layout: ComposerToolbarLayout; children: R
         (child): child is ReactElement<{ item: ComposerToolbarItemId; children: ReactNode }> => isValidElement(child),
     )
     const slotsByItem = new Map(slots.map((slot) => [slot.props.item, slot]))
-    const renderItems = (items: ComposerToolbarItemId[]) => items.map((item) => slotsByItem.get(item) ?? null)
+    const renderItems = (items: ComposerToolbarItemId[]) => items.map((item) => {
+        const slot = slotsByItem.get(item)
+        if (!slot || slot.props.children == null) return null
+        return <div key={item} className="shrink-0">{slot}</div>
+    })
 
     if (props.layout.mode === 'split') {
         return <>{renderItems(props.layout.left)}<span className="flex-1" aria-hidden="true" />{renderItems(props.layout.right)}</>
@@ -649,7 +653,10 @@ export function ComposerButtons(props: {
 
     return (
         <div className="flex shrink-0 items-center gap-1 px-2 pb-2">
-            <div className={`flex min-w-0 flex-1 items-center gap-1 ${toolbarAlignmentClass}`}>
+            <div
+                data-testid="composer-toolbar-items"
+                className={`flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${toolbarAlignmentClass}`}
+            >
                 <OrderedToolbarItems layout={layout}>
                 <ToolbarItemSlot item="attachment">
                 <ComposerPrimitive.AddAttachment
