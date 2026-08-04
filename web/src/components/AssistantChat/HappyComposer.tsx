@@ -363,7 +363,7 @@ export function HappyComposer(props: {
     sendError?: ComposerSendError | null
     onClearSendError?: () => void
     onSuppressSendErrorRestore?: (id: number) => void
-    /** Incremented by SessionChat after the send mutation is accepted. */
+    /** Incremented by SessionChat after a send starts; collapse waits for its result. */
     sendAcceptedRevision?: number
     /**
      * One-shot intent bridge consumed by useHappyRuntime's onNew callback.
@@ -513,6 +513,7 @@ export function HappyComposer(props: {
     })
     const [isExpanded, setIsExpanded] = useState(false)
     const lastSendAcceptedRevisionRef = useRef(props.sendAcceptedRevision)
+    const collapseAfterSendRef = useRef(false)
     const [showSettings, setShowSettings] = useState(false)
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
@@ -529,8 +530,17 @@ export function HappyComposer(props: {
         const revision = props.sendAcceptedRevision
         if (revision === undefined || revision === lastSendAcceptedRevisionRef.current) return
         lastSendAcceptedRevisionRef.current = revision
-        setIsExpanded(false)
+        collapseAfterSendRef.current = true
     }, [props.sendAcceptedRevision])
+
+    // A chat mutation being accepted only means it started. Wait until its
+    // disabled/pending state settles so a route-level error can preserve the
+    // expanded retry surface instead of collapsing before the draft returns.
+    useEffect(() => {
+        if (!collapseAfterSendRef.current || disabled) return
+        collapseAfterSendRef.current = false
+        if (!sendError) setIsExpanded(false)
+    }, [disabled, sendError])
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const richInputRef = useRef<RichComposerInputHandle>(null)

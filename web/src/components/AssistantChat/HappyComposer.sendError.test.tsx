@@ -138,6 +138,7 @@ type HarnessControls = {
     remount: () => void
     programmaticSetText: (text: string) => void
     acceptSend: () => void
+    settleSend: (error?: ComposerSendError) => void
     getClearErrorCalls: () => number
 }
 
@@ -153,6 +154,7 @@ function ComposerHarness(props: {
     }))
     const [schedule, setSchedule] = useState<PendingSchedule | null>(props.initialSchedule ?? null)
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
+    const [isSending, setIsSending] = useState(false)
     const [composerKey, setComposerKey] = useState('composer-a')
     const [sendAcceptedRevision, setSendAcceptedRevision] = useState(0)
     const clearErrorCallsRef = useRef(0)
@@ -180,7 +182,14 @@ function ComposerHarness(props: {
             ...current,
             composer: { ...current.composer, text },
         })),
-        acceptSend: () => setSendAcceptedRevision((revision) => revision + 1),
+        acceptSend: () => {
+            setIsSending(true)
+            setSendAcceptedRevision((revision) => revision + 1)
+        },
+        settleSend: (error) => {
+            if (error) setSendError(error)
+            setIsSending(false)
+        },
         getClearErrorCalls: () => clearErrorCallsRef.current,
     }
 
@@ -189,6 +198,7 @@ function ComposerHarness(props: {
             <HappyComposer
                 key={composerKey}
                 sessionId={composerKey}
+                disabled={isSending}
                 pendingSchedule={schedule}
                 sendAcceptedRevision={sendAcceptedRevision}
                 onSchedule={setSchedule}
@@ -253,7 +263,7 @@ describe('HappyComposer send-error atomic restore', () => {
         runtime.setSnapshot = null
     })
 
-    it('collapses an expanded composer only after the send is accepted', async () => {
+    it('collapses an expanded composer only after an accepted send succeeds', async () => {
         const controls = renderComposer('message', null)
         fireEvent.click(screen.getByRole('button', { name: 'expand' }))
         expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
@@ -262,7 +272,22 @@ describe('HappyComposer send-error atomic restore', () => {
         expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
 
         act(() => controls.current!.acceptSend())
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+
+        act(() => controls.current!.settleSend())
         await waitFor(() => expect(screen.getByTestId('composer-shell')).not.toHaveAttribute('data-expanded'))
+    })
+
+    it('keeps the composer expanded when an accepted send later fails', async () => {
+        const controls = renderComposer('message', null)
+        fireEvent.click(screen.getByRole('button', { name: 'expand' }))
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.settleSend(fail(1, 'message', null)))
+
+        await waitFor(() => expect(input()).toHaveValue('message'))
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
     })
 
     it('restores untouched text and its absolute schedule after accepted-send clear', async () => {
