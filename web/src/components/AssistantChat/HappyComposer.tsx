@@ -363,6 +363,8 @@ export function HappyComposer(props: {
     sendError?: ComposerSendError | null
     onClearSendError?: () => void
     onSuppressSendErrorRestore?: (id: number) => void
+    /** Incremented by SessionChat after the send mutation is accepted. */
+    sendAcceptedRevision?: number
     /**
      * One-shot intent bridge consumed by useHappyRuntime's onNew callback.
      * SessionChat owns this ref so the composer never retains an explicit
@@ -510,6 +512,7 @@ export function HappyComposer(props: {
         selection: { start: 0, end: 0 }
     })
     const [isExpanded, setIsExpanded] = useState(false)
+    const lastSendAcceptedRevisionRef = useRef(props.sendAcceptedRevision)
     const [showSettings, setShowSettings] = useState(false)
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
@@ -521,6 +524,13 @@ export function HappyComposer(props: {
     const isControlled = onScheduleProp !== undefined
     const pendingSchedule = isControlled ? (pendingScheduleProp ?? null) : pendingScheduleLocal
     const setPendingSchedule = isControlled ? onScheduleProp : setPendingScheduleLocal
+
+    useEffect(() => {
+        const revision = props.sendAcceptedRevision
+        if (revision === undefined || revision === lastSendAcceptedRevisionRef.current) return
+        lastSendAcceptedRevisionRef.current = revision
+        setIsExpanded(false)
+    }, [props.sendAcceptedRevision])
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const richInputRef = useRef<RichComposerInputHandle>(null)
@@ -1055,6 +1065,7 @@ export function HappyComposer(props: {
                 await prepared.beforeClear()
                 api.composer().setText('')
                 await api.composer().clearAttachments()
+                setIsExpanded(false)
             } finally {
                 parkInFlightRef.current = false
                 setIsParkingScratchlist(false)

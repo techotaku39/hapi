@@ -14,6 +14,7 @@ import { HappyComposer, type ComposerSendError } from './HappyComposer'
  */
 type FakeAttachment = { id: string; status: { type: 'complete' } }
 type MockComposerInputProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
+    asChild?: boolean
     maxRows?: number
     submitOnEnter?: boolean
     cancelOnEscape?: boolean
@@ -63,7 +64,14 @@ vi.mock('@assistant-ui/react', async () => {
                 <form onSubmit={onSubmit}>{children}</form>
             ),
             Input: React.forwardRef<HTMLTextAreaElement, MockComposerInputProps>(
-                ({ onChange, maxRows: _maxRows, submitOnEnter: _submitOnEnter, cancelOnEscape: _cancelOnEscape, ...props }, ref) => (
+                ({
+                    asChild: _asChild,
+                    onChange,
+                    maxRows: _maxRows,
+                    submitOnEnter: _submitOnEnter,
+                    cancelOnEscape: _cancelOnEscape,
+                    ...props
+                }, ref) => (
                     <textarea
                         {...props}
                         ref={ref}
@@ -107,9 +115,14 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
         onSchedule: (pending: PendingSchedule) => void
         onClearSchedule: () => void
         pendingSchedule: PendingSchedule | null
+        expanded: boolean
+        onExpandedToggle: () => void
     }) => (
         <div>
             <button type="button" onClick={props.onSend}>send</button>
+            <button type="button" onClick={props.onExpandedToggle}>
+                {props.expanded ? 'collapse' : 'expand'}
+            </button>
             <button type="button" onClick={() => props.onSchedule({ type: 'absolute', ms: 9000 })}>select schedule</button>
             <button type="button" onClick={props.onClearSchedule}>clear schedule</button>
             <output data-testid="pending-schedule">{JSON.stringify(props.pendingSchedule)}</output>
@@ -124,6 +137,7 @@ type HarnessControls = {
     acceptAndClearSchedule: () => void
     remount: () => void
     programmaticSetText: (text: string) => void
+    acceptSend: () => void
     getClearErrorCalls: () => number
 }
 
@@ -140,6 +154,7 @@ function ComposerHarness(props: {
     const [schedule, setSchedule] = useState<PendingSchedule | null>(props.initialSchedule ?? null)
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
     const [composerKey, setComposerKey] = useState('composer-a')
+    const [sendAcceptedRevision, setSendAcceptedRevision] = useState(0)
     const clearErrorCallsRef = useRef(0)
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
 
@@ -165,6 +180,7 @@ function ComposerHarness(props: {
             ...current,
             composer: { ...current.composer, text },
         })),
+        acceptSend: () => setSendAcceptedRevision((revision) => revision + 1),
         getClearErrorCalls: () => clearErrorCallsRef.current,
     }
 
@@ -174,6 +190,7 @@ function ComposerHarness(props: {
                 key={composerKey}
                 sessionId={composerKey}
                 pendingSchedule={schedule}
+                sendAcceptedRevision={sendAcceptedRevision}
                 onSchedule={setSchedule}
                 onClearSchedule={() => setSchedule(null)}
                 sendError={sendError}
@@ -234,6 +251,18 @@ describe('HappyComposer send-error atomic restore', () => {
     afterEach(() => {
         cleanup()
         runtime.setSnapshot = null
+    })
+
+    it('collapses an expanded composer only after the send is accepted', async () => {
+        const controls = renderComposer('message', null)
+        fireEvent.click(screen.getByRole('button', { name: 'expand' }))
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+
+        send()
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+
+        act(() => controls.current!.acceptSend())
+        await waitFor(() => expect(screen.getByTestId('composer-shell')).not.toHaveAttribute('data-expanded'))
     })
 
     it('restores untouched text and its absolute schedule after accepted-send clear', async () => {
