@@ -56,6 +56,7 @@ export function visibleBlockRole(block: VisibleChatBlock): VisibleChatBlockRole 
 type ToolGroupingOptions = {
     hasMoreMessages: boolean
     previousGroups?: ToolGroupBlock[]
+    previousGroupingMode?: ToolGroupingMode
     groupingMode?: ToolGroupingMode
     codexExplorationCollapsed?: boolean
 }
@@ -266,8 +267,10 @@ export function buildVisibleChatBlocks(
     options: ToolGroupingOptions
 ): VisibleChatBlock[] {
     const visibleBlocks: VisibleChatBlock[] = []
-    const previousGroups = options.previousGroups ?? []
     const groupingMode = options.groupingMode ?? 'classified'
+    const previousGroups = options.previousGroupingMode == null || options.previousGroupingMode === groupingMode
+        ? (options.previousGroups ?? [])
+        : []
 
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]
