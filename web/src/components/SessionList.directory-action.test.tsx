@@ -208,6 +208,7 @@ describe('SessionList time filter', () => {
         expect(screen.queryByRole('button', { name: /Old session/ })).toBeNull()
         expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
         expect(filterButton).toHaveAttribute('title', '2026-07-17 – 2026-07-18')
+        expect(filterButton).toHaveAccessibleName('Filter sessions by last activity: 2026-07-17 – 2026-07-18')
         expect(filterButton).toHaveFocus()
     })
 

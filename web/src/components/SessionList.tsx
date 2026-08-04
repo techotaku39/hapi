@@ -702,7 +702,9 @@ function SessionListSearch(props: {
                         hasDateRange ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'
                     )}
                     title={hasDateRange ? `${props.customStart} – ${props.customEnd}` : t('sessions.timeFilter.label')}
-                    aria-label={t('sessions.timeFilter.label')}
+                    aria-label={hasDateRange
+                        ? `${t('sessions.timeFilter.label')}: ${props.customStart} – ${props.customEnd}`
+                        : t('sessions.timeFilter.label')}
                     aria-expanded={datePickerOpen}
                 >
                     <CalendarIcon className="h-5 w-5" />
