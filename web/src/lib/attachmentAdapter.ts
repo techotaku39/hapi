@@ -11,15 +11,21 @@ const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
 type PendingUploadAttachment = PendingAttachment & {
     path?: string
     previewUrl?: string
+    uploadSessionId?: string
 }
 
-export function createAttachmentAdapter(api: ApiClient, sessionId: string): AttachmentAdapter {
+export function createAttachmentAdapter(
+    api: ApiClient,
+    sessionId: string,
+    resolveSessionId?: () => Promise<string>,
+    onSessionResolved?: (sessionId: string) => Promise<void>,
+): AttachmentAdapter {
     const cancelledAttachmentIds = new Set<string>()
 
-    const deleteUpload = async (path?: string) => {
+    const deleteUpload = async (path?: string, uploadSessionId = sessionId) => {
         if (!path) return
         try {
-            await api.deleteUploadFile(sessionId, path)
+            await api.deleteUploadFile(uploadSessionId, path)
         } catch {
             // Best effort cleanup
         }
@@ -43,6 +49,7 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     status: { type: 'requires-action', reason: 'composer-send' },
                     path: restored.path,
                     previewUrl: restored.previewUrl,
+                    uploadSessionId: restored.uploadSessionId,
                 } as PendingUploadAttachment
                 return
             }
@@ -86,9 +93,16 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     return
                 }
 
+                const uploadSessionId = resolveSessionId ? await resolveSessionId() : sessionId
+                if (uploadSessionId !== sessionId && onSessionResolved) {
+                    await onSessionResolved(uploadSessionId)
+                    return
+                }
+
                 const content = previewUrl
                     ? base64FromDataUrl(previewUrl)
                     : await fileToBase64(file)
+
                 if (cancelledAttachmentIds.has(id)) {
                     return
                 }
@@ -103,10 +117,10 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     previewUrl
                 } as PendingUploadAttachment
 
-                const result = await api.uploadFile(sessionId, file.name, content, contentType)
+                const result = await api.uploadFile(uploadSessionId, file.name, content, contentType)
                 if (cancelledAttachmentIds.has(id)) {
                     if (result.success && result.path) {
-                        await deleteUpload(result.path)
+                        await deleteUpload(result.path, uploadSessionId)
                     }
                     return
                 }
@@ -131,8 +145,10 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     file,
                     status: { type: 'requires-action', reason: 'composer-send' },
                     path: result.path,
-                    previewUrl
+                    previewUrl,
+                    uploadSessionId,
                 } as PendingUploadAttachment
+
             } catch {
                 yield {
                     id,
@@ -148,7 +164,8 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
         async remove(attachment: Attachment): Promise<void> {
             cancelledAttachmentIds.add(attachment.id)
             const path = (attachment as PendingUploadAttachment).path
-            await deleteUpload(path)
+            const uploadSessionId = (attachment as PendingUploadAttachment).uploadSessionId
+            await deleteUpload(path, uploadSessionId)
         },
 
         async send(attachment: PendingAttachment): Promise<CompleteAttachment> {

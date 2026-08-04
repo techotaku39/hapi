@@ -124,4 +124,28 @@ describe('attachmentAdapter image previews', () => {
         expect(emitted).toHaveLength(3)
         expect(emitted.every((attachment) => attachment.previewUrl === undefined)).toBe(true)
     })
+
+    it('hands an inactive attachment to the resumed session before uploading', async () => {
+        const { createAttachmentAdapter } = await import('./attachmentAdapter')
+        const file = new File(['image'], 'ready.png', { type: 'image/png' })
+        const uploadFile = vi.fn().mockResolvedValue({ success: true, path: '/uploads/ready.png' })
+        const resolveSessionId = vi.fn().mockResolvedValue('session-resumed')
+        const onSessionResolved = vi.fn().mockResolvedValue(undefined)
+        const adapter = createAttachmentAdapter(
+            { uploadFile } as never,
+            'session-inactive',
+            resolveSessionId,
+            onSessionResolved,
+        )
+
+        const additions = adapter.add({ file }) as AsyncIterable<unknown>
+        for await (const _attachment of additions) {
+            // Consume the upload lifecycle.
+        }
+
+        expect(resolveSessionId).toHaveBeenCalledOnce()
+        expect(onSessionResolved).toHaveBeenCalledWith('session-resumed')
+        expect(uploadFile).not.toHaveBeenCalled()
+
+    })
 })

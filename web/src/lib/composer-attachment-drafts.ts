@@ -11,6 +11,7 @@ type StoredAttachment = {
     blob: Blob
     path?: string
     previewUrl?: string
+    uploadSessionId?: string
 }
 
 type StoredAttachmentDraft = {
@@ -28,12 +29,14 @@ export type AttachmentDraftInput = {
     file: File
     path?: string
     previewUrl?: string
+    uploadSessionId?: string
 }
 
 export type RestoredUploadMetadata = {
     id: string
     path: string
     previewUrl?: string
+    uploadSessionId?: string
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -74,6 +77,7 @@ function toStoredFile(attachment: AttachmentDraftInput): StoredAttachment {
         blob: file,
         path: attachment.path,
         previewUrl: attachment.previewUrl,
+        uploadSessionId: attachment.uploadSessionId,
     }
 }
 
@@ -87,6 +91,7 @@ function toFile(file: StoredAttachment): File {
             id: file.id,
             path: file.path,
             previewUrl: file.previewUrl,
+            uploadSessionId: file.uploadSessionId,
         })
     }
     return restored
