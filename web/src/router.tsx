@@ -586,7 +586,12 @@ function SessionPage() {
             }))
         },
         resolveSessionId,
-        onSessionResolved: handleSessionResolved,
+        onSessionResolved: (resolvedSessionId) => {
+            if (sessionId) {
+                setSendErrors((prev) => migrateSuppressedSendError(prev, sessionId, resolvedSessionId))
+            }
+            handleSessionResolved(resolvedSessionId)
+        },
 
         onBlocked: (reason) => {
             if (reason === 'no-api') {

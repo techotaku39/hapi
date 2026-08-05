@@ -34,7 +34,7 @@ describe('transferComposerDraft', () => {
         expect(mocks.getDraftAttachments).not.toHaveBeenCalled()
     })
 
-    it('copies persisted attachment upload metadata for a session-list reopen', async () => {
+    it('drops session-scoped upload metadata for a session-list reopen', async () => {
         const file = new File(['draft'], 'draft.txt')
         mocks.getDraft.mockReturnValue('persisted text')
         mocks.getDraftAttachments.mockResolvedValue([file])
@@ -51,9 +51,9 @@ describe('transferComposerDraft', () => {
         expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-stored', [{
             id: 'uploaded-1',
             file,
-            path: '/tmp/uploaded-1',
-            previewUrl: 'blob:preview',
-            uploadSessionId: 'old-stored',
+            path: undefined,
+            previewUrl: undefined,
+            uploadSessionId: undefined,
         }])
     })
 

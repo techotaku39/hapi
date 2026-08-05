@@ -634,9 +634,10 @@ export function HappyComposer(props: {
     )
 
     useEffect(() => {
+        if (draftHydration.sessionId !== sessionId || !draftHydration.complete) return
         if (sessionId) setComposerDraftSnapshot(sessionId, composerText, attachmentDrafts)
         props.onUploadDraftSnapshot?.(composerText, attachmentDrafts)
-    }, [attachmentDrafts, composerText, props.onUploadDraftSnapshot, sessionId])
+    }, [attachmentDrafts, composerText, draftHydration.complete, draftHydration.sessionId, props.onUploadDraftSnapshot, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the

@@ -38,7 +38,11 @@ export function createAttachmentAdapter(
         accept: '*',
 
         async *add({ file }): AsyncGenerator<PendingAttachment> {
-            const restored = getRestoredUploadMetadata(file)
+            // Upload paths are scoped to the session that created them. An
+            // inactive composer may resume into a different session id, so its
+            // persisted file must follow the normal resolve/transfer flow and
+            // be uploaded again by the resumed composer.
+            const restored = resolveSessionId ? undefined : getRestoredUploadMetadata(file)
             if (restored) {
                 yield {
                     id: restored.id,
