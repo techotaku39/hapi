@@ -71,9 +71,8 @@ import type { ScratchlistEntry } from '@/lib/scratchlist'
 import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
 import { consumeSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
-import { getDraft, saveDraft } from '@/lib/composer-drafts'
+import { getDraft } from '@/lib/composer-drafts'
 import {
-    saveDraftAttachments,
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
@@ -1624,9 +1623,11 @@ function SessionChatInner(props: SessionChatProps) {
             props.session.id,
             () => props.resolveSessionIdForUpload!(props.session.id),
             async (resolvedSessionId) => {
-                const snapshot = uploadDraftSnapshotRef.current
-                saveDraft(resolvedSessionId, snapshot.text)
-                saveDraftAttachments(resolvedSessionId, snapshot.attachments)
+                // Attachment restoration can resolve the inactive session
+                // before composer hydration has published a live snapshot.
+                // Transfer from persisted storage in that case and strip the
+                // source session's upload metadata before navigation.
+                await transferComposerDraft(props.session.id, resolvedSessionId)
                 props.onUploadSessionResolved?.(resolvedSessionId)
             },
         )

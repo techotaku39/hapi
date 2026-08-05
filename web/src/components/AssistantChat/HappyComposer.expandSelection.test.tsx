@@ -18,7 +18,9 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
 }))
 
 vi.mock('@/components/AssistantChat/StatusBar', () => ({ StatusBar: () => null }))
-vi.mock('@/hooks/useComposerDraft', () => ({ useComposerDraft: () => {} }))
+vi.mock('@/hooks/useComposerDraft', () => ({
+    useComposerDraft: () => ({ sessionId: undefined, complete: true, restoredAny: false }),
+}))
 vi.mock('@/hooks/usePlatform', () => ({
     usePlatform: () => ({
         isTelegram: false,
