@@ -139,6 +139,7 @@ type HarnessControls = {
     programmaticSetText: (text: string) => void
     acceptSend: () => void
     settleSend: (error?: ComposerSendError) => void
+    settleAttachmentSendFailure: () => void
     getClearErrorCalls: () => number
 }
 
@@ -156,7 +157,11 @@ function ComposerHarness(props: {
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
     const [isSending, setIsSending] = useState(false)
     const [composerKey, setComposerKey] = useState('composer-a')
-    const [sendAcceptedRevision, setSendAcceptedRevision] = useState(0)
+    const [sendAcceptance, setSendAcceptance] = useState<{ attemptId: string | null } | null>(null)
+    const [sendSettlement, setSendSettlement] = useState<{
+        attemptId: string
+        status: 'success' | 'error'
+    } | null>(null)
     const clearErrorCallsRef = useRef(0)
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
 
@@ -184,10 +189,16 @@ function ComposerHarness(props: {
         })),
         acceptSend: () => {
             setIsSending(true)
-            setSendAcceptedRevision((revision) => revision + 1)
+            setSendSettlement(null)
+            setSendAcceptance({ attemptId: 'attempt-1' })
         },
         settleSend: (error) => {
             if (error) setSendError(error)
+            setSendSettlement({ attemptId: 'attempt-1', status: error ? 'error' : 'success' })
+            setIsSending(false)
+        },
+        settleAttachmentSendFailure: () => {
+            setSendSettlement({ attemptId: 'attempt-1', status: 'error' })
             setIsSending(false)
         },
         getClearErrorCalls: () => clearErrorCallsRef.current,
@@ -200,7 +211,8 @@ function ComposerHarness(props: {
                 sessionId={composerKey}
                 disabled={isSending}
                 pendingSchedule={schedule}
-                sendAcceptedRevision={sendAcceptedRevision}
+                sendAcceptance={sendAcceptance}
+                sendSettlement={sendSettlement}
                 onSchedule={setSchedule}
                 onClearSchedule={() => setSchedule(null)}
                 sendError={sendError}
@@ -288,6 +300,19 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue('message'))
         expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+    })
+
+    it('keeps the composer expanded when an attachment send later fails', () => {
+        const controls = renderComposer('', null)
+        act(() => controls.current!.addAttachment())
+        fireEvent.click(screen.getByRole('button', { name: 'expand' }))
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.settleAttachmentSendFailure())
+
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+        expect(screen.queryByTestId('composer-send-error')).toBeNull()
     })
 
     it('restores untouched text and its absolute schedule after accepted-send clear', async () => {
