@@ -165,10 +165,13 @@ export function SessionHeader(props: {
     }) > 0
     const agentFlavor = session.metadata?.flavor ?? null
     const telegramApp = isTelegramApp()
+    const hasExplicitModel = typeof session.model === 'string' && session.model.trim() !== ''
     const codexModelsState = useCodexModels({
         api,
         machineId: session.metadata?.machineId ?? null,
         enabled: !telegramApp
+            && headerMetadata.model
+            && hasExplicitModel
             && agentFlavor === 'codex'
             && session.active
             && session.agentState?.controlledByUser !== true
