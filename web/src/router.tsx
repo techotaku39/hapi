@@ -486,6 +486,11 @@ function SessionPage() {
         : null
 
     const resolvedSessionRef = useRef<{ source: string; target: Promise<string> } | null>(null)
+    // Clear when the session id or active flag changes so a same-id resume
+    // that later archives again cannot reuse a stale in-flight/cached resume.
+    useEffect(() => {
+        resolvedSessionRef.current = null
+    }, [session?.id, session?.active])
     const resolveSessionId = useCallback(async (currentSessionId: string) => {
         if (!api || !session || session.active) {
             return currentSessionId
