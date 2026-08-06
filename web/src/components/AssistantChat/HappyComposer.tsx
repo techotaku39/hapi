@@ -41,7 +41,7 @@ import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import { saveDraft } from '@/lib/composer-drafts'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
-import { setComposerDraftSnapshot } from '@/lib/composer-draft-transfer'
+import { clearComposerDraftSnapshot, setComposerDraftSnapshot } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -634,10 +634,18 @@ export function HappyComposer(props: {
     )
 
     useEffect(() => {
-        if (draftHydration.sessionId !== sessionId || !draftHydration.complete) return
-        if (sessionId) setComposerDraftSnapshot(sessionId, composerText, attachmentDrafts)
-        props.onUploadDraftSnapshot?.(composerText, attachmentDrafts)
-    }, [attachmentDrafts, composerText, draftHydration.complete, draftHydration.sessionId, props.onUploadDraftSnapshot, sessionId])
+        if (draftHydration.sessionId !== sessionId || !draftHydration.complete || !sessionId) return
+        // Inactive sessions keep attachments in IndexedDB only. Publishing an
+        // empty live snapshot here would shadow those files on reopen/transfer.
+        const canHydrateAttachments = props.canRestoreAttachments ?? active
+        if (canHydrateAttachments) {
+            setComposerDraftSnapshot(sessionId, composerText, attachmentDrafts)
+            props.onUploadDraftSnapshot?.(composerText, attachmentDrafts)
+        } else {
+            saveDraft(sessionId, composerText)
+            clearComposerDraftSnapshot(sessionId)
+        }
+    }, [active, attachmentDrafts, composerText, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, props.onUploadDraftSnapshot, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the

@@ -84,6 +84,30 @@ describe('transferComposerDraft', () => {
         expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-empty', [])
     })
 
+    it('falls back to persisted attachments after an inactive empty live snapshot is cleared', async () => {
+        const file = new File(['kept'], 'kept.txt')
+        mocks.getDraft.mockReturnValue('typed while inactive')
+        mocks.getDraftAttachments.mockResolvedValue([file])
+        mocks.getRestoredUploadMetadata.mockReturnValue({
+            id: 'kept-1',
+            path: '/tmp/kept',
+            uploadSessionId: 'old-empty',
+        })
+        setComposerDraftSnapshot('old-empty', 'typed while inactive', [])
+        clearComposerDraftSnapshot('old-empty')
+
+        await transferComposerDraft('old-empty', 'new-empty')
+
+        expect(mocks.saveDraft).toHaveBeenCalledWith('new-empty', 'typed while inactive')
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-empty', [{
+            id: 'kept-1',
+            file,
+            path: undefined,
+            previewUrl: undefined,
+            uploadSessionId: undefined,
+        }])
+    })
+
     it('merges an in-flight pending attachment that is not in the live snapshot yet', async () => {
         const existing = new File(['old'], 'old.txt')
         const pending = new File(['new'], 'new.txt')
