@@ -545,9 +545,10 @@ function SessionPage() {
             replace: true
         })
         if (api) {
-            void queryClient.prefetchQuery({
+            void queryClient.fetchQuery({
                 queryKey: queryKeys.session(resolvedSessionId),
                 queryFn: () => api.getSession(resolvedSessionId),
+                staleTime: 0,
             }).catch(() => {})
             void syncTailMessages(api, resolvedSessionId).catch(() => {})
         }

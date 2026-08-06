@@ -106,6 +106,34 @@ describe('transferComposerDraft', () => {
             },
         ])
     })
+
+    it('does not let a previously visited target snapshot replace the source draft', async () => {
+        const sourceFile = new File(['source'], 'source.txt')
+        const staleTargetFile = new File(['stale'], 'stale.txt')
+        mocks.getDraft.mockImplementation((sessionId: string) => (
+            sessionId === 'old-stored' ? 'source text' : 'stale target text'
+        ))
+        mocks.getDraftAttachments.mockImplementation(async (sessionId: string) => (
+            sessionId === 'old-stored' ? [sourceFile] : [staleTargetFile]
+        ))
+        mocks.getRestoredUploadMetadata.mockImplementation((file: File) => (
+            file === sourceFile
+                ? { id: 'source-1', path: '/tmp/source', uploadSessionId: 'old-stored' }
+                : { id: 'stale-1', path: '/tmp/stale', uploadSessionId: 'new-stored' }
+        ))
+        setComposerDraftSnapshot('new-stored', 'visited earlier', [{ id: 'stale-1', file: staleTargetFile }])
+
+        await transferComposerDraft('old-stored', 'new-stored')
+
+        expect(mocks.saveDraft).toHaveBeenCalledWith('new-stored', 'source text')
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-stored', [{
+            id: 'source-1',
+            file: sourceFile,
+            path: undefined,
+            previewUrl: undefined,
+            uploadSessionId: undefined,
+        }])
+    })
 })
 
 describe('handoffComposerDraft', () => {

@@ -85,18 +85,15 @@ export async function transferComposerDraft(
     if (sourceSessionId === targetSessionId && pendingAttachments.length === 0) return
 
     const sourceLive = liveSnapshots.get(sourceSessionId)
-    const targetLive = liveSnapshots.get(targetSessionId)
 
     let text: string
     let baseAttachments: AttachmentDraftInput[]
 
+    // Always read the source draft. A previously visited target may still sit
+    // in liveSnapshots; using it would shadow the reopened session's draft.
     if (sourceLive) {
         text = sourceLive.text
         baseAttachments = sourceLive.attachments
-    } else if (targetLive) {
-        // Source live was cleared by an earlier handoff; merge late files into the target.
-        text = targetLive.text
-        baseAttachments = targetLive.attachments
     } else {
         text = getDraft(sourceSessionId)
         baseAttachments = await loadPersistedAttachments(sourceSessionId)
@@ -150,8 +147,9 @@ export async function handoffComposerDraft(
             existing.pending.push(pendingItem)
         }
         await existing.done
-        // Ensure this file is on the target even if it missed the batched snapshot.
-        await transferComposerDraft(sourceSessionId, targetSessionId, [pendingItem])
+        // Append onto the target draft itself so an unrelated prior target
+        // snapshot cannot replace the transferred source content.
+        await transferComposerDraft(targetSessionId, targetSessionId, [pendingItem])
         return
     }
 
@@ -177,7 +175,7 @@ export async function handoffComposerDraft(
         await onNavigable(targetSessionId)
         const late = state.pending.filter((item) => !batch.some((early) => early.id === item.id))
         if (late.length > 0) {
-            await transferComposerDraft(sourceSessionId, targetSessionId, late)
+            await transferComposerDraft(targetSessionId, targetSessionId, late)
         }
     } finally {
         resolveDone()

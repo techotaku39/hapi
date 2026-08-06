@@ -98,6 +98,9 @@ export function createAttachmentAdapter(
                 }
 
                 const uploadSessionId = resolveSessionId ? await resolveSessionId() : sessionId
+                if (cancelledAttachmentIds.has(id)) {
+                    return
+                }
                 if (uploadSessionId !== sessionId && onSessionResolved) {
                     // Pass the in-flight file so handoff does not depend on a
                     // composer effect that may not have published yet.
