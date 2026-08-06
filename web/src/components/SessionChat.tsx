@@ -1811,7 +1811,7 @@ function SessionChatInner(props: SessionChatProps) {
                         <HappyComposer
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
-                        canRestoreAttachments={attachmentAdapter !== undefined}
+                        canRestoreAttachments={props.session.active}
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}

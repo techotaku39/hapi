@@ -22,12 +22,16 @@ type HandoffState = {
 }
 
 const activeHandoffs = new Map<string, HandoffState>()
+/** Source → target after a handoff completes, so staggered adds append instead of reloading the source. */
+const completedHandoffs = new Map<string, string>()
 
 export function setComposerDraftSnapshot(
     sessionId: string,
     text: string,
     attachments: readonly AttachmentDraftInput[],
 ): void {
+    // A fresh live snapshot means this session is active in a composer again.
+    completedHandoffs.delete(sessionId)
     // Keep the in-memory fast path bounded because snapshots retain File blobs.
     if (!liveSnapshots.has(sessionId) && liveSnapshots.size >= MAX_LIVE_SNAPSHOTS) {
         const oldestSessionId = liveSnapshots.keys().next().value
@@ -38,6 +42,7 @@ export function setComposerDraftSnapshot(
 
 export function clearComposerDraftSnapshot(sessionId: string): void {
     liveSnapshots.delete(sessionId)
+    completedHandoffs.delete(sessionId)
 }
 
 function stripSessionScopedUploadFields(attachment: AttachmentDraftInput): AttachmentDraftInput {
@@ -141,6 +146,12 @@ export async function handoffComposerDraft(
         return
     }
 
+    const completedTarget = completedHandoffs.get(sourceSessionId)
+    if (completedTarget === targetSessionId) {
+        await transferComposerDraft(targetSessionId, targetSessionId, [pendingItem])
+        return
+    }
+
     const existing = activeHandoffs.get(sourceSessionId)
     if (existing) {
         if (!existing.pending.some((item) => item.id === pendingItem.id)) {
@@ -172,6 +183,7 @@ export async function handoffComposerDraft(
         })
         const batch = [...state.pending]
         await transferComposerDraft(sourceSessionId, targetSessionId, batch)
+        completedHandoffs.set(sourceSessionId, targetSessionId)
         await onNavigable(targetSessionId)
         const late = state.pending.filter((item) => !batch.some((early) => early.id === item.id))
         if (late.length > 0) {

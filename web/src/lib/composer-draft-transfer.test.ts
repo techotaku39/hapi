@@ -160,4 +160,17 @@ describe('handoffComposerDraft', () => {
         const savedAttachments = mocks.saveDraftAttachments.mock.calls.at(-1)?.[1] as Array<{ id: string }>
         expect(savedAttachments.map((item) => item.id).sort()).toEqual(['p1', 'p2'])
     })
+
+    it('appends a staggered file onto the target after the first handoff completes', async () => {
+        const file1 = new File(['one'], 'one.txt')
+        const file2 = new File(['two'], 'two.txt')
+        const onNavigable = vi.fn().mockResolvedValue(undefined)
+
+        await handoffComposerDraft('source-a', 'target-a', { id: 'p1', file: file1 }, onNavigable)
+        await handoffComposerDraft('source-a', 'target-a', { id: 'p2', file: file2 }, onNavigable)
+
+        expect(onNavigable).toHaveBeenCalledOnce()
+        const savedAttachments = mocks.saveDraftAttachments.mock.calls.at(-1)?.[1] as Array<{ id: string }>
+        expect(savedAttachments.map((item) => item.id).sort()).toEqual(['p1', 'p2'])
+    })
 })
