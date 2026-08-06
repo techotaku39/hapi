@@ -18,10 +18,27 @@ vi.mock('@/lib/composer-attachment-drafts', () => ({
     saveDraftAttachments: mocks.saveDraftAttachments,
 }))
 
-import { setComposerDraftSnapshot, transferComposerDraft } from './composer-draft-transfer'
+import {
+    clearComposerDraftSnapshot,
+    handoffComposerDraft,
+    setComposerDraftSnapshot,
+    transferComposerDraft,
+} from './composer-draft-transfer'
 
 describe('transferComposerDraft', () => {
-    beforeEach(() => vi.clearAllMocks())
+    beforeEach(() => {
+        vi.clearAllMocks()
+        clearComposerDraftSnapshot('old-live')
+        clearComposerDraftSnapshot('new-live')
+        clearComposerDraftSnapshot('old-stored')
+        clearComposerDraftSnapshot('new-stored')
+        clearComposerDraftSnapshot('old-empty')
+        clearComposerDraftSnapshot('new-empty')
+        clearComposerDraftSnapshot('old-pending')
+        clearComposerDraftSnapshot('new-pending')
+        clearComposerDraftSnapshot('source-a')
+        clearComposerDraftSnapshot('target-a')
+    })
 
     it('prefers the live composer snapshot when reopening the visible session', async () => {
         const file = new File(['draft'], 'draft.txt')
@@ -65,5 +82,54 @@ describe('transferComposerDraft', () => {
 
         expect(mocks.saveDraft).toHaveBeenCalledWith('new-empty', '')
         expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-empty', [])
+    })
+
+    it('merges an in-flight pending attachment that is not in the live snapshot yet', async () => {
+        const existing = new File(['old'], 'old.txt')
+        const pending = new File(['new'], 'new.txt')
+        setComposerDraftSnapshot('old-pending', 'typed', [{ id: 'a1', file: existing }])
+
+        await transferComposerDraft('old-pending', 'new-pending', [{
+            id: 'a2',
+            file: pending,
+            previewUrl: 'data:text/plain;base64,bmV3',
+        }])
+
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-pending', [
+            { id: 'a1', file: existing },
+            {
+                id: 'a2',
+                file: pending,
+                previewUrl: 'data:text/plain;base64,bmV3',
+                path: undefined,
+                uploadSessionId: undefined,
+            },
+        ])
+    })
+})
+
+describe('handoffComposerDraft', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        clearComposerDraftSnapshot('source-a')
+        clearComposerDraftSnapshot('target-a')
+        mocks.getDraft.mockReturnValue('hello')
+        mocks.getDraftAttachments.mockResolvedValue([])
+    })
+
+    it('passes every concurrent in-flight file into one navigable handoff', async () => {
+        const file1 = new File(['one'], 'one.txt')
+        const file2 = new File(['two'], 'two.txt')
+        const onNavigable = vi.fn().mockResolvedValue(undefined)
+
+        const first = handoffComposerDraft('source-a', 'target-a', { id: 'p1', file: file1 }, onNavigable)
+        const second = handoffComposerDraft('source-a', 'target-a', { id: 'p2', file: file2 }, onNavigable)
+
+        await Promise.all([first, second])
+
+        expect(onNavigable).toHaveBeenCalledOnce()
+        expect(onNavigable).toHaveBeenCalledWith('target-a')
+        const savedAttachments = mocks.saveDraftAttachments.mock.calls.at(-1)?.[1] as Array<{ id: string }>
+        expect(savedAttachments.map((item) => item.id).sort()).toEqual(['p1', 'p2'])
     })
 })

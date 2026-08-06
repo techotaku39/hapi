@@ -144,7 +144,10 @@ describe('attachmentAdapter image previews', () => {
         }
 
         expect(resolveSessionId).toHaveBeenCalledOnce()
-        expect(onSessionResolved).toHaveBeenCalledWith('session-resumed')
+        expect(onSessionResolved).toHaveBeenCalledWith('session-resumed', expect.objectContaining({
+            id: expect.any(String),
+            file,
+        }))
         expect(uploadFile).not.toHaveBeenCalled()
 
     })

@@ -3,7 +3,7 @@ import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata } from '@/types/api'
 import { isImageMimeType } from '@/lib/fileAttachments'
 import { randomId } from '@/lib/randomId'
-import { getRestoredUploadMetadata } from '@/lib/composer-attachment-drafts'
+import { getRestoredUploadMetadata, type AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
@@ -18,7 +18,7 @@ export function createAttachmentAdapter(
     api: ApiClient,
     sessionId: string,
     resolveSessionId?: () => Promise<string>,
-    onSessionResolved?: (sessionId: string) => Promise<void>,
+    onSessionResolved?: (sessionId: string, pending: AttachmentDraftInput) => Promise<void>,
 ): AttachmentAdapter {
     const cancelledAttachmentIds = new Set<string>()
 
@@ -99,7 +99,9 @@ export function createAttachmentAdapter(
 
                 const uploadSessionId = resolveSessionId ? await resolveSessionId() : sessionId
                 if (uploadSessionId !== sessionId && onSessionResolved) {
-                    await onSessionResolved(uploadSessionId)
+                    // Pass the in-flight file so handoff does not depend on a
+                    // composer effect that may not have published yet.
+                    await onSessionResolved(uploadSessionId, { id, file, previewUrl })
                     return
                 }
 

@@ -76,8 +76,12 @@ import {
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
+<<<<<<< HEAD
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import { transferComposerDraft } from '@/lib/composer-draft-transfer'
+=======
+import { handoffComposerDraft, transferComposerDraft } from '@/lib/composer-draft-transfer'
+>>>>>>> 82947a07 (fix(web): include in-flight attachments in inactive resume handoff)
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
@@ -1624,13 +1628,17 @@ function SessionChatInner(props: SessionChatProps) {
             props.api,
             props.session.id,
             () => props.resolveSessionIdForUpload!(props.session.id),
-            async (resolvedSessionId) => {
-                // Attachment restoration can resolve the inactive session
-                // before composer hydration has published a live snapshot.
-                // Transfer from persisted storage in that case and strip the
-                // source session's upload metadata before navigation.
-                await transferComposerDraft(props.session.id, resolvedSessionId)
-                props.onUploadSessionResolved?.(resolvedSessionId)
+            async (resolvedSessionId, pending) => {
+                // Include the in-flight file and coalesce multi-file drops into
+                // one transfer + navigation before the source composer unmounts.
+                await handoffComposerDraft(
+                    props.session.id,
+                    resolvedSessionId,
+                    pending,
+                    async (targetSessionId) => {
+                        props.onUploadSessionResolved?.(targetSessionId)
+                    },
+                )
             },
         )
     }, [props.api, props.session.id, props.session.active, props.resolveSessionIdForUpload, scratchlistMode, inactiveCanResume])
