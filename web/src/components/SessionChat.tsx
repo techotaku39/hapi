@@ -76,12 +76,8 @@ import {
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
-<<<<<<< HEAD
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
-import { transferComposerDraft } from '@/lib/composer-draft-transfer'
-=======
 import { handoffComposerDraft, transferComposerDraft } from '@/lib/composer-draft-transfer'
->>>>>>> 82947a07 (fix(web): include in-flight attachments in inactive resume handoff)
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
