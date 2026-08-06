@@ -136,6 +136,8 @@ const WHEEL_GESTURE_GAP_MS = 250
 const KEYBOARD_SCROLL_INTENT_WINDOW_MS = 750
 const POINTER_CANCEL_INTENT_WINDOW_MS = 750
 const UPWARD_SCROLL_KEYS = new Set(['ArrowUp', 'PageUp', 'Home'])
+const NAVIGATION_TRANSIENT_RETRY_DELAY_MS = 200
+const MAX_NAVIGATION_TRANSIENT_RETRIES = 150
 
 export function getPullToLoadState(distancePx: number): PullToLoadState {
     if (distancePx >= TOP_PULL_TRIGGER_PX) {
@@ -330,6 +332,28 @@ export async function runAfterPendingHistoryLoad(
 ): Promise<boolean> {
     if (pendingLoad) await pendingLoad
     return action()
+}
+
+export async function loadOlderForNavigationWithRetry(
+    loadOlder: () => Promise<OlderHistoryLoadResult>,
+    options: {
+        maxTransientRetries?: number
+        retryDelayMs?: number
+        wait?: (delayMs: number) => Promise<void>
+    } = {}
+): Promise<boolean> {
+    const maxTransientRetries = options.maxTransientRetries ?? MAX_NAVIGATION_TRANSIENT_RETRIES
+    const retryDelayMs = options.retryDelayMs ?? NAVIGATION_TRANSIENT_RETRY_DELAY_MS
+    const wait = options.wait ?? ((delayMs: number) => new Promise<void>((resolve) => {
+        window.setTimeout(resolve, delayMs)
+    }))
+
+    for (let transientRetries = 0; ; transientRetries += 1) {
+        const result = await loadOlder()
+        if (result === 'loaded') return true
+        if (result === 'terminal-stop' || transientRetries >= maxTransientRetries) return false
+        await wait(retryDelayMs)
+    }
 }
 
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
@@ -1460,7 +1484,7 @@ export function HappyThread(props: {
     }, [loadOlderFromConsumer])
 
     const loadOlderForNavigation = useCallback(async (): Promise<boolean> => {
-        return await loadOlderFromConsumer() === 'loaded'
+        return loadOlderForNavigationWithRetry(loadOlderFromConsumer)
     }, [loadOlderFromConsumer])
 
     const markExplicitNavigationAwayFromBottom = useCallback(() => {

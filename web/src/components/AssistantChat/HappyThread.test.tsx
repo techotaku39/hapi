@@ -13,6 +13,7 @@ import {
     findPromptTarget,
     findPreviousUserMessage,
     getScrollIntent,
+    loadOlderForNavigationWithRetry,
     loadAllOlderMessages,
     locateOutlineTargetMessage,
     prependMissingUserSnapshot,
@@ -503,5 +504,40 @@ describe('pending history navigation', () => {
         settleLoad(true)
         await expect(navigation).resolves.toBe(true)
         expect(scrollToPrompt).toHaveBeenCalledOnce()
+    })
+})
+
+describe('navigation history loading', () => {
+    it('retries transient stops until a page loads', async () => {
+        const loadOlder = vi.fn()
+            .mockResolvedValueOnce('transient-stop')
+            .mockResolvedValueOnce('transient-stop')
+            .mockResolvedValueOnce('loaded')
+        const wait = vi.fn(async () => {})
+
+        await expect(loadOlderForNavigationWithRetry(loadOlder, { wait })).resolves.toBe(true)
+        expect(loadOlder).toHaveBeenCalledTimes(3)
+        expect(wait).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not retry a terminal stop', async () => {
+        const loadOlder = vi.fn(async () => 'terminal-stop' as const)
+        const wait = vi.fn(async () => {})
+
+        await expect(loadOlderForNavigationWithRetry(loadOlder, { wait })).resolves.toBe(false)
+        expect(loadOlder).toHaveBeenCalledOnce()
+        expect(wait).not.toHaveBeenCalled()
+    })
+
+    it('bounds repeated transient stops', async () => {
+        const loadOlder = vi.fn(async () => 'transient-stop' as const)
+        const wait = vi.fn(async () => {})
+
+        await expect(loadOlderForNavigationWithRetry(loadOlder, {
+            maxTransientRetries: 2,
+            wait
+        })).resolves.toBe(false)
+        expect(loadOlder).toHaveBeenCalledTimes(3)
+        expect(wait).toHaveBeenCalledTimes(2)
     })
 })
