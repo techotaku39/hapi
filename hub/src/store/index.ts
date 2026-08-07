@@ -357,6 +357,7 @@ export class Store {
                 team_state TEXT,
                 team_state_updated_at INTEGER,
                 pinned INTEGER NOT NULL DEFAULT 0,
+                global_pinned INTEGER NOT NULL DEFAULT 0,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
@@ -846,6 +847,9 @@ export class Store {
         if (columns.size === 0) return
         if (!columns.has('pinned')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!columns.has('global_pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
         }
     }
 

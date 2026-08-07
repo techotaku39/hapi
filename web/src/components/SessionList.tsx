@@ -9,6 +9,16 @@ import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon } from '@/components/icons'
+
+function PinnedSectionIcon(props: { className?: string }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={props.className} aria-hidden="true">
+            <path d="M12 17v5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M5 17h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M7 4V2h10v2l-2 5v4l2 2H7l2-2V9Z" />
+        </svg>
+    )
+}
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
@@ -198,6 +208,7 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             if (a.id === selectedSessionId) return -1
             if (b.id === selectedSessionId) return 1
             // Preserve an explicit pin when otherwise choosing by recency
+            if (Boolean(a.globalPinned) !== Boolean(b.globalPinned)) return a.globalPinned ? -1 : 1
             if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
             return b.updatedAt - a.updatedAt
         })
@@ -226,7 +237,7 @@ export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
 
 export function shouldShowSessionInSidebar(session: SessionSummary, selectedSessionId?: string | null): boolean {
     if (session.id === selectedSessionId) return true
-    if (session.active || session.pinned) return true
+    if (session.active || session.pinned || session.globalPinned) return true
     return !isSidebarEmptySessionStub(session)
 }
 
@@ -892,16 +903,16 @@ function SessionItem(props: {
                 : t('session.action.reopenCursorChecking')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, setPinned, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
-    const handleTogglePin = async () => {
+    const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
         try {
-            await setPinned(!s.pinned)
+            await setPinMode(mode)
         } catch (error) {
             addToast({
                 title: t('session.action.pinFailed'),
@@ -989,8 +1000,9 @@ function SessionItem(props: {
                 sessionId={s.id}
                 sessionTitle={sessionName}
                 sessionActive={s.active}
-                sessionPinned={s.pinned}
-                onTogglePin={() => void handleTogglePin()}
+                sessionPinned={Boolean(s.pinned)}
+                sessionGlobalPinned={Boolean(s.globalPinned)}
+                onSetPinMode={(mode) => void handleSetPinMode(mode)}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
@@ -1226,6 +1238,11 @@ export function SessionList(props: {
             ),
         [unreadFilteredSessions, activeMachineFilter]
     )
+    const globalPinnedSessions = useMemo(() => {
+        return machineFilteredSessions
+            .filter((session) => Boolean(session.globalPinned))
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+    }, [machineFilteredSessions])
     const runningSessions = useMemo(() => {
         const buckets: Record<'working' | 'pending', SessionSummary[]> = {
             working: [],
@@ -1235,6 +1252,9 @@ export function SessionList(props: {
             return buckets
         }
         for (const session of machineFilteredSessions) {
+            if (session.globalPinned) {
+                continue
+            }
             if (!session.active) {
                 continue
             }
@@ -1255,9 +1275,11 @@ export function SessionList(props: {
         + runningSessions.pending.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
-            pinInProgressSessions
-                ? machineFilteredSessions.filter((session) => !isPinnedInProgressSession(session))
-                : machineFilteredSessions
+            machineFilteredSessions.filter((session) => {
+                if (session.globalPinned) return false
+                if (pinInProgressSessions && isPinnedInProgressSession(session)) return false
+                return true
+            })
         ),
         [machineFilteredSessions, pinInProgressSessions]
     )
@@ -1265,6 +1287,7 @@ export function SessionList(props: {
         () => new Map()
     )
     const [runningSectionCollapsed, setRunningSectionCollapsed] = useState(false)
+    const [pinnedSectionCollapsed, setPinnedSectionCollapsed] = useState(false)
     const autoExpandedSelectedSessionKeyRef = useRef<string | null>(null)
     const isGroupCollapsed = (group: SessionGroup): boolean => {
         if (isFiltering) return false
@@ -1622,9 +1645,57 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 ? (
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.noResults')}
+                    </div>
+                ) : null}
+
+                {globalPinnedSessions.length > 0 ? (
+                    <div key="pinned-section">
+                        <div
+                            className="group/pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={!pinnedSectionCollapsed || isFiltering}
+                            onClick={() => setPinnedSectionCollapsed((value) => !value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault()
+                                    setPinnedSectionCollapsed((value) => !value)
+                                }
+                            }}
+                            title={t('sessions.pinnedSection')}
+                        >
+                            <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={pinnedSectionCollapsed && !isFiltering} />
+                            <PinnedSectionIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" />
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                                {t('sessions.pinnedSection')}
+                            </span>
+                            <span className="shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]">
+                                ({globalPinnedSessions.length})
+                            </span>
+                        </div>
+                        <div className="collapsible-panel" data-open={(!pinnedSectionCollapsed || isFiltering) || undefined}>
+                            <div className="collapsible-inner">
+                                <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
+                                    {globalPinnedSessions.map((s) => (
+                                        <SessionItem
+                                            key={s.id}
+                                            session={s}
+                                            onSelect={props.onSelect}
+                                            showPath={false}
+                                            api={api}
+                                            selected={s.id === selectedSessionId}
+                                            showDetailedStatus={showDetailedStatus}
+                                            inRunningSection
+                                            projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
+                                            machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 ) : null}
 

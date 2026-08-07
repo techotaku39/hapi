@@ -220,16 +220,16 @@ export function SessionHeader(props: {
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, setPinned, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
-    const handleTogglePin = async () => {
+    const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
         try {
-            await setPinned(!session.pinned)
+            await setPinMode(mode)
         } catch (error) {
             addToast({
                 title: t('session.action.pinFailed'),
@@ -512,9 +512,10 @@ export function SessionHeader(props: {
                 sessionId={session.id}
                 sessionTitle={title}
                 sessionActive={session.active}
-                sessionPinned={session.pinned}
+                sessionPinned={Boolean(session.pinned)}
+                sessionGlobalPinned={Boolean(session.globalPinned)}
                 onRename={() => setRenameOpen(true)}
-                onTogglePin={api ? () => void handleTogglePin() : undefined}
+                onSetPinMode={api ? (mode) => void handleSetPinMode(mode) : undefined}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}

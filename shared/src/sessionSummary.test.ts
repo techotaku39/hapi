@@ -71,7 +71,9 @@ describe('getPendingRequestKinds', () => {
 describe('toSessionSummary', () => {
     it('includes the pinned state', () => {
         expect(toSessionSummary(makeSession({ pinned: true })).pinned).toBe(true)
+        expect(toSessionSummary(makeSession({ globalPinned: true })).globalPinned).toBe(true)
         expect(toSessionSummary(makeSession()).pinned).toBe(false)
+        expect(toSessionSummary(makeSession()).globalPinned).toBe(false)
     })
 
     it('uses grokSessionId as the native resume token', () => {

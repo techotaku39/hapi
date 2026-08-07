@@ -274,10 +274,10 @@ describe('SessionHeader', () => {
     })
 
     it('toggles pin state from the header action menu', async () => {
-        const setSessionPinned = vi.fn().mockResolvedValue(undefined)
+        const setSessionPinMode = vi.fn().mockResolvedValue(undefined)
         const api = {
             getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
-            setSessionPinned
+            setSessionPinMode
         } as unknown as ApiClient
         const session: Session = {
             id: 'session-pin',
@@ -297,7 +297,8 @@ describe('SessionHeader', () => {
             modelReasoningEffort: null,
             effort: null,
             serviceTier: null,
-            pinned: false
+            pinned: false,
+            globalPinned: false
         }
 
         render(
@@ -311,15 +312,15 @@ describe('SessionHeader', () => {
         )
 
         fireEvent.click(screen.getByTitle('More actions'))
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin globally' }))
 
-        await waitFor(() => expect(setSessionPinned).toHaveBeenCalledWith('session-pin', true))
+        await waitFor(() => expect(setSessionPinMode).toHaveBeenCalledWith('session-pin', 'global'))
     })
 
     it('shows an error toast when toggling the pin fails', async () => {
         const api = {
             getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
-            setSessionPinned: vi.fn().mockRejectedValue(new Error('Network unavailable'))
+            setSessionPinMode: vi.fn().mockRejectedValue(new Error('Network unavailable'))
         } as unknown as ApiClient
 
         render(
@@ -334,7 +335,7 @@ describe('SessionHeader', () => {
         )
 
         fireEvent.click(screen.getByTitle('More actions'))
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin in project' }))
 
         expect(await screen.findByText('Could not update pin: Network unavailable')).toBeInTheDocument()
     })

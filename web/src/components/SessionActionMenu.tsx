@@ -22,7 +22,8 @@ type SessionActionMenuProps = {
     sessionActive: boolean
     onRename: () => void
     sessionPinned?: boolean
-    onTogglePin?: () => void
+    sessionGlobalPinned?: boolean
+    onSetPinMode?: (mode: 'none' | 'project' | 'global') => void
     onExport?: () => void
     onSyncCodex?: () => void
     onSyncPi?: () => void
@@ -190,7 +191,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         sessionActive,
         onRename,
         sessionPinned = false,
-        onTogglePin,
+        sessionGlobalPinned = false,
+        onSetPinMode,
         onExport,
         onSyncCodex,
         onSyncPi,
@@ -222,9 +224,9 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         }
     }
 
-    const handleTogglePin = () => {
+    const handleSetPinMode = (mode: 'none' | 'project' | 'global') => {
         onClose()
-        onTogglePin?.()
+        onSetPinMode?.(mode)
     }
 
     const handleArchive = () => {
@@ -383,16 +385,27 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     {t('session.action.copyReference')}
                 </button>
 
-                {onTogglePin ? (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                        onClick={handleTogglePin}
-                    >
-                        <PinIcon filled={sessionPinned} className="text-[var(--app-hint)]" />
-                        {t(sessionPinned ? 'session.action.unpin' : 'session.action.pin')}
-                    </button>
+                {onSetPinMode ? (
+                    <>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={() => handleSetPinMode(sessionPinned ? 'none' : 'project')}
+                        >
+                            <PinIcon filled={sessionPinned} className="text-[var(--app-hint)]" />
+                            {t(sessionPinned ? 'session.action.unpinProject' : 'session.action.pinProject')}
+                        </button>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={() => handleSetPinMode(sessionGlobalPinned ? 'none' : 'global')}
+                        >
+                            <PinIcon filled={sessionGlobalPinned} className="text-[var(--app-hint)]" />
+                            {t(sessionGlobalPinned ? 'session.action.unpinGlobal' : 'session.action.pinGlobal')}
+                        </button>
+                    </>
                 ) : null}
 
                 {onExport ? (

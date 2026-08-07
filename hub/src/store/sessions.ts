@@ -140,6 +140,7 @@ type DbSessionRow = {
     created_at: number
     updated_at: number
     pinned: number
+    global_pinned: number
     metadata: string | null
     metadata_version: number
     agent_state: string | null
@@ -166,6 +167,7 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         pinned: row.pinned === 1,
+        globalPinned: row.global_pinned === 1,
         metadata: safeJsonParse(row.metadata),
         metadataVersion: row.metadata_version,
         agentState: safeJsonParse(row.agent_state),
@@ -619,13 +621,25 @@ export function setSessionActive(
     }
 }
 
-export function setSessionPinned(db: Database, id: string, pinned: boolean, namespace: string): boolean {
+export type SessionPinMode = 'none' | 'project' | 'global'
+
+export function setSessionPinMode(db: Database, id: string, mode: SessionPinMode, namespace: string): boolean {
+    const pinned = mode === 'project' ? 1 : 0
+    const globalPinned = mode === 'global' ? 1 : 0
     const result = db.prepare(`
         UPDATE sessions
-        SET pinned = @pinned
-        WHERE id = @id AND namespace = @namespace AND pinned != @pinned
-    `).run({ id, namespace, pinned: pinned ? 1 : 0 })
+        SET pinned = @pinned,
+            global_pinned = @global_pinned
+        WHERE id = @id
+          AND namespace = @namespace
+          AND (pinned != @pinned OR global_pinned != @global_pinned)
+    `).run({ id, namespace, pinned, global_pinned: globalPinned })
     return result.changes === 1
+}
+
+/** @deprecated Prefer setSessionPinMode — kept for project-pin merge helpers. */
+export function setSessionPinned(db: Database, id: string, pinned: boolean, namespace: string): boolean {
+    return setSessionPinMode(db, id, pinned ? 'project' : 'none', namespace)
 }
 
 export function touchSessionUpdatedAt(

@@ -67,6 +67,7 @@ function createApp(session: Session, opts?: {
     forkConversation?: SyncEngine['forkConversation']
     rewindConversation?: SyncEngine['rewindConversation']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
+    setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
 }) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
@@ -138,6 +139,7 @@ function createApp(session: Session, opts?: {
         })),
         archiveSession: archiveSessionMock,
         setSessionPinned: opts?.setSessionPinned ?? (() => {}),
+        setSessionPinMode: opts?.setSessionPinMode ?? (() => {}),
         getSessionExport: opts?.getSessionExport ?? (() => ({
             type: 'success',
             payload: {
@@ -167,20 +169,20 @@ function createApp(session: Session, opts?: {
 }
 
 describe('sessions routes', () => {
-    it('updates the persisted pin state', async () => {
-        const calls: Array<[string, boolean]> = []
+    it('updates the persisted pin mode', async () => {
+        const calls: Array<[string, 'none' | 'project' | 'global']> = []
         const { app } = createApp(createSession(), {
-            setSessionPinned: (sessionId, pinned) => calls.push([sessionId, pinned])
+            setSessionPinMode: (sessionId, mode) => calls.push([sessionId, mode])
         })
 
         const response = await app.request('/api/sessions/session-1/pin', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pinned: true })
+            body: JSON.stringify({ mode: 'global' })
         })
 
         expect(response.status).toBe(200)
-        expect(calls).toEqual([['session-1', true]])
+        expect(calls).toEqual([['session-1', 'global']])
     })
 
     it('rejects an invalid pin body', async () => {
@@ -188,7 +190,7 @@ describe('sessions routes', () => {
         const response = await app.request('/api/sessions/session-1/pin', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pinned: 'yes' })
+            body: JSON.stringify({ mode: 'yes' })
         })
 
         expect(response.status).toBe(400)

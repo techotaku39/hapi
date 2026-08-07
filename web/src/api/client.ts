@@ -916,10 +916,10 @@ export class ApiClient {
         })
     }
 
-    async setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
+    async setSessionPinMode(sessionId: string, mode: 'none' | 'project' | 'global'): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/pin`, {
             method: 'PUT',
-            body: JSON.stringify({ pinned })
+            body: JSON.stringify({ mode })
         })
     }
 

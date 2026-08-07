@@ -41,12 +41,15 @@ beforeEach(() => {
 })
 
 describe('SessionActionMenu - Pin action', () => {
-    it('renders pin and unpin labels and invokes the action', () => {
-        const onTogglePin = vi.fn()
-        const { rerender } = renderMenu({ onTogglePin, sessionPinned: false })
+    it('renders project and global pin actions', () => {
+        const onSetPinMode = vi.fn()
+        const { rerender } = renderMenu({ onSetPinMode, sessionPinned: false, sessionGlobalPinned: false })
 
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
-        expect(onTogglePin).toHaveBeenCalledOnce()
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin in project' }))
+        expect(onSetPinMode).toHaveBeenCalledWith('project')
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin globally' }))
+        expect(onSetPinMode).toHaveBeenCalledWith('global')
 
         rerender(
             <I18nProvider>
@@ -57,7 +60,8 @@ describe('SessionActionMenu - Pin action', () => {
                     sessionTitle="Session 1"
                     sessionActive={false}
                     sessionPinned={true}
-                    onTogglePin={onTogglePin}
+                    sessionGlobalPinned={true}
+                    onSetPinMode={onSetPinMode}
                     onRename={vi.fn()}
                     onArchive={vi.fn()}
                     onDelete={vi.fn()}
@@ -65,7 +69,8 @@ describe('SessionActionMenu - Pin action', () => {
                 />
             </I18nProvider>
         )
-        expect(screen.getByRole('menuitem', { name: 'Unpin session' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Unpin from project' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Unpin globally' })).toBeInTheDocument()
     })
 })
 

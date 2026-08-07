@@ -6,6 +6,7 @@ export type StoredSession = {
     createdAt: number
     updatedAt: number
     pinned: boolean
+    globalPinned: boolean
     metadata: unknown | null
     metadataVersion: number
     agentState: unknown | null

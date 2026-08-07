@@ -27,7 +27,7 @@ export function useSessionActions(
     setEffort: (effort: string | null) => Promise<void>
     setServiceTier: (serviceTier: string | null) => Promise<void>
     renameSession: (name: string) => Promise<void>
-    setPinned: (pinned: boolean) => Promise<void>
+    setPinMode: (mode: 'none' | 'project' | 'global') => Promise<void>
     deleteSession: () => Promise<void>
     isPending: boolean
 } {
@@ -236,9 +236,9 @@ export function useSessionActions(
     })
 
     const pinMutation = useMutation({
-        mutationFn: async (pinned: boolean) => {
+        mutationFn: async (mode: 'none' | 'project' | 'global') => {
             if (!api || !sessionId) throw new Error('Session unavailable')
-            await api.setSessionPinned(sessionId, pinned)
+            await api.setSessionPinMode(sessionId, mode)
         },
         onSuccess: () => void invalidateSession(),
     })
@@ -271,7 +271,7 @@ export function useSessionActions(
         setEffort: effortMutation.mutateAsync,
         setServiceTier: serviceTierMutation.mutateAsync,
         renameSession: renameMutation.mutateAsync,
-        setPinned: pinMutation.mutateAsync,
+        setPinMode: pinMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
         isPending: abortMutation.isPending
             || archiveMutation.isPending
