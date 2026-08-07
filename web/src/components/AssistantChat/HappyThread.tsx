@@ -1618,8 +1618,12 @@ export function HappyThread(props: {
                 conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 3000)
                 return false
             }
+            // Preserve the pre-jump baseline so the first smooth-scroll frames
+            // still count as upward movement. Zeroing this first makes an early
+            // near-bottom frame look non-upward and can flip view mode back to
+            // tail, compacting the history we just loaded.
+            lastScrollTopRef.current = viewport.scrollTop
             viewport.scrollTo({ top: 0, behavior: 'smooth' })
-            lastScrollTopRef.current = 0
             setConversationStartStatus('success')
             conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 1400)
             return true

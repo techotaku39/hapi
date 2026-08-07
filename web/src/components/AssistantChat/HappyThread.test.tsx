@@ -309,6 +309,30 @@ describe('scroll anchor helpers', () => {
         })
     })
 
+    it('keeps the first conversation-start smooth-scroll frame as upward when the pre-jump baseline is preserved', () => {
+        // After load-all, restoration leaves the viewport near the bottom.
+        // Zeroing previousScrollTop before smooth scroll makes the first
+        // near-bottom frame look non-upward and can flip view mode to tail.
+        expect(getScrollIntent({
+            scrollTop: 24_800,
+            previousScrollTop: 0,
+            scrollHeight: 25_200,
+            clientHeight: 530
+        })).toMatchObject({
+            isNearBottom: true,
+            isScrollingUp: false
+        })
+        expect(getScrollIntent({
+            scrollTop: 24_800,
+            previousScrollTop: 24_967,
+            scrollHeight: 25_200,
+            clientHeight: 530
+        })).toMatchObject({
+            isNearBottom: true,
+            isScrollingUp: true
+        })
+    })
+
     it('cancels initial scroll settling when the user scrolls up away from the bottom', () => {
         const intent = getScrollIntent({
             scrollTop: 520,
