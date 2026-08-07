@@ -456,6 +456,23 @@ describe('handoffComposerDraft', () => {
         expect(mocks.moveDraftAttachments).not.toHaveBeenCalled()
         expect(mocks.clearDraft).not.toHaveBeenCalled()
         expect(composerDraftWasHandedOff('source-a')).toBe(false)
+        // Text is independently recoverable under the resumed id even when
+        // attachment storage fails closed.
+        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'typed')
+    })
+
+    it('still leaves target text after navigate when attachment read fails', async () => {
+        clearComposerDraftSnapshot('source-a')
+        forgetComposerDraftHandoff('source-a')
+        mocks.getDraft.mockReturnValue('typed')
+        mocks.getDraftAttachments.mockRejectedValue(new Error('IndexedDB read failed'))
+        const navigate = vi.fn().mockResolvedValue(undefined)
+
+        await transferComposerDraftThenNavigate('source-a', 'target-a', navigate)
+
+        expect(navigate).toHaveBeenCalledOnce()
+        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'typed')
+        expect(mocks.moveDraftAttachments).not.toHaveBeenCalled()
     })
 
     it('still navigates when the local durable move rejects', async () => {
@@ -535,6 +552,30 @@ describe('persistInactiveComposerAttachments', () => {
 
         expect(mocks.saveDraft).toHaveBeenCalledWith('session-inactive', 'typed')
         expect(mocks.saveDraftAttachments).not.toHaveBeenCalled()
+    })
+
+    it('does not publish a partial snapshot when the merge read fails', async () => {
+        const picked = new File(['b'], 'b.txt')
+        mocks.getDraftAttachments.mockImplementation(async (
+            _sessionId: string,
+            options?: { throwOnError?: boolean },
+        ) => {
+            if (options?.throwOnError) throw new Error('idb merge read failed')
+            return []
+        })
+
+        await expect(persistInactiveComposerAttachments('old-pending', 'typed', [
+            { id: 'b1', file: picked },
+        ])).rejects.toThrow(/idb merge read failed/)
+
+        expect(mocks.saveDraftAttachments).not.toHaveBeenCalled()
+        expect(mocks.getDraftAttachments).toHaveBeenCalledWith('old-pending', { throwOnError: true })
+
+        // Transfer must not see a live-only-B snapshot and skip the strict read.
+        mocks.getDraft.mockReturnValue('typed')
+        await expect(transferComposerDraft('old-pending', 'new-pending')).rejects.toThrow()
+        expect(mocks.moveDraftAttachments).not.toHaveBeenCalled()
+        expect(composerDraftWasHandedOff('old-pending')).toBe(false)
     })
 
     it('merges a newly selected file into the hidden stored draft', async () => {

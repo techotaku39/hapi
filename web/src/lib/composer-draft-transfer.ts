@@ -173,7 +173,9 @@ async function persistInactiveComposerAttachmentsNow(
         }
         saveDraft(sessionId, text)
         const previousVisibleIds = inactiveVisibleIds.get(sessionId) ?? new Set<string>()
-        const stored = await loadPersistedAttachments(sessionId)
+        // Fail closed: never publish pending.latest / liveSnapshots from a
+        // best-effort empty read that would erase hidden stored files on move.
+        const stored = await loadPersistedAttachments(sessionId, { throwOnError: true })
         const latestAfterRead = pendingTransfers.get(sessionId)?.latest
         if (latestAfterRead) {
             return latestAfterRead.attachments
@@ -200,7 +202,7 @@ async function persistInactiveComposerAttachmentsNow(
     }
     saveDraft(sessionId, text)
     const previousVisibleIds = inactiveVisibleIds.get(sessionId) ?? new Set<string>()
-    const stored = await loadPersistedAttachments(sessionId)
+    const stored = await loadPersistedAttachments(sessionId, { throwOnError: true })
     // Drop ids that were previously visible but are gone now (operator removed
     // a failed-resume pick). Hidden stored files outside that set are retained.
     const retained = stored.filter((item) => !previousVisibleIds.has(item.id))
@@ -314,9 +316,20 @@ export async function transferComposerDraft(
             baseAttachments = sourceLive.attachments
         } else {
             text = getDraft(sourceSessionId)
-            // Fail closed: a transient IndexedDB read must not look like an
-            // empty draft and then delete the source during the durable move.
-            baseAttachments = await loadPersistedAttachments(sourceSessionId, { throwOnError: true })
+            try {
+                // Fail closed: a transient IndexedDB read must not look like an
+                // empty draft and then delete the source during the durable move.
+                baseAttachments = await loadPersistedAttachments(sourceSessionId, {
+                    throwOnError: true,
+                })
+            } catch (error) {
+                // Resume already resolved a new id; keep the independently readable
+                // text under the target even when attachment storage aborts.
+                if (crossSession) {
+                    saveDraft(targetSessionId, text)
+                }
+                throw error
+            }
         }
 
         const buildTransferredAttachments = (): AttachmentDraftInput[] => {
