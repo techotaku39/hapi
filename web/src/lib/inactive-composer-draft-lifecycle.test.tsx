@@ -11,6 +11,7 @@ import {
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import {
     clearComposerDraftSnapshot,
+    persistInactiveComposerAttachments,
     setComposerDraftSnapshot,
     transferComposerDraft,
 } from '@/lib/composer-draft-transfer'
@@ -51,8 +52,7 @@ function DraftLifecycleComposer(props: {
         if (canRestoreAttachments) {
             setComposerDraftSnapshot(props.sessionId, composerText, attachmentDrafts)
         } else {
-            saveDraft(props.sessionId, composerText)
-            clearComposerDraftSnapshot(props.sessionId)
+            void persistInactiveComposerAttachments(props.sessionId, composerText, attachmentDrafts)
         }
     }, [
         attachmentDrafts,

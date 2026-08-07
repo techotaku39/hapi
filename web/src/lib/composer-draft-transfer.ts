@@ -81,6 +81,29 @@ async function loadPersistedAttachments(sessionId: string): Promise<AttachmentDr
     })
 }
 
+/**
+ * Persist text for an inactive composer. When the user has visible pending
+ * attachments (e.g. resume failed after pick), merge them into IndexedDB
+ * instead of replacing the hidden stored list or discarding the new picks.
+ */
+export async function persistInactiveComposerAttachments(
+    sessionId: string,
+    text: string,
+    visibleAttachments: readonly AttachmentDraftInput[],
+): Promise<AttachmentDraftInput[]> {
+    saveDraft(sessionId, text)
+    if (visibleAttachments.length === 0) {
+        clearComposerDraftSnapshot(sessionId)
+        return []
+    }
+
+    const stored = await loadPersistedAttachments(sessionId)
+    const merged = mergeAttachmentsById(stored, visibleAttachments)
+    saveDraftAttachments(sessionId, merged)
+    setComposerDraftSnapshot(sessionId, text, merged)
+    return merged
+}
+
 /** Copy a draft to the new id returned by resume/reopen before navigating. */
 export async function transferComposerDraft(
     sourceSessionId: string,

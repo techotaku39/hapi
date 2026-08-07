@@ -5,6 +5,7 @@ import {
     saveDraftAttachments,
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
+import { persistInactiveComposerAttachments } from '@/lib/composer-draft-transfer'
 
 export type ComposerDraftHydration = {
     /** Session represented by this status; prevents a previous session's ready state leaking across a key change. */
@@ -128,10 +129,16 @@ export function useComposerDraft(
             if (draftReadyRef.current) {
                 saveDraft(sessionId, composerTextRef.current)
             }
-            // Inactive composers deliberately skip restoring stored attachments, so
-            // the visible list is incomplete. Never overwrite IndexedDB from it.
             if (canRestoreAttachments && (attachmentsRef.current.length > 0 || attachmentsReadyRef.current)) {
                 saveDraftAttachments(sessionId, [...attachmentsRef.current])
+            } else if (!canRestoreAttachments && attachmentsRef.current.length > 0) {
+                // Merge visible pending picks into IndexedDB; do not replace the
+                // hidden stored list with only the incomplete visible set.
+                void persistInactiveComposerAttachments(
+                    sessionId,
+                    composerTextRef.current,
+                    attachmentsRef.current,
+                )
             }
             draftReadyRef.current = false
             attachmentsReadyRef.current = false

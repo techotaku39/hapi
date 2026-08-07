@@ -9,6 +9,7 @@ vi.mock('@/lib/composer-drafts', () => ({
 }))
 vi.mock('@/lib/composer-attachment-drafts', () => ({
     getDraftAttachments: vi.fn(async () => []),
+    getRestoredUploadMetadata: vi.fn(() => undefined),
     saveDraftAttachments: vi.fn(),
 }))
 
@@ -177,8 +178,10 @@ describe('useComposerDraft', () => {
         expect(mockSaveDraftAttachments).not.toHaveBeenCalled()
     })
 
-    it('does not overwrite stored attachments with a partial inactive selection on unmount', async () => {
-        const partial = new File(['too-big'], 'huge.bin', { type: 'application/octet-stream' })
+    it('merges a visible inactive selection into stored attachments on unmount', async () => {
+        const stored = new File(['kept'], 'kept.txt', { type: 'text/plain' })
+        const partial = new File(['picked'], 'picked.txt', { type: 'text/plain' })
+        mockGetDraftAttachments.mockResolvedValue([stored])
         const { unmount } = renderHook(() => (
             useComposerDraft(
                 'session-1',
@@ -191,10 +194,19 @@ describe('useComposerDraft', () => {
         ))
         await act(async () => flushRAF())
         unmount()
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+        })
 
-        // Text can still persist; attachments must stay owned by IndexedDB.
         expect(mockSaveDraft).toHaveBeenCalledWith('session-1', 'typed')
-        expect(mockSaveDraftAttachments).not.toHaveBeenCalled()
+        expect(mockSaveDraftAttachments).toHaveBeenCalledWith(
+            'session-1',
+            expect.arrayContaining([
+                expect.objectContaining({ file: stored }),
+                expect.objectContaining({ id: 'partial', file: partial }),
+            ]),
+        )
     })
     it('reports immediate complete hydration when no session exists', () => {
         const { result } = renderHook(() => useComposerDraft(undefined, '', [], true, vi.fn(), vi.fn()))

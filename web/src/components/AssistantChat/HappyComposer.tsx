@@ -39,9 +39,8 @@ import { supportsEffort, supportsModelChange, PI_THINKING_LEVEL_LABELS } from '@
 import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
-import { saveDraft } from '@/lib/composer-drafts'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
-import { clearComposerDraftSnapshot, setComposerDraftSnapshot } from '@/lib/composer-draft-transfer'
+import { persistInactiveComposerAttachments, setComposerDraftSnapshot } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -635,16 +634,17 @@ export function HappyComposer(props: {
 
     useEffect(() => {
         if (draftHydration.sessionId !== sessionId || !draftHydration.complete || !sessionId) return
-        // Inactive sessions keep attachments in IndexedDB only. Publishing an
-        // empty live snapshot here would shadow those files on reopen/transfer.
+        // Inactive sessions do not restore stored attachments into the adapter.
+        // Keep IndexedDB intact when nothing new is visible; when the user did
+        // pick files (even if resume failed), merge them into storage so reopen
+        // does not drop them.
         const canHydrateAttachments = props.canRestoreAttachments ?? active
         if (canHydrateAttachments) {
             setComposerDraftSnapshot(sessionId, composerText, attachmentDrafts)
             props.onUploadDraftSnapshot?.(composerText, attachmentDrafts)
-        } else {
-            saveDraft(sessionId, composerText)
-            clearComposerDraftSnapshot(sessionId)
+            return
         }
+        void persistInactiveComposerAttachments(sessionId, composerText, attachmentDrafts)
     }, [active, attachmentDrafts, composerText, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, props.onUploadDraftSnapshot, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is

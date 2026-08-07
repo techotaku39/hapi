@@ -21,6 +21,7 @@ vi.mock('@/lib/composer-attachment-drafts', () => ({
 import {
     clearComposerDraftSnapshot,
     handoffComposerDraft,
+    persistInactiveComposerAttachments,
     setComposerDraftSnapshot,
     transferComposerDraft,
 } from './composer-draft-transfer'
@@ -196,5 +197,43 @@ describe('handoffComposerDraft', () => {
         expect(onNavigable).toHaveBeenCalledOnce()
         const savedAttachments = mocks.saveDraftAttachments.mock.calls.at(-1)?.[1] as Array<{ id: string }>
         expect(savedAttachments.map((item) => item.id).sort()).toEqual(['p1', 'p2'])
+    })
+})
+
+describe('persistInactiveComposerAttachments', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        clearComposerDraftSnapshot('session-inactive')
+    })
+
+    it('clears the live snapshot without touching stored files when nothing is visible', async () => {
+        setComposerDraftSnapshot('session-inactive', 'stale', [])
+        mocks.getDraftAttachments.mockResolvedValue([new File(['kept'], 'kept.txt')])
+
+        await persistInactiveComposerAttachments('session-inactive', 'typed', [])
+
+        expect(mocks.saveDraft).toHaveBeenCalledWith('session-inactive', 'typed')
+        expect(mocks.saveDraftAttachments).not.toHaveBeenCalled()
+    })
+
+    it('merges a newly selected file into the hidden stored draft', async () => {
+        const stored = new File(['a'], 'a.txt')
+        const picked = new File(['b'], 'b.txt')
+        mocks.getDraftAttachments.mockResolvedValue([stored])
+        mocks.getRestoredUploadMetadata.mockReturnValue({
+            id: 'stored-a',
+            path: '/tmp/a',
+            uploadSessionId: 'session-inactive',
+        })
+
+        await persistInactiveComposerAttachments('session-inactive', 'typed', [{
+            id: 'picked-b',
+            file: picked,
+        }])
+
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('session-inactive', [
+            expect.objectContaining({ id: 'stored-a', file: stored }),
+            expect.objectContaining({ id: 'picked-b', file: picked }),
+        ])
     })
 })
