@@ -128,7 +128,9 @@ export function useComposerDraft(
             if (draftReadyRef.current) {
                 saveDraft(sessionId, composerTextRef.current)
             }
-            if (attachmentsRef.current.length > 0 || (canRestoreAttachments && attachmentsReadyRef.current)) {
+            // Inactive composers deliberately skip restoring stored attachments, so
+            // the visible list is incomplete. Never overwrite IndexedDB from it.
+            if (canRestoreAttachments && (attachmentsRef.current.length > 0 || attachmentsReadyRef.current)) {
                 saveDraftAttachments(sessionId, [...attachmentsRef.current])
             }
             draftReadyRef.current = false

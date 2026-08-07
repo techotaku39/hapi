@@ -176,6 +176,26 @@ describe('useComposerDraft', () => {
         expect(addAttachment).not.toHaveBeenCalled()
         expect(mockSaveDraftAttachments).not.toHaveBeenCalled()
     })
+
+    it('does not overwrite stored attachments with a partial inactive selection on unmount', async () => {
+        const partial = new File(['too-big'], 'huge.bin', { type: 'application/octet-stream' })
+        const { unmount } = renderHook(() => (
+            useComposerDraft(
+                'session-1',
+                'typed',
+                [{ id: 'partial', file: partial }],
+                false,
+                vi.fn(),
+                vi.fn(),
+            )
+        ))
+        await act(async () => flushRAF())
+        unmount()
+
+        // Text can still persist; attachments must stay owned by IndexedDB.
+        expect(mockSaveDraft).toHaveBeenCalledWith('session-1', 'typed')
+        expect(mockSaveDraftAttachments).not.toHaveBeenCalled()
+    })
     it('reports immediate complete hydration when no session exists', () => {
         const { result } = renderHook(() => useComposerDraft(undefined, '', [], true, vi.fn(), vi.fn()))
         expect(result.current).toEqual({ sessionId: undefined, complete: true, restoredAny: false })
