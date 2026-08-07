@@ -1668,10 +1668,11 @@ export function SessionList(props: {
                             title={t('sessions.pinnedSection')}
                         >
                             <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={pinnedSectionCollapsed && !isFiltering} />
-                            <PinnedSectionIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" />
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                            <span className="min-w-0 truncate text-sm font-medium">
                                 {t('sessions.pinnedSection')}
                             </span>
+                            <PinnedSectionIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" />
+                            <span className="min-w-0 flex-1" aria-hidden="true" />
                             <span className="shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]">
                                 ({globalPinnedSessions.length})
                             </span>
@@ -1826,7 +1827,7 @@ export function SessionList(props: {
                                         <div key={s.id} className="contents">
                                             {shouldShowPinnedDivider(visibleGroupSessions, index) ? (
                                                 <div
-                                                    className="ml-2 my-1 border-t border-[var(--app-border)]"
+                                                    className="ml-2.5 mr-2 my-1 border-t border-[var(--app-border)]"
                                                     aria-hidden="true"
                                                 />
                                             ) : null}
