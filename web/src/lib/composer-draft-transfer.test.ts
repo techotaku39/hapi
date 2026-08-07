@@ -379,6 +379,31 @@ describe('handoffComposerDraft', () => {
         ])
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
+
+    it('re-samples composer text after the awaited attachment move', async () => {
+        const file = new File(['draft'], 'draft.txt')
+        setComposerDraftSnapshot('source-a', 'before wait', [{ id: 'a1', file }])
+        let releaseDrain!: () => void
+        const drainGate = new Promise<void>((resolve) => {
+            releaseDrain = resolve
+        })
+        mocks.moveDraftAttachments.mockImplementation(async (
+            _source: string,
+            _target: string,
+            resolveAttachments: () => Array<{ id: string; file: File }>,
+        ) => {
+            await drainGate
+            return resolveAttachments()
+        })
+
+        const transfer = transferComposerDraft('source-a', 'target-a')
+        updateComposerDraftTextSnapshot('source-a', 'typed during wait')
+        releaseDrain()
+        await transfer
+
+        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'typed during wait')
+        expect(composerDraftWasHandedOff('source-a')).toBe(true)
+    })
 })
 
 describe('updateComposerDraftTextSnapshot', () => {

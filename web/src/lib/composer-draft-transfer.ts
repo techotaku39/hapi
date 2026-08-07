@@ -239,8 +239,8 @@ export async function transferComposerDraft(
         return mergeAttachmentsById(normalizedBase, normalizedPending)
     }
 
-    saveDraft(targetSessionId, text)
     let attachments: AttachmentDraftInput[]
+    let transferredText = text
     if (sourceSessionId !== targetSessionId) {
         // Durable move: await target put + source delete before navigation so a
         // reload cannot lose the draft, and tombstone the source so unmount
@@ -251,15 +251,20 @@ export async function transferComposerDraft(
             targetSessionId,
             buildTransferredAttachments,
         )
+        // Keystrokes during the IDB drain keep updating the source; re-read
+        // before retiring it so the target does not get a stale snapshot.
+        transferredText = liveSnapshots.get(sourceSessionId)?.text ?? getDraft(sourceSessionId)
+        saveDraft(targetSessionId, transferredText)
         clearDraft(sourceSessionId)
         completedHandoffs.set(sourceSessionId, targetSessionId)
         liveSnapshots.delete(sourceSessionId)
         inactiveVisibleIds.delete(sourceSessionId)
     } else {
         attachments = buildTransferredAttachments()
+        saveDraft(targetSessionId, transferredText)
         saveDraftAttachments(targetSessionId, attachments)
     }
-    setComposerDraftSnapshot(targetSessionId, text, attachments)
+    setComposerDraftSnapshot(targetSessionId, transferredText, attachments)
 }
 
 /**
