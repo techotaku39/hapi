@@ -605,13 +605,11 @@ function SessionPage() {
                 resolvedSessionId,
                 () => handleSessionResolved(resolvedSessionId),
             )
-            // Inactive composers withhold stored files from the visible adapter.
-            // After transfer, defer the mutation so the active target can hydrate
-            // and re-upload before Send; otherwise clearDraftsAfterSend would
-            // wipe the moved draft after a text-only POST.
-            if ((context.attachments?.length ?? 0) > 0) return undefined
+            // Cross-session resume: visible metadata may still carry source-scoped
+            // upload paths, and inactive remounts hide stored files entirely.
+            // Always defer so the active target can hydrate/re-upload before POST.
             const stored = await getDraftAttachments(resolvedSessionId)
-            if (stored.length > 0) {
+            if ((context.attachments?.length ?? 0) > 0 || stored.length > 0) {
                 return { deferUntilDraftHydrated: true }
             }
             return undefined

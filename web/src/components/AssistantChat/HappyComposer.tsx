@@ -511,7 +511,6 @@ export function HappyComposer(props: {
         const path = (attachment as { path?: string }).path
         return typeof path === 'string' && path.length > 0
     })
-    const canSend = (hasText || hasAttachments) && attachmentsReady && !controlsDisabled
 
     const [inputState, setInputState] = useState<TextInputState>({
         text: '',
@@ -636,6 +635,8 @@ export function HappyComposer(props: {
         (text) => api.composer().setText(text),
         (file) => api.composer().addAttachment(file),
     )
+    const hasAnyAttachments = hasAttachments || draftHydration.hasStoredAttachments
+    const canSend = (hasText || hasAnyAttachments) && attachmentsReady && !controlsDisabled
 
     useEffect(() => {
         if (!sessionId) return
@@ -2278,7 +2279,7 @@ export function HappyComposer(props: {
                             pendingSchedule={pendingSchedule}
                             onSchedule={handleUserSchedule}
                             onClearSchedule={onUserClearSchedule}
-                            hasAttachments={hasAttachments}
+                            hasAttachments={hasAnyAttachments}
                             piModelLabel={piModelLabel}
                             piModelDisabled={controlsDisabled || !piHasModels}
                             piModelOpen={showPiModelPanel}

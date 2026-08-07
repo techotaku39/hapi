@@ -14,6 +14,8 @@ export type ComposerDraftHydration = {
     complete: boolean
     /** True when this hydration found and applied a persisted text or attachment draft. */
     restoredAny: boolean
+    /** True when IndexedDB still holds attachment blobs (even if not restored into the adapter). */
+    hasStoredAttachments: boolean
 }
 
 /**
@@ -48,17 +50,28 @@ export function useComposerDraft(
         sessionId,
         complete: sessionId === undefined,
         restoredAny: false,
+        hasStoredAttachments: false,
     }))
 
     useEffect(() => {
         if (!sessionId) {
-            setHydration({ sessionId: undefined, complete: true, restoredAny: false })
+            setHydration({
+                sessionId: undefined,
+                complete: true,
+                restoredAny: false,
+                hasStoredAttachments: false,
+            })
             return
         }
 
         draftReadyRef.current = false
         attachmentsReadyRef.current = false
-        setHydration({ sessionId, complete: false, restoredAny: false })
+        setHydration({
+            sessionId,
+            complete: false,
+            restoredAny: false,
+            hasStoredAttachments: false,
+        })
 
         let disposed = false
         const frame = requestAnimationFrame(() => {
@@ -67,13 +80,36 @@ export function useComposerDraft(
             if (restoreText) {
                 // Mark before the external composer store gets its render so a
                 // consumer never mistakes this persisted replacement for empty.
-                setHydration({ sessionId, complete: !canRestoreAttachments, restoredAny: true })
+                setHydration({
+                    sessionId,
+                    complete: false,
+                    restoredAny: true,
+                    hasStoredAttachments: false,
+                })
                 setText(draft!)
             }
             draftReadyRef.current = true
 
             if (!canRestoreAttachments) {
-                if (!restoreText) setHydration({ sessionId, complete: true, restoredAny: false })
+                // Peek at stored blobs without restoring them into the inactive
+                // adapter so schedule/exclusion UI still knows they exist.
+                void getDraftAttachments(sessionId).then((files) => {
+                    if (disposed) return
+                    setHydration({
+                        sessionId,
+                        complete: true,
+                        restoredAny: restoreText,
+                        hasStoredAttachments: files.length > 0,
+                    })
+                }).catch(() => {
+                    if (disposed) return
+                    setHydration({
+                        sessionId,
+                        complete: true,
+                        restoredAny: restoreText,
+                        hasStoredAttachments: false,
+                    })
+                })
                 return
             }
 
@@ -98,6 +134,7 @@ export function useComposerDraft(
                         sessionId,
                         complete: false,
                         restoredAny: restoreText || current.restoredAny,
+                        hasStoredAttachments: files.length > 0,
                     }
                     : current)
                 let restoredAttachment = false
@@ -113,18 +150,19 @@ export function useComposerDraft(
                         }
                     }
                 }
-                return restoredAttachment
+                return { restoredAttachment, hasStoredAttachments: files.length > 0 }
             }).catch(() => {
                 // Attachment draft read is best effort.
-                return false
-            }).then((restoredAttachment) => {
+                return { restoredAttachment: false, hasStoredAttachments: false }
+            }).then((result) => {
                 if (!disposed) {
                     attachmentsReadyRef.current = true
                     setHydration((current) => current.sessionId === sessionId
                         ? {
                             ...current,
                             complete: true,
-                            restoredAny: current.restoredAny || Boolean(restoredAttachment),
+                            restoredAny: current.restoredAny || Boolean(result?.restoredAttachment),
+                            hasStoredAttachments: Boolean(result?.hasStoredAttachments),
                         }
                         : current)
                 }
