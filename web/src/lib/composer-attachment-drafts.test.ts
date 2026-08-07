@@ -79,4 +79,22 @@ describe('composer-attachment-drafts', () => {
             previewUrl: 'data:image/png;base64,aW1hZ2U=',
         })
     })
+
+    it('retains stable ids for pathless pending files across persist passes', async () => {
+        const mod = await import('./composer-attachment-drafts')
+        const file = new File(['pending'], 'pending.txt')
+        mod.saveDraftAttachments('session-1', [{ id: 'pending-1', file }])
+
+        const [first] = await mod.getDraftAttachments('session-1')
+        expect(first && mod.getRestoredUploadMetadata(first)?.id).toBe('pending-1')
+
+        mod.saveDraftAttachments('session-1', [{
+            id: mod.getRestoredUploadMetadata(first!)!.id,
+            file: first!,
+        }])
+        const secondPass = await mod.getDraftAttachments('session-1')
+
+        expect(secondPass).toHaveLength(1)
+        expect(secondPass[0] && mod.getRestoredUploadMetadata(secondPass[0])?.id).toBe('pending-1')
+    })
 })

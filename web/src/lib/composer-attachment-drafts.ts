@@ -34,7 +34,7 @@ export type AttachmentDraftInput = {
 
 export type RestoredUploadMetadata = {
     id: string
-    path: string
+    path?: string
     previewUrl?: string
     uploadSessionId?: string
 }
@@ -86,14 +86,14 @@ function toFile(file: StoredAttachment): File {
         type: file.type,
         lastModified: file.lastModified,
     })
-    if (file.path) {
-        restoredUploadMetadata.set(restored, {
-            id: file.id,
-            path: file.path,
-            previewUrl: file.previewUrl,
-            uploadSessionId: file.uploadSessionId,
-        })
-    }
+    // Always retain the stored id so pathless pending picks (failed resume)
+    // round-trip without inventing a synthetic id on the next persist pass.
+    restoredUploadMetadata.set(restored, {
+        id: file.id,
+        path: file.path,
+        previewUrl: file.previewUrl,
+        uploadSessionId: file.uploadSessionId,
+    })
     return restored
 }
 

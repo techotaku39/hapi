@@ -236,4 +236,104 @@ describe('persistInactiveComposerAttachments', () => {
             expect.objectContaining({ id: 'picked-b', file: picked }),
         ])
     })
+
+    it('removes a previously visible failed pick from storage when the operator clears it', async () => {
+        const storedA = new File(['a'], 'a.txt')
+        const pickedB = new File(['b'], 'b.txt')
+        mocks.getDraftAttachments
+            .mockResolvedValueOnce([storedA])
+            .mockResolvedValueOnce([storedA, pickedB])
+        mocks.getRestoredUploadMetadata.mockImplementation((file: File) => {
+            if (file === storedA) {
+                return { id: 'stored-a', path: '/tmp/a', uploadSessionId: 'session-inactive' }
+            }
+            if (file === pickedB) {
+                return { id: 'picked-b' }
+            }
+            return undefined
+        })
+
+        await persistInactiveComposerAttachments('session-inactive', 'typed', [{
+            id: 'picked-b',
+            file: pickedB,
+        }])
+        await persistInactiveComposerAttachments('session-inactive', 'typed', [])
+
+        expect(mocks.saveDraftAttachments).toHaveBeenLastCalledWith('session-inactive', [
+            expect.objectContaining({ id: 'stored-a', file: storedA }),
+        ])
+    })
+
+    it('serializes concurrent persist calls so an older read cannot overwrite a newer merge', async () => {
+        const storedA = new File(['a'], 'a.txt')
+        const pickedB = new File(['b'], 'b.txt')
+        const pickedC = new File(['c'], 'c.txt')
+        let releaseFirstRead!: () => void
+        const firstReadGate = new Promise<void>((resolve) => {
+            releaseFirstRead = resolve
+        })
+        let readCount = 0
+        mocks.getDraftAttachments.mockImplementation(async () => {
+            readCount += 1
+            if (readCount === 1) {
+                await firstReadGate
+                return [storedA]
+            }
+            return [storedA]
+        })
+        mocks.getRestoredUploadMetadata.mockReturnValue({
+            id: 'stored-a',
+            path: '/tmp/a',
+            uploadSessionId: 'session-inactive',
+        })
+
+        const first = persistInactiveComposerAttachments('session-inactive', 'first', [{
+            id: 'picked-b',
+            file: pickedB,
+        }])
+        const second = persistInactiveComposerAttachments('session-inactive', 'second', [{
+            id: 'picked-c',
+            file: pickedC,
+        }])
+        releaseFirstRead()
+        await Promise.all([first, second])
+
+        expect(mocks.saveDraftAttachments.mock.calls.at(-1)?.[1]).toEqual([
+            expect.objectContaining({ id: 'stored-a', file: storedA }),
+            expect.objectContaining({ id: 'picked-c', file: pickedC }),
+        ])
+    })
+
+    it('awaits a pending inactive persist before transferComposerDraft reads storage', async () => {
+        const storedA = new File(['a'], 'a.txt')
+        const pickedB = new File(['b'], 'b.txt')
+        let releaseRead!: () => void
+        const readGate = new Promise<void>((resolve) => {
+            releaseRead = resolve
+        })
+        mocks.getDraft.mockReturnValue('typed')
+        mocks.getDraftAttachments.mockImplementation(async () => {
+            await readGate
+            return [storedA]
+        })
+        mocks.getRestoredUploadMetadata.mockImplementation((file: File) => {
+            if (file === storedA) {
+                return { id: 'stored-a', path: '/tmp/a' }
+            }
+            return { id: 'picked-b' }
+        })
+
+        const persist = persistInactiveComposerAttachments('old-pending', 'typed', [{
+            id: 'picked-b',
+            file: pickedB,
+        }])
+        const transfer = transferComposerDraft('old-pending', 'new-pending')
+        releaseRead()
+        await Promise.all([persist, transfer])
+
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-pending', expect.arrayContaining([
+            expect.objectContaining({ id: 'stored-a' }),
+            expect.objectContaining({ id: 'picked-b' }),
+        ]))
+    })
 })

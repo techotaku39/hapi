@@ -41,9 +41,11 @@ export function createAttachmentAdapter(
             // Upload paths are scoped to the session that created them. An
             // inactive composer may resume into a different session id, so its
             // persisted file must follow the normal resolve/transfer flow and
-            // be uploaded again by the resumed composer.
-            const restored = resolveSessionId ? undefined : getRestoredUploadMetadata(file)
-            if (restored) {
+            // be uploaded again by the resumed composer. Pathless restored
+            // metadata still supplies a stable id so draft merge cannot
+            // duplicate the same File across persistence passes.
+            const restored = getRestoredUploadMetadata(file)
+            if (!resolveSessionId && restored?.path) {
                 yield {
                     id: restored.id,
                     type: 'file',
@@ -58,7 +60,7 @@ export function createAttachmentAdapter(
                 return
             }
 
-            const id = randomId()
+            const id = restored?.id ?? randomId()
             const contentType = file.type || 'application/octet-stream'
 
             try {

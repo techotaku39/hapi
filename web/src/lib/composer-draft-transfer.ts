@@ -24,6 +24,10 @@ type HandoffState = {
 const activeHandoffs = new Map<string, HandoffState>()
 /** Source → target after a handoff completes, so staggered adds append instead of reloading the source. */
 const completedHandoffs = new Map<string, string>()
+/** Last visible inactive attachment ids, so a later empty composer can drop them from IndexedDB. */
+const inactiveVisibleIds = new Map<string, Set<string>>()
+/** Serialize read/merge/write so unmount + effect cannot race, and reopen can await the latest. */
+const inactivePersistQueue = new Map<string, Promise<AttachmentDraftInput[]>>()
 
 export function setComposerDraftSnapshot(
     sessionId: string,
@@ -43,6 +47,7 @@ export function setComposerDraftSnapshot(
 export function clearComposerDraftSnapshot(sessionId: string): void {
     liveSnapshots.delete(sessionId)
     completedHandoffs.delete(sessionId)
+    inactiveVisibleIds.delete(sessionId)
 }
 
 function stripSessionScopedUploadFields(attachment: AttachmentDraftInput): AttachmentDraftInput {
@@ -81,27 +86,63 @@ async function loadPersistedAttachments(sessionId: string): Promise<AttachmentDr
     })
 }
 
+async function persistInactiveComposerAttachmentsNow(
+    sessionId: string,
+    text: string,
+    visibleAttachments: readonly AttachmentDraftInput[],
+): Promise<AttachmentDraftInput[]> {
+    saveDraft(sessionId, text)
+    const previousVisibleIds = inactiveVisibleIds.get(sessionId) ?? new Set<string>()
+    const stored = await loadPersistedAttachments(sessionId)
+    // Drop ids that were previously visible but are gone now (operator removed
+    // a failed-resume pick). Hidden stored files outside that set are retained.
+    const retained = stored.filter((item) => !previousVisibleIds.has(item.id))
+    const merged = mergeAttachmentsById(retained, visibleAttachments)
+    inactiveVisibleIds.set(sessionId, new Set(visibleAttachments.map((item) => item.id)))
+
+    if (visibleAttachments.length === 0) {
+        // Inactive composers must not publish a live snapshot of hidden files.
+        liveSnapshots.delete(sessionId)
+        completedHandoffs.delete(sessionId)
+        if (previousVisibleIds.size > 0) {
+            saveDraftAttachments(sessionId, retained)
+        }
+        return retained
+    }
+
+    saveDraftAttachments(sessionId, merged)
+    setComposerDraftSnapshot(sessionId, text, merged)
+    return merged
+}
+
 /**
  * Persist text for an inactive composer. When the user has visible pending
  * attachments (e.g. resume failed after pick), merge them into IndexedDB
  * instead of replacing the hidden stored list or discarding the new picks.
+ * Concurrent calls for one session are serialized.
  */
 export async function persistInactiveComposerAttachments(
     sessionId: string,
     text: string,
     visibleAttachments: readonly AttachmentDraftInput[],
 ): Promise<AttachmentDraftInput[]> {
-    saveDraft(sessionId, text)
-    if (visibleAttachments.length === 0) {
-        clearComposerDraftSnapshot(sessionId)
-        return []
+    const previous = inactivePersistQueue.get(sessionId) ?? Promise.resolve([] as AttachmentDraftInput[])
+    const next = previous
+        .catch(() => [] as AttachmentDraftInput[])
+        .then(() => persistInactiveComposerAttachmentsNow(sessionId, text, visibleAttachments))
+    inactivePersistQueue.set(sessionId, next)
+    try {
+        return await next
+    } finally {
+        if (inactivePersistQueue.get(sessionId) === next) {
+            inactivePersistQueue.delete(sessionId)
+        }
     }
+}
 
-    const stored = await loadPersistedAttachments(sessionId)
-    const merged = mergeAttachmentsById(stored, visibleAttachments)
-    saveDraftAttachments(sessionId, merged)
-    setComposerDraftSnapshot(sessionId, text, merged)
-    return merged
+async function awaitInactivePersist(sessionId: string): Promise<void> {
+    const pending = inactivePersistQueue.get(sessionId)
+    if (pending) await pending.catch(() => {})
 }
 
 /** Copy a draft to the new id returned by resume/reopen before navigating. */
@@ -111,6 +152,9 @@ export async function transferComposerDraft(
     pendingAttachments: readonly AttachmentDraftInput[] = [],
 ): Promise<void> {
     if (sourceSessionId === targetSessionId && pendingAttachments.length === 0) return
+
+    // Flush any in-flight inactive merge so reopen cannot race a pending read.
+    await awaitInactivePersist(sourceSessionId)
 
     const sourceLive = liveSnapshots.get(sourceSessionId)
 
