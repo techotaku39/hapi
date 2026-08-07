@@ -559,6 +559,27 @@ describe('SessionList collapse behavior', () => {
         })
     })
 
+    it('keeps an inactive project-pinned group expanded with no selection', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-pinned',
+                pinned: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Pinned task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-idle',
+                updatedAt: 50,
+                metadata: { path: '/work/hapi', name: 'Idle task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        expect(screen.getByRole('button', { name: /Pinned task/ })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Idle task/ })).toBeInTheDocument()
+    })
+
     it('keeps the running section open while searching even when collapsed', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
