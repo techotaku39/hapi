@@ -670,7 +670,9 @@ export function HappyComposer(props: {
             sessionId,
             latestComposerTextRef.current,
             attachmentDraftsRef.current,
-        )
+        ).catch((error) => {
+            console.warn('[composer-draft] inactive persistence failed', error)
+        })
     }, [active, attachmentRevision, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is

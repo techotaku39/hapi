@@ -153,7 +153,9 @@ export function useComposerDraft(
                     sessionId,
                     composerTextRef.current,
                     attachmentsRef.current,
-                )
+                ).catch((error) => {
+                    console.warn('[composer-draft] inactive persistence failed', error)
+                })
             }
             draftReadyRef.current = false
             attachmentsReadyRef.current = false
