@@ -44,7 +44,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { seedMessageWindowFromSession, syncTailMessages } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
-import { reapplyOptimisticSessionActive } from '@/lib/session-detail-optimistic'
+import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { initializeSessionLastSeen, markSessionSeen } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
@@ -549,15 +549,11 @@ function SessionPage() {
             replace: true
         })
         if (api) {
-            void queryClient.fetchQuery({
-                queryKey: queryKeys.session(resolvedSessionId),
-                queryFn: () => api.getSession(resolvedSessionId),
-                staleTime: 0,
-            }).catch(() => undefined).finally(() => {
-                // Resume can return before REST reflects active; keep the
-                // optimistic seed so the target composer stays on the active adapter.
-                reapplyOptimisticSessionActive(queryClient, resolvedSessionId)
-            })
+            void refreshSessionDetailPreservingActive(
+                queryClient,
+                resolvedSessionId,
+                () => api.getSession(resolvedSessionId),
+            )
             void syncTailMessages(api, resolvedSessionId).catch(() => {})
         }
     }, [api, navigate, queryClient, session])

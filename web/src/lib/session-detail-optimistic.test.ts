@@ -1,10 +1,35 @@
 import { describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
-import { reapplyOptimisticSessionActive } from './session-detail-optimistic'
+import {
+    mergeSessionDetailIfActiveUnchanged,
+    refreshSessionDetailPreservingActive,
+} from './session-detail-optimistic'
 
-describe('reapplyOptimisticSessionActive', () => {
-    it('keeps the cache active after a stale inactive detail fetch', async () => {
+describe('mergeSessionDetailIfActiveUnchanged', () => {
+    it('keeps a newer inactive SSE transition over a late active response', () => {
+        const current = {
+            session: { id: 'session-reopened', active: false, title: 'sse-inactive' },
+        }
+        const response = {
+            session: { id: 'session-reopened', active: true, title: 'stale-active' },
+        }
+        expect(mergeSessionDetailIfActiveUnchanged(current, response)).toBe(current)
+    })
+
+    it('applies the response when active still matches', () => {
+        const current = {
+            session: { id: 'session-reopened', active: true, title: 'seeded' },
+        }
+        const response = {
+            session: { id: 'session-reopened', active: true, title: 'fresh' },
+        }
+        expect(mergeSessionDetailIfActiveUnchanged(current, response)).toEqual(response)
+    })
+})
+
+describe('refreshSessionDetailPreservingActive', () => {
+    it('does not resurrect active after the cache went inactive mid-flight', async () => {
         const queryClient = new QueryClient({
             defaultOptions: { queries: { retry: false } },
         })
@@ -13,28 +38,30 @@ describe('reapplyOptimisticSessionActive', () => {
             session: { id: resolvedSessionId, active: true, title: 'seeded' },
         })
 
-        await queryClient.fetchQuery({
-            queryKey: queryKeys.session(resolvedSessionId),
-            queryFn: async () => ({
-                session: { id: resolvedSessionId, active: false, title: 'stale' },
-            }),
-            staleTime: 0,
-        }).catch(() => undefined).finally(() => {
-            reapplyOptimisticSessionActive(queryClient, resolvedSessionId)
+        let release!: () => void
+        const gate = new Promise<void>((resolve) => {
+            release = resolve
         })
+        const fetchDetail = vi.fn(async () => {
+            await gate
+            return {
+                session: { id: resolvedSessionId, active: true, title: 'late' },
+            }
+        })
+
+        const refresh = refreshSessionDetailPreservingActive(
+            queryClient,
+            resolvedSessionId,
+            fetchDetail,
+        )
+        queryClient.setQueryData(queryKeys.session(resolvedSessionId), {
+            session: { id: resolvedSessionId, active: false, title: 'sse-inactive' },
+        })
+        release()
+        await refresh
 
         expect(queryClient.getQueryData(queryKeys.session(resolvedSessionId))).toEqual({
-            session: { id: resolvedSessionId, active: true, title: 'stale' },
+            session: { id: resolvedSessionId, active: false, title: 'sse-inactive' },
         })
-    })
-
-    it('is a no-op when the detail cache is empty', () => {
-        const queryClient = new QueryClient({
-            defaultOptions: { queries: { retry: false } },
-        })
-        const spy = vi.spyOn(queryClient, 'setQueryData')
-        reapplyOptimisticSessionActive(queryClient, 'missing')
-        const updater = spy.mock.calls[0]?.[1] as ((previous: unknown) => unknown) | undefined
-        expect(updater?.(undefined)).toBeUndefined()
     })
 })
