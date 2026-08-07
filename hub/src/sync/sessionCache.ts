@@ -1204,11 +1204,19 @@ export class SessionCache {
                 throw new Error('Session not found for merge')
             }
             const latestMode = latest.globalPinned ? 'global' : latest.pinned ? 'project' : 'none'
-            if (latestMode !== latestSourceMode) {
-                const updated = this.store.sessions.setSessionPinMode(newSessionId, latestSourceMode, namespace)
+            // Prefer the stronger pin: global > project > none. Never downgrade a
+            // concurrently (or already) global-pinned target to project-only.
+            const desiredMode =
+                latestSourceMode === 'global' || latestMode === 'global'
+                    ? 'global' as const
+                    : latestSourceMode === 'project' || latestMode === 'project'
+                        ? 'project' as const
+                        : 'none' as const
+            if (desiredMode !== latestMode) {
+                const updated = this.store.sessions.setSessionPinMode(newSessionId, desiredMode, namespace)
                 const now = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
                 const nowMode = now?.globalPinned ? 'global' : now?.pinned ? 'project' : 'none'
-                if (!updated && nowMode !== latestSourceMode) {
+                if (!updated && nowMode !== desiredMode) {
                     throw new Error('Failed to preserve session pin during merge')
                 }
             }
