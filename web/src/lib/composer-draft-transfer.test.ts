@@ -676,6 +676,38 @@ describe('persistInactiveComposerAttachments', () => {
         expect(mocks.clearDraft).not.toHaveBeenCalledWith('old-pending')
     })
 
+    it('repeats the corrective target write until late edits stabilize', async () => {
+        const kept = new File(['kept'], 'kept.txt')
+        setComposerDraftSnapshot('old-pending', 'before', [{ id: 'kept-1', file: kept }])
+        let releaseCorrective!: () => void
+        const correctiveGate = new Promise<void>((resolve) => {
+            releaseCorrective = resolve
+        })
+        let correctiveCalls = 0
+        mocks.moveDraftAttachments.mockImplementation(async (source, target, resolveAttachments) => {
+            if (source === target) {
+                correctiveCalls += 1
+                if (correctiveCalls === 1) {
+                    await correctiveGate
+                }
+                return resolveAttachments()
+            }
+            return resolveAttachments()
+        })
+
+        const transfer = transferComposerDraft('old-pending', 'new-pending')
+        await Promise.resolve()
+        await persistInactiveComposerAttachments('old-pending', 'mid', [{ id: 'kept-1', file: kept }])
+        // First corrective is blocked; a later text edit must force another pass.
+        updateComposerDraftTextSnapshot('old-pending', 'final typed')
+        releaseCorrective()
+        await transfer
+
+        expect(correctiveCalls).toBeGreaterThanOrEqual(2)
+        expect(mocks.saveDraft).toHaveBeenCalledWith('new-pending', 'final typed')
+        expect(composerDraftWasHandedOff('old-pending')).toBe(true)
+    })
+
     it('buffers a persist that races the first transfer await onto the target', async () => {
         const kept = new File(['kept'], 'kept.txt')
         const removed = new File(['gone'], 'gone.txt')

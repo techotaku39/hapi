@@ -200,4 +200,54 @@ describe('attachmentAdapter image previews', () => {
         expect(handoff.isCancelled()).toBe(true)
         expect(uploadFile).not.toHaveBeenCalled()
     })
+
+    it('shares one resume promise across staggered inactive attachment generators', async () => {
+        const { createAttachmentAdapter } = await import('./attachmentAdapter')
+        const file1 = new File(['one'], 'one.txt', { type: 'text/plain' })
+        const file2 = new File(['two'], 'two.txt', { type: 'text/plain' })
+        const uploadFile = vi.fn()
+        let resolveResume!: (sessionId: string) => void
+        let resumeCalls = 0
+        let uploadResolution: Promise<string> | undefined
+        const resolveSessionId = vi.fn(() => {
+            resumeCalls += 1
+            return new Promise<string>((resolve) => {
+                resolveResume = resolve
+            })
+        })
+        const resolveUploadSession = () => {
+            uploadResolution ??= resolveSessionId().catch((error) => {
+                uploadResolution = undefined
+                throw error
+            })
+            return uploadResolution
+        }
+        const onSessionResolved = vi.fn().mockResolvedValue(undefined)
+        const adapter = createAttachmentAdapter(
+            { uploadFile } as never,
+            'session-inactive',
+            resolveUploadSession,
+            onSessionResolved,
+        )
+
+        const first = (async () => {
+            for await (const _ of adapter.add({ file: file1 }) as AsyncIterable<unknown>) {
+                // consume
+            }
+        })()
+        const second = (async () => {
+            for await (const _ of adapter.add({ file: file2 }) as AsyncIterable<unknown>) {
+                // consume
+            }
+        })()
+
+        await vi.waitFor(() => {
+            expect(resumeCalls).toBe(1)
+        })
+        resolveResume('session-resumed')
+        await Promise.all([first, second])
+        expect(resumeCalls).toBe(1)
+        expect(onSessionResolved).toHaveBeenCalled()
+        expect(uploadFile).not.toHaveBeenCalled()
+    })
 })

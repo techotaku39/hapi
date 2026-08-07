@@ -1620,10 +1620,22 @@ function SessionChatInner(props: SessionChatProps) {
         if (!inactiveCanResume || !props.resolveSessionIdForUpload) {
             return undefined
         }
+        // Keep one resume promise for every generator created by this adapter
+        // instance. Preview generation can outlive navigation; a remount clears
+        // the router cache, so a second file must reuse this closure's promise
+        // instead of starting a fresh resume against the retired source id.
+        let uploadResolution: Promise<string> | undefined
+        const resolveUploadSession = () => {
+            uploadResolution ??= props.resolveSessionIdForUpload!(props.session.id).catch((error) => {
+                uploadResolution = undefined
+                throw error
+            })
+            return uploadResolution
+        }
         return createAttachmentAdapter(
             props.api,
             props.session.id,
-            () => props.resolveSessionIdForUpload!(props.session.id),
+            resolveUploadSession,
             async (resolvedSessionId, pending) => {
                 // Include the in-flight file and coalesce multi-file drops into
                 // one transfer + navigation before the source composer unmounts.

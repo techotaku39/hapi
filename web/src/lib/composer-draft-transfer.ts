@@ -66,6 +66,16 @@ export function updateComposerDraftTextSnapshot(sessionId: string, text: string)
     if (existing) {
         liveSnapshots.set(sessionId, { ...existing, text })
     }
+    // Keep in-flight transfer latest text in sync with keystrokes during a move.
+    const pending = pendingTransfers.get(sessionId)
+    if (pending?.latest) {
+        pending.latest = { ...pending.latest, text }
+    } else if (pending) {
+        pending.latest = {
+            text,
+            attachments: existing ? [...existing.attachments] : [],
+        }
+    }
 }
 
 /** Stable membership/metadata key for attachment-only persist effects. */
@@ -330,22 +340,22 @@ export async function transferComposerDraft(
                     targetSessionId,
                     buildTransferredAttachments,
                 )
-                // Keystrokes / attachment edits during the IDB drain keep updating
-                // the source live snapshot or pendingTransfers.latest; re-read
-                // before retiring it so the target does not get a stale snapshot.
-                const pendingLatest = pendingTransfers.get(sourceSessionId)?.latest
-                transferredText = pendingLatest?.text
-                    ?? liveSnapshots.get(sourceSessionId)?.text
-                    ?? getDraft(sourceSessionId)
-                // Re-resolve and await a durable target write so a late edit is
-                // committed before the source row is retired.
-                if (pendingLatest) {
+                // Repeat corrective target writes until pending.latest is stable
+                // across the await — text/attachment edits during the write must
+                // not be retired with a stale revision.
+                for (;;) {
+                    const latest = pendingTransfers.get(sourceSessionId)?.latest
+                    transferredText = latest?.text
+                        ?? liveSnapshots.get(sourceSessionId)?.text
+                        ?? getDraft(sourceSessionId)
+                    if (!latest) break
                     attachments = buildTransferredAttachments()
                     await moveDraftAttachments(
                         targetSessionId,
                         targetSessionId,
                         () => attachments,
                     )
+                    if (pendingTransfers.get(sourceSessionId)?.latest === latest) break
                 }
                 saveDraft(targetSessionId, transferredText)
                 clearDraft(sourceSessionId)
