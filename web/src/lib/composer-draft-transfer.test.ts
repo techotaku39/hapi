@@ -630,10 +630,76 @@ describe('persistInactiveComposerAttachments', () => {
         await transfer
 
         expect(mocks.saveDraftAttachments.mock.calls.filter((call) => call[0] === 'old-pending')).toEqual([])
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-pending', [
-            expect.objectContaining({ id: 'kept-1', file: kept }),
-        ])
+        // Late edit triggers an awaited same-target corrective move, not a fire-and-forget save.
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith(
+            'new-pending',
+            'new-pending',
+            expect.any(Function),
+        )
+        const corrective = mocks.moveDraftAttachments.mock.calls.find(
+            (call) => call[0] === 'new-pending' && call[1] === 'new-pending',
+        )?.[2] as (() => Array<{ id: string }>) | undefined
+        expect(corrective?.().map((item) => item.id)).toEqual(['kept-1'])
         expect(composerDraftWasHandedOff('old-pending')).toBe(true)
         expect(mocks.clearDraft).toHaveBeenCalledWith('old-pending')
+    })
+
+    it('buffers a persist that races the first transfer await onto the target', async () => {
+        const kept = new File(['kept'], 'kept.txt')
+        const removed = new File(['gone'], 'gone.txt')
+        setComposerDraftSnapshot('old-pending', 'typed', [
+            { id: 'kept-1', file: kept },
+            { id: 'gone-1', file: removed },
+        ])
+        let releasePersistFlush!: () => void
+        const persistFlushGate = new Promise<void>((resolve) => {
+            releasePersistFlush = resolve
+        })
+        // Make awaitInactivePersist wait so the barrier is installed first.
+        mocks.getDraftAttachments.mockImplementation(async () => {
+            await persistFlushGate
+            return []
+        })
+        // Start a no-op queued persist so awaitInactivePersist has work.
+        const flushPersist = persistInactiveComposerAttachments('old-pending', 'typed', [
+            { id: 'kept-1', file: kept },
+            { id: 'gone-1', file: removed },
+        ])
+
+        const transfer = transferComposerDraft('old-pending', 'new-pending')
+        await Promise.resolve()
+        // Barrier is up; this edit must land on pending.latest, not IndexedDB source.
+        await persistInactiveComposerAttachments('old-pending', 'typed', [{ id: 'kept-1', file: kept }])
+        releasePersistFlush()
+        await flushPersist
+        await transfer
+
+        expect(mocks.saveDraftAttachments.mock.calls.filter((call) => call[0] === 'old-pending')).toEqual([])
+        expectMovedAttachments('old-pending', 'new-pending', [
+            expect.objectContaining({ id: 'kept-1', file: kept }),
+        ])
+    })
+
+    it('does not treat remounted empty visible state as removal of stored failed picks', async () => {
+        const { resetInactiveComposerAttachmentVisibility } = await import('./composer-draft-transfer')
+        const storedA = new File(['a'], 'a.txt')
+        const pickedB = new File(['b'], 'b.txt')
+        mocks.getDraftAttachments.mockResolvedValue([storedA, pickedB])
+        mocks.getRestoredUploadMetadata.mockImplementation((file: File) => {
+            if (file === storedA) return { id: 'stored-a' }
+            if (file === pickedB) return { id: 'picked-b' }
+            return undefined
+        })
+
+        await persistInactiveComposerAttachments('session-inactive', 'typed', [{
+            id: 'picked-b',
+            file: pickedB,
+        }])
+        // Remount inactive: visibility tracking resets before the empty hydrate persist.
+        resetInactiveComposerAttachmentVisibility('session-inactive')
+        mocks.saveDraftAttachments.mockClear()
+        await persistInactiveComposerAttachments('session-inactive', 'typed', [])
+
+        expect(mocks.saveDraftAttachments).not.toHaveBeenCalled()
     })
 })

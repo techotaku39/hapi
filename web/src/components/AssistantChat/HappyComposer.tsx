@@ -40,7 +40,7 @@ import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
-import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision } from '@/lib/composer-draft-transfer'
+import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -636,6 +636,15 @@ export function HappyComposer(props: {
         (text) => api.composer().setText(text),
         (file) => api.composer().addAttachment(file),
     )
+
+    useEffect(() => {
+        if (!sessionId) return
+        const canHydrateAttachments = props.canRestoreAttachments ?? active
+        if (canHydrateAttachments) return
+        // A remount starts with an empty visible list by design; do not treat
+        // previously persisted failed-resume picks as operator removals.
+        resetInactiveComposerAttachmentVisibility(sessionId)
+    }, [active, props.canRestoreAttachments, sessionId])
 
     useEffect(() => {
         if (draftHydration.sessionId !== sessionId || !draftHydration.complete || !sessionId) return

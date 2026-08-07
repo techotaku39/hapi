@@ -13,6 +13,7 @@ import {
     attachmentDraftRevision,
     clearComposerDraftSnapshot,
     persistInactiveComposerAttachments,
+    resetInactiveComposerAttachmentVisibility,
     setComposerDraftSnapshot,
     transferComposerDraft,
     updateComposerDraftTextSnapshot,
@@ -38,6 +39,12 @@ function DraftLifecycleComposer(props: {
     latestTextRef.current = composerText
     const attachmentDraftsRef = useRef(attachmentDrafts)
     attachmentDraftsRef.current = attachmentDrafts
+
+    useEffect(() => {
+        if (canRestoreAttachments) return
+        resetInactiveComposerAttachmentVisibility(props.sessionId)
+    }, [canRestoreAttachments, props.sessionId])
+
     const draftHydration = useComposerDraft(
         props.sessionId,
         composerText,
