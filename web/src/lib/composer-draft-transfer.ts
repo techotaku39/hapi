@@ -211,44 +211,52 @@ export async function transferComposerDraft(
         baseAttachments = await loadPersistedAttachments(sourceSessionId)
     }
 
-    // Sample cancellation immediately before writing so a remove() during an
-    // awaited handoff still drops the file (including one already in the
-    // source snapshot from an earlier inactive persist).
-    const cancelledIds = new Set<string>()
-    for (const item of pendingAttachments) {
-        if (item.isCancelled?.()) cancelledIds.add(item.id)
+    const buildTransferredAttachments = (): AttachmentDraftInput[] => {
+        // Sample cancellation at write time (after any awaited IDB drain inside
+        // moveDraftAttachments) so a remove() during the wait still drops the file.
+        const cancelledIds = new Set<string>()
+        for (const item of pendingAttachments) {
+            if (item.isCancelled?.()) cancelledIds.add(item.id)
+        }
+
+        // Cross-session reopen cannot reuse source-authorized upload paths.
+        // Same-target staggered appends must keep path/uploadSessionId already
+        // written by earlier uploads on that resumed composer.
+        const normalizedBase = (
+            sourceSessionId === targetSessionId
+                ? baseAttachments
+                : baseAttachments.map(stripSessionScopedUploadFields)
+        ).filter((item) => !cancelledIds.has(item.id))
+        const normalizedPending = pendingAttachments
+            .filter((item) => !cancelledIds.has(item.id))
+            .map((attachment) => ({
+                id: attachment.id,
+                file: attachment.file,
+                previewUrl: attachment.previewUrl,
+                path: undefined,
+                uploadSessionId: undefined,
+            }))
+        return mergeAttachmentsById(normalizedBase, normalizedPending)
     }
 
-    // Cross-session reopen cannot reuse source-authorized upload paths.
-    // Same-target staggered appends must keep path/uploadSessionId already
-    // written by earlier uploads on that resumed composer.
-    const normalizedBase = (
-        sourceSessionId === targetSessionId
-            ? baseAttachments
-            : baseAttachments.map(stripSessionScopedUploadFields)
-    ).filter((item) => !cancelledIds.has(item.id))
-    const normalizedPending = pendingAttachments
-        .filter((item) => !cancelledIds.has(item.id))
-        .map((attachment) => ({
-            id: attachment.id,
-            file: attachment.file,
-            previewUrl: attachment.previewUrl,
-            path: undefined,
-            uploadSessionId: undefined,
-        }))
-    const attachments = mergeAttachmentsById(normalizedBase, normalizedPending)
-
     saveDraft(targetSessionId, text)
+    let attachments: AttachmentDraftInput[]
     if (sourceSessionId !== targetSessionId) {
         // Durable move: await target put + source delete before navigation so a
         // reload cannot lose the draft, and tombstone the source so unmount
-        // cleanup cannot recreate it under the obsolete id.
-        await moveDraftAttachments(sourceSessionId, targetSessionId, attachments)
+        // cleanup cannot recreate it under the obsolete id. Failed moves throw
+        // without clearing the source or recording a handoff.
+        attachments = await moveDraftAttachments(
+            sourceSessionId,
+            targetSessionId,
+            buildTransferredAttachments,
+        )
         clearDraft(sourceSessionId)
         completedHandoffs.set(sourceSessionId, targetSessionId)
         liveSnapshots.delete(sourceSessionId)
         inactiveVisibleIds.delete(sourceSessionId)
     } else {
+        attachments = buildTransferredAttachments()
         saveDraftAttachments(targetSessionId, attachments)
     }
     setComposerDraftSnapshot(targetSessionId, text, attachments)

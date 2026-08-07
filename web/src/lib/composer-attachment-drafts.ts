@@ -201,28 +201,58 @@ export function saveDraftAttachments(sessionId: string, attachments: AttachmentD
 
 /**
  * Atomically put the target draft and delete the source in one IndexedDB
- * transaction (after draining any queued writes). Cache is updated first so
- * a concurrent read cannot resurrect the source while the commit is in flight.
+ * transaction (after draining any queued writes). `resolveAttachments` runs
+ * only after that drain so a mid-wait remove() is still honored.
  */
 export async function moveDraftAttachments(
     sourceSessionId: string,
     targetSessionId: string,
-    attachments: AttachmentDraftInput[],
-): Promise<void> {
+    resolveAttachments: () => AttachmentDraftInput[],
+): Promise<AttachmentDraftInput[]> {
     if (sourceSessionId === targetSessionId) {
+        const attachments = resolveAttachments()
         saveDraftAttachments(targetSessionId, attachments)
         await awaitPendingWrites(targetSessionId)
-        return
+        return attachments
     }
 
     await awaitPendingWrites(sourceSessionId, targetSessionId)
 
+    // Re-sample after the drain — cancellation during awaitPendingWrites must win.
+    const attachments = resolveAttachments()
     const storedFiles = attachments.map(toStoredFile)
     const copies = storedFiles.map(toFile)
+
+    const previousSource = cache.has(sourceSessionId)
+        ? (cache.get(sourceSessionId) ?? []).map(copyFile)
+        : null
+    const previousTarget = cache.has(targetSessionId)
+        ? (cache.get(targetSessionId) ?? []).map(copyFile)
+        : null
+
     setCachedFiles(targetSessionId, copies)
     // Tombstone the source immediately so unmount cleanup / remount cannot
-    // re-read and re-persist the obsolete session id.
+    // re-read and re-persist the obsolete session id while the commit runs.
     setCachedFiles(sourceSessionId, [])
+
+    // Environments without IndexedDB (tests / SSR) stay memory-only, matching
+    // saveDraftAttachments. Real IDB open/transaction failures must not look durable.
+    if (typeof indexedDB === 'undefined') {
+        return attachments
+    }
+
+    const restoreCaches = () => {
+        if (previousSource === null) {
+            cache.delete(sourceSessionId)
+        } else {
+            setCachedFiles(sourceSessionId, previousSource)
+        }
+        if (previousTarget === null) {
+            cache.delete(targetSessionId)
+        } else {
+            setCachedFiles(targetSessionId, previousTarget)
+        }
+    }
 
     try {
         const db = await openDb()
@@ -257,8 +287,10 @@ export async function moveDraftAttachments(
             }
             transaction.onabort = transaction.onerror
         })
-    } catch {
-        // IndexedDB unavailable: cache tombstones still prevent source resurrection.
+        return attachments
+    } catch (error) {
+        restoreCaches()
+        throw error instanceof Error ? error : new Error('Composer draft move failed')
     }
 }
 
