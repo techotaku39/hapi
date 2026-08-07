@@ -187,6 +187,97 @@ describe('composer-attachment-drafts', () => {
         expect(await mod.getDraftAttachments('session-source')).toEqual([])
     })
 
+    it('does not prune an unrelated draft when moving at the retention cap', async () => {
+        const store = new Map<string, { sessionId: string; updatedAt: number; files: unknown[] }>()
+        const fakeDb = {
+            transaction(_name: string, _mode: string) {
+                let pendingCallbacks = 0
+                const finishLater = (cb: () => void) => {
+                    pendingCallbacks += 1
+                    queueMicrotask(() => {
+                        cb()
+                        pendingCallbacks -= 1
+                        if (pendingCallbacks === 0) transaction.oncomplete?.({})
+                    })
+                }
+                const objectStore = () => ({
+                    put: (record: { sessionId: string; updatedAt: number; files: unknown[] }) => {
+                        store.set(record.sessionId, record)
+                    },
+                    delete: (sessionId: string) => {
+                        store.delete(sessionId)
+                    },
+                    getAll: () => {
+                        const request: { onsuccess: ((ev: unknown) => void) | null; result?: unknown[] } = {
+                            onsuccess: null,
+                        }
+                        finishLater(() => {
+                            request.result = [...store.values()]
+                            request.onsuccess?.({})
+                        })
+                        return request
+                    },
+                })
+                const transaction = {
+                    objectStore,
+                    oncomplete: null as ((ev: unknown) => void) | null,
+                    onerror: null as ((ev: unknown) => void) | null,
+                    onabort: null as ((ev: unknown) => void) | null,
+                }
+                queueMicrotask(() => {
+                    if (pendingCallbacks === 0) transaction.oncomplete?.({})
+                })
+                return transaction
+            },
+            close() {},
+        }
+        vi.stubGlobal('indexedDB', {
+            open: () => {
+                const request: {
+                    result: typeof fakeDb
+                    onsuccess: ((ev: unknown) => void) | null
+                    onerror: ((ev: unknown) => void) | null
+                    onupgradeneeded: ((ev: unknown) => void) | null
+                } = {
+                    result: fakeDb,
+                    onsuccess: null,
+                    onerror: null,
+                    onupgradeneeded: null,
+                }
+                queueMicrotask(() => request.onsuccess?.({}))
+                return request
+            },
+        })
+        vi.resetModules()
+        const mod = await import('./composer-attachment-drafts')
+
+        // Fill the retention cap with 49 unrelated drafts + the source (50 total).
+        // Source is mid-range by updatedAt so it is not the oldest entry.
+        for (let i = 0; i < 49; i++) {
+            store.set(`keep-${i}`, {
+                sessionId: `keep-${i}`,
+                updatedAt: i + 1,
+                files: [],
+            })
+        }
+        const file = new File(['payload'], 'notes.txt')
+        mod.saveDraftAttachments('session-source', [{ id: 'a1', file }])
+        store.set('session-source', {
+            sessionId: 'session-source',
+            updatedAt: 25,
+            files: [{ id: 'a1', name: 'notes.txt', type: '', lastModified: 0, blob: file }],
+        })
+        expect(store.size).toBe(50)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        await mod.moveDraftAttachments('session-source', 'session-target', () => [{ id: 'a1', file }])
+
+        expect(store.has('session-target')).toBe(true)
+        expect(store.has('session-source')).toBe(false)
+        expect(store.has('keep-0')).toBe(true)
+        expect(store.size).toBe(50)
+    })
+
     it('rolls cache back and throws when the IndexedDB move transaction fails', async () => {
         vi.stubGlobal('indexedDB', {
             open: () => {

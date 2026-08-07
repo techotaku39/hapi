@@ -259,6 +259,9 @@ export async function moveDraftAttachments(
         await new Promise<void>((resolve, reject) => {
             const transaction = db.transaction(STORE, 'readwrite')
             const store = transaction.objectStore(STORE)
+            // Delete the source before put/prune so a full 50-draft store does not
+            // briefly look like 51 rows and evict an unrelated session.
+            store.delete(sourceSessionId)
             if (attachments.length === 0) {
                 store.delete(targetSessionId)
             } else {
@@ -272,11 +275,11 @@ export async function moveDraftAttachments(
                     const drafts = (allRequest.result as StoredAttachmentDraft[])
                         .sort((a, b) => b.updatedAt - a.updatedAt)
                     for (const stale of drafts.slice(MAX_DRAFTS)) {
+                        if (stale.sessionId === targetSessionId) continue
                         store.delete(stale.sessionId)
                     }
                 }
             }
-            store.delete(sourceSessionId)
             transaction.oncomplete = () => {
                 db.close()
                 resolve()

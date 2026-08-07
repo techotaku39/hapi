@@ -34,6 +34,12 @@ const completedHandoffs = new Map<string, string>()
 const inactiveVisibleIds = new Map<string, Set<string>>()
 /** Serialize read/merge/write so unmount + effect cannot race, and reopen can await the latest. */
 const inactivePersistQueue = new Map<string, Promise<AttachmentDraftInput[]>>()
+/** In-flight cross-session transfers: inactive persist must not recreate the source row. */
+type PendingTransfer = {
+    targetSessionId: string
+    latest?: { text: string; attachments: AttachmentDraftInput[] }
+}
+const pendingTransfers = new Map<string, PendingTransfer>()
 
 export function setComposerDraftSnapshot(
     sessionId: string,
@@ -74,6 +80,7 @@ export function clearComposerDraftSnapshot(sessionId: string): void {
     // Keep completedHandoffs: a handed-off source must stay tombstoned so
     // unmount cleanup cannot recreate the obsolete draft.
     inactiveVisibleIds.delete(sessionId)
+    pendingTransfers.delete(sessionId)
 }
 
 /** True after a cross-session transfer retired this source id. */
@@ -127,6 +134,10 @@ async function persistInactiveComposerAttachmentsNow(
     text: string,
     visibleAttachments: readonly AttachmentDraftInput[],
 ): Promise<AttachmentDraftInput[]> {
+    // A queued persist may settle after the source was already moved.
+    if (composerDraftWasHandedOff(sessionId) || pendingTransfers.has(sessionId)) {
+        return [...visibleAttachments]
+    }
     saveDraft(sessionId, text)
     const previousVisibleIds = inactiveVisibleIds.get(sessionId) ?? new Set<string>()
     const stored = await loadPersistedAttachments(sessionId)
@@ -139,7 +150,8 @@ async function persistInactiveComposerAttachmentsNow(
     if (visibleAttachments.length === 0) {
         // Inactive composers must not publish a live snapshot of hidden files.
         liveSnapshots.delete(sessionId)
-        completedHandoffs.delete(sessionId)
+        // Do not clear completedHandoffs here — that tombstone must survive
+        // empty inactive remounts after a cross-session move.
         if (previousVisibleIds.size > 0) {
             saveDraftAttachments(sessionId, retained)
         }
@@ -165,6 +177,20 @@ export async function persistInactiveComposerAttachments(
     // Source session was already moved to a resumed id — do not recreate it.
     if (composerDraftWasHandedOff(sessionId)) {
         return []
+    }
+    // Transfer in flight: record the latest visible state for the target, and
+    // never write IndexedDB under the retiring source id.
+    const pending = pendingTransfers.get(sessionId)
+    if (pending) {
+        const attachments = [...visibleAttachments]
+        pending.latest = { text, attachments }
+        saveDraft(sessionId, text)
+        const existing = liveSnapshots.get(sessionId)
+        if (existing || attachments.length > 0) {
+            liveSnapshots.set(sessionId, { text, attachments })
+        }
+        inactiveVisibleIds.set(sessionId, new Set(attachments.map((item) => item.id)))
+        return attachments
     }
     const previous = inactivePersistQueue.get(sessionId) ?? Promise.resolve([] as AttachmentDraftInput[])
     const next = previous
@@ -219,13 +245,20 @@ export async function transferComposerDraft(
             if (item.isCancelled?.()) cancelledIds.add(item.id)
         }
 
+        // Prefer edits recorded while the move was in flight over the snapshot
+        // captured at transfer start.
+        const pendingLatest = pendingTransfers.get(sourceSessionId)?.latest
+        const currentBase = pendingLatest?.attachments
+            ?? liveSnapshots.get(sourceSessionId)?.attachments
+            ?? baseAttachments
+
         // Cross-session reopen cannot reuse source-authorized upload paths.
         // Same-target staggered appends must keep path/uploadSessionId already
         // written by earlier uploads on that resumed composer.
         const normalizedBase = (
             sourceSessionId === targetSessionId
-                ? baseAttachments
-                : baseAttachments.map(stripSessionScopedUploadFields)
+                ? currentBase
+                : currentBase.map(stripSessionScopedUploadFields)
         ).filter((item) => !cancelledIds.has(item.id))
         const normalizedPending = pendingAttachments
             .filter((item) => !cancelledIds.has(item.id))
@@ -242,6 +275,7 @@ export async function transferComposerDraft(
     let attachments: AttachmentDraftInput[]
     let transferredText = text
     if (sourceSessionId !== targetSessionId) {
+        pendingTransfers.set(sourceSessionId, { targetSessionId })
         // Durable move: await target put + source delete before navigation so a
         // reload cannot lose the draft, and tombstone the source so unmount
         // cleanup cannot recreate it under the obsolete id.
@@ -251,9 +285,19 @@ export async function transferComposerDraft(
                 targetSessionId,
                 buildTransferredAttachments,
             )
-            // Keystrokes during the IDB drain keep updating the source; re-read
+            // Keystrokes / attachment edits during the IDB drain keep updating
+            // the source live snapshot or pendingTransfers.latest; re-read
             // before retiring it so the target does not get a stale snapshot.
-            transferredText = liveSnapshots.get(sourceSessionId)?.text ?? getDraft(sourceSessionId)
+            const pendingLatest = pendingTransfers.get(sourceSessionId)?.latest
+            transferredText = pendingLatest?.text
+                ?? liveSnapshots.get(sourceSessionId)?.text
+                ?? getDraft(sourceSessionId)
+            // Re-resolve after the move so a late persist.latest wins even when
+            // resolveAttachments already ran inside moveDraftAttachments.
+            if (pendingLatest) {
+                attachments = buildTransferredAttachments()
+                saveDraftAttachments(targetSessionId, attachments)
+            }
             saveDraft(targetSessionId, transferredText)
             clearDraft(sourceSessionId)
             completedHandoffs.set(sourceSessionId, targetSessionId)
@@ -263,12 +307,17 @@ export async function transferComposerDraft(
             // Hub resume already succeeded; keep navigating. Copy text + in-memory
             // attachments to the target without claiming a durable handoff so the
             // source IndexedDB row remains if the operator reloads the old id.
-            transferredText = liveSnapshots.get(sourceSessionId)?.text ?? getDraft(sourceSessionId)
+            const pendingLatest = pendingTransfers.get(sourceSessionId)?.latest
+            transferredText = pendingLatest?.text
+                ?? liveSnapshots.get(sourceSessionId)?.text
+                ?? getDraft(sourceSessionId)
             attachments = buildTransferredAttachments()
             saveDraft(targetSessionId, transferredText)
             saveDraftAttachments(targetSessionId, attachments)
             setComposerDraftSnapshot(targetSessionId, transferredText, attachments)
             throw error
+        } finally {
+            pendingTransfers.delete(sourceSessionId)
         }
     } else {
         attachments = buildTransferredAttachments()

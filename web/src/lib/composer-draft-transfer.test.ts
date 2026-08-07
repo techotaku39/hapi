@@ -606,4 +606,34 @@ describe('persistInactiveComposerAttachments', () => {
             expect.objectContaining({ id: 'picked-b' }),
         ]))
     })
+
+    it('routes attachment edits during an in-flight move to the target without recreating the source', async () => {
+        const kept = new File(['kept'], 'kept.txt')
+        const removed = new File(['gone'], 'gone.txt')
+        setComposerDraftSnapshot('old-pending', 'typed', [
+            { id: 'kept-1', file: kept },
+            { id: 'gone-1', file: removed },
+        ])
+        let releaseMove!: () => void
+        const moveGate = new Promise<void>((resolve) => {
+            releaseMove = resolve
+        })
+        mocks.moveDraftAttachments.mockImplementation(async (_source, _target, resolveAttachments) => {
+            await moveGate
+            return resolveAttachments()
+        })
+
+        const transfer = transferComposerDraft('old-pending', 'new-pending')
+        await Promise.resolve()
+        await persistInactiveComposerAttachments('old-pending', 'typed', [{ id: 'kept-1', file: kept }])
+        releaseMove()
+        await transfer
+
+        expect(mocks.saveDraftAttachments.mock.calls.filter((call) => call[0] === 'old-pending')).toEqual([])
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-pending', [
+            expect.objectContaining({ id: 'kept-1', file: kept }),
+        ])
+        expect(composerDraftWasHandedOff('old-pending')).toBe(true)
+        expect(mocks.clearDraft).toHaveBeenCalledWith('old-pending')
+    })
 })
