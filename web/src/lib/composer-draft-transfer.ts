@@ -37,9 +37,20 @@ const inactivePersistQueue = new Map<string, Promise<AttachmentDraftInput[]>>()
 /** In-flight cross-session transfers: inactive persist must not recreate the source row. */
 type PendingTransfer = {
     targetSessionId: string
+    /** Attachment-aware revision recorded during the move (never invent empty from keystrokes). */
     latest?: { text: string; attachments: AttachmentDraftInput[] }
+    /** Text-only keystrokes while inactive (no live attachment snapshot). */
+    latestText?: string
 }
 const pendingTransfers = new Map<string, PendingTransfer>()
+
+function samplePendingTransferText(sessionId: string, fallback: string): string {
+    const pending = pendingTransfers.get(sessionId)
+    return pending?.latest?.text
+        ?? pending?.latestText
+        ?? liveSnapshots.get(sessionId)?.text
+        ?? fallback
+}
 
 export function setComposerDraftSnapshot(
     sessionId: string,
@@ -66,15 +77,13 @@ export function updateComposerDraftTextSnapshot(sessionId: string, text: string)
     if (existing) {
         liveSnapshots.set(sessionId, { ...existing, text })
     }
-    // Keep in-flight transfer latest text in sync with keystrokes during a move.
+    // Keep in-flight transfer text in sync without inventing attachments: [] —
+    // inactive composers withhold hidden stored files from liveSnapshots.
     const pending = pendingTransfers.get(sessionId)
-    if (pending?.latest) {
+    if (!pending) return
+    pending.latestText = text
+    if (pending.latest) {
         pending.latest = { ...pending.latest, text }
-    } else if (pending) {
-        pending.latest = {
-            text,
-            attachments: existing ? [...existing.attachments] : [],
-        }
     }
 }
 
@@ -230,13 +239,25 @@ export async function persistInactiveComposerAttachments(
     // never write IndexedDB under the retiring source id.
     const pending = pendingTransfers.get(sessionId)
     if (pending) {
+        pending.latestText = text
+        saveDraft(sessionId, text)
+        // Empty visible during transfer is common (hidden stored files). Do not
+        // invent pending.latest with attachments: [] — that would erase IDB.
+        if (visibleAttachments.length === 0) {
+            if (pending.latest) {
+                pending.latest = { ...pending.latest, text }
+                return [...pending.latest.attachments]
+            }
+            const existing = liveSnapshots.get(sessionId)
+            if (existing) {
+                liveSnapshots.set(sessionId, { ...existing, text })
+                return [...existing.attachments]
+            }
+            return []
+        }
         const attachments = [...visibleAttachments]
         pending.latest = { text, attachments }
-        saveDraft(sessionId, text)
-        const existing = liveSnapshots.get(sessionId)
-        if (existing || attachments.length > 0) {
-            liveSnapshots.set(sessionId, { text, attachments })
-        }
+        liveSnapshots.set(sessionId, { text, attachments })
         inactiveVisibleIds.set(sessionId, new Set(attachments.map((item) => item.id)))
         return attachments
     }
@@ -344,10 +365,13 @@ export async function transferComposerDraft(
                 // across the await — text/attachment edits during the write must
                 // not be retired with a stale revision.
                 for (;;) {
-                    const latest = pendingTransfers.get(sourceSessionId)?.latest
-                    transferredText = latest?.text
-                        ?? liveSnapshots.get(sourceSessionId)?.text
-                        ?? getDraft(sourceSessionId)
+                    const pendingState = pendingTransfers.get(sourceSessionId)
+                    const latest = pendingState?.latest
+                    const textMarker = pendingState?.latestText
+                    transferredText = samplePendingTransferText(
+                        sourceSessionId,
+                        getDraft(sourceSessionId),
+                    )
                     if (!latest) break
                     attachments = buildTransferredAttachments()
                     await moveDraftAttachments(
@@ -355,8 +379,13 @@ export async function transferComposerDraft(
                         targetSessionId,
                         () => attachments,
                     )
-                    if (pendingTransfers.get(sourceSessionId)?.latest === latest) break
+                    const after = pendingTransfers.get(sourceSessionId)
+                    if (after?.latest === latest && after?.latestText === textMarker) break
                 }
+                transferredText = samplePendingTransferText(
+                    sourceSessionId,
+                    getDraft(sourceSessionId),
+                )
                 saveDraft(targetSessionId, transferredText)
                 clearDraft(sourceSessionId)
                 completedHandoffs.set(sourceSessionId, targetSessionId)
@@ -366,10 +395,10 @@ export async function transferComposerDraft(
                 // Hub resume already succeeded; keep navigating. Copy text + in-memory
                 // attachments to the target without claiming a durable handoff so the
                 // source IndexedDB row remains if the operator reloads the old id.
-                const pendingLatest = pendingTransfers.get(sourceSessionId)?.latest
-                transferredText = pendingLatest?.text
-                    ?? liveSnapshots.get(sourceSessionId)?.text
-                    ?? getDraft(sourceSessionId)
+                transferredText = samplePendingTransferText(
+                    sourceSessionId,
+                    getDraft(sourceSessionId),
+                )
                 attachments = buildTransferredAttachments()
                 saveDraft(targetSessionId, transferredText)
                 saveDraftAttachments(targetSessionId, attachments)

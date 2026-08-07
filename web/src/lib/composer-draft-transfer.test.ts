@@ -407,6 +407,44 @@ describe('handoffComposerDraft', () => {
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
 
+    it('keeps IndexedDB-only attachments when typing during a blocked move', async () => {
+        const stored = new File(['kept'], 'kept.txt')
+        mocks.getDraft.mockReturnValue('before')
+        mocks.getDraftAttachments.mockResolvedValue([stored])
+        mocks.getRestoredUploadMetadata.mockReturnValue({ id: 'stored-1' })
+        let releaseDrain!: () => void
+        const drainGate = new Promise<void>((resolve) => {
+            releaseDrain = resolve
+        })
+        let movedDuringDrain: Array<{ id: string; file: File }> | undefined
+        mocks.moveDraftAttachments.mockImplementation(async (
+            source: string,
+            target: string,
+            resolveAttachments: () => Array<{ id: string; file: File }>,
+        ) => {
+            if (source === target) {
+                return resolveAttachments()
+            }
+            await drainGate
+            movedDuringDrain = resolveAttachments()
+            return movedDuringDrain
+        })
+
+        const transfer = transferComposerDraft('source-a', 'target-a')
+        // Let transfer install the barrier and enter the blocked move.
+        await Promise.resolve()
+        await Promise.resolve()
+        updateComposerDraftTextSnapshot('source-a', 'typed during wait')
+        releaseDrain()
+        await transfer
+
+        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'typed during wait')
+        expect(movedDuringDrain).toEqual([
+            expect.objectContaining({ id: 'stored-1', file: stored }),
+        ])
+        expect(composerDraftWasHandedOff('source-a')).toBe(true)
+    })
+
     it('still navigates when the local durable move rejects', async () => {
         const file = new File(['draft'], 'draft.txt')
         setComposerDraftSnapshot('source-a', 'typed', [{ id: 'a1', file }])
