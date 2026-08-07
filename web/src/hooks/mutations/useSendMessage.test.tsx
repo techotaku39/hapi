@@ -646,7 +646,8 @@ describe('useSendMessage', () => {
         const { result } = renderHook(
             () => useSendMessage(api, 'session-original', {
                 resolveSessionId: async () => 'session-resolved',
-                onSessionResolved: async () => {
+                onSessionResolved: async (_id, context) => {
+                    expect(context).toEqual({ text: 'hello with draft', attachments: undefined })
                     order.push('resolved')
                     await gate.promise
                     order.push('resolved-done')
@@ -672,6 +673,26 @@ describe('useSendMessage', () => {
             expect(order).toEqual(['resolved', 'resolved-done', 'mutate'])
         })
         expect(sendMessage).toHaveBeenCalled()
+    })
+
+    it('does not mutate when onSessionResolved defers for draft hydration', async () => {
+        const sendMessage = vi.fn(async () => {})
+        const api = createMockApi(sendMessage)
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-original', {
+                resolveSessionId: async () => 'session-resolved',
+                onSessionResolved: async () => ({ deferUntilDraftHydrated: true }),
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        let accepted: Awaited<ReturnType<typeof result.current.sendMessage>> | undefined
+        await act(async () => {
+            accepted = await result.current.sendMessage('hello with hidden file')
+        })
+
+        expect(accepted).toBe(false)
+        expect(sendMessage).not.toHaveBeenCalled()
     })
 
     // #918: the inactive-session 409 path

@@ -44,6 +44,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { seedMessageWindowFromSession, syncTailMessages } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
+import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { initializeSessionLastSeen, markSessionSeen } from '@/lib/sessionLastSeen'
@@ -596,14 +597,24 @@ function SessionPage() {
             }))
         },
         resolveSessionId,
-        onSessionResolved: async (resolvedSessionId) => {
-            if (!sessionId) return
+        onSessionResolved: async (resolvedSessionId, context) => {
+            if (!sessionId) return undefined
             setSendErrors((prev) => migrateSuppressedSendError(prev, sessionId, resolvedSessionId))
             await transferComposerDraftThenNavigate(
                 sessionId,
                 resolvedSessionId,
                 () => handleSessionResolved(resolvedSessionId),
             )
+            // Inactive composers withhold stored files from the visible adapter.
+            // After transfer, defer the mutation so the active target can hydrate
+            // and re-upload before Send; otherwise clearDraftsAfterSend would
+            // wipe the moved draft after a text-only POST.
+            if ((context.attachments?.length ?? 0) > 0) return undefined
+            const stored = await getDraftAttachments(resolvedSessionId)
+            if (stored.length > 0) {
+                return { deferUntilDraftHydrated: true }
+            }
+            return undefined
         },
 
         onBlocked: (reason) => {
