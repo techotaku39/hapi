@@ -40,7 +40,7 @@ import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
-import { persistInactiveComposerAttachments, setComposerDraftSnapshot } from '@/lib/composer-draft-transfer'
+import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -623,6 +623,11 @@ export function HappyComposer(props: {
             uploadSessionId: upload.uploadSessionId,
         }]
     })
+    const attachmentRevision = attachmentDraftRevision(attachmentDrafts)
+    const latestComposerTextRef = useRef(composerText)
+    latestComposerTextRef.current = composerText
+    const attachmentDraftsRef = useRef(attachmentDrafts)
+    attachmentDraftsRef.current = attachmentDrafts
     const draftHydration = useComposerDraft(
         sessionId,
         composerText,
@@ -640,12 +645,24 @@ export function HappyComposer(props: {
         // does not drop them.
         const canHydrateAttachments = props.canRestoreAttachments ?? active
         if (canHydrateAttachments) {
-            setComposerDraftSnapshot(sessionId, composerText, attachmentDrafts)
-            props.onUploadDraftSnapshot?.(composerText, attachmentDrafts)
+            setComposerDraftSnapshot(sessionId, composerText, attachmentDraftsRef.current)
+            props.onUploadDraftSnapshot?.(composerText, attachmentDraftsRef.current)
             return
         }
-        void persistInactiveComposerAttachments(sessionId, composerText, attachmentDrafts)
-    }, [active, attachmentDrafts, composerText, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, props.onUploadDraftSnapshot, sessionId])
+        // Text is cheap (sessionStorage); do not queue a blob merge per keystroke.
+        updateComposerDraftTextSnapshot(sessionId, composerText)
+    }, [active, attachmentRevision, composerText, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, props.onUploadDraftSnapshot, sessionId])
+
+    useEffect(() => {
+        if (draftHydration.sessionId !== sessionId || !draftHydration.complete || !sessionId) return
+        const canHydrateAttachments = props.canRestoreAttachments ?? active
+        if (canHydrateAttachments) return
+        void persistInactiveComposerAttachments(
+            sessionId,
+            latestComposerTextRef.current,
+            attachmentDraftsRef.current,
+        )
+    }, [active, attachmentRevision, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the

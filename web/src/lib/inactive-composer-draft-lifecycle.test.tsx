@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, waitFor } from '@testing-library/react'
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { clearDraft, getDraft, saveDraft } from '@/lib/composer-drafts'
 import {
     clearDraftAttachments,
@@ -10,14 +10,16 @@ import {
 } from '@/lib/composer-attachment-drafts'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import {
+    attachmentDraftRevision,
     clearComposerDraftSnapshot,
     persistInactiveComposerAttachments,
     setComposerDraftSnapshot,
     transferComposerDraft,
+    updateComposerDraftTextSnapshot,
 } from '@/lib/composer-draft-transfer'
 
 /**
- * Mirrors HappyComposer's post-hydration snapshot effect for the inactive
+ * Mirrors HappyComposer's post-hydration snapshot effects for the inactive
  * archive → switch → reopen lifecycle without mounting the full chat tree.
  */
 function DraftLifecycleComposer(props: {
@@ -31,6 +33,11 @@ function DraftLifecycleComposer(props: {
         props.initialAttachments ?? [],
     )
     const canRestoreAttachments = props.active
+    const attachmentRevision = attachmentDraftRevision(attachmentDrafts)
+    const latestTextRef = useRef(composerText)
+    latestTextRef.current = composerText
+    const attachmentDraftsRef = useRef(attachmentDrafts)
+    attachmentDraftsRef.current = attachmentDrafts
     const draftHydration = useComposerDraft(
         props.sessionId,
         composerText,
@@ -50,14 +57,30 @@ function DraftLifecycleComposer(props: {
     useEffect(() => {
         if (draftHydration.sessionId !== props.sessionId || !draftHydration.complete) return
         if (canRestoreAttachments) {
-            setComposerDraftSnapshot(props.sessionId, composerText, attachmentDrafts)
-        } else {
-            void persistInactiveComposerAttachments(props.sessionId, composerText, attachmentDrafts)
+            setComposerDraftSnapshot(props.sessionId, composerText, attachmentDraftsRef.current)
+            return
         }
+        updateComposerDraftTextSnapshot(props.sessionId, composerText)
     }, [
-        attachmentDrafts,
+        attachmentRevision,
         canRestoreAttachments,
         composerText,
+        draftHydration.complete,
+        draftHydration.sessionId,
+        props.sessionId,
+    ])
+
+    useEffect(() => {
+        if (draftHydration.sessionId !== props.sessionId || !draftHydration.complete) return
+        if (canRestoreAttachments) return
+        void persistInactiveComposerAttachments(
+            props.sessionId,
+            latestTextRef.current,
+            attachmentDraftsRef.current,
+        )
+    }, [
+        attachmentRevision,
+        canRestoreAttachments,
         draftHydration.complete,
         draftHydration.sessionId,
         props.sessionId,

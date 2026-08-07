@@ -147,6 +147,7 @@ describe('attachmentAdapter image previews', () => {
         expect(onSessionResolved).toHaveBeenCalledWith('session-resumed', expect.objectContaining({
             id: expect.any(String),
             file,
+            isCancelled: expect.any(Function),
         }))
         expect(uploadFile).not.toHaveBeenCalled()
 
@@ -188,9 +189,15 @@ describe('attachmentAdapter image previews', () => {
         await remainder
 
         expect(resolveSessionId).toHaveBeenCalledOnce()
-        // Resume already merged the source session away — navigate without
-        // re-adding the cancelled file, and never upload it.
-        expect(onSessionResolved).toHaveBeenCalledWith('session-resumed', undefined)
+        // Resume already merged the source session away — hand off with a live
+        // cancellation predicate (never drop the id), and never upload.
+        expect(onSessionResolved).toHaveBeenCalledWith('session-resumed', expect.objectContaining({
+            id: pendingId,
+            file,
+            isCancelled: expect.any(Function),
+        }))
+        const handoff = onSessionResolved.mock.calls[0]?.[1] as { isCancelled: () => boolean }
+        expect(handoff.isCancelled()).toBe(true)
         expect(uploadFile).not.toHaveBeenCalled()
     })
 })

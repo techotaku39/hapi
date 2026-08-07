@@ -1627,13 +1627,8 @@ function SessionChatInner(props: SessionChatProps) {
             async (resolvedSessionId, pending) => {
                 // Include the in-flight file and coalesce multi-file drops into
                 // one transfer + navigation before the source composer unmounts.
-                // If the pick was cancelled after resume, still transfer text /
-                // other drafts and navigate — the hub may have deleted the source.
-                if (!pending) {
-                    await transferComposerDraft(props.session.id, resolvedSessionId)
-                    props.onUploadSessionResolved?.(resolvedSessionId)
-                    return
-                }
+                // isCancelled is sampled at save time so a mid-handoff remove
+                // still drops the file (and any prior inactive persist of it).
                 await handoffComposerDraft(
                     props.session.id,
                     resolvedSessionId,

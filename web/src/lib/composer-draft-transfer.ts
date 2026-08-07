@@ -11,12 +11,17 @@ type ComposerDraftSnapshot = {
     attachments: AttachmentDraftInput[]
 }
 
+/** In-flight handoff may carry a live cancellation check sampled at save time. */
+export type AttachmentDraftHandoff = AttachmentDraftInput & {
+    isCancelled?: () => boolean
+}
+
 const liveSnapshots = new Map<string, ComposerDraftSnapshot>()
 const MAX_LIVE_SNAPSHOTS = 50
 
 type HandoffState = {
     targetSessionId: string
-    pending: AttachmentDraftInput[]
+    pending: AttachmentDraftHandoff[]
     done: Promise<void>
     resolveDone: () => void
 }
@@ -42,6 +47,25 @@ export function setComposerDraftSnapshot(
         if (oldestSessionId) liveSnapshots.delete(oldestSessionId)
     }
     liveSnapshots.set(sessionId, { text, attachments: [...attachments] })
+}
+
+/**
+ * Cheap text-only update for inactive composers. Avoids queuing another
+ * IndexedDB blob merge on every keystroke when attachments are unchanged.
+ */
+export function updateComposerDraftTextSnapshot(sessionId: string, text: string): void {
+    saveDraft(sessionId, text)
+    const existing = liveSnapshots.get(sessionId)
+    if (existing) {
+        liveSnapshots.set(sessionId, { ...existing, text })
+    }
+}
+
+/** Stable membership/metadata key for attachment-only persist effects. */
+export function attachmentDraftRevision(attachments: readonly AttachmentDraftInput[]): string {
+    return attachments
+        .map(({ id, path, uploadSessionId }) => `${id}:${path ?? ''}:${uploadSessionId ?? ''}`)
+        .join('\0')
 }
 
 export function clearComposerDraftSnapshot(sessionId: string): void {
@@ -149,7 +173,7 @@ async function awaitInactivePersist(sessionId: string): Promise<void> {
 export async function transferComposerDraft(
     sourceSessionId: string,
     targetSessionId: string,
-    pendingAttachments: readonly AttachmentDraftInput[] = [],
+    pendingAttachments: readonly AttachmentDraftHandoff[] = [],
 ): Promise<void> {
     if (sourceSessionId === targetSessionId && pendingAttachments.length === 0) return
 
@@ -171,18 +195,32 @@ export async function transferComposerDraft(
         baseAttachments = await loadPersistedAttachments(sourceSessionId)
     }
 
-    // Reopened sessions can receive a new id and cannot safely reuse upload
-    // paths authorized for (and potentially deleted with) the source session.
-    // In-flight picks keep their local preview data URL.
-    const strippedBase = baseAttachments.map(stripSessionScopedUploadFields)
-    const normalizedPending = pendingAttachments.map((attachment) => ({
-        id: attachment.id,
-        file: attachment.file,
-        previewUrl: attachment.previewUrl,
-        path: undefined,
-        uploadSessionId: undefined,
-    }))
-    const attachments = mergeAttachmentsById(strippedBase, normalizedPending)
+    // Sample cancellation immediately before writing so a remove() during an
+    // awaited handoff still drops the file (including one already in the
+    // source snapshot from an earlier inactive persist).
+    const cancelledIds = new Set<string>()
+    for (const item of pendingAttachments) {
+        if (item.isCancelled?.()) cancelledIds.add(item.id)
+    }
+
+    // Cross-session reopen cannot reuse source-authorized upload paths.
+    // Same-target staggered appends must keep path/uploadSessionId already
+    // written by earlier uploads on that resumed composer.
+    const normalizedBase = (
+        sourceSessionId === targetSessionId
+            ? baseAttachments
+            : baseAttachments.map(stripSessionScopedUploadFields)
+    ).filter((item) => !cancelledIds.has(item.id))
+    const normalizedPending = pendingAttachments
+        .filter((item) => !cancelledIds.has(item.id))
+        .map((attachment) => ({
+            id: attachment.id,
+            file: attachment.file,
+            previewUrl: attachment.previewUrl,
+            path: undefined,
+            uploadSessionId: undefined,
+        }))
+    const attachments = mergeAttachmentsById(normalizedBase, normalizedPending)
 
     saveDraft(targetSessionId, text)
     saveDraftAttachments(targetSessionId, attachments)
@@ -199,13 +237,14 @@ export async function transferComposerDraft(
 export async function handoffComposerDraft(
     sourceSessionId: string,
     targetSessionId: string,
-    pending: AttachmentDraftInput,
+    pending: AttachmentDraftHandoff,
     onNavigable: (targetSessionId: string) => void | Promise<void>,
 ): Promise<void> {
-    const pendingItem: AttachmentDraftInput = {
+    const pendingItem: AttachmentDraftHandoff = {
         id: pending.id,
         file: pending.file,
         previewUrl: pending.previewUrl,
+        isCancelled: pending.isCancelled,
     }
 
     if (sourceSessionId === targetSessionId) {
@@ -251,6 +290,8 @@ export async function handoffComposerDraft(
         const batch = [...state.pending]
         await transferComposerDraft(sourceSessionId, targetSessionId, batch)
         completedHandoffs.set(sourceSessionId, targetSessionId)
+        // Navigate even when every pending file was cancelled mid-handoff —
+        // resume may already have deleted the source session row.
         await onNavigable(targetSessionId)
         const late = state.pending.filter((item) => !batch.some((early) => early.id === item.id))
         if (late.length > 0) {

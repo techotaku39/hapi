@@ -19,11 +19,13 @@ vi.mock('@/lib/composer-attachment-drafts', () => ({
 }))
 
 import {
+    attachmentDraftRevision,
     clearComposerDraftSnapshot,
     handoffComposerDraft,
     persistInactiveComposerAttachments,
     setComposerDraftSnapshot,
     transferComposerDraft,
+    updateComposerDraftTextSnapshot,
 } from './composer-draft-transfer'
 
 describe('transferComposerDraft', () => {
@@ -197,6 +199,121 @@ describe('handoffComposerDraft', () => {
         expect(onNavigable).toHaveBeenCalledOnce()
         const savedAttachments = mocks.saveDraftAttachments.mock.calls.at(-1)?.[1] as Array<{ id: string }>
         expect(savedAttachments.map((item) => item.id).sort()).toEqual(['p1', 'p2'])
+    })
+
+    it('keeps upload metadata when appending onto the same target session', async () => {
+        const uploaded = new File(['one'], 'one.txt')
+        const late = new File(['two'], 'two.txt')
+        const onNavigable = vi.fn().mockResolvedValue(undefined)
+
+        // First handoff establishes source→target mapping.
+        await handoffComposerDraft('source-a', 'target-a', { id: 'p1', file: uploaded }, onNavigable)
+        // Simulate the target composer having finished uploading p1.
+        setComposerDraftSnapshot('target-a', 'hello', [{
+            id: 'p1',
+            file: uploaded,
+            path: '/uploads/one.txt',
+            uploadSessionId: 'target-a',
+        }])
+        await handoffComposerDraft('source-a', 'target-a', { id: 'p2', file: late }, onNavigable)
+
+        const savedAttachments = mocks.saveDraftAttachments.mock.calls.at(-1)?.[1] as Array<{
+            id: string
+            path?: string
+            uploadSessionId?: string
+        }>
+        expect(savedAttachments).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'p1',
+                path: '/uploads/one.txt',
+                uploadSessionId: 'target-a',
+            }),
+            expect.objectContaining({ id: 'p2', file: late }),
+        ]))
+    })
+
+    it('drops a cancelled pending id from the source snapshot at save time', async () => {
+        const kept = new File(['kept'], 'kept.txt')
+        const cancelled = new File(['gone'], 'gone.txt')
+        setComposerDraftSnapshot('source-a', 'typed', [
+            { id: 'kept-1', file: kept },
+            { id: 'gone-1', file: cancelled },
+        ])
+        const onNavigable = vi.fn().mockResolvedValue(undefined)
+
+        await handoffComposerDraft(
+            'source-a',
+            'target-a',
+            {
+                id: 'gone-1',
+                file: cancelled,
+                isCancelled: () => true,
+            },
+            onNavigable,
+        )
+
+        expect(onNavigable).toHaveBeenCalledOnce()
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('target-a', [
+            expect.objectContaining({ id: 'kept-1', file: kept }),
+        ])
+    })
+
+    it('re-samples isCancelled after an async gap before writing the transfer', async () => {
+        const kept = new File(['kept'], 'kept.txt')
+        const cancelled = new File(['gone'], 'gone.txt')
+        setComposerDraftSnapshot('source-a', 'typed', [
+            { id: 'kept-1', file: kept },
+            { id: 'gone-1', file: cancelled },
+        ])
+        let cancelledNow = false
+        const onNavigable = vi.fn().mockResolvedValue(undefined)
+
+        const handoff = handoffComposerDraft(
+            'source-a',
+            'target-a',
+            {
+                id: 'gone-1',
+                file: cancelled,
+                isCancelled: () => cancelledNow,
+            },
+            onNavigable,
+        )
+        // Cancel after enqueue, before the handoff's setTimeout(0) transfer samples.
+        cancelledNow = true
+        await handoff
+
+        expect(onNavigable).toHaveBeenCalledOnce()
+        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('target-a', [
+            expect.objectContaining({ id: 'kept-1', file: kept }),
+        ])
+    })
+})
+
+describe('updateComposerDraftTextSnapshot', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        clearComposerDraftSnapshot('session-inactive')
+    })
+
+    it('updates text without writing attachment blobs', () => {
+        const file = new File(['blob'], 'big.bin')
+        setComposerDraftSnapshot('session-inactive', 'before', [{ id: 'a1', file }])
+
+        updateComposerDraftTextSnapshot('session-inactive', 'after keystroke')
+
+        expect(mocks.saveDraft).toHaveBeenCalledWith('session-inactive', 'after keystroke')
+        expect(mocks.saveDraftAttachments).not.toHaveBeenCalled()
+    })
+
+    it('keeps attachment revision stable across text-only changes', () => {
+        const file = new File(['blob'], 'big.bin')
+        const drafts = [{ id: 'a1', file, path: '/tmp/a', uploadSessionId: 's1' }]
+        expect(attachmentDraftRevision(drafts)).toBe(attachmentDraftRevision([
+            { id: 'a1', file: new File(['other'], 'other.bin'), path: '/tmp/a', uploadSessionId: 's1' },
+        ]))
+        expect(attachmentDraftRevision(drafts)).not.toBe(attachmentDraftRevision([
+            { id: 'a1', file, path: '/tmp/b', uploadSessionId: 's1' },
+        ]))
     })
 })
 
