@@ -18,7 +18,9 @@ export function createAttachmentAdapter(
     api: ApiClient,
     sessionId: string,
     resolveSessionId?: () => Promise<string>,
-    onSessionResolved?: (sessionId: string, pending: AttachmentDraftInput) => Promise<void>,
+    // pending omitted when the operator cancelled after resume already merged
+    // into a new session id — caller must still navigate/transfer drafts.
+    onSessionResolved?: (sessionId: string, pending?: AttachmentDraftInput) => Promise<void>,
 ): AttachmentAdapter {
     const cancelledAttachmentIds = new Set<string>()
 
@@ -100,13 +102,18 @@ export function createAttachmentAdapter(
                 }
 
                 const uploadSessionId = resolveSessionId ? await resolveSessionId() : sessionId
-                if (cancelledAttachmentIds.has(id)) {
+                // Resume may already have merged the source session away. Even
+                // when this file was cancelled mid-resume, still hand off so
+                // the UI can leave the deleted source route (and keep drafts).
+                const cancelled = cancelledAttachmentIds.has(id)
+                if (uploadSessionId !== sessionId && onSessionResolved) {
+                    await onSessionResolved(
+                        uploadSessionId,
+                        cancelled ? undefined : { id, file, previewUrl },
+                    )
                     return
                 }
-                if (uploadSessionId !== sessionId && onSessionResolved) {
-                    // Pass the in-flight file so handoff does not depend on a
-                    // composer effect that may not have published yet.
-                    await onSessionResolved(uploadSessionId, { id, file, previewUrl })
+                if (cancelled) {
                     return
                 }
 

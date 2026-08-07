@@ -152,7 +152,7 @@ describe('attachmentAdapter image previews', () => {
 
     })
 
-    it('skips handoff when the attachment is removed during resume', async () => {
+    it('still hands off after resume when the attachment is cancelled mid-flight', async () => {
         const { createAttachmentAdapter } = await import('./attachmentAdapter')
         const file = new File(['image'], 'ready.png', { type: 'image/png' })
         const uploadFile = vi.fn().mockResolvedValue({ success: true, path: '/uploads/ready.png' })
@@ -188,7 +188,9 @@ describe('attachmentAdapter image previews', () => {
         await remainder
 
         expect(resolveSessionId).toHaveBeenCalledOnce()
-        expect(onSessionResolved).not.toHaveBeenCalled()
+        // Resume already merged the source session away — navigate without
+        // re-adding the cancelled file, and never upload it.
+        expect(onSessionResolved).toHaveBeenCalledWith('session-resumed', undefined)
         expect(uploadFile).not.toHaveBeenCalled()
     })
 })
