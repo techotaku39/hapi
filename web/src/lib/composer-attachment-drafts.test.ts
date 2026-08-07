@@ -109,6 +109,33 @@ describe('composer-attachment-drafts', () => {
         expect(await mod.getDraftAttachments('session-source')).toEqual([])
     })
 
+    it('can surface IndexedDB read failures when throwOnError is set', async () => {
+        vi.stubGlobal('indexedDB', {
+            open: () => {
+                const request: {
+                    result: unknown
+                    onsuccess: ((ev: unknown) => void) | null
+                    onerror: ((ev: unknown) => void) | null
+                    onupgradeneeded: ((ev: unknown) => void) | null
+                    error: Error
+                } = {
+                    result: undefined,
+                    onsuccess: null,
+                    onerror: null,
+                    onupgradeneeded: null,
+                    error: new Error('open failed'),
+                }
+                queueMicrotask(() => request.onerror?.({}))
+                return request
+            },
+        })
+        vi.resetModules()
+        const mod = await import('./composer-attachment-drafts')
+
+        await expect(mod.getDraftAttachments('session-1')).resolves.toEqual([])
+        await expect(mod.getDraftAttachments('session-1', { throwOnError: true })).rejects.toThrow()
+    })
+
     it('commits a put+delete move when IndexedDB is available', async () => {
         const store = new Map<string, unknown>()
         const fakeDb = {

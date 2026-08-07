@@ -140,8 +140,11 @@ function mergeAttachmentsById(
     return [...byId.values()]
 }
 
-async function loadPersistedAttachments(sessionId: string): Promise<AttachmentDraftInput[]> {
-    return (await getDraftAttachments(sessionId)).map((file, index) => {
+async function loadPersistedAttachments(
+    sessionId: string,
+    options: { throwOnError?: boolean } = {},
+): Promise<AttachmentDraftInput[]> {
+    return (await getDraftAttachments(sessionId, options)).map((file, index) => {
         const metadata = getRestoredUploadMetadata(file)
         return {
             id: metadata?.id ?? `transferred-${index}-${file.name}`,
@@ -311,7 +314,9 @@ export async function transferComposerDraft(
             baseAttachments = sourceLive.attachments
         } else {
             text = getDraft(sourceSessionId)
-            baseAttachments = await loadPersistedAttachments(sourceSessionId)
+            // Fail closed: a transient IndexedDB read must not look like an
+            // empty draft and then delete the source during the durable move.
+            baseAttachments = await loadPersistedAttachments(sourceSessionId, { throwOnError: true })
         }
 
         const buildTransferredAttachments = (): AttachmentDraftInput[] => {

@@ -445,6 +445,19 @@ describe('handoffComposerDraft', () => {
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
 
+    it('does not move when the source IndexedDB attachment read fails', async () => {
+        clearComposerDraftSnapshot('source-a')
+        forgetComposerDraftHandoff('source-a')
+        mocks.getDraft.mockReturnValue('typed')
+        mocks.getDraftAttachments.mockRejectedValue(new Error('IndexedDB read failed'))
+
+        await expect(transferComposerDraft('source-a', 'target-a')).rejects.toThrow(/IndexedDB read failed/)
+
+        expect(mocks.moveDraftAttachments).not.toHaveBeenCalled()
+        expect(mocks.clearDraft).not.toHaveBeenCalled()
+        expect(composerDraftWasHandedOff('source-a')).toBe(false)
+    })
+
     it('still navigates when the local durable move rejects', async () => {
         const file = new File(['draft'], 'draft.txt')
         setComposerDraftSnapshot('source-a', 'typed', [{ id: 'a1', file }])

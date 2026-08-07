@@ -158,7 +158,10 @@ function setCachedFiles(sessionId: string, files: File[]): void {
     }
 }
 
-export async function getDraftAttachments(sessionId: string): Promise<File[]> {
+export async function getDraftAttachments(
+    sessionId: string,
+    options: { throwOnError?: boolean } = {},
+): Promise<File[]> {
     const cached = cache.get(sessionId)
     if (cached) return cached.map(copyFile)
 
@@ -179,7 +182,8 @@ export async function getDraftAttachments(sessionId: string): Promise<File[]> {
         const files = record?.files.map(toFile) ?? []
         if (files.length > 0) setCachedFiles(sessionId, files)
         return files
-    } catch {
+    } catch (error) {
+        if (options.throwOnError) throw error
         return []
     }
 }
