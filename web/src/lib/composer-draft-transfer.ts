@@ -141,25 +141,37 @@ async function persistInactiveComposerAttachmentsNow(
 ): Promise<AttachmentDraftInput[]> {
     // A queued persist may settle during/after the source move — buffer onto
     // the in-flight transfer instead of recreating the retiring source row.
-    const pending = pendingTransfers.get(sessionId)
-    if (pending) {
+    if (pendingTransfers.has(sessionId)) {
         // A newer synchronous barrier edit already recorded latest; keep it.
-        if (pending.latest) {
-            return pending.latest.attachments
+        // Re-read the map after awaits — TS would otherwise keep a stale
+        // `pending.latest` narrowing across the async gap.
+        const latestBeforeRead = pendingTransfers.get(sessionId)?.latest
+        if (latestBeforeRead) {
+            return latestBeforeRead.attachments
         }
         saveDraft(sessionId, text)
         const previousVisibleIds = inactiveVisibleIds.get(sessionId) ?? new Set<string>()
         const stored = await loadPersistedAttachments(sessionId)
-        // Re-check: a concurrent barrier edit may have landed while we read.
-        if (pending.latest) {
-            return pending.latest.attachments
+        const latestAfterRead = pendingTransfers.get(sessionId)?.latest
+        if (latestAfterRead) {
+            return latestAfterRead.attachments
         }
-        const retained = stored.filter((item) => !previousVisibleIds.has(item.id))
-        const merged = mergeAttachmentsById(retained, visibleAttachments)
-        pending.latest = { text, attachments: merged }
-        liveSnapshots.set(sessionId, { text, attachments: merged })
-        inactiveVisibleIds.set(sessionId, new Set(visibleAttachments.map((item) => item.id)))
-        return merged
+        // Transfer may have finished while we read storage.
+        if (!pendingTransfers.has(sessionId)) {
+            if (composerDraftWasHandedOff(sessionId)) {
+                return [...visibleAttachments]
+            }
+        } else {
+            const retained = stored.filter((item) => !previousVisibleIds.has(item.id))
+            const merged = mergeAttachmentsById(retained, visibleAttachments)
+            const pending = pendingTransfers.get(sessionId)
+            if (pending) {
+                pending.latest = { text, attachments: merged }
+            }
+            liveSnapshots.set(sessionId, { text, attachments: merged })
+            inactiveVisibleIds.set(sessionId, new Set(visibleAttachments.map((item) => item.id)))
+            return merged
+        }
     }
     if (composerDraftWasHandedOff(sessionId)) {
         return [...visibleAttachments]

@@ -644,6 +644,38 @@ describe('persistInactiveComposerAttachments', () => {
         expect(mocks.clearDraft).toHaveBeenCalledWith('old-pending')
     })
 
+    it('does not mark a durable handoff when the corrective target write rejects', async () => {
+        const kept = new File(['kept'], 'kept.txt')
+        const removed = new File(['gone'], 'gone.txt')
+        setComposerDraftSnapshot('old-pending', 'typed', [
+            { id: 'kept-1', file: kept },
+            { id: 'gone-1', file: removed },
+        ])
+        let releaseMove!: () => void
+        const moveGate = new Promise<void>((resolve) => {
+            releaseMove = resolve
+        })
+        let correctiveCalls = 0
+        mocks.moveDraftAttachments.mockImplementation(async (source, target, resolveAttachments) => {
+            if (source === target) {
+                correctiveCalls += 1
+                throw new Error('quota exceeded')
+            }
+            await moveGate
+            return resolveAttachments()
+        })
+
+        const transfer = transferComposerDraft('old-pending', 'new-pending')
+        await Promise.resolve()
+        await persistInactiveComposerAttachments('old-pending', 'typed', [{ id: 'kept-1', file: kept }])
+        releaseMove()
+        await expect(transfer).rejects.toThrow(/quota exceeded/)
+
+        expect(correctiveCalls).toBe(1)
+        expect(composerDraftWasHandedOff('old-pending')).toBe(false)
+        expect(mocks.clearDraft).not.toHaveBeenCalledWith('old-pending')
+    })
+
     it('buffers a persist that races the first transfer await onto the target', async () => {
         const kept = new File(['kept'], 'kept.txt')
         const removed = new File(['gone'], 'gone.txt')

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { getDraft, saveDraft } from '@/lib/composer-drafts'
 import {
     getDraftAttachments,
+    getRestoredUploadMetadata,
     saveDraftAttachments,
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
@@ -81,7 +82,14 @@ export function useComposerDraft(
                 // session can already be hydrating when it settles, so never
                 // publish old status or rehydrate old files after disposal.
                 if (disposed) return
-                const restoreAttachments = attachmentsRef.current.length === 0 && files.length > 0
+                // Same-id resume can flip inactive→active with a newly visible
+                // pick already in the adapter. Restore only missing stored ids
+                // instead of skipping the whole draft when anything is visible.
+                const visibleIds = new Set(attachmentsRef.current.map((item) => item.id))
+                const filesToRestore = files.filter((file) => {
+                    const id = getRestoredUploadMetadata(file)?.id
+                    return !id || !visibleIds.has(id)
+                })
                 // Text is already known to be restored; attachment presence by
                 // itself is not. An upload can fail, so only successful adds
                 // contribute to restoredAny in the final completion update.
@@ -93,8 +101,8 @@ export function useComposerDraft(
                     }
                     : current)
                 let restoredAttachment = false
-                if (restoreAttachments) {
-                    for (const file of files) {
+                if (filesToRestore.length > 0) {
+                    for (const file of filesToRestore) {
                         if (disposed) break
                         try {
                             await addAttachment(file)

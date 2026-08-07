@@ -14,12 +14,13 @@ vi.mock('@/lib/composer-attachment-drafts', () => ({
 }))
 
 import { getDraft, saveDraft } from '@/lib/composer-drafts'
-import { getDraftAttachments, saveDraftAttachments } from '@/lib/composer-attachment-drafts'
+import { getDraftAttachments, getRestoredUploadMetadata, saveDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { useComposerDraft } from './useComposerDraft'
 
 const mockGetDraft = vi.mocked(getDraft)
 const mockSaveDraft = vi.mocked(saveDraft)
 const mockGetDraftAttachments = vi.mocked(getDraftAttachments)
+const mockGetRestoredUploadMetadata = vi.mocked(getRestoredUploadMetadata)
 const mockSaveDraftAttachments = vi.mocked(saveDraftAttachments)
 
 describe('useComposerDraft', () => {
@@ -29,6 +30,7 @@ describe('useComposerDraft', () => {
         vi.clearAllMocks()
         mockGetDraft.mockReturnValue('')
         mockGetDraftAttachments.mockResolvedValue([])
+        mockGetRestoredUploadMetadata.mockReturnValue(undefined)
         rAFCallbacks = []
         vi.stubGlobal('requestAnimationFrame', vi.fn((cb: () => void) => {
             rAFCallbacks.push(cb)
@@ -65,6 +67,47 @@ describe('useComposerDraft', () => {
         expect(mockGetDraft).toHaveBeenCalledWith('session-1')
         expect(setText).toHaveBeenCalledWith('saved text')
         expect(result.current).toEqual({ sessionId: 'session-1', complete: true, restoredAny: true })
+    })
+
+    it('restores only missing stored attachments when a visible pick already exists', async () => {
+        const storedA = new File(['a'], 'a.txt')
+        const visibleB = new File(['b'], 'b.txt')
+        mockGetDraftAttachments.mockResolvedValue([storedA, visibleB])
+        mockGetRestoredUploadMetadata.mockImplementation((file: File) => {
+            if (file === storedA) return { id: 'stored-a' }
+            if (file === visibleB) return { id: 'visible-b' }
+            return undefined
+        })
+        const addAttachment = vi.fn().mockResolvedValue(undefined)
+        const visible = [{ id: 'visible-b', file: visibleB }]
+
+        const { result, rerender } = renderHook(
+            ({ canRestore, attachments }) => useComposerDraft(
+                'session-1',
+                '',
+                attachments,
+                canRestore,
+                vi.fn(),
+                addAttachment,
+            ),
+            { initialProps: { canRestore: false, attachments: visible } },
+        )
+
+        await act(async () => flushRAF())
+        expect(result.current.complete).toBe(true)
+        expect(addAttachment).not.toHaveBeenCalled()
+
+        // Same-id resume flips inactive → active with B already visible.
+        rerender({ canRestore: true, attachments: visible })
+        await act(async () => flushRAF())
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(addAttachment).toHaveBeenCalledTimes(1)
+        expect(addAttachment).toHaveBeenCalledWith(storedA)
+        expect(result.current.complete).toBe(true)
     })
 
     it('does not restore draft if composer already has text', async () => {
@@ -150,16 +193,31 @@ describe('useComposerDraft', () => {
         expect(result.current).toEqual({ sessionId: 'session-1', complete: true, restoredAny: true })
     })
 
-    it('does not duplicate saved attachments when the composer already has files', async () => {
+    it('does not duplicate a stored attachment that is already visible by id', async () => {
         const current = new File(['current'], 'current.png', { type: 'image/png' })
-        const saved = new File(['saved'], 'saved.png', { type: 'image/png' })
-        mockGetDraftAttachments.mockResolvedValue([saved])
+        mockGetDraftAttachments.mockResolvedValue([current])
+        mockGetRestoredUploadMetadata.mockReturnValue({ id: 'current' })
         const addAttachment = vi.fn(async () => {})
 
         renderHook(() => useComposerDraft('session-1', '', [{ id: 'current', file: current }], true, vi.fn(), addAttachment))
         await act(async () => flushRAF())
 
         expect(addAttachment).not.toHaveBeenCalled()
+    })
+
+    it('restores a stored sibling when a different attachment is already visible', async () => {
+        const current = new File(['current'], 'current.png', { type: 'image/png' })
+        const saved = new File(['saved'], 'saved.png', { type: 'image/png' })
+        mockGetDraftAttachments.mockResolvedValue([saved])
+        mockGetRestoredUploadMetadata.mockImplementation((file: File) => (
+            file === saved ? { id: 'saved' } : undefined
+        ))
+        const addAttachment = vi.fn(async () => {})
+
+        renderHook(() => useComposerDraft('session-1', '', [{ id: 'current', file: current }], true, vi.fn(), addAttachment))
+        await act(async () => flushRAF())
+
+        expect(addAttachment).toHaveBeenCalledWith(saved)
     })
 
     it('preserves saved attachments while the attachment adapter is unavailable', async () => {

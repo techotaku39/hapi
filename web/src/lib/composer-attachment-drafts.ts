@@ -98,6 +98,8 @@ function toFile(file: StoredAttachment): File {
 }
 
 async function writeDraft(record: StoredAttachmentDraft | null, sessionId: string): Promise<void> {
+    // No IndexedDB (tests / SSR): cache is already updated by the caller.
+    if (typeof indexedDB === 'undefined') return
     const db = await openDb()
     await new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(STORE, 'readwrite')
@@ -140,7 +142,9 @@ async function awaitPendingWrites(...sessionIds: string[]): Promise<void> {
     const unique = [...new Set(sessionIds)]
     await Promise.all(unique.map(async (sessionId) => {
         const pending = pendingWrites.get(sessionId)
-        if (pending) await pending.catch(() => {})
+        // Propagate IndexedDB failures — same-target corrective writes must not
+        // look durable when the queued transaction rejected.
+        if (pending) await pending
     }))
 }
 

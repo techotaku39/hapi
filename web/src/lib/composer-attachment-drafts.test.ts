@@ -340,4 +340,72 @@ describe('composer-attachment-drafts', () => {
         expect((await mod.getDraftAttachments('session-source')).map((item) => item.name)).toEqual(['notes.txt'])
         expect(await mod.getDraftAttachments('session-target')).toEqual([])
     })
+
+    it('propagates a rejected same-target queued write instead of treating it as durable', async () => {
+        let failNextWrite = false
+        vi.stubGlobal('indexedDB', {
+            open: () => {
+                const request: {
+                    result: {
+                        transaction: () => {
+                            objectStore: () => {
+                                put: (record: { sessionId: string }) => void
+                                delete: (sessionId: string) => void
+                                getAll: () => { onsuccess: null; result?: unknown[] }
+                            }
+                            oncomplete: ((ev: unknown) => void) | null
+                            onerror: ((ev: unknown) => void) | null
+                            onabort: null
+                            error: Error | null
+                        }
+                        close: () => void
+                    }
+                    onsuccess: ((ev: unknown) => void) | null
+                    onerror: ((ev: unknown) => void) | null
+                    onupgradeneeded: ((ev: unknown) => void) | null
+                } = {
+                    result: {
+                        transaction: () => {
+                            const transaction = {
+                                objectStore: () => ({
+                                    put: () => {},
+                                    delete: () => {},
+                                    getAll: () => ({ onsuccess: null, result: [] as unknown[] }),
+                                }),
+                                oncomplete: null as ((ev: unknown) => void) | null,
+                                onerror: null as ((ev: unknown) => void) | null,
+                                onabort: null,
+                                error: null as Error | null,
+                            }
+                            queueMicrotask(() => {
+                                if (failNextWrite) {
+                                    transaction.error = new Error('quota exceeded')
+                                    transaction.onerror?.({})
+                                    return
+                                }
+                                transaction.oncomplete?.({})
+                            })
+                            return transaction
+                        },
+                        close: () => {},
+                    },
+                    onsuccess: null,
+                    onerror: null,
+                    onupgradeneeded: null,
+                }
+                queueMicrotask(() => request.onsuccess?.({}))
+                return request
+            },
+        })
+        vi.resetModules()
+        const mod = await import('./composer-attachment-drafts')
+        const file = new File(['payload'], 'notes.txt')
+        failNextWrite = true
+
+        await expect(mod.moveDraftAttachments(
+            'session-target',
+            'session-target',
+            () => [{ id: 'a1', file }],
+        )).rejects.toThrow(/quota exceeded|Composer draft/)
+    })
 })
