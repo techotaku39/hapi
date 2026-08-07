@@ -445,6 +445,45 @@ describe('handoffComposerDraft', () => {
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
 
+    it('drops attachments cancelled while the durable move is in flight', async () => {
+        const kept = new File(['kept'], 'kept.txt')
+        const doomed = new File(['doomed'], 'doomed.txt')
+        setComposerDraftSnapshot('source-a', 'typed', [{ id: 'kept-1', file: kept }])
+        let cancelled = false
+        let releaseMove!: () => void
+        const moveGate = new Promise<void>((resolve) => {
+            releaseMove = resolve
+        })
+        mocks.moveDraftAttachments.mockImplementation(async (
+            source: string,
+            target: string,
+            resolveAttachments: () => Array<{ id: string; file: File }>,
+        ) => {
+            if (source === target) {
+                return resolveAttachments()
+            }
+            const resolved = resolveAttachments()
+            await moveGate
+            return resolved
+        })
+
+        const transfer = transferComposerDraft('source-a', 'target-a', [
+            { id: 'doomed-1', file: doomed, isCancelled: () => cancelled },
+        ])
+        await Promise.resolve()
+        await Promise.resolve()
+        cancelled = true
+        releaseMove()
+        await transfer
+
+        const correctiveResolvers = mocks.moveDraftAttachments.mock.calls
+            .filter((call) => call[0] === call[1])
+            .map((call) => call[2] as () => Array<{ id: string }>)
+        expect(correctiveResolvers.length).toBeGreaterThanOrEqual(1)
+        expect(correctiveResolvers.at(-1)?.().map((item) => item.id)).toEqual(['kept-1'])
+        expect(composerDraftWasHandedOff('source-a')).toBe(true)
+    })
+
     it('does not move when the source IndexedDB attachment read fails', async () => {
         clearComposerDraftSnapshot('source-a')
         forgetComposerDraftHandoff('source-a')
