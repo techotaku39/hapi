@@ -636,6 +636,44 @@ describe('useSendMessage', () => {
         await expect(acceptedPromise!).resolves.toEqual({ attemptId: 'local-id-1' })
     })
 
+    it('awaits onSessionResolved before starting the send mutation', async () => {
+        const order: string[] = []
+        const gate = deferred<void>()
+        const sendMessage = vi.fn(async () => {
+            order.push('mutate')
+        })
+        const api = createMockApi(sendMessage)
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-original', {
+                resolveSessionId: async () => 'session-resolved',
+                onSessionResolved: async () => {
+                    order.push('resolved')
+                    await gate.promise
+                    order.push('resolved-done')
+                },
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            void result.current.sendMessage('hello with draft')
+        })
+
+        await waitFor(() => {
+            expect(order).toEqual(['resolved'])
+        })
+        expect(sendMessage).not.toHaveBeenCalled()
+
+        await act(async () => {
+            gate.resolve()
+        })
+
+        await waitFor(() => {
+            expect(order).toEqual(['resolved', 'resolved-done', 'mutate'])
+        })
+        expect(sendMessage).toHaveBeenCalled()
+    })
+
     // #918: the inactive-session 409 path
     describe('inactive-session 409 (issue #918)', () => {
         it('fires onError with the ApiError so the consumer can render a session_inactive affordance', async () => {

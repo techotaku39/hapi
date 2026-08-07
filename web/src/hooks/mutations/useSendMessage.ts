@@ -79,7 +79,7 @@ export type SendErrorInfo = {
 
 type UseSendMessageOptions = {
     resolveSessionId?: (sessionId: string) => Promise<string>
-    onSessionResolved?: (sessionId: string) => void
+    onSessionResolved?: (sessionId: string) => void | Promise<void>
     onBlocked?: (reason: BlockedReason) => void
     onSuccess?: (sessionId: string) => void
     onError?: (info: SendErrorInfo) => void
@@ -283,7 +283,9 @@ export function useSendMessage(
             try {
                 const resolved = await options.resolveSessionId(sessionId)
                 if (resolved && resolved !== sessionId) {
-                    options.onSessionResolved?.(resolved)
+                    // Await draft transfer / navigation before the mutation so
+                    // hidden inactive attachments move with the resumed id.
+                    await options.onSessionResolved?.(resolved)
                     targetSessionId = resolved
                 }
             } catch (error) {

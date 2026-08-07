@@ -600,11 +600,14 @@ function SessionPage() {
             }))
         },
         resolveSessionId,
-        onSessionResolved: (resolvedSessionId) => {
-            if (sessionId) {
-                setSendErrors((prev) => migrateSuppressedSendError(prev, sessionId, resolvedSessionId))
-            }
-            handleSessionResolved(resolvedSessionId)
+        onSessionResolved: async (resolvedSessionId) => {
+            if (!sessionId) return
+            setSendErrors((prev) => migrateSuppressedSendError(prev, sessionId, resolvedSessionId))
+            await transferComposerDraftThenNavigate(
+                sessionId,
+                resolvedSessionId,
+                () => handleSessionResolved(resolvedSessionId),
+            )
         },
 
         onBlocked: (reason) => {
