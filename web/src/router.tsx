@@ -498,11 +498,11 @@ function SessionPage() {
     }, [session?.id, session?.active])
     const resolveSessionId = useCallback(async (currentSessionId: string) => {
         if (!api || !session || session.active) {
-            return currentSessionId
+            return { sessionId: currentSessionId, resumed: false }
         }
         const cached = resolvedSessionRef.current
         if (cached?.source === currentSessionId) {
-            return await cached.target
+            return { sessionId: await cached.target, resumed: true }
         }
         if (!inactiveSessionCanResume(session, messages.length, cursorChatStoreStatus?.onDisk)) {
             throw new ApiError(
@@ -514,7 +514,7 @@ function SessionPage() {
         try {
             const target = api.resumeSession(currentSessionId, { permissionMode: session.permissionMode ?? undefined })
             resolvedSessionRef.current = { source: currentSessionId, target }
-            return await target
+            return { sessionId: await target, resumed: true }
         } catch (error) {
             if (resolvedSessionRef.current?.source === currentSessionId) {
                 resolvedSessionRef.current = null
@@ -779,7 +779,7 @@ function SessionPage() {
             onLoadMore={loadMoreMessages}
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
-            resolveSessionIdForUpload={resolveSessionId}
+            resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
             onUploadSessionResolved={handleSessionResolved}
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}

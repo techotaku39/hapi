@@ -372,6 +372,11 @@ export function HappyComposer(props: {
     /** Terminal result for a chat mutation, including attachment-bearing failures. */
     sendSettlement?: { attemptId: string; status: 'success' | 'error' } | null
     /**
+     * Resume/handoff path for inactive drafts that only exist in IndexedDB
+     * (no visible text/attachments for assistant-ui to append).
+     */
+    onResumeStoredDraft?: () => void | Promise<void>
+    /**
      * One-shot intent bridge consumed by useHappyRuntime's onNew callback.
      * SessionChat owns this ref so the composer never retains an explicit
      * queue request after a scratchlist/scheduled/failed early path.
@@ -635,7 +640,15 @@ export function HappyComposer(props: {
         (text) => api.composer().setText(text),
         (file) => api.composer().addAttachment(file),
     )
-    const hasAnyAttachments = hasAttachments || draftHydration.hasStoredAttachments
+    const canHydrateAttachments = props.canRestoreAttachments ?? active
+    const hiddenAttachmentStatePending =
+        !canHydrateAttachments
+        && (draftHydration.sessionId !== sessionId || !draftHydration.complete)
+    const hasHiddenAttachments =
+        !canHydrateAttachments && draftHydration.hasStoredAttachments
+    const hasAnyAttachments = hasAttachments || hasHiddenAttachments
+    const blocksScheduling =
+        hasAttachments || hasHiddenAttachments || hiddenAttachmentStatePending
     const canSend = (hasText || hasAnyAttachments) && attachmentsReady && !controlsDisabled
 
     useEffect(() => {
@@ -1159,6 +1172,10 @@ export function HappyComposer(props: {
         // explicit queue intent to SessionChat.
         const effectiveIntent = pendingSchedule == null ? restoredIntent : 'default'
         try {
+            if (!hasText && !hasAttachments && draftHydration.hasStoredAttachments) {
+                await props.onResumeStoredDraft?.()
+                return
+            }
             // Must be adjacent to send(): useHappyRuntime consumes and resets
             // this ref synchronously from assistant-ui's onNew callback.
             if (pendingSendIntentRef) pendingSendIntentRef.current = effectiveIntent
@@ -1181,9 +1198,13 @@ export function HappyComposer(props: {
         api,
         attachments,
         canSend,
+        draftHydration.hasStoredAttachments,
+        hasAttachments,
+        hasText,
         onSuppressSendErrorRestore,
         pendingSchedule,
         props.onParkScratchlist,
+        props.onResumeStoredDraft,
         props.scratchlistMode,
         richMentionsEnabled,
         sendError,
@@ -2279,7 +2300,7 @@ export function HappyComposer(props: {
                             pendingSchedule={pendingSchedule}
                             onSchedule={handleUserSchedule}
                             onClearSchedule={onUserClearSchedule}
-                            hasAttachments={hasAnyAttachments}
+                            hasAttachments={blocksScheduling}
                             piModelLabel={piModelLabel}
                             piModelDisabled={controlsDisabled || !piHasModels}
                             piModelOpen={showPiModelPanel}

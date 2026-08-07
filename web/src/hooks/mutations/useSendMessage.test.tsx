@@ -148,7 +148,7 @@ describe('useSendMessage', () => {
         const { result } = renderHook(
             () => useSendMessage(api, 'session-original', {
                 onSuccess,
-                resolveSessionId: async () => 'session-resolved',
+                resolveSessionId: async () => ({ sessionId: 'session-resolved', resumed: true }),
                 onSessionResolved: vi.fn(),
             }),
             { wrapper: createWrapper() },
@@ -436,7 +436,7 @@ describe('useSendMessage', () => {
             const { result } = renderHook(
                 () => useSendMessage(api, 'session-original', {
                     onError,
-                    resolveSessionId: async () => 'session-resolved',
+                    resolveSessionId: async () => ({ sessionId: 'session-resolved', resumed: true }),
                     onSessionResolved: vi.fn(),
                 }),
                 { wrapper: createWrapper() },
@@ -624,7 +624,7 @@ describe('useSendMessage', () => {
         const api = createMockApi()
         const { result } = renderHook(
             () => useSendMessage(api, 'session-original', {
-                resolveSessionId: async () => 'session-resolved',
+                resolveSessionId: async () => ({ sessionId: 'session-resolved', resumed: true }),
                 onSessionResolved: vi.fn(),
             }),
             { wrapper: createWrapper() },
@@ -645,7 +645,7 @@ describe('useSendMessage', () => {
         const api = createMockApi(sendMessage)
         const { result } = renderHook(
             () => useSendMessage(api, 'session-original', {
-                resolveSessionId: async () => 'session-resolved',
+                resolveSessionId: async () => ({ sessionId: 'session-resolved', resumed: true }),
                 onSessionResolved: async (_id, context) => {
                     expect(context).toEqual({ text: 'hello with draft', attachments: undefined })
                     order.push('resolved')
@@ -680,7 +680,7 @@ describe('useSendMessage', () => {
         const api = createMockApi(sendMessage)
         const { result } = renderHook(
             () => useSendMessage(api, 'session-original', {
-                resolveSessionId: async () => 'session-resolved',
+                resolveSessionId: async () => ({ sessionId: 'session-resolved', resumed: true }),
                 onSessionResolved: async () => ({ deferUntilDraftHydrated: true }),
             }),
             { wrapper: createWrapper() },
@@ -693,6 +693,51 @@ describe('useSendMessage', () => {
 
         expect(accepted).toBe(false)
         expect(sendMessage).not.toHaveBeenCalled()
+    })
+
+    it('defers after a same-id resume when onSessionResolved asks to wait', async () => {
+        const sendMessage = vi.fn(async () => {})
+        const api = createMockApi(sendMessage)
+        const onSessionResolved = vi.fn(async () => ({ deferUntilDraftHydrated: true as const }))
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-same', {
+                resolveSessionId: async () => ({ sessionId: 'session-same', resumed: true }),
+                onSessionResolved,
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        let accepted: Awaited<ReturnType<typeof result.current.sendMessage>> | undefined
+        await act(async () => {
+            accepted = await result.current.sendMessage('same-id with hidden file')
+        })
+
+        expect(onSessionResolved).toHaveBeenCalledWith('session-same', {
+            text: 'same-id with hidden file',
+            attachments: undefined,
+        })
+        expect(accepted).toBe(false)
+        expect(sendMessage).not.toHaveBeenCalled()
+    })
+
+    it('does not call onSessionResolved when the session was already active', async () => {
+        const sendMessage = vi.fn(async () => {})
+        const api = createMockApi(sendMessage)
+        const onSessionResolved = vi.fn()
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-active', {
+                resolveSessionId: async () => ({ sessionId: 'session-active', resumed: false }),
+                onSessionResolved,
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        await act(async () => {
+            await result.current.sendMessage('already active')
+        })
+
+        expect(onSessionResolved).not.toHaveBeenCalled()
+        expect(sendMessage).toHaveBeenCalled()
     })
 
     // #918: the inactive-session 409 path

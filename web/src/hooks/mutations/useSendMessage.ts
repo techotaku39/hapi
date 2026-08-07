@@ -77,6 +77,12 @@ export type SendErrorInfo = {
     mutationStarted: boolean
 }
 
+export type ResolvedSession = {
+    sessionId: string
+    /** True after an inactive-session resume, even when the hub returns the same id. */
+    resumed: boolean
+}
+
 export type SessionResolution = {
     attachments?: AttachmentMetadata[]
     /** Transfer moved hidden drafts; wait for the active composer to hydrate/re-upload. */
@@ -89,7 +95,7 @@ export type SessionResolvedContext = {
 }
 
 type UseSendMessageOptions = {
-    resolveSessionId?: (sessionId: string) => Promise<string>
+    resolveSessionId?: (sessionId: string) => Promise<ResolvedSession>
     onSessionResolved?: (
         sessionId: string,
         context: SessionResolvedContext,
@@ -297,14 +303,15 @@ export function useSendMessage(
             setIsResolving(true)
             try {
                 const resolved = await options.resolveSessionId(sessionId)
-                if (resolved && resolved !== sessionId) {
+                targetSessionId = resolved.sessionId
+                if (resolved.resumed) {
                     // Await draft transfer / navigation before the mutation so
-                    // hidden inactive attachments move with the resumed id.
-                    const resolution = await options.onSessionResolved?.(resolved, {
-                        text,
-                        attachments,
-                    })
-                    targetSessionId = resolved
+                    // hidden inactive attachments move with the resumed id
+                    // (including same-id PTY/Pi/Cursor resumes).
+                    const resolution = await options.onSessionResolved?.(
+                        targetSessionId,
+                        { text, attachments },
+                    )
                     if (resolution?.deferUntilDraftHydrated) {
                         // Target composer still needs to hydrate/re-upload files.
                         return false
