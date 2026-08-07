@@ -484,6 +484,53 @@ describe('handoffComposerDraft', () => {
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
 
+    it('stabilizes multi-file cancellation across the corrective write', async () => {
+        const fileA = new File(['a'], 'a.txt')
+        const fileB = new File(['b'], 'b.txt')
+        setComposerDraftSnapshot('source-a', 'typed', [])
+        let cancelA = false
+        let cancelB = false
+        let correctiveCalls = 0
+        let releaseCorrective!: () => void
+        const correctiveGate = new Promise<void>((resolve) => {
+            releaseCorrective = resolve
+        })
+        mocks.moveDraftAttachments.mockImplementation(async (
+            source: string,
+            target: string,
+            resolveAttachments: () => Array<{ id: string; file: File }>,
+        ) => {
+            if (source === target) {
+                correctiveCalls += 1
+                if (correctiveCalls === 1) {
+                    await correctiveGate
+                }
+                return resolveAttachments()
+            }
+            const resolved = resolveAttachments()
+            cancelA = true
+            return resolved
+        })
+
+        const transfer = transferComposerDraft('source-a', 'target-a', [
+            { id: 'a1', file: fileA, isCancelled: () => cancelA },
+            { id: 'b1', file: fileB, isCancelled: () => cancelB },
+        ])
+        await Promise.resolve()
+        await Promise.resolve()
+        // First corrective is blocked; cancel the sibling mid-write.
+        cancelB = true
+        releaseCorrective()
+        await transfer
+
+        expect(correctiveCalls).toBeGreaterThanOrEqual(2)
+        const lastCorrective = mocks.moveDraftAttachments.mock.calls
+            .filter((call) => call[0] === call[1])
+            .at(-1)?.[2] as (() => Array<{ id: string }>) | undefined
+        expect(lastCorrective?.().map((item) => item.id)).toEqual([])
+        expect(composerDraftWasHandedOff('source-a')).toBe(true)
+    })
+
     it('does not move when the source IndexedDB attachment read fails', async () => {
         clearComposerDraftSnapshot('source-a')
         forgetComposerDraftHandoff('source-a')

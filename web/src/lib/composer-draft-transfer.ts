@@ -381,11 +381,18 @@ export async function transferComposerDraft(
                 )
                 // Always rewrite the target at least once after the durable move so
                 // isCancelled flips during the IDB commit window still prune the file.
-                // Then repeat until pending.latest / latestText are stable across the await.
+                // Repeat until pending edits and the cancellation set are stable.
+                const cancellationRevision = () => JSON.stringify(
+                    pendingAttachments
+                        .filter((item) => item.isCancelled?.())
+                        .map((item) => item.id)
+                        .sort(),
+                )
                 for (;;) {
                     const pendingState = pendingTransfers.get(sourceSessionId)
                     const latest = pendingState?.latest
                     const textMarker = pendingState?.latestText
+                    const cancelMarker = cancellationRevision()
                     transferredText = samplePendingTransferText(
                         sourceSessionId,
                         getDraft(sourceSessionId),
@@ -397,7 +404,13 @@ export async function transferComposerDraft(
                         () => attachments,
                     )
                     const after = pendingTransfers.get(sourceSessionId)
-                    if (after?.latest === latest && after?.latestText === textMarker) break
+                    if (
+                        after?.latest === latest
+                        && after?.latestText === textMarker
+                        && cancellationRevision() === cancelMarker
+                    ) {
+                        break
+                    }
                 }
                 transferredText = samplePendingTransferText(
                     sourceSessionId,
@@ -513,15 +526,20 @@ export async function handoffComposerDraft(
         const batch = [...state.pending]
         try {
             await transferComposerDraft(sourceSessionId, targetSessionId, batch)
-            // Belt-and-suspenders: if remove() won during the move commit window,
-            // prune those ids from the target before navigation restores them.
-            const cancelledAfterMove = batch.filter((item) => item.isCancelled?.())
-            if (cancelledAfterMove.length > 0) {
-                await transferComposerDraft(
-                    targetSessionId,
-                    targetSessionId,
-                    cancelledAfterMove,
-                )
+            // Re-sample the full batch until cancellation is stable across the
+            // same-target rewrite (multi-file removes can land mid-await).
+            const cancellationRevision = () => JSON.stringify(
+                batch
+                    .filter((item) => item.isCancelled?.())
+                    .map((item) => item.id)
+                    .sort(),
+            )
+            let observedCancellationRevision = '[]'
+            for (;;) {
+                const nextCancellationRevision = cancellationRevision()
+                if (nextCancellationRevision === observedCancellationRevision) break
+                observedCancellationRevision = nextCancellationRevision
+                await transferComposerDraft(targetSessionId, targetSessionId, batch)
             }
         } catch (error) {
             console.warn('[composer-draft] handoff transfer failed; still navigating', error)
