@@ -35,12 +35,22 @@ import {
     persistInactiveComposerAttachments,
     setComposerDraftSnapshot,
     transferComposerDraft,
+    transferComposerDraftThenNavigate,
     updateComposerDraftTextSnapshot,
 } from './composer-draft-transfer'
 
 function resetSession(sessionId: string): void {
     clearComposerDraftSnapshot(sessionId)
     forgetComposerDraftHandoff(sessionId)
+}
+
+function resetMoveDraftMock(): void {
+    mocks.moveDraftAttachments.mockReset()
+    mocks.moveDraftAttachments.mockImplementation(async (
+        _source: string,
+        _target: string,
+        resolveAttachments: () => Array<{ id: string; file: File }>,
+    ) => resolveAttachments())
 }
 
 function expectMovedAttachments(
@@ -62,11 +72,7 @@ function expectMovedAttachments(
 describe('transferComposerDraft', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mocks.moveDraftAttachments.mockImplementation(async (
-            _source: string,
-            _target: string,
-            resolveAttachments: () => Array<{ id: string; file: File }>,
-        ) => resolveAttachments())
+        resetMoveDraftMock()
         resetSession('old-live')
         resetSession('new-live')
         resetSession('old-stored')
@@ -217,11 +223,7 @@ describe('transferComposerDraft', () => {
 describe('handoffComposerDraft', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mocks.moveDraftAttachments.mockImplementation(async (
-            _source: string,
-            _target: string,
-            resolveAttachments: () => Array<{ id: string; file: File }>,
-        ) => resolveAttachments())
+        resetMoveDraftMock()
         resetSession('source-a')
         resetSession('target-a')
         mocks.getDraft.mockReturnValue('hello')
@@ -404,11 +406,42 @@ describe('handoffComposerDraft', () => {
         expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'typed during wait')
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
+
+    it('still navigates when the local durable move rejects', async () => {
+        const file = new File(['draft'], 'draft.txt')
+        setComposerDraftSnapshot('source-a', 'typed', [{ id: 'a1', file }])
+        mocks.moveDraftAttachments.mockRejectedValue(new Error('quota exceeded'))
+        const onNavigable = vi.fn().mockResolvedValue(undefined)
+
+        await handoffComposerDraft(
+            'source-a',
+            'target-a',
+            { id: 'p1', file },
+            onNavigable,
+        )
+
+        expect(onNavigable).toHaveBeenCalledWith('target-a')
+        expect(composerDraftWasHandedOff('source-a')).toBe(false)
+        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'typed')
+    })
+
+    it('navigates after resume even when transferComposerDraftThenNavigate hits a move failure', async () => {
+        const file = new File(['draft'], 'draft.txt')
+        setComposerDraftSnapshot('source-a', 'typed', [{ id: 'a1', file }])
+        mocks.moveDraftAttachments.mockRejectedValue(new Error('quota exceeded'))
+        const navigate = vi.fn().mockResolvedValue(undefined)
+
+        await transferComposerDraftThenNavigate('source-a', 'target-a', navigate)
+
+        expect(navigate).toHaveBeenCalledOnce()
+        expect(composerDraftWasHandedOff('source-a')).toBe(false)
+    })
 })
 
 describe('updateComposerDraftTextSnapshot', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        resetMoveDraftMock()
         resetSession('session-inactive')
     })
 
@@ -437,6 +470,7 @@ describe('updateComposerDraftTextSnapshot', () => {
 describe('persistInactiveComposerAttachments', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        resetMoveDraftMock()
         resetSession('session-inactive')
         resetSession('old-pending')
         resetSession('new-pending')

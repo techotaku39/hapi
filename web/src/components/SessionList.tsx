@@ -29,7 +29,7 @@ import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
-import { transferComposerDraft } from '@/lib/composer-draft-transfer'
+import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -886,8 +886,11 @@ function SessionItem(props: {
             // resumeSession may merge the row into a freshly-spawned sessionId.
             // Follow it so the operator lands on the live session.
             if (result.sessionId && result.sessionId !== s.id) {
-                await transferComposerDraft(s.id, result.sessionId)
-                onSelect(result.sessionId)
+                await transferComposerDraftThenNavigate(
+                    s.id,
+                    result.sessionId,
+                    () => onSelect(result.sessionId),
+                )
             }
         } catch (error) {
             setReopenError(formatReopenError(error))

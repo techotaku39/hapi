@@ -244,27 +244,56 @@ export async function transferComposerDraft(
     if (sourceSessionId !== targetSessionId) {
         // Durable move: await target put + source delete before navigation so a
         // reload cannot lose the draft, and tombstone the source so unmount
-        // cleanup cannot recreate it under the obsolete id. Failed moves throw
-        // without clearing the source or recording a handoff.
-        attachments = await moveDraftAttachments(
-            sourceSessionId,
-            targetSessionId,
-            buildTransferredAttachments,
-        )
-        // Keystrokes during the IDB drain keep updating the source; re-read
-        // before retiring it so the target does not get a stale snapshot.
-        transferredText = liveSnapshots.get(sourceSessionId)?.text ?? getDraft(sourceSessionId)
-        saveDraft(targetSessionId, transferredText)
-        clearDraft(sourceSessionId)
-        completedHandoffs.set(sourceSessionId, targetSessionId)
-        liveSnapshots.delete(sourceSessionId)
-        inactiveVisibleIds.delete(sourceSessionId)
+        // cleanup cannot recreate it under the obsolete id.
+        try {
+            attachments = await moveDraftAttachments(
+                sourceSessionId,
+                targetSessionId,
+                buildTransferredAttachments,
+            )
+            // Keystrokes during the IDB drain keep updating the source; re-read
+            // before retiring it so the target does not get a stale snapshot.
+            transferredText = liveSnapshots.get(sourceSessionId)?.text ?? getDraft(sourceSessionId)
+            saveDraft(targetSessionId, transferredText)
+            clearDraft(sourceSessionId)
+            completedHandoffs.set(sourceSessionId, targetSessionId)
+            liveSnapshots.delete(sourceSessionId)
+            inactiveVisibleIds.delete(sourceSessionId)
+        } catch (error) {
+            // Hub resume already succeeded; keep navigating. Copy text + in-memory
+            // attachments to the target without claiming a durable handoff so the
+            // source IndexedDB row remains if the operator reloads the old id.
+            transferredText = liveSnapshots.get(sourceSessionId)?.text ?? getDraft(sourceSessionId)
+            attachments = buildTransferredAttachments()
+            saveDraft(targetSessionId, transferredText)
+            saveDraftAttachments(targetSessionId, attachments)
+            setComposerDraftSnapshot(targetSessionId, transferredText, attachments)
+            throw error
+        }
     } else {
         attachments = buildTransferredAttachments()
         saveDraft(targetSessionId, transferredText)
         saveDraftAttachments(targetSessionId, attachments)
     }
     setComposerDraftSnapshot(targetSessionId, transferredText, attachments)
+}
+
+/**
+ * Move drafts after a successful hub resume/reopen, then always run `navigate`.
+ * Local IndexedDB failures must not strand the UI on a deleted source route.
+ */
+export async function transferComposerDraftThenNavigate(
+    sourceSessionId: string,
+    targetSessionId: string,
+    navigate: () => void | Promise<void>,
+    pendingAttachments: readonly AttachmentDraftHandoff[] = [],
+): Promise<void> {
+    try {
+        await transferComposerDraft(sourceSessionId, targetSessionId, pendingAttachments)
+    } catch (error) {
+        console.warn('[composer-draft] transfer failed after resume; continuing navigation', error)
+    }
+    await navigate()
 }
 
 /**
@@ -325,12 +354,21 @@ export async function handoffComposerDraft(
             setTimeout(resolve, 0)
         })
         const batch = [...state.pending]
-        await transferComposerDraft(sourceSessionId, targetSessionId, batch)
-        // completedHandoffs already set inside transfer for cross-session moves
+        try {
+            await transferComposerDraft(sourceSessionId, targetSessionId, batch)
+        } catch (error) {
+            console.warn('[composer-draft] handoff transfer failed; still navigating', error)
+        }
+        // Navigate even when the local durable move failed — resume may already
+        // have deleted the source session row.
         await onNavigable(targetSessionId)
         const late = state.pending.filter((item) => !batch.some((early) => early.id === item.id))
         if (late.length > 0) {
-            await transferComposerDraft(targetSessionId, targetSessionId, late)
+            try {
+                await transferComposerDraft(targetSessionId, targetSessionId, late)
+            } catch (error) {
+                console.warn('[composer-draft] late handoff append failed', error)
+            }
         }
     } finally {
         resolveDone()

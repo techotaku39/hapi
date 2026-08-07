@@ -43,7 +43,7 @@ import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { seedMessageWindowFromSession, syncTailMessages } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
-import { transferComposerDraft } from '@/lib/composer-draft-transfer'
+import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { initializeSessionLastSeen, markSessionSeen } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
@@ -434,12 +434,15 @@ function SessionPage() {
                 await queryClient.invalidateQueries({ queryKey: queryKeys.session(result.sessionId) })
                 await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
                 if (result.sessionId && result.sessionId !== errorSessionId) {
-                    await transferComposerDraft(errorSessionId, result.sessionId)
-                    navigate({
-                        to: '/sessions/$sessionId',
-                        params: { sessionId: result.sessionId },
-                        replace: true
-                    })
+                    await transferComposerDraftThenNavigate(
+                        errorSessionId,
+                        result.sessionId,
+                        () => navigate({
+                            to: '/sessions/$sessionId',
+                            params: { sessionId: result.sessionId },
+                            replace: true
+                        }),
+                    )
                 }
             } catch (err) {
                 const message = err instanceof Error ? err.message : t('dialog.error.default')

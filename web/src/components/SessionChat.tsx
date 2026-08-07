@@ -77,7 +77,7 @@ import {
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
-import { handoffComposerDraft, transferComposerDraft } from '@/lib/composer-draft-transfer'
+import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
@@ -1674,12 +1674,15 @@ function SessionChatInner(props: SessionChatProps) {
                 reopenDisabledReason={props.reopenDisabledReason}
                 onSessionDeleted={props.onBack}
                 onSessionReopened={async (newSessionId) => {
-                    await transferComposerDraft(props.session.id, newSessionId)
-                    navigate({
-                        to: '/sessions/$sessionId',
-                        params: { sessionId: newSessionId },
-                        replace: true
-                    })
+                    await transferComposerDraftThenNavigate(
+                        props.session.id,
+                        newSessionId,
+                        () => navigate({
+                            to: '/sessions/$sessionId',
+                            params: { sessionId: newSessionId },
+                            replace: true
+                        }),
+                    )
                 }}
             />
 
