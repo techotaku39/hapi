@@ -1,7 +1,8 @@
-import { getDraft, saveDraft } from '@/lib/composer-drafts'
+import { clearDraft, getDraft, saveDraft } from '@/lib/composer-drafts'
 import {
     getDraftAttachments,
     getRestoredUploadMetadata,
+    moveDraftAttachments,
     saveDraftAttachments,
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
@@ -70,8 +71,19 @@ export function attachmentDraftRevision(attachments: readonly AttachmentDraftInp
 
 export function clearComposerDraftSnapshot(sessionId: string): void {
     liveSnapshots.delete(sessionId)
-    completedHandoffs.delete(sessionId)
+    // Keep completedHandoffs: a handed-off source must stay tombstoned so
+    // unmount cleanup cannot recreate the obsolete draft.
     inactiveVisibleIds.delete(sessionId)
+}
+
+/** True after a cross-session transfer retired this source id. */
+export function composerDraftWasHandedOff(sessionId: string): boolean {
+    return completedHandoffs.has(sessionId)
+}
+
+/** Test/helper: drop the handoff tombstone so a session id can be reused. */
+export function forgetComposerDraftHandoff(sessionId: string): void {
+    completedHandoffs.delete(sessionId)
 }
 
 function stripSessionScopedUploadFields(attachment: AttachmentDraftInput): AttachmentDraftInput {
@@ -150,6 +162,10 @@ export async function persistInactiveComposerAttachments(
     text: string,
     visibleAttachments: readonly AttachmentDraftInput[],
 ): Promise<AttachmentDraftInput[]> {
+    // Source session was already moved to a resumed id — do not recreate it.
+    if (composerDraftWasHandedOff(sessionId)) {
+        return []
+    }
     const previous = inactivePersistQueue.get(sessionId) ?? Promise.resolve([] as AttachmentDraftInput[])
     const next = previous
         .catch(() => [] as AttachmentDraftInput[])
@@ -223,11 +239,19 @@ export async function transferComposerDraft(
     const attachments = mergeAttachmentsById(normalizedBase, normalizedPending)
 
     saveDraft(targetSessionId, text)
-    saveDraftAttachments(targetSessionId, attachments)
-    setComposerDraftSnapshot(targetSessionId, text, attachments)
     if (sourceSessionId !== targetSessionId) {
+        // Durable move: await target put + source delete before navigation so a
+        // reload cannot lose the draft, and tombstone the source so unmount
+        // cleanup cannot recreate it under the obsolete id.
+        await moveDraftAttachments(sourceSessionId, targetSessionId, attachments)
+        clearDraft(sourceSessionId)
+        completedHandoffs.set(sourceSessionId, targetSessionId)
         liveSnapshots.delete(sourceSessionId)
+        inactiveVisibleIds.delete(sourceSessionId)
+    } else {
+        saveDraftAttachments(targetSessionId, attachments)
     }
+    setComposerDraftSnapshot(targetSessionId, text, attachments)
 }
 
 /**
@@ -289,9 +313,7 @@ export async function handoffComposerDraft(
         })
         const batch = [...state.pending]
         await transferComposerDraft(sourceSessionId, targetSessionId, batch)
-        completedHandoffs.set(sourceSessionId, targetSessionId)
-        // Navigate even when every pending file was cancelled mid-handoff —
-        // resume may already have deleted the source session row.
+        // completedHandoffs already set inside transfer for cross-session moves
         await onNavigable(targetSessionId)
         const late = state.pending.filter((item) => !batch.some((early) => early.id === item.id))
         if (late.length > 0) {

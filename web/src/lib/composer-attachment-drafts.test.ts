@@ -97,4 +97,15 @@ describe('composer-attachment-drafts', () => {
         expect(secondPass).toHaveLength(1)
         expect(secondPass[0] && mod.getRestoredUploadMetadata(secondPass[0])?.id).toBe('pending-1')
     })
+
+    it('moves attachments to the target and tombstones the source in cache', async () => {
+        const mod = await import('./composer-attachment-drafts')
+        const file = new File(['payload'], 'notes.txt')
+        mod.saveDraftAttachments('session-source', [{ id: 'a1', file }])
+
+        await mod.moveDraftAttachments('session-source', 'session-target', [{ id: 'a1', file }])
+
+        expect((await mod.getDraftAttachments('session-target')).map((item) => item.name)).toEqual(['notes.txt'])
+        expect(await mod.getDraftAttachments('session-source')).toEqual([])
+    })
 })

@@ -5,7 +5,7 @@ import {
     saveDraftAttachments,
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
-import { persistInactiveComposerAttachments } from '@/lib/composer-draft-transfer'
+import { persistInactiveComposerAttachments, composerDraftWasHandedOff } from '@/lib/composer-draft-transfer'
 
 export type ComposerDraftHydration = {
     /** Session represented by this status; prevents a previous session's ready state leaking across a key change. */
@@ -126,6 +126,13 @@ export function useComposerDraft(
         return () => {
             disposed = true
             cancelAnimationFrame(frame)
+            // Cross-session resume already moved this draft; do not recreate the
+            // obsolete source id after the route change unmounts the composer.
+            if (composerDraftWasHandedOff(sessionId)) {
+                draftReadyRef.current = false
+                attachmentsReadyRef.current = false
+                return
+            }
             if (draftReadyRef.current) {
                 saveDraft(sessionId, composerTextRef.current)
             }

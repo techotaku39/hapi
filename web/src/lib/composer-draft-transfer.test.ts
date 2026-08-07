@@ -3,24 +3,30 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
     getDraft: vi.fn(),
     saveDraft: vi.fn(),
+    clearDraft: vi.fn(),
     getDraftAttachments: vi.fn(),
     getRestoredUploadMetadata: vi.fn(),
     saveDraftAttachments: vi.fn(),
+    moveDraftAttachments: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/lib/composer-drafts', () => ({
     getDraft: mocks.getDraft,
     saveDraft: mocks.saveDraft,
+    clearDraft: mocks.clearDraft,
 }))
 vi.mock('@/lib/composer-attachment-drafts', () => ({
     getDraftAttachments: mocks.getDraftAttachments,
     getRestoredUploadMetadata: mocks.getRestoredUploadMetadata,
     saveDraftAttachments: mocks.saveDraftAttachments,
+    moveDraftAttachments: mocks.moveDraftAttachments,
 }))
 
 import {
     attachmentDraftRevision,
     clearComposerDraftSnapshot,
+    composerDraftWasHandedOff,
+    forgetComposerDraftHandoff,
     handoffComposerDraft,
     persistInactiveComposerAttachments,
     setComposerDraftSnapshot,
@@ -28,19 +34,25 @@ import {
     updateComposerDraftTextSnapshot,
 } from './composer-draft-transfer'
 
+function resetSession(sessionId: string): void {
+    clearComposerDraftSnapshot(sessionId)
+    forgetComposerDraftHandoff(sessionId)
+}
+
 describe('transferComposerDraft', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        clearComposerDraftSnapshot('old-live')
-        clearComposerDraftSnapshot('new-live')
-        clearComposerDraftSnapshot('old-stored')
-        clearComposerDraftSnapshot('new-stored')
-        clearComposerDraftSnapshot('old-empty')
-        clearComposerDraftSnapshot('new-empty')
-        clearComposerDraftSnapshot('old-pending')
-        clearComposerDraftSnapshot('new-pending')
-        clearComposerDraftSnapshot('source-a')
-        clearComposerDraftSnapshot('target-a')
+        mocks.moveDraftAttachments.mockResolvedValue(undefined)
+        resetSession('old-live')
+        resetSession('new-live')
+        resetSession('old-stored')
+        resetSession('new-stored')
+        resetSession('old-empty')
+        resetSession('new-empty')
+        resetSession('old-pending')
+        resetSession('new-pending')
+        resetSession('source-a')
+        resetSession('target-a')
     })
 
     it('prefers the live composer snapshot when reopening the visible session', async () => {
@@ -50,8 +62,11 @@ describe('transferComposerDraft', () => {
         await transferComposerDraft('old-live', 'new-live')
 
         expect(mocks.saveDraft).toHaveBeenCalledWith('new-live', 'latest text')
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-live', [{ id: 'a1', file }])
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('old-live', 'new-live', [{ id: 'a1', file }])
+        expect(mocks.clearDraft).toHaveBeenCalledWith('old-live')
+        expect(mocks.saveDraftAttachments).not.toHaveBeenCalled()
         expect(mocks.getDraftAttachments).not.toHaveBeenCalled()
+        expect(composerDraftWasHandedOff('old-live')).toBe(true)
     })
 
     it('drops session-scoped upload metadata for a session-list reopen', async () => {
@@ -68,13 +83,14 @@ describe('transferComposerDraft', () => {
         await transferComposerDraft('old-stored', 'new-stored')
 
         expect(mocks.saveDraft).toHaveBeenCalledWith('new-stored', 'persisted text')
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-stored', [{
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('old-stored', 'new-stored', [{
             id: 'uploaded-1',
             file,
             path: undefined,
             previewUrl: undefined,
             uploadSessionId: undefined,
         }])
+        expect(mocks.clearDraft).toHaveBeenCalledWith('old-stored')
     })
 
     it('does not resurrect persisted text when the live composer is empty', async () => {
@@ -84,7 +100,7 @@ describe('transferComposerDraft', () => {
         await transferComposerDraft('old-empty', 'new-empty')
 
         expect(mocks.saveDraft).toHaveBeenCalledWith('new-empty', '')
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-empty', [])
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('old-empty', 'new-empty', [])
     })
 
     it('falls back to persisted attachments after an inactive empty live snapshot is cleared', async () => {
@@ -102,7 +118,7 @@ describe('transferComposerDraft', () => {
         await transferComposerDraft('old-empty', 'new-empty')
 
         expect(mocks.saveDraft).toHaveBeenCalledWith('new-empty', 'typed while inactive')
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-empty', [{
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('old-empty', 'new-empty', [{
             id: 'kept-1',
             file,
             path: undefined,
@@ -122,7 +138,7 @@ describe('transferComposerDraft', () => {
             previewUrl: 'data:text/plain;base64,bmV3',
         }])
 
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-pending', [
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('old-pending', 'new-pending', [
             { id: 'a1', file: existing },
             {
                 id: 'a2',
@@ -153,7 +169,7 @@ describe('transferComposerDraft', () => {
         await transferComposerDraft('old-stored', 'new-stored')
 
         expect(mocks.saveDraft).toHaveBeenCalledWith('new-stored', 'source text')
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-stored', [{
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('old-stored', 'new-stored', [{
             id: 'source-1',
             file: sourceFile,
             path: undefined,
@@ -161,13 +177,25 @@ describe('transferComposerDraft', () => {
             uploadSessionId: undefined,
         }])
     })
+
+    it('blocks source re-persist after a durable handoff', async () => {
+        const file = new File(['draft'], 'draft.txt')
+        setComposerDraftSnapshot('old-live', 'latest text', [{ id: 'a1', file }])
+
+        await transferComposerDraft('old-live', 'new-live')
+        await persistInactiveComposerAttachments('old-live', 'resurrect?', [{ id: 'a1', file }])
+
+        expect(composerDraftWasHandedOff('old-live')).toBe(true)
+        expect(mocks.saveDraftAttachments).not.toHaveBeenCalled()
+    })
 })
 
 describe('handoffComposerDraft', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        clearComposerDraftSnapshot('source-a')
-        clearComposerDraftSnapshot('target-a')
+        mocks.moveDraftAttachments.mockResolvedValue(undefined)
+        resetSession('source-a')
+        resetSession('target-a')
         mocks.getDraft.mockReturnValue('hello')
         mocks.getDraftAttachments.mockResolvedValue([])
     })
@@ -184,8 +212,8 @@ describe('handoffComposerDraft', () => {
 
         expect(onNavigable).toHaveBeenCalledOnce()
         expect(onNavigable).toHaveBeenCalledWith('target-a')
-        const savedAttachments = mocks.saveDraftAttachments.mock.calls.at(-1)?.[1] as Array<{ id: string }>
-        expect(savedAttachments.map((item) => item.id).sort()).toEqual(['p1', 'p2'])
+        const moved = mocks.moveDraftAttachments.mock.calls.at(-1)?.[2] as Array<{ id: string }>
+        expect(moved.map((item) => item.id).sort()).toEqual(['p1', 'p2'])
     })
 
     it('appends a staggered file onto the target after the first handoff completes', async () => {
@@ -253,7 +281,7 @@ describe('handoffComposerDraft', () => {
         )
 
         expect(onNavigable).toHaveBeenCalledOnce()
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('target-a', [
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('source-a', 'target-a', [
             expect.objectContaining({ id: 'kept-1', file: kept }),
         ])
     })
@@ -283,7 +311,7 @@ describe('handoffComposerDraft', () => {
         await handoff
 
         expect(onNavigable).toHaveBeenCalledOnce()
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('target-a', [
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('source-a', 'target-a', [
             expect.objectContaining({ id: 'kept-1', file: kept }),
         ])
     })
@@ -292,7 +320,7 @@ describe('handoffComposerDraft', () => {
 describe('updateComposerDraftTextSnapshot', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        clearComposerDraftSnapshot('session-inactive')
+        resetSession('session-inactive')
     })
 
     it('updates text without writing attachment blobs', () => {
@@ -320,7 +348,9 @@ describe('updateComposerDraftTextSnapshot', () => {
 describe('persistInactiveComposerAttachments', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        clearComposerDraftSnapshot('session-inactive')
+        resetSession('session-inactive')
+        resetSession('old-pending')
+        resetSession('new-pending')
     })
 
     it('clears the live snapshot without touching stored files when nothing is visible', async () => {
@@ -448,7 +478,7 @@ describe('persistInactiveComposerAttachments', () => {
         releaseRead()
         await Promise.all([persist, transfer])
 
-        expect(mocks.saveDraftAttachments).toHaveBeenCalledWith('new-pending', expect.arrayContaining([
+        expect(mocks.moveDraftAttachments).toHaveBeenCalledWith('old-pending', 'new-pending', expect.arrayContaining([
             expect.objectContaining({ id: 'stored-a' }),
             expect.objectContaining({ id: 'picked-b' }),
         ]))

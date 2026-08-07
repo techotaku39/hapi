@@ -136,6 +136,14 @@ function queueWrite(record: StoredAttachmentDraft | null, sessionId: string): vo
     })
 }
 
+async function awaitPendingWrites(...sessionIds: string[]): Promise<void> {
+    const unique = [...new Set(sessionIds)]
+    await Promise.all(unique.map(async (sessionId) => {
+        const pending = pendingWrites.get(sessionId)
+        if (pending) await pending.catch(() => {})
+    }))
+}
+
 function setCachedFiles(sessionId: string, files: File[]): void {
     cache.delete(sessionId)
     cache.set(sessionId, files)
@@ -189,6 +197,69 @@ export function saveDraftAttachments(sessionId: string, attachments: AttachmentD
         files: storedFiles,
         updatedAt: Date.now(),
     }, sessionId)
+}
+
+/**
+ * Atomically put the target draft and delete the source in one IndexedDB
+ * transaction (after draining any queued writes). Cache is updated first so
+ * a concurrent read cannot resurrect the source while the commit is in flight.
+ */
+export async function moveDraftAttachments(
+    sourceSessionId: string,
+    targetSessionId: string,
+    attachments: AttachmentDraftInput[],
+): Promise<void> {
+    if (sourceSessionId === targetSessionId) {
+        saveDraftAttachments(targetSessionId, attachments)
+        await awaitPendingWrites(targetSessionId)
+        return
+    }
+
+    await awaitPendingWrites(sourceSessionId, targetSessionId)
+
+    const storedFiles = attachments.map(toStoredFile)
+    const copies = storedFiles.map(toFile)
+    setCachedFiles(targetSessionId, copies)
+    // Tombstone the source immediately so unmount cleanup / remount cannot
+    // re-read and re-persist the obsolete session id.
+    setCachedFiles(sourceSessionId, [])
+
+    try {
+        const db = await openDb()
+        await new Promise<void>((resolve, reject) => {
+            const transaction = db.transaction(STORE, 'readwrite')
+            const store = transaction.objectStore(STORE)
+            if (attachments.length === 0) {
+                store.delete(targetSessionId)
+            } else {
+                store.put({
+                    sessionId: targetSessionId,
+                    files: storedFiles,
+                    updatedAt: Date.now(),
+                })
+                const allRequest = store.getAll()
+                allRequest.onsuccess = () => {
+                    const drafts = (allRequest.result as StoredAttachmentDraft[])
+                        .sort((a, b) => b.updatedAt - a.updatedAt)
+                    for (const stale of drafts.slice(MAX_DRAFTS)) {
+                        store.delete(stale.sessionId)
+                    }
+                }
+            }
+            store.delete(sourceSessionId)
+            transaction.oncomplete = () => {
+                db.close()
+                resolve()
+            }
+            transaction.onerror = () => {
+                db.close()
+                reject(transaction.error ?? new Error('Composer draft move failed'))
+            }
+            transaction.onabort = transaction.onerror
+        })
+    } catch {
+        // IndexedDB unavailable: cache tombstones still prevent source resurrection.
+    }
 }
 
 export function clearDraftAttachments(sessionId: string): void {
