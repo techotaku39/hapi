@@ -12,10 +12,17 @@ import { CopyIcon, CheckIcon } from '@/components/icons'
 
 function PinnedSectionIcon(props: { className?: string }) {
     return (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={props.className} aria-hidden="true">
-            <path d="M12 17v5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
-            <path d="M5 17h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
-            <path d="M7 4V2h10v2l-2 5v4l2 2H7l2-2V9Z" />
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className={props.className}
+            aria-hidden="true"
+        >
+            {/* Keep the pin head optically centered; stem is shorter than the menu icon. */}
+            <path d="M12 16v4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M6 16h12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M8 4V2h8v2l-1.5 4.5V12l1.5 1.5H8L9.5 12V8.5Z" />
         </svg>
     )
 }
@@ -1668,10 +1675,12 @@ export function SessionList(props: {
                             title={t('sessions.pinnedSection')}
                         >
                             <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={pinnedSectionCollapsed && !isFiltering} />
-                            <span className="min-w-0 truncate text-sm font-medium">
-                                {t('sessions.pinnedSection')}
+                            <span className="inline-flex min-w-0 items-center gap-1">
+                                <span className="min-w-0 truncate text-sm font-medium">
+                                    {t('sessions.pinnedSection')}
+                                </span>
+                                <PinnedSectionIcon className="h-3.5 w-3.5 shrink-0 -translate-y-px text-[var(--app-hint)]" />
                             </span>
-                            <PinnedSectionIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" />
                             <span className="min-w-0 flex-1" aria-hidden="true" />
                             <span className="shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]">
                                 ({globalPinnedSessions.length})
