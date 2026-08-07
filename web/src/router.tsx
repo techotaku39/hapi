@@ -604,6 +604,10 @@ function SessionPage() {
                 sessionId,
                 resolvedSessionId,
                 () => handleSessionResolved(resolvedSessionId),
+                [],
+                // assistant-ui clears composer text without awaiting this path;
+                // keep the submitted snapshot so deferred hydration still has it.
+                { textOverride: context.text },
             )
             // Cross-session resume: visible metadata may still carry source-scoped
             // upload paths, and inactive remounts hide stored files entirely.

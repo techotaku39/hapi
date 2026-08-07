@@ -285,13 +285,43 @@ async function awaitInactivePersist(sessionId: string): Promise<void> {
     if (pending) await pending.catch(() => {})
 }
 
+export type TransferComposerDraftOptions = {
+    /**
+     * Immutable text captured at send/resume time. Prefer this over drafts that
+     * may already have been cleared by assistant-ui while resume was in flight.
+     */
+    textOverride?: string
+}
+
+function resolveTransferredText(
+    sampled: string,
+    options?: TransferComposerDraftOptions,
+): string {
+    return options?.textOverride !== undefined ? options.textOverride : sampled
+}
+
 /** Copy a draft to the new id returned by resume/reopen before navigating. */
 export async function transferComposerDraft(
     sourceSessionId: string,
     targetSessionId: string,
     pendingAttachments: readonly AttachmentDraftHandoff[] = [],
+    options?: TransferComposerDraftOptions,
 ): Promise<void> {
-    if (sourceSessionId === targetSessionId && pendingAttachments.length === 0) return
+    if (sourceSessionId === targetSessionId && pendingAttachments.length === 0) {
+        // Same-id resume often no-ops attachments, but Send still needs the
+        // submitted text restored after assistant-ui cleared the composer.
+        if (options?.textOverride !== undefined) {
+            saveDraft(targetSessionId, options.textOverride)
+            const existing = liveSnapshots.get(targetSessionId)
+            if (existing) {
+                liveSnapshots.set(targetSessionId, {
+                    ...existing,
+                    text: options.textOverride,
+                })
+            }
+        }
+        return
+    }
 
     const crossSession = sourceSessionId !== targetSessionId
     // Install the barrier before any await so a concurrent inactive persist
@@ -326,7 +356,7 @@ export async function transferComposerDraft(
                 // Resume already resolved a new id; keep the independently readable
                 // text under the target even when attachment storage aborts.
                 if (crossSession) {
-                    saveDraft(targetSessionId, text)
+                    saveDraft(targetSessionId, resolveTransferredText(text, options))
                 }
                 throw error
             }
@@ -412,9 +442,12 @@ export async function transferComposerDraft(
                         break
                     }
                 }
-                transferredText = samplePendingTransferText(
-                    sourceSessionId,
-                    getDraft(sourceSessionId),
+                transferredText = resolveTransferredText(
+                    samplePendingTransferText(
+                        sourceSessionId,
+                        getDraft(sourceSessionId),
+                    ),
+                    options,
                 )
                 saveDraft(targetSessionId, transferredText)
                 clearDraft(sourceSessionId)
@@ -425,9 +458,12 @@ export async function transferComposerDraft(
                 // Hub resume already succeeded; keep navigating. Copy text + in-memory
                 // attachments to the target without claiming a durable handoff so the
                 // source IndexedDB row remains if the operator reloads the old id.
-                transferredText = samplePendingTransferText(
-                    sourceSessionId,
-                    getDraft(sourceSessionId),
+                transferredText = resolveTransferredText(
+                    samplePendingTransferText(
+                        sourceSessionId,
+                        getDraft(sourceSessionId),
+                    ),
+                    options,
                 )
                 attachments = buildTransferredAttachments()
                 saveDraft(targetSessionId, transferredText)
@@ -437,6 +473,7 @@ export async function transferComposerDraft(
             }
         } else {
             attachments = buildTransferredAttachments()
+            transferredText = resolveTransferredText(transferredText, options)
             saveDraft(targetSessionId, transferredText)
             saveDraftAttachments(targetSessionId, attachments)
         }
@@ -457,9 +494,15 @@ export async function transferComposerDraftThenNavigate(
     targetSessionId: string,
     navigate: () => void | Promise<void>,
     pendingAttachments: readonly AttachmentDraftHandoff[] = [],
+    options?: TransferComposerDraftOptions,
 ): Promise<void> {
     try {
-        await transferComposerDraft(sourceSessionId, targetSessionId, pendingAttachments)
+        await transferComposerDraft(
+            sourceSessionId,
+            targetSessionId,
+            pendingAttachments,
+            options,
+        )
     } catch (error) {
         console.warn('[composer-draft] transfer failed after resume; continuing navigation', error)
     }

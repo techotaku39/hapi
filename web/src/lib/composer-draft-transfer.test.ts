@@ -407,6 +407,49 @@ describe('handoffComposerDraft', () => {
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
 
+    it('prefers the send-time textOverride over a cleared inactive draft', async () => {
+        const file = new File(['draft'], 'draft.txt')
+        setComposerDraftSnapshot('source-a', 'submitted hello', [{ id: 'a1', file }])
+        let releaseDrain!: () => void
+        const drainGate = new Promise<void>((resolve) => {
+            releaseDrain = resolve
+        })
+        mocks.moveDraftAttachments.mockImplementation(async (
+            _source: string,
+            _target: string,
+            resolveAttachments: () => Array<{ id: string; file: File }>,
+        ) => {
+            await drainGate
+            return resolveAttachments()
+        })
+
+        const transfer = transferComposerDraft(
+            'source-a',
+            'target-a',
+            [],
+            { textOverride: 'submitted hello' },
+        )
+        // assistant-ui cleared the composer while resumeSession awaited.
+        updateComposerDraftTextSnapshot('source-a', '')
+        releaseDrain()
+        await transfer
+
+        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'submitted hello')
+        expect(composerDraftWasHandedOff('source-a')).toBe(true)
+    })
+
+    it('applies textOverride on same-id resume when attachments stay put', async () => {
+        mocks.getDraft.mockReturnValue('')
+        await transferComposerDraft(
+            'session-same',
+            'session-same',
+            [],
+            { textOverride: 'submitted hello' },
+        )
+        expect(mocks.saveDraft).toHaveBeenCalledWith('session-same', 'submitted hello')
+        expect(mocks.moveDraftAttachments).not.toHaveBeenCalled()
+    })
+
     it('keeps IndexedDB-only attachments when typing during a blocked move', async () => {
         const stored = new File(['kept'], 'kept.txt')
         mocks.getDraft.mockReturnValue('before')
