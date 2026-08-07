@@ -233,7 +233,7 @@ export default {
   'session.action.pinGlobal': '全局置顶',
   'session.action.unpinGlobal': '取消全局置顶',
   'session.action.pinFailed': '无法更新置顶状态',
-  'sessions.pinnedSection': '置顶',
+  'sessions.pinnedSection': '置顶会话',
   'session.action.export': '导出对话',
   'session.action.syncCodex': '从 Codex 同步',
   'session.action.syncPi': '同步 Pi 历史',

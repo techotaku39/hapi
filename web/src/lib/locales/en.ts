@@ -233,7 +233,7 @@ export default {
   'session.action.pinGlobal': 'Pin globally',
   'session.action.unpinGlobal': 'Unpin globally',
   'session.action.pinFailed': 'Could not update pin',
-  'sessions.pinnedSection': 'Pinned',
+  'sessions.pinnedSection': 'Pinned sessions',
   'session.action.export': 'Export conversation',
   'session.action.syncCodex': 'Sync from Codex',
   'session.action.syncPi': 'Sync Pi history',
