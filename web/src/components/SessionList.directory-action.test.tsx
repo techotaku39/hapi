@@ -11,6 +11,7 @@ afterEach(() => {
     cleanup()
     localStorage.removeItem('hapi-session-preview-limit')
     localStorage.removeItem('hapi-pin-in-progress-sessions')
+    localStorage.removeItem('hapi-session-list-machine-filter')
 })
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -560,6 +561,46 @@ describe('SessionList collapse behavior', () => {
 
         expect(screen.getByText('work/hapi · NUC')).toHaveAttribute('title', 'work/hapi · NUC')
         expect(screen.getByText('work/docs · Laptop')).toHaveAttribute('title', 'work/docs · Laptop')
+    })
+
+    it('omits the machine label when a multi-machine list is filtered to one machine', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        localStorage.setItem('hapi-session-list-machine-filter', 'machine-1')
+        const sessions = [
+            makeSession({
+                id: 'session-running',
+                active: true,
+                thinking: true,
+                updatedAt: 100,
+                metadata: {
+                    path: '/work/hapi',
+                    machineId: 'machine-1',
+                    name: 'Running task',
+                    flavor: 'codex',
+                },
+            }),
+            makeSession({
+                id: 'session-other-machine',
+                active: true,
+                thinking: true,
+                updatedAt: 90,
+                metadata: {
+                    path: '/work/docs',
+                    machineId: 'machine-2',
+                    name: 'Other machine task',
+                    flavor: 'codex',
+                },
+            }),
+        ]
+
+        render(renderSessionList(sessions, null, {
+            'machine-1': 'NUC',
+            'machine-2': 'Laptop',
+        }))
+
+        expect(screen.getByText('work/hapi')).toHaveAttribute('title', 'work/hapi')
+        expect(screen.queryByText('work/hapi · NUC')).toBeNull()
+        expect(screen.queryByRole('button', { name: /Other machine task/ })).toBeNull()
     })
 
     it('does not label quiet active sessions as Idle', () => {

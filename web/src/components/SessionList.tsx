@@ -1754,7 +1754,7 @@ export function SessionList(props: {
                                                     showDetailedStatus={showDetailedStatus}
                                                     inRunningSection
                                                     projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
-                                                    machineLabel={showMachineFilterBar
+                                                    machineLabel={showMachineFilterBar && activeMachineFilter === null
                                                         ? resolveMachineLabel(s.metadata?.machineId ?? null)
                                                         : undefined}
                                                 />
