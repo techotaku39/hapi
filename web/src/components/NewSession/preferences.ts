@@ -127,7 +127,8 @@ function resolvePreferredOptionValue(
 
 export function resolvePreferredLaunchSettings(
     agent: AgentType,
-    preferred: PreferredLaunchSettings | null
+    preferred: PreferredLaunchSettings | null,
+    legacyCodexYolo = false
 ): PreferredLaunchSettings {
     const preferredModel = preferred?.model ?? 'auto'
     const staticModelValues = MODEL_OPTIONS[agent].map((option) => option.value)
@@ -156,7 +157,7 @@ export function resolvePreferredLaunchSettings(
     const permissionMode = supportsCodexFamilyPermissionMode
         ? preferredPermissionMode && availablePermissionModes.includes(preferredPermissionMode)
             ? preferredPermissionMode
-            : agent === 'codex' && loadPreferredYoloMode()
+            : agent === 'codex' && legacyCodexYolo
                 ? 'yolo'
                 : 'default'
         : undefined

@@ -6,7 +6,8 @@ import { saveNewSessionFormDraft } from './newSessionFormDraft'
 import {
     loadPreferredLaunchSettings,
     savePreferredAgent,
-    savePreferredLaunchSettings
+    savePreferredLaunchSettings,
+    savePreferredYoloMode
 } from './preferences'
 
 const mocks = vi.hoisted(() => ({
@@ -268,6 +269,48 @@ describe('NewSession launch preferences', () => {
             expect(screen.getByTestId('model')).toHaveTextContent('gpt-5.6-sol')
             expect(screen.getByTestId('reasoning')).toHaveTextContent('xhigh')
             expect(screen.getByTestId('permission-mode')).toHaveTextContent('safe-yolo')
+        })
+    })
+
+    it('does not migrate a legacy YOLO value owned by a non-Codex agent', async () => {
+        savePreferredAgent('claude')
+        savePreferredYoloMode(true)
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        fireEvent.click(screen.getByDisplayValue('codex'))
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+        })
+    })
+
+    it('migrates a legacy YOLO value when Codex was the preferred agent', async () => {
+        savePreferredAgent('codex')
+        savePreferredYoloMode(true)
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('yolo')
         })
     })
 

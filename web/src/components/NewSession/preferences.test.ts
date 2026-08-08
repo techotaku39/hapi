@@ -172,8 +172,9 @@ describe('NewSession preferences', () => {
     it('migrates the legacy YOLO preference for Codex only', () => {
         savePreferredYoloMode(true)
 
-        expect(resolvePreferredLaunchSettings('codex', null).permissionMode).toBe('yolo')
-        expect(resolvePreferredLaunchSettings('copilot', null).permissionMode).toBe('default')
+        expect(resolvePreferredLaunchSettings('codex', null, true).permissionMode).toBe('yolo')
+        expect(resolvePreferredLaunchSettings('copilot', null, true).permissionMode).toBe('default')
+        expect(resolvePreferredLaunchSettings('codex', null, false).permissionMode).toBe('default')
     })
 
     it.each([
