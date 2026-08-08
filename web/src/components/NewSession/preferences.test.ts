@@ -176,6 +176,22 @@ describe('NewSession preferences', () => {
         expect(resolvePreferredLaunchSettings('copilot', null).permissionMode).toBe('default')
     })
 
+    it.each([
+        ['kimi', 'safe-yolo'],
+        ['opencode', 'plan']
+    ] as const)('restores remembered permission modes for %s', (agent, permissionMode) => {
+        savePreferredLaunchSettings('machine-1', agent, {
+            model: 'auto',
+            cursorSelectedBase: 'auto',
+            effort: 'auto',
+            modelReasoningEffort: 'default',
+            permissionMode
+        })
+
+        const preferred = loadPreferredLaunchSettings('machine-1', agent)
+        expect(resolvePreferredLaunchSettings(agent, preferred).permissionMode).toBe(permissionMode)
+    })
+
     it('drops an OpenCode reasoning value that is not offered at launch', () => {
         expect(resolvePreferredLaunchSettings('opencode', {
             model: 'provider/model',
@@ -186,7 +202,8 @@ describe('NewSession preferences', () => {
             model: 'provider/model',
             cursorSelectedBase: 'auto',
             effort: 'auto',
-            modelReasoningEffort: 'default'
+            modelReasoningEffort: 'default',
+            permissionMode: 'default'
         })
     })
 })
