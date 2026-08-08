@@ -472,6 +472,30 @@ describe('SessionList collapse behavior', () => {
         expect(getProjectPanel().getAttribute('data-open')).toBeNull()
     })
 
+    it('keeps project-pinned active sessions in their project group when the preference is on', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        const sessions = [
+            makeSession({
+                id: 'session-pinned-running',
+                active: true,
+                thinking: true,
+                pinned: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Pinned running task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-idle',
+                updatedAt: 50,
+                metadata: { path: '/work/hapi', name: 'Idle task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(screen.queryByTitle('In progress')).toBeNull()
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        expect(screen.getByRole('button', { name: /Pinned running task/ })).toBeInTheDocument()
+    })
+
     it('does not label quiet active sessions as Idle', () => {
         const sessions = [
             makeSession({

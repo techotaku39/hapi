@@ -1252,7 +1252,7 @@ export function SessionList(props: {
             return buckets
         }
         for (const session of machineFilteredSessions) {
-            if (session.globalPinned) {
+            if (session.globalPinned || session.pinned) {
                 continue
             }
             if (!session.active) {
@@ -1277,7 +1277,7 @@ export function SessionList(props: {
         () => groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => {
                 if (session.globalPinned) return false
-                if (pinInProgressSessions && isPinnedInProgressSession(session)) return false
+                if (pinInProgressSessions && !session.pinned && isPinnedInProgressSession(session)) return false
                 return true
             })
         ),
