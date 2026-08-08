@@ -1,4 +1,8 @@
-import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol'
+import {
+    CREATABLE_AGENT_FLAVORS,
+    getPermissionModesForFlavor,
+    type PermissionMode
+} from '@hapi/protocol'
 import {
     CLAUDE_EFFORT_OPTIONS,
     CODEX_REASONING_EFFORT_OPTIONS,
@@ -17,6 +21,7 @@ export type PreferredLaunchSettings = {
     cursorSelectedBase: string
     effort: LaunchEffort
     modelReasoningEffort: CodexReasoningEffort
+    permissionMode?: PermissionMode
 }
 
 // Only launchable flavors are valid defaults; a stale 'gemini' preference
@@ -76,6 +81,10 @@ export function loadPreferredLaunchSettings(
         if (!parsed || typeof parsed !== 'object' || typeof parsed.model !== 'string') {
             return null
         }
+        const permissionMode = typeof parsed.permissionMode === 'string'
+            && getPermissionModesForFlavor(agent).includes(parsed.permissionMode as PermissionMode)
+            ? parsed.permissionMode as PermissionMode
+            : undefined
         return {
             model: parsed.model,
             cursorSelectedBase: typeof parsed.cursorSelectedBase === 'string'
@@ -84,7 +93,8 @@ export function loadPreferredLaunchSettings(
             effort: typeof parsed.effort === 'string' ? parsed.effort : 'auto',
             modelReasoningEffort: typeof parsed.modelReasoningEffort === 'string'
                 ? parsed.modelReasoningEffort
-                : 'default'
+                : 'default',
+            ...(permissionMode ? { permissionMode } : {})
         }
     } catch {
         return null
@@ -139,11 +149,22 @@ export function resolvePreferredLaunchSettings(
             'default'
         )
         : (preferred?.modelReasoningEffort ?? 'default')
+    const supportsCodexFamilyPermissionMode = agent === 'codex' || agent === 'copilot'
+    const availablePermissionModes = getPermissionModesForFlavor(agent)
+    const preferredPermissionMode = preferred?.permissionMode
+    const permissionMode = supportsCodexFamilyPermissionMode
+        ? preferredPermissionMode && availablePermissionModes.includes(preferredPermissionMode)
+            ? preferredPermissionMode
+            : agent === 'codex' && loadPreferredYoloMode()
+                ? 'yolo'
+                : 'default'
+        : undefined
 
     return {
         model,
         cursorSelectedBase: preferred?.cursorSelectedBase ?? 'auto',
         effort,
-        modelReasoningEffort
+        modelReasoningEffort,
+        ...(permissionMode ? { permissionMode } : {})
     }
 }
