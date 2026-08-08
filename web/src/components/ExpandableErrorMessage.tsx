@@ -1,7 +1,14 @@
 import { useState } from 'react'
-import { truncateGraphemes } from '@/lib/graphemes'
 
 const DEFAULT_MAX_LENGTH = 160
+
+function splitGraphemes(value: string) {
+    if (typeof Intl.Segmenter === 'function') {
+        return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value), ({ segment }) => segment)
+    }
+
+    return Array.from(value)
+}
 
 export function ExpandableErrorMessage(props: {
     message: string
@@ -13,9 +20,10 @@ export function ExpandableErrorMessage(props: {
     const [expanded, setExpanded] = useState(false)
     const maxLength = props.maxLength ?? DEFAULT_MAX_LENGTH
     const singleLine = props.message.replace(/\s+/g, ' ').trim()
-    const truncated = singleLine.length > maxLength
+    const graphemes = splitGraphemes(singleLine)
+    const truncated = graphemes.length > maxLength
     const preview = truncated
-        ? `${truncateGraphemes(singleLine, maxLength).trimEnd()}…`
+        ? `${graphemes.slice(0, maxLength).join('').trimEnd()}…`
         : props.message
 
     return (
