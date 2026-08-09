@@ -1104,4 +1104,12 @@ export default {
   'session.status.subagent.running': '运行中',
   'session.status.subagent.waiting': '等待中',
   'session.status.subagent.error': '错误',
+  'session.summary.label': '会话摘要',
+  'session.summary.ariaLabel': '会话状态摘要',
+  'session.summary.status.done': '已完成',
+  'session.summary.status.blocked': '已阻塞',
+  'session.summary.status.needsReview': '需要审阅',
+  'session.summary.status.needsDecision': '需要决策',
+  'session.summary.status.failed': '失败',
+  'session.summary.status.stalled': '已停滞',
 } as const

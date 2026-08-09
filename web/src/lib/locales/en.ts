@@ -1105,4 +1105,12 @@ export default {
   'session.status.subagent.running': 'Running',
   'session.status.subagent.waiting': 'Waiting',
   'session.status.subagent.error': 'Error',
+  'session.summary.label': 'Session summary',
+  'session.summary.ariaLabel': 'Session status summary',
+  'session.summary.status.done': 'Done',
+  'session.summary.status.blocked': 'Blocked',
+  'session.summary.status.needsReview': 'Needs review',
+  'session.summary.status.needsDecision': 'Needs decision',
+  'session.summary.status.failed': 'Failed',
+  'session.summary.status.stalled': 'Stalled',
 } as const
