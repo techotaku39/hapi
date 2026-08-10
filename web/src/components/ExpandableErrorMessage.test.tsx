@@ -27,5 +27,11 @@ describe('ExpandableErrorMessage', () => {
 
         fireEvent.click(toggle)
         expect(toggle).toHaveTextContent(overLimit)
+
+        const replacement = `${withinLimit}SECOND ERROR TAIL`
+        rerender(<ExpandableErrorMessage {...props} message={replacement} />)
+        const replacementToggle = screen.getByRole('button', { name: /Show full error/ })
+        expect(replacementToggle).toHaveAttribute('aria-expanded', 'false')
+        expect(replacementToggle).not.toHaveTextContent('SECOND ERROR TAIL')
     })
 })
