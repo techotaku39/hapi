@@ -115,6 +115,12 @@ describe('ConversationOutlinePanel', () => {
         expect(onLoadMore).toHaveBeenCalledTimes(1)
     })
 
+    it('uses a concise placeholder for outline search', () => {
+        renderPanel()
+
+        expect(screen.getByPlaceholderText('Search outline')).toBeInTheDocument()
+    })
+
     it('filters loaded outline items without hiding load earlier', () => {
         const onLoadMore = vi.fn()
         renderPanel({ hasMoreMessages: true, onLoadMore })

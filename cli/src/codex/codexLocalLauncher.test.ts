@@ -76,6 +76,15 @@ function createSessionStub(
     const sessionEvents: Array<{ type: string; message?: string }> = [];
     const userMessages: string[] = [];
     const agentMessages: unknown[] = [];
+    const messageEvents: Array<{
+        type: 'user-message';
+        message: string;
+    } | {
+        type: 'user-activity';
+    } | {
+        type: 'agent-message';
+        message: unknown;
+    }> = [];
     let userActivityCount = 0;
     let localLaunchFailure: { message: string; exitReason: 'switch' | 'exit' } | null = null;
     let sessionId: string | null = null;
@@ -142,18 +151,22 @@ function createSessionStub(
             },
             sendUserMessage: (message: string) => {
                 userMessages.push(message);
+                messageEvents.push({ type: 'user-message', message });
             },
             notifyUserActivity: () => {
                 userActivityCount += 1;
+                messageEvents.push({ type: 'user-activity' });
             },
             sendAgentMessage: (message: unknown) => {
                 agentMessages.push(message);
+                messageEvents.push({ type: 'agent-message', message });
             },
             queue: createQueueStub()
         },
         sessionEvents,
         userMessages,
         agentMessages,
+        messageEvents,
         getUserActivityCount: () => userActivityCount,
         getLocalLaunchFailure: () => localLaunchFailure,
         getModelReasoningEffort: () => modelReasoningEffort,
@@ -1027,6 +1040,102 @@ describe('codexLocalLauncher', () => {
         });
     });
 
+    it('dispatches buffered finals before later user and semantic actions', async () => {
+        const transcriptPath = join(tempDir, 'codex-ordered-actions-transcript.jsonl');
+        const { session, messageEvents } = createSessionStub(
+            'default',
+            undefined,
+            '/tmp/worktree',
+            null,
+            true
+        );
+        let releaseRunBarrier: (() => void) | undefined;
+        harness.runBarrier = new Promise((resolve) => {
+            releaseRunBarrier = resolve;
+        });
+
+        await writeFile(
+            transcriptPath,
+            [
+                JSON.stringify({ type: 'session_meta', payload: { id: 'codex-thread-ordered' } }),
+                JSON.stringify({ type: 'turn_context', payload: { turn_id: 'turn-ordered' } }),
+                JSON.stringify({
+                    type: 'response_item',
+                    payload: {
+                        type: 'message',
+                        id: 'final-a',
+                        role: 'assistant',
+                        phase: 'final_answer',
+                        content: [{ type: 'output_text', text: 'visible final A' }],
+                        internal_chat_message_metadata_passthrough: { turn_id: 'turn-ordered' }
+                    }
+                }),
+                JSON.stringify({
+                    type: 'event_msg',
+                    payload: { type: 'user_message', message: 'queued follow-up' }
+                }),
+                JSON.stringify({
+                    type: 'response_item',
+                    payload: {
+                        type: 'message',
+                        id: 'final-b',
+                        role: 'assistant',
+                        phase: 'final_answer',
+                        content: [{ type: 'output_text', text: 'visible final B' }],
+                        internal_chat_message_metadata_passthrough: { turn_id: 'turn-ordered' }
+                    }
+                }),
+                JSON.stringify({
+                    type: 'event_msg',
+                    payload: {
+                        type: 'item_completed',
+                        turn_id: 'turn-ordered',
+                        item: {
+                            type: 'AgentMessage',
+                            id: 'final-b',
+                            phase: 'final_answer',
+                            content: [{ type: 'Text', text: 'visible final B' }]
+                        }
+                    }
+                }),
+                JSON.stringify({
+                    type: 'event_msg',
+                    payload: { type: 'task_complete', turn_id: 'turn-ordered' }
+                })
+            ].join('\n') + '\n'
+        );
+
+        const launcherPromise = codexLocalLauncher(session as never);
+        await wait(50);
+
+        harness.sessionHookHandlers[0]?.('codex-thread-ordered', {
+            transcript_path: transcriptPath
+        });
+        await wait(300);
+
+        releaseRunBarrier?.();
+        await launcherPromise;
+
+        expect(messageEvents).toEqual([{
+            type: 'agent-message',
+            message: {
+                type: 'message',
+                message: 'visible final A',
+                id: 'final-a'
+            }
+        }, {
+            type: 'user-message',
+            message: 'queued follow-up'
+        }, {
+            type: 'agent-message',
+            message: {
+                type: 'message',
+                message: 'visible final B',
+                id: 'final-b'
+            }
+        }]);
+    });
+
     it('replays Codex 0.147 completed messages and response-only final answers once', async () => {
         const transcriptPath = join(tempDir, 'codex-import-0.147-transcript.jsonl');
         const { session, userMessages, agentMessages, getUserActivityCount } = createSessionStub(
@@ -1095,6 +1204,10 @@ describe('codexLocalLauncher', () => {
                         content: [{ type: 'output_text', text: 'visible 0.147 final answer' }],
                         internal_chat_message_metadata_passthrough: { turn_id: 'turn-147' }
                     }
+                }),
+                JSON.stringify({
+                    type: 'event_msg',
+                    payload: { type: 'task_complete', turn_id: 'turn-147' }
                 })
             ].join('\n') + '\n'
         );
@@ -1120,6 +1233,62 @@ describe('codexLocalLauncher', () => {
             type: 'message',
             message: 'visible 0.147 final answer',
             id: 'final-147'
+        }]);
+    });
+
+    it('finalizes a response-only answer when an imported transcript ends without a boundary', async () => {
+        const transcriptPath = join(tempDir, 'codex-import-final-at-eof.jsonl');
+        const { session, agentMessages } = createSessionStub(
+            'default',
+            undefined,
+            '/tmp/worktree',
+            null,
+            true
+        );
+        let releaseRunBarrier: (() => void) | undefined;
+        harness.runBarrier = new Promise((resolve) => {
+            releaseRunBarrier = resolve;
+        });
+
+        await writeFile(
+            transcriptPath,
+            [
+                JSON.stringify({ type: 'session_meta', payload: { id: 'codex-thread-final-at-eof' } }),
+                JSON.stringify({ type: 'turn_context', payload: { turn_id: 'turn-final-at-eof' } }),
+                JSON.stringify({
+                    type: 'response_item',
+                    payload: {
+                        type: 'message',
+                        id: 'final-at-eof',
+                        role: 'assistant',
+                        phase: 'final_answer',
+                        content: [{ type: 'output_text', text: 'visible answer at EOF' }],
+                        internal_chat_message_metadata_passthrough: { turn_id: 'turn-final-at-eof' }
+                    }
+                })
+            ].join('\n') + '\n'
+        );
+
+        const launcherPromise = codexLocalLauncher(session as never);
+        await wait(50);
+
+        harness.sessionHookHandlers[0]?.('codex-thread-final-at-eof', {
+            transcript_path: transcriptPath
+        });
+        await wait(300);
+        expect(agentMessages).toEqual([{
+            type: 'message',
+            message: 'visible answer at EOF',
+            id: 'final-at-eof'
+        }]);
+
+        releaseRunBarrier?.();
+        await launcherPromise;
+
+        expect(agentMessages).toEqual([{
+            type: 'message',
+            message: 'visible answer at EOF',
+            id: 'final-at-eof'
         }]);
     });
 

@@ -502,7 +502,8 @@ export function HappyComposer(props: {
         onScratchlistParkingChange?.(isParkingScratchlist)
     }, [isParkingScratchlist, onScratchlistParkingChange])
 
-    const controlsDisabled = disabled || (!active && !allowSendWhenInactive) || threadIsDisabled || isParkingScratchlist
+    const configurationControlsDisabled = (!active && !allowSendWhenInactive) || isParkingScratchlist
+    const controlsDisabled = disabled || threadIsDisabled || configurationControlsDisabled
     const trimmed = composerText.trim()
     const hasText = trimmed.length > 0
     const hasAttachments = attachments.length > 0
@@ -1438,11 +1439,11 @@ export function HappyComposer(props: {
     }, [clearCursorDrillDown])
 
     const handleModelChange = useCallback((nextModel: { provider: string; modelId: string } | string | null) => {
-        if (!onModelChange || controlsDisabled) return
+        if (!onModelChange || configurationControlsDisabled) return
         onModelChange(nextModel)
         dismissSettings()
         haptic('light')
-    }, [onModelChange, controlsDisabled, haptic, dismissSettings])
+    }, [onModelChange, configurationControlsDisabled, haptic, dismissSettings])
 
     const handleCursorModelRowClick = useCallback((nextModel: string | null) => {
         if (!onModelChange || controlsDisabled) return
@@ -1537,11 +1538,11 @@ export function HappyComposer(props: {
     }, [onModelReasoningEffortChange, controlsDisabled, haptic, dismissSettings])
 
     const handleEffortChange = useCallback((nextEffort: string | null) => {
-        if (!onEffortChange || controlsDisabled) return
+        if (!onEffortChange || configurationControlsDisabled) return
         onEffortChange(nextEffort)
         dismissSettings()
         haptic('light')
-    }, [onEffortChange, controlsDisabled, haptic, dismissSettings])
+    }, [onEffortChange, configurationControlsDisabled, haptic, dismissSettings])
 
     const handleServiceTierChange = useCallback((nextServiceTier: string | null) => {
         if (!onServiceTierChange || controlsDisabled) return
@@ -1612,20 +1613,20 @@ export function HappyComposer(props: {
     }, [clearCursorDrillDown])
 
     const handlePiModelToggle = useCallback(() => {
-        if (controlsDisabled) return
+        if (configurationControlsDisabled) return
         setShowPiModelPanel((v) => !v)
         setShowSettings(false)
         setShowPiThinkingPanel(false)
         haptic('light')
-    }, [controlsDisabled, haptic])
+    }, [configurationControlsDisabled, haptic])
 
     const handlePiThinkingToggle = useCallback(() => {
-        if (controlsDisabled) return
+        if (configurationControlsDisabled) return
         setShowPiThinkingPanel((v) => !v)
         setShowSettings(false)
         setShowPiModelPanel(false)
         haptic('light')
-    }, [controlsDisabled, haptic])
+    }, [configurationControlsDisabled, haptic])
 
     const overlayPositionClass = isExpanded
         ? 'absolute z-10 bottom-12 mb-2'
@@ -1645,7 +1646,7 @@ export function HappyComposer(props: {
                         <PiModelPanel
                             models={piModels}
                             currentModel={currentPiModel ? { provider: currentPiModel.provider, modelId: currentPiModel.modelId } : null}
-                            controlsDisabled={controlsDisabled}
+                            controlsDisabled={configurationControlsDisabled}
                             onSelect={(piModel) => {
                                 handleModelChange({ provider: piModel.provider, modelId: piModel.modelId })
                             }}
@@ -1663,7 +1664,7 @@ export function HappyComposer(props: {
                             currentLevel={effort}
                             reasoning={selectedPiModel?.reasoning}
                             thinkingLevelMap={selectedPiModel?.thinkingLevelMap}
-                            controlsDisabled={controlsDisabled}
+                            controlsDisabled={configurationControlsDisabled}
                             onSelect={(level) => handleEffortChange(level)}
                             onClose={closeAllPanels}
                         />
@@ -2320,11 +2321,11 @@ export function HappyComposer(props: {
                             onClearSchedule={onUserClearSchedule}
                             hasAttachments={blocksScheduling}
                             piModelLabel={piModelLabel}
-                            piModelDisabled={controlsDisabled || !piHasModels}
+                            piModelDisabled={configurationControlsDisabled || !piHasModels}
                             piModelOpen={showPiModelPanel}
                             onPiModelToggle={handlePiModelToggle}
                             piThinkingLabel={piThinkingLabel}
-                            piThinkingDisabled={controlsDisabled || !piHasModels || !selectedPiModel || selectedPiModel.reasoning === false}
+                            piThinkingDisabled={configurationControlsDisabled || !piHasModels || !selectedPiModel || selectedPiModel.reasoning === false}
                             piThinkingOpen={showPiThinkingPanel}
                             onPiThinkingToggle={handlePiThinkingToggle}
                             scratchlistMode={props.scratchlistMode}

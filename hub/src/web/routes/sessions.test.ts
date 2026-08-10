@@ -64,6 +64,7 @@ function createApp(session: Session, opts?: {
     sessionExists?: boolean
     archiveSession?: (sessionId: string) => Promise<void>
     getCursorChatStoreStatus?: SyncEngine['getCursorChatStoreStatus']
+    listCodexModelsForSession?: SyncEngine['listCodexModelsForSession']
     forkConversation?: SyncEngine['forkConversation']
     rewindConversation?: SyncEngine['rewindConversation']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
@@ -127,6 +128,10 @@ function createApp(session: Session, opts?: {
             : { ok: false, reason: 'not-found' },
         applySessionConfig,
         listCursorModelsForSession,
+        listCodexModelsForSession: opts?.listCodexModelsForSession ?? (async () => ({
+            success: true,
+            models: []
+        })),
         listOpencodeModelsForSession,
         listOpencodeReasoningEffortOptionsForSession,
         listGrokModelsForSession,
@@ -194,6 +199,36 @@ describe('sessions routes', () => {
         })
 
         expect(response.status).toBe(400)
+    })
+
+    it('uses session-scoped Codex model discovery for the fallback endpoint', async () => {
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                machineId: 'machine-1'
+            }
+        })
+        const captured: string[] = []
+        const { app } = createApp(session, {
+            listCodexModelsForSession: async (sessionId) => {
+                captured.push(sessionId)
+                return {
+                    success: true,
+                    models: [{ id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: true }]
+                }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/codex-models')
+
+        expect(response.status).toBe(200)
+        expect(captured).toEqual(['session-1'])
+        expect(await response.json()).toEqual({
+            success: true,
+            models: [{ id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: true }]
+        })
     })
 
     it('returns the machine-scoped Cursor chat store status', async () => {

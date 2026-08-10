@@ -161,6 +161,46 @@ describe('voice transcription routes', () => {
         else process.env.OPENAI_API_KEY = previousKey
     })
 
+    test('preserves the selected locale for OpenAI-compatible transcription', async () => {
+        const app = createApp()
+        const headers = await authHeaders()
+        const previous = {
+            baseUrl: process.env.TRANSCRIPTION_BASE_URL,
+            model: process.env.TRANSCRIPTION_MODEL,
+            apiKey: process.env.TRANSCRIPTION_API_KEY
+        }
+        process.env.TRANSCRIPTION_BASE_URL = 'http://localhost:8000/v1'
+        process.env.TRANSCRIPTION_MODEL = 'local-whisper'
+        process.env.TRANSCRIPTION_API_KEY = 'server-only-key'
+        const originalFetch = global.fetch
+        let upstreamInit: RequestInit | undefined
+        // @ts-expect-error test override
+        global.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            upstreamInit = init
+            return new Response(JSON.stringify({ text: 'transcribed text' }), { status: 200 })
+        }) as typeof fetch
+
+        const form = new FormData()
+        form.set('provider', 'openai-compatible')
+        form.set('mode', 'standard')
+        form.set('language', 'zh-TW')
+        form.set('file', new File(['audio bytes'], 'speech.webm', { type: 'audio/webm' }))
+        const res = await app.request('/api/voice/transcription', { method: 'POST', headers, body: form })
+
+        expect(res.status).toBe(200)
+        expect((upstreamInit?.body as FormData).get('language')).toBe('zh-TW')
+
+        global.fetch = originalFetch
+        for (const [key, value] of Object.entries({
+            TRANSCRIPTION_BASE_URL: previous.baseUrl,
+            TRANSCRIPTION_MODEL: previous.model,
+            TRANSCRIPTION_API_KEY: previous.apiKey
+        })) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+        }
+    })
+
     test('rejects unsupported files before calling a provider', async () => {
         const app = createApp()
         const headers = await authHeaders()
