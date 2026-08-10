@@ -326,6 +326,20 @@ export async function loadAllOlderMessages(options: {
     return true
 }
 
+async function waitForViewportTop(viewport: HTMLElement, timeoutMs = 2500): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    while (viewport.scrollTop > 1 && Date.now() < deadline) {
+        await new Promise<void>((resolve) => {
+            if (typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(() => resolve())
+            } else {
+                window.setTimeout(resolve, 16)
+            }
+        })
+    }
+    return viewport.scrollTop <= 1
+}
+
 export async function runAfterPendingHistoryLoad(
     pendingLoad: Promise<unknown> | null,
     action: () => boolean
@@ -709,6 +723,11 @@ export function HappyThread(props: {
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
+    // Conversation-start navigation owns the viewport while it loads and
+    // settles the final jump. Programmatic anchor restoration can otherwise
+    // look like a bottom arrival and switch the bounded history window back to
+    // tail mode, which immediately requests and renders the latest page.
+    const conversationStartNavigationRef = useRef(false)
     // Keep pagination refs current during render. Explicit navigation can
     // continue in a microtask immediately after a layout effect settles a
     // page load, before passive effects would otherwise update these refs.
@@ -809,6 +828,11 @@ export function HappyThread(props: {
         }
 
         const setAtBottomMode = (atBottom: boolean) => {
+            if (conversationStartNavigationRef.current && atBottom) {
+                atBottomRef.current = false
+                autoScrollEnabledRef.current = false
+                return
+            }
             if (atBottom === atBottomRef.current) {
                 return
             }
@@ -1121,6 +1145,9 @@ export function HappyThread(props: {
     }, []) // Stable: no dependencies, reads from refs
 
     const scrollToBottomInstant = useCallback(() => {
+        if (conversationStartNavigationRef.current) {
+            return
+        }
         const viewport = viewportRef.current
         if (viewport) {
             viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'instant' })
@@ -1132,11 +1159,14 @@ export function HappyThread(props: {
         if (!followLatest) {
             clearInitialScrollTimers()
         }
-        autoScrollEnabledRef.current = followLatest && atBottomRef.current
+        autoScrollEnabledRef.current = !conversationStartNavigationRef.current
+            && followLatest
+            && atBottomRef.current
     }, [clearInitialScrollTimers])
 
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
+        conversationStartNavigationRef.current = false
         const viewport = viewportRef.current
         if (viewport) {
             viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
@@ -1151,6 +1181,7 @@ export function HappyThread(props: {
 
     // Reset state when session changes
     useLayoutEffect(() => {
+        conversationStartNavigationRef.current = false
         autoScrollEnabledRef.current = true
         lastScrollTopRef.current = viewportRef.current?.scrollTop ?? 0
         atBottomRef.current = true
@@ -1510,17 +1541,6 @@ export function HappyThread(props: {
         props.onOutlineOpenChange(false)
     }, [loadOlderForOutline, markExplicitNavigationAwayFromBottom, props.onOutlineItemClick, props.onOutlineOpenChange])
 
-    const scrollToMessage = useCallback((messageId: string): boolean => {
-        initialScrollDeadlineRef.current = 0
-        clearInitialScrollTimers()
-        const target = document.getElementById(getConversationMessageAnchorId(messageId))
-        const viewport = viewportRef.current
-        if (!target || !viewport?.contains(target)) return false
-        target.scrollIntoView({ block: 'start', behavior: 'smooth' })
-        markExplicitNavigationAwayFromBottom()
-        return true
-    }, [clearInitialScrollTimers, markExplicitNavigationAwayFromBottom])
-
     const [promptNavigationStatus, setPromptNavigationStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [loadingPromptMessageId, setLoadingPromptMessageId] = useState<string | null>(null)
     const navigationInFlightRef = useRef(false)
@@ -1568,24 +1588,22 @@ export function HappyThread(props: {
         }
     }, [clearInitialScrollTimers, loadOlderForNavigation, markExplicitNavigationAwayFromBottom])
 
-    const jumpToPrompt = useCallback(async (messageId: string, replyToMessageId?: string): Promise<boolean> => {
+    const jumpToPrompt = useCallback(async (messageId: string, _replyToMessageId?: string): Promise<boolean> => {
         if (navigationInFlightRef.current) return false
         navigationInFlightRef.current = true
         setIsNavigationInFlight(true)
         try {
-            if (replyToMessageId) {
-                const scrolled = await runAfterPendingHistoryLoad(
-                    pendingLoadPromiseRef.current,
-                    () => scrollToMessage(replyToMessageId)
-                )
-                if (scrolled) return true
-            }
+            // Resolve the prompt through the history-aware path even when its
+            // message anchor is already rendered. A direct scroll to the
+            // replyToMessageId can race assistant-ui's tail restoration and
+            // leave the viewport at its previous position.
+            if (pendingLoadPromiseRef.current) await pendingLoadPromiseRef.current
             return await scrollToPromptForMessage(messageId)
         } finally {
             navigationInFlightRef.current = false
             setIsNavigationInFlight(false)
         }
-    }, [scrollToMessage, scrollToPromptForMessage])
+    }, [scrollToPromptForMessage])
 
     const [conversationStartStatus, setConversationStartStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const conversationStartStatusTimerRef = useRef<number | null>(null)
@@ -1594,6 +1612,7 @@ export function HappyThread(props: {
         if (navigationInFlightRef.current) return false
         navigationInFlightRef.current = true
         setIsNavigationInFlight(true)
+        conversationStartNavigationRef.current = true
         if (conversationStartStatusTimerRef.current !== null) {
             window.clearTimeout(conversationStartStatusTimerRef.current)
             conversationStartStatusTimerRef.current = null
@@ -1624,6 +1643,18 @@ export function HappyThread(props: {
             // tail, compacting the history we just loaded.
             lastScrollTopRef.current = viewport.scrollTop
             viewport.scrollTo({ top: 0, behavior: 'smooth' })
+            if (!await waitForViewportTop(viewport)) {
+                // Some browsers keep a long smooth scroll alive while the
+                // message list is being resized. The navigation contract is
+                // a deterministic jump, so cancel that animation rather than
+                // allowing a late frame to re-enter tail mode.
+                viewport.scrollTo({ top: 0, behavior: 'instant' })
+                await waitForViewportTop(viewport, 250)
+            }
+            if (viewport.scrollTop > 1) {
+                throw new Error('Could not reach conversation start')
+            }
+            lastScrollTopRef.current = viewport.scrollTop
             setConversationStartStatus('success')
             conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 1400)
             return true
@@ -1633,6 +1664,9 @@ export function HappyThread(props: {
             conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 3000)
             return false
         } finally {
+            conversationStartNavigationRef.current = false
+            autoScrollEnabledRef.current = false
+            atBottomRef.current = false
             navigationInFlightRef.current = false
             setIsNavigationInFlight(false)
         }
