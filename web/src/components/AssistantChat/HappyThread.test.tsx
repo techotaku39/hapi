@@ -213,6 +213,12 @@ describe('ConversationOutlinePanel', () => {
         expect(onLoadMore).toHaveBeenCalledTimes(1)
     })
 
+    it('uses a concise placeholder for outline search', () => {
+        renderPanel()
+
+        expect(screen.getByPlaceholderText('Search outline')).toBeInTheDocument()
+    })
+
     it('filters loaded outline items without hiding load earlier', () => {
         const onLoadMore = vi.fn()
         renderPanel({ hasMoreMessages: true, onLoadMore })
@@ -291,8 +297,21 @@ describe('scroll anchor helpers', () => {
             clientHeight: 530
         })).toMatchObject({
             distanceFromBottom: 12,
-            isNearBottom: true,
+            isNearBottom: false,
             isScrollingUp: true
+        })
+    })
+
+    it('does not resume tail-following merely because downward reading is close to the bottom', () => {
+        expect(getScrollIntent({
+            scrollTop: 610,
+            previousScrollTop: 590,
+            scrollHeight: 1232,
+            clientHeight: 530
+        })).toMatchObject({
+            distanceFromBottom: 92,
+            isNearBottom: false,
+            isScrollingUp: false
         })
     })
 

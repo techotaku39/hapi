@@ -20,6 +20,7 @@ import {
     prepareSidebarSessions,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
+    shouldShowPinnedDivider,
     shouldShowSessionInSidebar
 } from './SessionList'
 
@@ -91,6 +92,27 @@ describe('getWorktreeSessionLabel', () => {
     })
 })
 
+describe('shouldShowPinnedDivider', () => {
+    it('shows one divider at the visible pinned-to-unpinned boundary', () => {
+        const sessions = [
+            makeSession({ id: 'pinned-a', pinned: true }),
+            makeSession({ id: 'pinned-b', pinned: true }),
+            makeSession({ id: 'regular-a' }),
+            makeSession({ id: 'regular-b' })
+        ]
+
+        expect(sessions.map((_, index) => shouldShowPinnedDivider(sessions, index)))
+            .toEqual([false, false, true, false])
+    })
+
+    it('does not show a divider when all visible sessions have the same pin state', () => {
+        expect(shouldShowPinnedDivider([
+            makeSession({ id: 'a' }),
+            makeSession({ id: 'b' })
+        ], 1)).toBe(false)
+    })
+})
+
 describe('deduplicateSessionsByAgentId', () => {
     it('deduplicates sessions with the same agentSessionId', () => {
         const sessions = [
@@ -120,6 +142,26 @@ describe('deduplicateSessionsByAgentId', () => {
         const result = deduplicateSessionsByAgentId(sessions, 'a')
         expect(result).toHaveLength(1)
         expect(result[0].id).toBe('a') // selected wins despite older updatedAt
+    })
+
+    it('preserves a pinned session when deduplicating by recency', () => {
+        const sessions = [
+            makeSession({ id: 'pinned', pinned: true, metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 100 }),
+            makeSession({ id: 'recent', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 200 })
+        ]
+        const result = deduplicateSessionsByAgentId(sessions)
+        expect(result).toHaveLength(1)
+        expect(result[0].id).toBe('pinned')
+    })
+
+    it('keeps the selected inactive session ahead of a pinned duplicate', () => {
+        const sessions = [
+            makeSession({ id: 'selected', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 100 }),
+            makeSession({ id: 'pinned', pinned: true, metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 200 })
+        ]
+        const result = deduplicateSessionsByAgentId(sessions, 'selected')
+        expect(result).toHaveLength(1)
+        expect(result[0].id).toBe('selected')
     })
 
     it('active always wins over selected inactive', () => {
@@ -286,6 +328,16 @@ describe('prepareSidebarSessions', () => {
         expect(result.map(session => session.id).sort()).toEqual(['real', 'stub'])
     })
 
+    it('keeps a pinned inactive stub visible', () => {
+        const sessions = [
+            makeSession({ id: 'pinned-stub', pinned: true, metadata: { path: '/work/hapi' } }),
+            makeSession({ id: 'stub', metadata: { path: '/work/hapi' } })
+        ]
+
+        const result = prepareSidebarSessions(sessions)
+        expect(result.map(session => session.id)).toEqual(['pinned-stub'])
+    })
+
     it('deduplicates before filtering stubs', () => {
         const sessions = [
             makeSession({ id: 'stub', metadata: { path: '/work/hapi' } }),
@@ -307,11 +359,12 @@ describe('prepareSidebarSessions', () => {
 })
 
 describe('shouldShowSessionInSidebar', () => {
-    it('always shows active and selected sessions', () => {
+    it('always shows active, selected, and pinned sessions', () => {
         const stub = makeSession({ id: 'stub', metadata: { path: '/work/hapi' } })
         expect(shouldShowSessionInSidebar(stub)).toBe(false)
         expect(shouldShowSessionInSidebar(stub, 'stub')).toBe(true)
         expect(shouldShowSessionInSidebar({ ...stub, active: true })).toBe(true)
+        expect(shouldShowSessionInSidebar({ ...stub, pinned: true })).toBe(true)
     })
 })
 

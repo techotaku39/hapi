@@ -308,6 +308,13 @@ export const RenameSessionRequestSchema = z.object({
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
 
+export const SetSessionPinnedRequestSchema = z.object({
+    mode: z.enum(['none', 'project', 'global'])
+})
+
+export type SetSessionPinnedRequest = z.infer<typeof SetSessionPinnedRequestSchema>
+export type SessionPinMode = SetSessionPinnedRequest['mode']
+
 /**
  * An empty string clears the custom name, so unlike session rename there is no
  * `min(1)`: the machine falls back to its hostname. The length ceiling is
@@ -620,6 +627,8 @@ export type GitCommandResponse = CommandResponse
 export type FileReadResponse = {
     success: boolean
     content?: string
+    size?: number
+    modified?: number
     error?: string
 }
 
