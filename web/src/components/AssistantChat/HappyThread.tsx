@@ -47,6 +47,22 @@ type PendingScrollRestore = {
 
 type HistoryLoadSource = 'coverage' | 'user' | 'consumer'
 type PullToLoadState = 'idle' | 'pulling' | 'ready'
+type NavigationStatus = 'idle' | 'loading' | 'success' | 'error'
+type NavigationFeedbackKind = 'conversationStart' | 'prompt'
+
+export function shouldHoldHistoryNavigation(historyNavigationActive: boolean, atBottom: boolean): boolean {
+    return historyNavigationActive && atBottom
+}
+
+export function getNavigationFeedback(
+    conversationStartStatus: NavigationStatus,
+    promptNavigationStatus: NavigationStatus
+): { status: NavigationStatus; kind: NavigationFeedbackKind } {
+    if (promptNavigationStatus !== 'idle') {
+        return { status: promptNavigationStatus, kind: 'prompt' }
+    }
+    return { status: conversationStartStatus, kind: 'conversationStart' }
+}
 
 type HistoryLoaderState = {
     runId: number
@@ -390,8 +406,8 @@ function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
 }
 
 export function ConversationStartStatus(props: {
-    status: 'idle' | 'loading' | 'success' | 'error'
-    kind?: 'conversationStart' | 'prompt'
+    status: NavigationStatus
+    kind?: NavigationFeedbackKind
 }) {
     const { t } = useTranslation()
     if (props.status === 'idle') return null
@@ -732,7 +748,7 @@ export function HappyThread(props: {
     // settles the final jump. Programmatic anchor restoration can otherwise
     // look like a bottom arrival and switch the bounded history window back to
     // tail mode, which immediately requests and renders the latest page.
-    const conversationStartNavigationRef = useRef(false)
+    const historyNavigationRef = useRef(false)
     // Keep pagination refs current during render. Explicit navigation can
     // continue in a microtask immediately after a layout effect settles a
     // page load, before passive effects would otherwise update these refs.
@@ -833,7 +849,7 @@ export function HappyThread(props: {
         }
 
         const setAtBottomMode = (atBottom: boolean) => {
-            if (conversationStartNavigationRef.current && atBottom) {
+            if (shouldHoldHistoryNavigation(historyNavigationRef.current, atBottom)) {
                 atBottomRef.current = false
                 autoScrollEnabledRef.current = false
                 return
@@ -1160,7 +1176,7 @@ export function HappyThread(props: {
     }, []) // Stable: no dependencies, reads from refs
 
     const scrollToBottomInstant = useCallback(() => {
-        if (conversationStartNavigationRef.current) {
+        if (historyNavigationRef.current) {
             return
         }
         const viewport = viewportRef.current
@@ -1174,14 +1190,14 @@ export function HappyThread(props: {
         if (!followLatest) {
             clearInitialScrollTimers()
         }
-        autoScrollEnabledRef.current = !conversationStartNavigationRef.current
+        autoScrollEnabledRef.current = !historyNavigationRef.current
             && followLatest
             && atBottomRef.current
     }, [clearInitialScrollTimers])
 
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
-        conversationStartNavigationRef.current = false
+        historyNavigationRef.current = false
         const viewport = viewportRef.current
         if (viewport) {
             tailScrollInProgressRef.current = true
@@ -1197,7 +1213,7 @@ export function HappyThread(props: {
 
     // Reset state when session changes
     useLayoutEffect(() => {
-        conversationStartNavigationRef.current = false
+        historyNavigationRef.current = false
         autoScrollEnabledRef.current = true
         tailScrollInProgressRef.current = false
         lastScrollTopRef.current = viewportRef.current?.scrollTop ?? 0
@@ -1558,11 +1574,29 @@ export function HappyThread(props: {
         props.onOutlineOpenChange(false)
     }, [loadOlderForOutline, markExplicitNavigationAwayFromBottom, props.onOutlineItemClick, props.onOutlineOpenChange])
 
-    const [promptNavigationStatus, setPromptNavigationStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+    const [promptNavigationStatus, setPromptNavigationStatus] = useState<NavigationStatus>('idle')
     const [loadingPromptMessageId, setLoadingPromptMessageId] = useState<string | null>(null)
     const navigationInFlightRef = useRef(false)
     const [isNavigationInFlight, setIsNavigationInFlight] = useState(false)
     const promptNavigationTimerRef = useRef<number | null>(null)
+    const [conversationStartStatus, setConversationStartStatus] = useState<NavigationStatus>('idle')
+    const conversationStartStatusTimerRef = useRef<number | null>(null)
+    const isLoadingConversationStart = conversationStartStatus === 'loading'
+    const clearConversationStartFeedback = useCallback(() => {
+        if (conversationStartStatusTimerRef.current !== null) {
+            window.clearTimeout(conversationStartStatusTimerRef.current)
+            conversationStartStatusTimerRef.current = null
+        }
+        setConversationStartStatus('idle')
+    }, [])
+    const clearPromptNavigationFeedback = useCallback(() => {
+        if (promptNavigationTimerRef.current !== null) {
+            window.clearTimeout(promptNavigationTimerRef.current)
+            promptNavigationTimerRef.current = null
+        }
+        setLoadingPromptMessageId(null)
+        setPromptNavigationStatus('idle')
+    }, [])
     const scrollToPromptForMessage = useCallback(async (messageId: string): Promise<boolean> => {
         if (promptNavigationTimerRef.current !== null) {
             window.clearTimeout(promptNavigationTimerRef.current)
@@ -1608,7 +1642,9 @@ export function HappyThread(props: {
     const jumpToPrompt = useCallback(async (messageId: string, _replyToMessageId?: string): Promise<boolean> => {
         if (navigationInFlightRef.current) return false
         navigationInFlightRef.current = true
+        historyNavigationRef.current = true
         setIsNavigationInFlight(true)
+        clearConversationStartFeedback()
         try {
             // Resolve the prompt through the history-aware path even when its
             // message anchor is already rendered. A direct scroll to the
@@ -1617,19 +1653,18 @@ export function HappyThread(props: {
             if (pendingLoadPromiseRef.current) await pendingLoadPromiseRef.current
             return await scrollToPromptForMessage(messageId)
         } finally {
+            historyNavigationRef.current = false
             navigationInFlightRef.current = false
             setIsNavigationInFlight(false)
         }
-    }, [scrollToPromptForMessage])
+    }, [clearConversationStartFeedback, scrollToPromptForMessage])
 
-    const [conversationStartStatus, setConversationStartStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
-    const conversationStartStatusTimerRef = useRef<number | null>(null)
-    const isLoadingConversationStart = conversationStartStatus === 'loading'
     const scrollToConversationStart = useCallback(async (): Promise<boolean> => {
         if (navigationInFlightRef.current) return false
         navigationInFlightRef.current = true
         setIsNavigationInFlight(true)
-        conversationStartNavigationRef.current = true
+        historyNavigationRef.current = true
+        clearPromptNavigationFeedback()
         if (conversationStartStatusTimerRef.current !== null) {
             window.clearTimeout(conversationStartStatusTimerRef.current)
             conversationStartStatusTimerRef.current = null
@@ -1681,13 +1716,18 @@ export function HappyThread(props: {
             conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 3000)
             return false
         } finally {
-            conversationStartNavigationRef.current = false
+            historyNavigationRef.current = false
             autoScrollEnabledRef.current = false
             atBottomRef.current = false
             navigationInFlightRef.current = false
             setIsNavigationInFlight(false)
         }
-    }, [clearInitialScrollTimers, loadOlderForNavigation, markExplicitNavigationAwayFromBottom])
+    }, [
+        clearInitialScrollTimers,
+        clearPromptNavigationFeedback,
+        loadOlderForNavigation,
+        markExplicitNavigationAwayFromBottom
+    ])
 
     useEffect(() => () => {
         if (conversationStartStatusTimerRef.current !== null) {
@@ -1888,6 +1928,7 @@ export function HappyThread(props: {
     }, [props.session])
 
     const hasNavigationStatus = conversationStartStatus !== 'idle' || promptNavigationStatus !== 'idle'
+    const navigationFeedback = getNavigationFeedback(conversationStartStatus, promptNavigationStatus)
 
     return (
         <HappyChatProvider value={{
@@ -1936,8 +1977,8 @@ export function HappyThread(props: {
                     </div>
                 ) : null}
                 <ConversationStartStatus
-                    status={conversationStartStatus !== 'idle' ? conversationStartStatus : promptNavigationStatus}
-                    kind={conversationStartStatus !== 'idle' ? 'conversationStart' : 'prompt'}
+                    status={navigationFeedback.status}
+                    kind={navigationFeedback.kind}
                 />
                 <ThreadPrimitive.Viewport
                     asChild

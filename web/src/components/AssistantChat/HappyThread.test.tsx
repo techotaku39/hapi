@@ -12,6 +12,7 @@ import {
     isNestedScrollEvent,
     findPromptTarget,
     findPreviousUserMessage,
+    getNavigationFeedback,
     getScrollIntent,
     loadOlderForNavigationWithRetry,
     loadAllOlderMessages,
@@ -20,6 +21,7 @@ import {
     restoreScrollAnchor,
     runAfterPendingHistoryLoad,
     shouldLoadOlderForViewport,
+    shouldHoldHistoryNavigation,
     shouldCancelInitialScrollSettling,
 } from '@/components/AssistantChat/HappyThread'
 import type { ConversationOutlineItem } from '@/chat/outline'
@@ -82,6 +84,34 @@ describe('ConversationStartStatus', () => {
     it('announces prompt loading separately from conversation-start loading', () => {
         render(<I18nProvider><ConversationStartStatus status="loading" kind="prompt" /></I18nProvider>)
         expect(screen.getByRole('status')).toHaveTextContent('Loading turn input…')
+    })
+})
+
+describe('navigation feedback priority', () => {
+    it('shows the prompt status while conversation-start feedback is still settling', () => {
+        expect(getNavigationFeedback('success', 'loading')).toEqual({
+            status: 'loading',
+            kind: 'prompt'
+        })
+        expect(getNavigationFeedback('error', 'success')).toEqual({
+            status: 'success',
+            kind: 'prompt'
+        })
+    })
+
+    it('falls back to conversation-start feedback when no prompt navigation is active', () => {
+        expect(getNavigationFeedback('success', 'idle')).toEqual({
+            status: 'success',
+            kind: 'conversationStart'
+        })
+    })
+})
+
+describe('history navigation viewport lock', () => {
+    it('holds the viewport in history mode when restoration reports the bottom', () => {
+        expect(shouldHoldHistoryNavigation(true, true)).toBe(true)
+        expect(shouldHoldHistoryNavigation(true, false)).toBe(false)
+        expect(shouldHoldHistoryNavigation(false, true)).toBe(false)
     })
 })
 
