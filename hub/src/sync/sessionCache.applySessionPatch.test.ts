@@ -228,6 +228,41 @@ describe('SessionCache.applySessionPatch', () => {
         store.close()
     })
 
+    it('uses the session sequence to gate authoritative reply-clock patches', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'versioned-assistant-reply-patch',
+            { path: '/tmp', host: 'h' },
+            null,
+            'default'
+        )
+        const cache = new SessionCache(store, createPublisher([]))
+        cache.refreshSession(session.id)
+        const currentVersion = cache.getSession(session.id)?.seq ?? 0
+
+        expect(cache.applySessionPatch(session.id, {
+            lastAssistantMessageAt: 1_000,
+            lastAssistantMessageVersion: currentVersion + 1
+        })).toBe(true)
+        expect(cache.getSession(session.id)).toMatchObject({
+            lastAssistantMessageAt: 1_000,
+            seq: currentVersion + 1
+        })
+
+        expect(cache.applySessionPatch(session.id, {
+            lastAssistantMessageAt: null,
+            lastAssistantMessageVersion: currentVersion
+        })).toBe(true)
+        expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBe(1_000)
+
+        expect(cache.applySessionPatch(session.id, {
+            lastAssistantMessageAt: null,
+            lastAssistantMessageVersion: currentVersion + 2
+        })).toBe(true)
+        expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBeNull()
+        store.close()
+    })
+
     it('applies a todos patch in place when the session is cached', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

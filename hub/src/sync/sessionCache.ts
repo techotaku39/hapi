@@ -444,18 +444,29 @@ export class SessionCache {
         if (patch.thinking !== undefined) session.thinking = patch.thinking
         if (patch.activeAt !== undefined) session.activeAt = patch.activeAt
         if (patch.updatedAt !== undefined) session.updatedAt = Math.max(session.updatedAt, patch.updatedAt)
+        const replyVersion = patch.lastAssistantMessageVersion
+        const canApplyReplyClock = replyVersion === undefined || replyVersion >= session.seq
+        if (replyVersion !== undefined) {
+            session.seq = Math.max(session.seq, replyVersion)
+        }
         if (patch.lastAssistantMessageAt !== undefined) {
-            // Reply timestamps are a monotonic watermark. A stale structured
-            // patch must not move the default sidebar sort backwards.
-            if (patch.lastAssistantMessageAt === null) {
-                if (session.lastAssistantMessageAt == null) {
-                    session.lastAssistantMessageAt = null
+            if (canApplyReplyClock && replyVersion !== undefined) {
+                // Versioned reply-clock updates are authoritative: transcript
+                // rewinds may legitimately move the timestamp backward/null.
+                session.lastAssistantMessageAt = patch.lastAssistantMessageAt
+            } else if (canApplyReplyClock) {
+                // Legacy unversioned patches retain the old monotonic safety
+                // rule until every producer carries a reply-clock version.
+                if (patch.lastAssistantMessageAt === null) {
+                    if (session.lastAssistantMessageAt == null) {
+                        session.lastAssistantMessageAt = null
+                    }
+                } else {
+                    session.lastAssistantMessageAt = Math.max(
+                        session.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY,
+                        patch.lastAssistantMessageAt
+                    )
                 }
-            } else {
-                session.lastAssistantMessageAt = Math.max(
-                    session.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY,
-                    patch.lastAssistantMessageAt
-                )
             }
         }
         if (patch.model !== undefined) session.model = patch.model
@@ -708,6 +719,10 @@ export class SessionCache {
             return
         }
 
+        const refreshed = this.store.sessions.getSession(sessionId)
+        if (refreshed) {
+            session.seq = Math.max(session.seq, refreshed.seq)
+        }
         session.updatedAt = Math.max(session.updatedAt, nextUpdatedAt)
         this.publisher.emit({
             type: 'session-updated',
@@ -736,22 +751,30 @@ export class SessionCache {
         if (!Number.isFinite(next)) return
 
         this.store.sessions.touchSessionLastAssistantMessageAt(sessionId, next, stored.namespace)
+        const refreshed = this.store.sessions.getSession(sessionId)
+        const replyVersion = refreshed?.seq ?? stored.seq
 
         if (!session) {
             this.refreshSession(sessionId)
             return
         }
 
-        if ((session.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY) >= next) {
+        const replyChanged = (session.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY) < next
+        const versionChanged = session.seq < replyVersion
+        if (!replyChanged && !versionChanged) {
             return
         }
 
+        session.seq = Math.max(session.seq, replyVersion)
         session.lastAssistantMessageAt = next
         this.publisher.emit({
             type: 'session-updated',
             sessionId,
             namespace: session.namespace,
-            data: { lastAssistantMessageAt: next } satisfies SessionPatch
+            data: {
+                lastAssistantMessageAt: next,
+                lastAssistantMessageVersion: replyVersion
+            } satisfies SessionPatch
         })
     }
 

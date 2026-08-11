@@ -53,6 +53,8 @@ export type SessionSummary = {
     updatedAt: number
     /** Latest visible assistant prose; used by the default sidebar sort without mutating `updatedAt`. */
     lastAssistantMessageAt?: number | null
+    /** Session sequence carrying the reply clock; gates dual-SSE stale records/patches. */
+    lastAssistantMessageVersion?: number
     pinned?: boolean
     globalPinned?: boolean
     metadata: SessionSummaryMetadata | null
@@ -223,6 +225,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         activeAt: session.activeAt,
         updatedAt: session.updatedAt,
         lastAssistantMessageAt: session.lastAssistantMessageAt ?? null,
+        lastAssistantMessageVersion: session.seq,
         pinned: session.pinned ?? false,
         globalPinned: session.globalPinned ?? false,
         metadata: toSessionSummaryMetadata(session.metadata),

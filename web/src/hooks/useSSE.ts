@@ -77,6 +77,24 @@ export function canApplyVersionedSummaryPatch(
     return detailPresent
 }
 
+/**
+ * Full session records carry the store sequence, which is also the version
+ * of the reply clock observed in that record. Both SSE connections can
+ * deliver the same event out of order, so an older record must not replace a
+ * newer rewind/backfill result.
+ */
+export function shouldAcceptSessionRecord(current: Session | undefined, incoming: Session): boolean {
+    return current === undefined || incoming.seq >= (Number.isFinite(current.seq) ? current.seq : 0)
+}
+
+/** Same ordering gate for list summaries, which retain only the reply-clock watermark. */
+export function shouldAcceptSessionSummaryRecord(
+    current: SessionSummary | undefined,
+    incoming: Pick<Session, 'seq'>
+): boolean {
+    return current === undefined || incoming.seq >= (current.lastAssistantMessageVersion ?? 0)
+}
+
 type VisibilityState = 'visible' | 'hidden'
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
@@ -123,8 +141,16 @@ export function sortSessionSummaries(left: SessionSummary, right: SessionSummary
  * ignores `activeAt` entirely.
  */
 export function isRenderIrrelevantSessionPatch(session: Session, patch: SessionPatch): boolean {
+    if (patch.lastAssistantMessageVersion !== undefined
+        && patch.lastAssistantMessageVersion > (Number.isFinite(session.seq) ? session.seq : 0)) {
+        return false
+    }
+
     const current = session as unknown as Record<string, unknown>
     for (const [key, value] of Object.entries(patch)) {
+        if (key === 'lastAssistantMessageVersion') {
+            continue
+        }
         if (
             key === 'activeAt'
             && typeof value === 'number'
@@ -166,8 +192,18 @@ export function applySessionDetailPatch(session: Session, patch: SessionPatch): 
         const nextUpdatedAt = Math.max(nextSession.updatedAt, patch.updatedAt)
         assign('updatedAt', nextUpdatedAt)
     }
-    if (patch.lastAssistantMessageAt !== undefined) {
-        if (patch.lastAssistantMessageAt === null) {
+    const currentReplyVersion = Number.isFinite(session.seq) ? session.seq : 0
+    const replyVersion = patch.lastAssistantMessageVersion
+    const canApplyReplyClock = replyVersion === undefined || replyVersion >= currentReplyVersion
+    if (replyVersion !== undefined && replyVersion > currentReplyVersion) {
+        assign('seq', replyVersion)
+    }
+    if (patch.lastAssistantMessageAt !== undefined && canApplyReplyClock) {
+        if (replyVersion !== undefined) {
+            // Versioned reply-clock updates are authoritative: a rewind may
+            // legitimately move the timestamp backward or clear it.
+            assign('lastAssistantMessageAt', patch.lastAssistantMessageAt)
+        } else if (patch.lastAssistantMessageAt === null) {
             if (nextSession.lastAssistantMessageAt == null) {
                 assign('lastAssistantMessageAt', null)
             }
@@ -572,7 +608,8 @@ export function useSSE(options: {
             scheduleInvalidationFlush()
         }
 
-        const upsertSessionSummary = (session: Session) => {
+        const upsertSessionSummary = (session: Session): boolean => {
+            let accepted = false
             queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (previous) => {
                 if (!previous) {
                     return previous
@@ -580,6 +617,10 @@ export function useSSE(options: {
 
                 const existingIndex = previous.sessions.findIndex((item) => item.id === session.id)
                 const existing = existingIndex >= 0 ? previous.sessions[existingIndex] : undefined
+                if (!shouldAcceptSessionSummaryRecord(existing, session)) {
+                    return previous
+                }
+                accepted = true
                 const summary = {
                     ...toSessionSummary(session),
                     futureScheduledMessageCount: existing?.futureScheduledMessageCount ?? 0,
@@ -594,6 +635,7 @@ export function useSSE(options: {
                 nextSessions.sort(sortSessionSummaries)
                 return { ...previous, sessions: nextSessions }
             })
+            return accepted
         }
 
         const patchSessionSummary = (sessionId: string, patch: SessionPatch): boolean => {
@@ -614,6 +656,10 @@ export function useSSE(options: {
                     return previous
                 }
 
+                const replyVersion = patch.lastAssistantMessageVersion
+                const canApplyReplyClock = replyVersion === undefined
+                    || replyVersion >= (current.lastAssistantMessageVersion ?? 0)
+
                 const nextSummary: SessionSummary = {
                     ...current,
                     active: patch.active ?? current.active,
@@ -624,11 +670,16 @@ export function useSSE(options: {
                     updatedAt: patch.updatedAt !== undefined
                         ? Math.max(current.updatedAt, patch.updatedAt)
                         : current.updatedAt,
-                    lastAssistantMessageAt: patch.lastAssistantMessageAt !== undefined
-                        ? patch.lastAssistantMessageAt === null
-                            ? current.lastAssistantMessageAt
-                            : Math.max(current.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY, patch.lastAssistantMessageAt)
+                    lastAssistantMessageAt: patch.lastAssistantMessageAt !== undefined && canApplyReplyClock
+                        ? replyVersion !== undefined
+                            ? patch.lastAssistantMessageAt
+                            : patch.lastAssistantMessageAt === null
+                                ? current.lastAssistantMessageAt
+                                : Math.max(current.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY, patch.lastAssistantMessageAt)
                         : current.lastAssistantMessageAt,
+                    lastAssistantMessageVersion: replyVersion !== undefined
+                        ? Math.max(current.lastAssistantMessageVersion ?? 0, replyVersion)
+                        : current.lastAssistantMessageVersion,
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
                         ? patch.backgroundTaskCount ?? 0
                         : current.backgroundTaskCount,
@@ -663,7 +714,8 @@ export function useSSE(options: {
                 // session, and `activeAt` is the only one that actually moves.
                 // Nothing renders `activeAt`, so writing a new object for it just
                 // hands React Query a fresh reference and re-renders the list.
-                if (isRenderIrrelevantPatch(current, nextSummary)) {
+                const replyVersionChanged = nextSummary.lastAssistantMessageVersion !== current.lastAssistantMessageVersion
+                if (isRenderIrrelevantPatch(current, nextSummary) && !replyVersionChanged) {
                     return previous
                 }
                 nextSessions[index] = nextSummary
@@ -821,7 +873,10 @@ export function useSSE(options: {
                     void queryClient.removeQueries({ queryKey: queryKeys.session(event.sessionId) })
                     clearMessageWindow(event.sessionId)
                 } else if (isSessionRecord(event.data) && event.data.id === event.sessionId) {
-                    queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), { session: event.data })
+                    const currentDetail = queryClient.getQueryData<SessionResponse>(queryKeys.session(event.sessionId))?.session
+                    if (shouldAcceptSessionRecord(currentDetail, event.data)) {
+                        queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), { session: event.data })
+                    }
                     upsertSessionSummary(event.data)
                 } else {
                     const patch = getSessionPatch(event.data)
