@@ -171,6 +171,19 @@ afterEach(() => {
     vi.unstubAllGlobals()
 })
 
+describe('QueuedMessagesBar layout', () => {
+    it('keeps the queue footer flush with the composer area', () => {
+        renderQueuedMessage()
+
+        const bar = screen.getByRole('status')
+        const content = bar.firstElementChild
+
+        expect(bar).not.toHaveClass('mb-1')
+        expect(content).toHaveClass('pt-2', 'pb-0')
+        expect(content).not.toHaveClass('py-2')
+    })
+})
+
 describe('QueuedMessagesBar edit restore', () => {
     it('keeps a newly typed draft and its schedule when the deferred cancel succeeds', async () => {
         const scheduledAt = Date.now() + 60_000

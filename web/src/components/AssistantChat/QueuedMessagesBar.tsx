@@ -303,9 +303,9 @@ export function QueuedMessagesBar({
         <div
             role="status"
             aria-label={`${queued.length} queued message${queued.length === 1 ? '' : 's'} pending invocation`}
-            className="mx-auto w-full max-w-content mb-1"
+            className="mx-auto w-full max-w-content"
         >
-            <div className="px-3 py-2 text-sm text-[var(--app-fg-muted)]">
+            <div className="px-3 pb-0 pt-2 text-sm text-[var(--app-fg-muted)]">
                 <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-[var(--app-hint)]">
                     <ClockIcon />
                     <span>Queued</span>
