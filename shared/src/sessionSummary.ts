@@ -51,6 +51,8 @@ export type SessionSummary = {
     thinking: boolean
     activeAt: number
     updatedAt: number
+    /** Latest visible assistant prose; used by the default sidebar sort without mutating `updatedAt`. */
+    lastAssistantMessageAt?: number | null
     pinned?: boolean
     globalPinned?: boolean
     metadata: SessionSummaryMetadata | null
@@ -148,6 +150,18 @@ export function computeTodoProgress(todos: TodoItem[] | undefined): SessionSumma
     }
 }
 
+/**
+ * Return the recency clock used by the default session sidebar ordering.
+ *
+ * `updatedAt` remains the activity/unread watermark and is the fallback for
+ * sessions that have no visible assistant prose (including legacy rows).
+ */
+export function getSessionListSortTimestamp(
+    session: Pick<SessionSummary, 'updatedAt' | 'lastAssistantMessageAt'>
+): number {
+    return session.lastAssistantMessageAt ?? session.updatedAt
+}
+
 const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
     claude: 'claudeSessionId',
     codex: 'codexSessionId',
@@ -208,6 +222,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         thinking: session.thinking,
         activeAt: session.activeAt,
         updatedAt: session.updatedAt,
+        lastAssistantMessageAt: session.lastAssistantMessageAt ?? null,
         pinned: session.pinned ?? false,
         globalPinned: session.globalPinned ?? false,
         metadata: toSessionSummaryMetadata(session.metadata),

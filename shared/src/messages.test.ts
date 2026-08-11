@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
     extractAssistantPlainText,
     extractNotifySummary,
+    isAssistantTextMessage,
     isRedundantGoalStatusEventContent,
     type NotifySummary
 } from './messages'
@@ -105,6 +106,34 @@ describe('extractAssistantPlainText', () => {
     test('returns null for unknown content shapes', () => {
         expect(extractAssistantPlainText({ type: 'event', data: {} })).toBeNull()
         expect(extractAssistantPlainText({ type: 'text' })).toBeNull()
+    })
+})
+
+describe('isAssistantTextMessage', () => {
+    test('accepts a visible assistant message and rejects non-text agent events', () => {
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'answer' } }
+        })).toBe(true)
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'tool-call', name: 'Edit' } }
+        })).toBe(false)
+        expect(isAssistantTextMessage({
+            role: 'user',
+            content: { type: 'codex', data: { type: 'message', message: 'not an assistant reply' } }
+        })).toBe(false)
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    isMeta: true,
+                    message: { content: [{ type: 'text', text: 'hidden recap' }] }
+                }
+            }
+        })).toBe(false)
     })
 })
 

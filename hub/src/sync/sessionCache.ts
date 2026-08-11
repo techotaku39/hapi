@@ -1,4 +1,5 @@
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
+import { isAssistantTextMessage } from '@hapi/protocol/messages'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
@@ -18,6 +19,7 @@ export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
     private readonly lastBroadcastAtBySessionId: Map<string, number> = new Map()
     private readonly todoBackfillAttemptedSessionIds: Set<string> = new Set()
+    private readonly assistantReplyBackfillAttemptedSessionIds: Set<string> = new Set()
     private readonly deduplicateInProgress: Set<string> = new Set()
     private readonly deduplicatePending: Set<string> = new Set()
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
@@ -129,6 +131,7 @@ export class SessionCache {
             const existed = this.sessions.delete(sessionId)
             this.pendingThinkingUntilBySessionId.delete(sessionId)
             this.runtimeConfigUpdatedAtBySessionId.delete(sessionId)
+            this.assistantReplyBackfillAttemptedSessionIds.delete(sessionId)
             if (existed) {
                 this.publisher.emit({ type: 'session-removed', sessionId })
             }
@@ -150,6 +153,29 @@ export class SessionCache {
                     }
                     break
                 }
+            }
+        }
+
+        // Older databases have no persisted reply clock. Backfill lazily from
+        // the durable transcript once per session; new writes update the field
+        // at message-ingest time, so this does not become a per-refresh scan.
+        if (stored.lastAssistantMessageAt === null
+            && !this.assistantReplyBackfillAttemptedSessionIds.has(sessionId)) {
+            this.assistantReplyBackfillAttemptedSessionIds.add(sessionId)
+            let latestAssistantMessageAt: number | null = null
+            for (const message of this.store.messages.getAllMessages(sessionId)) {
+                if (!isAssistantTextMessage(message.content)) continue
+                if (latestAssistantMessageAt === null || message.createdAt > latestAssistantMessageAt) {
+                    latestAssistantMessageAt = message.createdAt
+                }
+            }
+            if (latestAssistantMessageAt !== null) {
+                this.store.sessions.touchSessionLastAssistantMessageAt(
+                    sessionId,
+                    latestAssistantMessageAt,
+                    stored.namespace
+                )
+                stored = this.store.sessions.getSession(sessionId) ?? stored
             }
         }
 
@@ -181,6 +207,7 @@ export class SessionCache {
             seq: stored.seq,
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt,
+            lastAssistantMessageAt: stored.lastAssistantMessageAt,
             pinned: stored.pinned,
             globalPinned: stored.globalPinned,
             active: existing?.active ?? stored.active,
@@ -311,6 +338,20 @@ export class SessionCache {
         if (patch.thinking !== undefined) session.thinking = patch.thinking
         if (patch.activeAt !== undefined) session.activeAt = patch.activeAt
         if (patch.updatedAt !== undefined) session.updatedAt = Math.max(session.updatedAt, patch.updatedAt)
+        if (patch.lastAssistantMessageAt !== undefined) {
+            // Reply timestamps are a monotonic watermark. A stale structured
+            // patch must not move the default sidebar sort backwards.
+            if (patch.lastAssistantMessageAt === null) {
+                if (session.lastAssistantMessageAt == null) {
+                    session.lastAssistantMessageAt = null
+                }
+            } else {
+                session.lastAssistantMessageAt = Math.max(
+                    session.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY,
+                    patch.lastAssistantMessageAt
+                )
+            }
+        }
         if (patch.model !== undefined) session.model = patch.model
         if (patch.modelReasoningEffort !== undefined) session.modelReasoningEffort = patch.modelReasoningEffort
         if (patch.effort !== undefined) session.effort = patch.effort
@@ -567,6 +608,44 @@ export class SessionCache {
             sessionId,
             namespace: session.namespace,
             data: { updatedAt: session.updatedAt } satisfies SessionPatch
+        })
+    }
+
+    /**
+     * Update the independent sidebar clock for a visible assistant reply.
+     * This intentionally leaves `updatedAt` untouched.
+     */
+    recordAssistantMessage(sessionId: string, messageAt: number): void {
+        if (!Number.isFinite(messageAt)) return
+
+        const stored = this.store.sessions.getSession(sessionId)
+        if (!stored) return
+
+        const session = this.sessions.get(sessionId)
+        const current = Math.max(
+            stored.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY,
+            session?.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY
+        )
+        const next = Math.max(current, messageAt)
+        if (!Number.isFinite(next)) return
+
+        this.store.sessions.touchSessionLastAssistantMessageAt(sessionId, next, stored.namespace)
+
+        if (!session) {
+            this.refreshSession(sessionId)
+            return
+        }
+
+        if ((session.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY) >= next) {
+            return
+        }
+
+        session.lastAssistantMessageAt = next
+        this.publisher.emit({
+            type: 'session-updated',
+            sessionId,
+            namespace: session.namespace,
+            data: { lastAssistantMessageAt: next } satisfies SessionPatch
         })
     }
 

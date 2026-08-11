@@ -20,6 +20,73 @@ function createPublisher(events: SyncEvent[]): EventPublisher {
 // cache-vs-DB divergence would manifest as ghost notifications, stale
 // pendingRequestsCount, or wrong todos progress in the session list.
 describe('SessionCache.applySessionPatch', () => {
+    it('records assistant reply time without moving the activity clock', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+        const created = cache.getOrCreateSession(
+            'assistant-reply-patch',
+            { path: '/tmp', host: 'h' },
+            null,
+            'default'
+        )
+        const activityAt = created.updatedAt
+
+        cache.recordAssistantMessage(created.id, 2_000)
+
+        const after = cache.getSession(created.id)
+        expect(after?.lastAssistantMessageAt).toBe(2_000)
+        expect(after?.updatedAt).toBe(activityAt)
+        expect(events.at(-1)).toMatchObject({
+            type: 'session-updated',
+            sessionId: created.id,
+            data: { lastAssistantMessageAt: 2_000 }
+        })
+        expect(store.sessions.getSession(created.id)?.lastAssistantMessageAt).toBe(2_000)
+        store.close()
+    })
+
+    it('backfills the reply clock from legacy transcript rows', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'legacy-assistant-reply',
+            { path: '/tmp', host: 'h' },
+            null,
+            'default'
+        )
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'historical answer' } }
+        }, undefined, undefined, 3_000)
+
+        const db = (store as unknown as { db: import('bun:sqlite').Database }).db
+        db.prepare('UPDATE sessions SET last_assistant_message_at = NULL WHERE id = ?').run(session.id)
+
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+        const loaded = cache.refreshSession(session.id)
+        expect(loaded?.lastAssistantMessageAt).toBe(3_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
+        store.close()
+    })
+
+    it('does not rewind the reply clock when a stale patch arrives', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'stale-assistant-reply-patch',
+            { path: '/tmp', host: 'h' },
+            null,
+            'default'
+        )
+        const cache = new SessionCache(store, createPublisher([]))
+        cache.recordAssistantMessage(session.id, 2_000)
+
+        expect(cache.applySessionPatch(session.id, { lastAssistantMessageAt: 1_000 })).toBe(true)
+        expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+        store.close()
+    })
+
     it('applies a todos patch in place when the session is cached', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

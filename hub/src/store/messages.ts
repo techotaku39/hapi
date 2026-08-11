@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import { isAssistantTextMessage } from '@hapi/protocol/messages'
 
 import type { StoredMessage } from './types'
 import { decodeMessageContent, encodeMessageContent, truncateOversizedMessageContent } from './contentCodec'
@@ -15,6 +16,58 @@ type DbMessageRow = {
     local_id: string | null
     invoked_at: number | null
     scheduled_at: number | null
+}
+
+function touchLastAssistantMessageAt(
+    db: Database,
+    sessionId: string,
+    content: unknown,
+    createdAt: number
+): void {
+    if (!isAssistantTextMessage(content) || !Number.isFinite(createdAt)) return
+
+    db.prepare(`
+        UPDATE sessions
+        SET last_assistant_message_at = @created_at,
+            seq = seq + 1
+        WHERE id = @session_id
+          AND (
+              last_assistant_message_at IS NULL
+              OR last_assistant_message_at < @created_at
+          )
+    `).run({
+        session_id: sessionId,
+        created_at: createdAt
+    })
+}
+
+function findLastAssistantMessageAt(db: Database, sessionId: string): number | null {
+    const rows = db.prepare(
+        'SELECT content, created_at FROM messages WHERE session_id = ?'
+    ).all(sessionId) as Array<Pick<DbMessageRow, 'content' | 'created_at'>>
+
+    let latest: number | null = null
+    for (const row of rows) {
+        if (!isAssistantTextMessage(decodeMessageContent(row.content))) continue
+        if (latest === null || row.created_at > latest) {
+            latest = row.created_at
+        }
+    }
+    return latest
+}
+
+function refreshLastAssistantMessageAt(db: Database, sessionId: string): void {
+    const latest = findLastAssistantMessageAt(db, sessionId)
+    db.prepare(`
+        UPDATE sessions
+        SET last_assistant_message_at = @message_at,
+            seq = seq + 1
+        WHERE id = @session_id
+          AND last_assistant_message_at IS NOT @message_at
+    `).run({
+        session_id: sessionId,
+        message_at: latest
+    })
 }
 
 export type MessagePosition = {
@@ -69,6 +122,7 @@ export function addImportedMessage(
             local_id: localId,
             invoked_at: stampedAt
         })
+        touchLastAssistantMessageAt(db, sessionId, content, stampedAt)
         if (previousHead && stampedAt < previousHead.at) bumpMessageEpoch(db, sessionId)
         const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
         if (!row) throw new Error('Failed to create imported message')
@@ -163,6 +217,8 @@ export function addMessage(
             scheduled_at: scheduledAt ?? null
         })
 
+        touchLastAssistantMessageAt(db, sessionId, content, stampedAt)
+
         const positionAt = invokedAt ?? stampedAt
         if (previousHead && positionAt < previousHead.at) bumpMessageEpoch(db, sessionId)
         const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
@@ -215,6 +271,8 @@ export function copyMessageToSession(
         invoked_at: invokedAt ?? null,
         scheduled_at: message.scheduledAt ?? null
     })
+
+    touchLastAssistantMessageAt(db, sessionId, message.content, createdAt)
 
     const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
     if (!row) {
@@ -275,9 +333,11 @@ export function copyMessagesToSession(
                 invoked_at: invokedAt ?? null,
                 scheduled_at: message.scheduledAt ?? null
             })
+            touchLastAssistantMessageAt(db, sessionId, message.content, createdAt)
             nextSeq += 1
         }
 
+        refreshLastAssistantMessageAt(db, sessionId)
         bumpMessageEpoch(db, sessionId)
         return messages.length
     })()
@@ -940,6 +1000,8 @@ export function mergeSessionMessages(
         ).run(toSessionId, fromSessionId)
 
         if (result.changes > 0) {
+            refreshLastAssistantMessageAt(db, fromSessionId)
+            refreshLastAssistantMessageAt(db, toSessionId)
             bumpMessageEpoch(db, fromSessionId)
             bumpMessageEpoch(db, toSessionId)
         }
@@ -1011,9 +1073,11 @@ export function truncateMessagesFromLocalId(
                 rowLocalId,
                 invokedAt
             )
+            touchLastAssistantMessageAt(db, sessionId, message.content, createdAt)
             inserted += 1
         }
 
+        refreshLastAssistantMessageAt(db, sessionId)
         const epoch = bumpMessageEpoch(db, sessionId)
         return { deleted: deleted.changes, inserted, epoch }
     })()

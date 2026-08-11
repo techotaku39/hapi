@@ -86,10 +86,13 @@ function getSessionTimeLabel(
     const importedAt = session.metadata?.flavor === 'codex'
         ? getCodexImportedAt(session.metadata?.agentSessionId)
         : null
-    if (importedAt !== null) {
+    // Imported Codex sessions used to show the local import time because the
+    // list only had `updatedAt`. Once a persisted assistant-reply timestamp is
+    // available, prefer it so imported and native sessions share one meaning.
+    if (importedAt !== null && session.lastAssistantMessageAt == null) {
         return formatCodexImportedRelativeTime(importedAt, t)
     }
-    return formatRelativeTime(session.updatedAt, t)
+    return formatRelativeTime(session.lastAssistantMessageAt ?? session.updatedAt, t)
 }
 
 /**

@@ -5,6 +5,7 @@ import {
     computePendingRequests,
     computePendingRequestsCount,
     computeTodoProgress,
+    getSessionListSortTimestamp,
     isObject,
     toSessionSummary,
     toSessionSummaryMetadata
@@ -92,7 +93,7 @@ const RECONNECT_SLOW_AFTER_ATTEMPTS = 8
 const RECONNECT_SLOW_MAX_DELAY_MS = 300_000
 const INVALIDATION_BATCH_MS = 16
 
-function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
+export function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
     if (Boolean(left.globalPinned) !== Boolean(right.globalPinned)) {
         return left.globalPinned ? -1 : 1
     }
@@ -105,7 +106,7 @@ function sortSessionSummaries(left: SessionSummary, right: SessionSummary): numb
     if (left.active && left.pendingRequestsCount !== right.pendingRequestsCount) {
         return right.pendingRequestsCount - left.pendingRequestsCount
     }
-    return right.updatedAt - left.updatedAt
+    return getSessionListSortTimestamp(right) - getSessionListSortTimestamp(left)
 }
 
 /**
@@ -165,6 +166,18 @@ export function applySessionDetailPatch(session: Session, patch: SessionPatch): 
         const nextUpdatedAt = Math.max(nextSession.updatedAt, patch.updatedAt)
         assign('updatedAt', nextUpdatedAt)
     }
+    if (patch.lastAssistantMessageAt !== undefined) {
+        if (patch.lastAssistantMessageAt === null) {
+            if (nextSession.lastAssistantMessageAt == null) {
+                assign('lastAssistantMessageAt', null)
+            }
+        } else {
+            assign(
+                'lastAssistantMessageAt',
+                Math.max(nextSession.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY, patch.lastAssistantMessageAt)
+            )
+        }
+    }
     if (patch.model !== undefined) assign('model', patch.model)
     if (patch.modelReasoningEffort !== undefined) assign('modelReasoningEffort', patch.modelReasoningEffort)
     if (patch.effort !== undefined) assign('effort', patch.effort)
@@ -211,7 +224,8 @@ function isSessionRecord(value: unknown): value is Session {
  * The CLI keep-alive makes the hub re-broadcast a full session patch about
  * every 10s per active session even when nothing changed, and `activeAt` is
  * the sole field that moves. No component reads `activeAt` - the list shows
- * `updatedAt` and sorts on active/pendingRequestsCount/updatedAt - so storing
+ * the latest assistant reply clock (falling back to `updatedAt`) and sorts on
+ * active/pendingRequestsCount/reply time - so storing
  * it costs a new object identity and a full list re-render for nothing.
  */
 export function sameSessionSummaryMetadata(
@@ -242,6 +256,7 @@ export function isRenderIrrelevantPatch(current: SessionSummary, next: SessionSu
     return current.active === next.active
         && current.thinking === next.thinking
         && current.updatedAt === next.updatedAt
+        && current.lastAssistantMessageAt === next.lastAssistantMessageAt
         && current.backgroundTaskCount === next.backgroundTaskCount
         && current.model === next.model
         && current.modelReasoningEffort === next.modelReasoningEffort
@@ -609,6 +624,11 @@ export function useSSE(options: {
                     updatedAt: patch.updatedAt !== undefined
                         ? Math.max(current.updatedAt, patch.updatedAt)
                         : current.updatedAt,
+                    lastAssistantMessageAt: patch.lastAssistantMessageAt !== undefined
+                        ? patch.lastAssistantMessageAt === null
+                            ? current.lastAssistantMessageAt
+                            : Math.max(current.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY, patch.lastAssistantMessageAt)
+                        : current.lastAssistantMessageAt,
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
                         ? patch.backgroundTaskCount ?? 0
                         : current.backgroundTaskCount,

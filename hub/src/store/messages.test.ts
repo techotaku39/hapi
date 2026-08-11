@@ -9,6 +9,34 @@ function makeSession(store: Store, tag: string) {
     return store.sessions.getOrCreateSession(tag, { path: `/tmp/${tag}` }, null, 'default')
 }
 
+describe('assistant reply timestamp', () => {
+    it('records visible assistant prose but ignores tools and preserves updatedAt', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'assistant-reply-clock')
+        const activityAt = session.updatedAt
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'tool-call', name: 'Edit' } }
+        }, undefined, undefined, 1_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBeNull()
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'answer' } }
+        }, undefined, undefined, 2_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'older answer' } }
+        }, undefined, undefined, 1_500)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+        expect(store.sessions.getSession(session.id)?.updatedAt).toBe(activityAt)
+        store.close()
+    })
+})
+
 describe('cancelQueuedMessage', () => {
     it('happy path: deletes queued message, returns status=cancelled with localId', () => {
         const store = makeStore()

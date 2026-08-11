@@ -8,7 +8,8 @@ import {
     isNewerVersionedPatch,
     isRenderIrrelevantPatch,
     isRenderIrrelevantSessionPatch,
-    shouldInvalidateSessionListForEvent
+    shouldInvalidateSessionListForEvent,
+    sortSessionSummaries
 } from './useSSE'
 
 function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -34,6 +35,28 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
         ...overrides
     } as SessionSummary
 }
+
+describe('sortSessionSummaries', () => {
+    it('keeps pin and activity priorities, then sorts inactive sessions by assistant reply', () => {
+        const sessions = [
+            makeSummary({ id: 'reply-newer', active: false, updatedAt: 500, lastAssistantMessageAt: 900 }),
+            makeSummary({ id: 'activity-newer', active: false, updatedAt: 800, lastAssistantMessageAt: 100 }),
+            makeSummary({ id: 'pinned-old', active: false, pinned: true, updatedAt: 1, lastAssistantMessageAt: 1 }),
+            makeSummary({ id: 'quiet-active', active: true, updatedAt: 2, lastAssistantMessageAt: 2 }),
+            makeSummary({ id: 'pending-active', active: true, pendingRequestsCount: 1, updatedAt: 3, lastAssistantMessageAt: 3 })
+        ]
+
+        sessions.sort(sortSessionSummaries)
+
+        expect(sessions.map(session => session.id)).toEqual([
+            'pinned-old',
+            'pending-active',
+            'quiet-active',
+            'reply-newer',
+            'activity-newer'
+        ])
+    })
+})
 
 describe('canApplyVersionedSummaryPatch (PR #897 review, HAPI Bot 2026-07-23 Major)', () => {
     it('allows non-versioned patches without a detail cache', () => {
@@ -150,6 +173,7 @@ describe('isRenderIrrelevantPatch', () => {
         ['active', { active: false }],
         ['thinking', { thinking: true }],
         ['updatedAt', { updatedAt: 9_999 }],
+        ['lastAssistantMessageAt', { lastAssistantMessageAt: 9_999 }],
         ['backgroundTaskCount', { backgroundTaskCount: 3 }],
         ['model', { model: 'opus' }],
         ['modelReasoningEffort', { modelReasoningEffort: 'high' }],
@@ -280,5 +304,14 @@ describe('applySessionDetailPatch (PR #897 review, Copilot keep-alive)', () => {
             activeAt: 11_000,
             copilotAgentMode: 'interactive'
         })).toBeNull()
+    })
+
+    it('does not rewind the reply clock from a stale detail patch', () => {
+        const next = applySessionDetailPatch({
+            ...session,
+            lastAssistantMessageAt: 2_000
+        }, { activeAt: 2_000, lastAssistantMessageAt: 1_000 })
+
+        expect(next?.lastAssistantMessageAt).toBe(2_000)
     })
 })

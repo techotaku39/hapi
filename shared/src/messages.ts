@@ -136,6 +136,26 @@ export function extractAssistantPlainText(content: unknown): string | null {
     return null
 }
 
+/**
+ * Whether a stored role-wrapped message contains visible assistant prose.
+ *
+ * This deliberately shares the same extraction rules as notifications: tool
+ * calls, tool results, reasoning, and other agent events must not move the
+ * sidebar's "last reply" clock.
+ */
+export function isAssistantTextMessage(content: unknown): boolean {
+    const record = unwrapRoleWrappedRecordEnvelope(content)
+    if (record?.role !== 'agent') return false
+
+    if (isObject(record.content) && record.content.type === 'output') {
+        const data = isObject(record.content.data) ? record.content.data : null
+        if (!data || Boolean(data.isMeta) || Boolean(data.isCompactSummary)) return false
+        if (!isClaudeChatVisibleMessage({ type: data.type, subtype: data.subtype })) return false
+    }
+
+    return Boolean(extractAssistantPlainText(record.content)?.trim())
+}
+
 const NOTIFY_SUMMARY_PREFIX = 'AGENT_NOTIFY_SUMMARY '
 
 export type NotifySummary = {

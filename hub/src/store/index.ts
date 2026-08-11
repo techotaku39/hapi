@@ -40,7 +40,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 23
+const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -302,6 +302,7 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
         })
 
         if (currentVersion === 0) {
@@ -356,6 +357,7 @@ export class Store {
                 machine_id TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                last_assistant_message_at INTEGER,
                 metadata TEXT,
                 metadata_version INTEGER DEFAULT 1,
                 agent_state TEXT,
@@ -970,6 +972,18 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
         `)
+    }
+
+    /**
+     * Keep the prompt/activity clock (`updated_at`) separate from the latest
+     * visible assistant prose used by the web sidebar.
+     */
+    private migrateFromV23ToV24(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('last_assistant_message_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_assistant_message_at INTEGER')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {

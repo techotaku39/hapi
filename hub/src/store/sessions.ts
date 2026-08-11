@@ -139,6 +139,7 @@ type DbSessionRow = {
     machine_id: string | null
     created_at: number
     updated_at: number
+    last_assistant_message_at: number | null
     pinned: number
     global_pinned: number
     metadata: string | null
@@ -166,6 +167,7 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         machineId: row.machine_id,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        lastAssistantMessageAt: row.last_assistant_message_at,
         pinned: row.pinned === 1,
         globalPinned: row.global_pinned === 1,
         metadata: safeJsonParse(row.metadata),
@@ -227,6 +229,7 @@ export function getOrCreateSession(
     db.prepare(`
         INSERT INTO sessions (
             id, tag, namespace, machine_id, created_at, updated_at,
+            last_assistant_message_at,
             metadata, metadata_version,
             agent_state, agent_state_version,
             model,
@@ -236,6 +239,7 @@ export function getOrCreateSession(
             active, active_at, seq
         ) VALUES (
             @id, @tag, @namespace, NULL, @created_at, @updated_at,
+            NULL,
             @metadata, 1,
             @agent_state, 1,
             @model,
@@ -660,6 +664,42 @@ export function touchSessionUpdatedAt(
             id,
             namespace,
             updated_at: updatedAt
+        })
+
+        return result.changes === 1
+    } catch {
+        return false
+    }
+}
+
+/**
+ * Persist the latest visible assistant reply without changing `updated_at`.
+ * The latter remains the prompt/activity clock used for unread state and
+ * replay semantics; this field is the sidebar's reply-recency clock.
+ */
+export function touchSessionLastAssistantMessageAt(
+    db: Database,
+    id: string,
+    messageAt: number,
+    namespace: string
+): boolean {
+    if (!Number.isFinite(messageAt)) return false
+
+    try {
+        const result = db.prepare(`
+            UPDATE sessions
+            SET last_assistant_message_at = @message_at,
+                seq = seq + 1
+            WHERE id = @id
+              AND namespace = @namespace
+              AND (
+                  last_assistant_message_at IS NULL
+                  OR last_assistant_message_at < @message_at
+              )
+        `).run({
+            id,
+            message_at: messageAt,
+            namespace
         })
 
         return result.changes === 1
