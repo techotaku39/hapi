@@ -299,6 +299,7 @@ export function copyMessagesToSession(
 
     return db.transaction(() => {
         let nextSeq = getMaxSeq(db, sessionId) + 1
+        let latestAssistantMessage: { content: unknown; createdAt: number } | null = null
         const insert = db.prepare(`
             INSERT INTO messages (
                 id, session_id, content, created_at, seq, local_id, invoked_at, scheduled_at
@@ -333,11 +334,21 @@ export function copyMessagesToSession(
                 invoked_at: invokedAt ?? null,
                 scheduled_at: message.scheduledAt ?? null
             })
-            touchLastAssistantMessageAt(db, sessionId, message.content, createdAt)
+            if (isAssistantTextMessage(message.content)
+                && (latestAssistantMessage === null || createdAt > latestAssistantMessage.createdAt)) {
+                latestAssistantMessage = { content: message.content, createdAt }
+            }
             nextSeq += 1
         }
 
-        refreshLastAssistantMessageAt(db, sessionId)
+        if (latestAssistantMessage !== null) {
+            touchLastAssistantMessageAt(
+                db,
+                sessionId,
+                latestAssistantMessage.content,
+                latestAssistantMessage.createdAt
+            )
+        }
         bumpMessageEpoch(db, sessionId)
         return messages.length
     })()

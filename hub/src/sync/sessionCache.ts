@@ -19,11 +19,14 @@ export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
     private readonly lastBroadcastAtBySessionId: Map<string, number> = new Map()
     private readonly todoBackfillAttemptedSessionIds: Set<string> = new Set()
-    private readonly assistantReplyBackfillAttemptedSessionIds: Set<string> = new Set()
+    private readonly assistantReplyBackfillQueue: string[] = []
+    private readonly assistantReplyBackfillQueuedSessionIds: Set<string> = new Set()
     private readonly deduplicateInProgress: Set<string> = new Set()
     private readonly deduplicatePending: Set<string> = new Set()
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
+    private assistantReplyBackfillTimer: ReturnType<typeof setTimeout> | null = null
+    private assistantReplyBackfillStopped = false
 
     constructor(
         private readonly store: Store,
@@ -131,7 +134,7 @@ export class SessionCache {
             const existed = this.sessions.delete(sessionId)
             this.pendingThinkingUntilBySessionId.delete(sessionId)
             this.runtimeConfigUpdatedAtBySessionId.delete(sessionId)
-            this.assistantReplyBackfillAttemptedSessionIds.delete(sessionId)
+            this.assistantReplyBackfillQueuedSessionIds.delete(sessionId)
             if (existed) {
                 this.publisher.emit({ type: 'session-removed', sessionId })
             }
@@ -156,27 +159,11 @@ export class SessionCache {
             }
         }
 
-        // Older databases have no persisted reply clock. Backfill lazily from
-        // the durable transcript once per session; new writes update the field
-        // at message-ingest time, so this does not become a per-refresh scan.
-        if (stored.lastAssistantMessageAt === null
-            && !this.assistantReplyBackfillAttemptedSessionIds.has(sessionId)) {
-            this.assistantReplyBackfillAttemptedSessionIds.add(sessionId)
-            let latestAssistantMessageAt: number | null = null
-            for (const message of this.store.messages.getAllMessages(sessionId)) {
-                if (!isAssistantTextMessage(message.content)) continue
-                if (latestAssistantMessageAt === null || message.createdAt > latestAssistantMessageAt) {
-                    latestAssistantMessageAt = message.createdAt
-                }
-            }
-            if (latestAssistantMessageAt !== null) {
-                this.store.sessions.touchSessionLastAssistantMessageAt(
-                    sessionId,
-                    latestAssistantMessageAt,
-                    stored.namespace
-                )
-                stored = this.store.sessions.getSession(sessionId) ?? stored
-            }
+        // Older databases need one transcript scan to populate the durable
+        // reply clock. Queue that work after the refresh so startup and
+        // request-driven cache hydration never block on a full transcript.
+        if (!stored.assistantReplyClockBackfilled) {
+            this.queueAssistantReplyBackfill(sessionId)
         }
 
         const metadata = (() => {
@@ -249,6 +236,91 @@ export class SessionCache {
         for (const session of sessions) {
             this.refreshSession(session.id)
         }
+    }
+
+    stop(): void {
+        this.assistantReplyBackfillStopped = true
+        if (this.assistantReplyBackfillTimer !== null) {
+            clearTimeout(this.assistantReplyBackfillTimer)
+            this.assistantReplyBackfillTimer = null
+        }
+        this.assistantReplyBackfillQueue.length = 0
+        this.assistantReplyBackfillQueuedSessionIds.clear()
+    }
+
+    private queueAssistantReplyBackfill(sessionId: string): void {
+        if (this.assistantReplyBackfillStopped || this.assistantReplyBackfillQueuedSessionIds.has(sessionId)) {
+            return
+        }
+
+        this.assistantReplyBackfillQueuedSessionIds.add(sessionId)
+        this.assistantReplyBackfillQueue.push(sessionId)
+        this.scheduleAssistantReplyBackfill()
+    }
+
+    private scheduleAssistantReplyBackfill(): void {
+        if (this.assistantReplyBackfillStopped
+            || this.assistantReplyBackfillTimer !== null
+            || this.assistantReplyBackfillQueue.length === 0) {
+            return
+        }
+
+        this.assistantReplyBackfillTimer = setTimeout(() => {
+            this.assistantReplyBackfillTimer = null
+            this.runNextAssistantReplyBackfill()
+        }, 0)
+    }
+
+    private runNextAssistantReplyBackfill(): void {
+        if (this.assistantReplyBackfillStopped) return
+
+        const sessionId = this.assistantReplyBackfillQueue.shift()
+        if (!sessionId) return
+        this.assistantReplyBackfillQueuedSessionIds.delete(sessionId)
+
+        try {
+            this.backfillAssistantReplyClock(sessionId)
+        } catch {
+            // Keep the marker unset so a later refresh can retry after a
+            // transient database or malformed-row failure.
+        }
+
+        this.scheduleAssistantReplyBackfill()
+    }
+
+    private backfillAssistantReplyClock(sessionId: string): void {
+        const stored = this.store.sessions.getSession(sessionId)
+        if (!stored || stored.assistantReplyClockBackfilled) return
+
+        let latestAssistantMessageAt: number | null = null
+        for (const message of this.store.messages.getAllMessages(sessionId)) {
+            if (!isAssistantTextMessage(message.content)) continue
+            if (latestAssistantMessageAt === null || message.createdAt > latestAssistantMessageAt) {
+                latestAssistantMessageAt = message.createdAt
+            }
+        }
+
+        const completed = this.store.sessions.completeAssistantReplyClockBackfill(
+            sessionId,
+            latestAssistantMessageAt,
+            stored.namespace
+        )
+        if (!completed) return
+
+        const refreshed = this.store.sessions.getSession(sessionId)
+        const session = this.sessions.get(sessionId)
+        if (!refreshed || !session || refreshed.namespace !== session.namespace) return
+
+        session.seq = refreshed.seq
+        if (session.lastAssistantMessageAt === refreshed.lastAssistantMessageAt) return
+
+        session.lastAssistantMessageAt = refreshed.lastAssistantMessageAt
+        this.publisher.emit({
+            type: 'session-updated',
+            sessionId,
+            namespace: session.namespace,
+            data: { lastAssistantMessageAt: refreshed.lastAssistantMessageAt } satisfies SessionPatch
+        })
     }
 
     setSessionPinned(sessionId: string, pinned: boolean): void {
@@ -1107,6 +1179,7 @@ export class SessionCache {
         this.sessions.delete(sessionId)
         this.lastBroadcastAtBySessionId.delete(sessionId)
         this.todoBackfillAttemptedSessionIds.delete(sessionId)
+        this.assistantReplyBackfillQueuedSessionIds.delete(sessionId)
         this.pendingThinkingUntilBySessionId.delete(sessionId)
 
         void import('../scratchlistAttachments/storage').then(async ({
@@ -1352,6 +1425,7 @@ export class SessionCache {
             }
             this.lastBroadcastAtBySessionId.delete(oldSessionId)
             this.todoBackfillAttemptedSessionIds.delete(oldSessionId)
+            this.assistantReplyBackfillQueuedSessionIds.delete(oldSessionId)
         } else {
             this.refreshSession(oldSessionId)
         }

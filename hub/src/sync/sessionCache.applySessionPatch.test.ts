@@ -12,6 +12,15 @@ function createPublisher(events: SyncEvent[]): EventPublisher {
     } as unknown as EventPublisher
 }
 
+async function waitForAssistantReplyClock(store: Store, sessionId: string) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        const session = store.sessions.getSession(sessionId)
+        if (session?.assistantReplyClockBackfilled) return session
+        await new Promise<void>((resolve) => setTimeout(resolve, 1))
+    }
+    throw new Error('Timed out waiting for assistant reply clock backfill')
+}
+
 // Companion guard for syncEngine.handleRealtimeEvent's new "forward structured
 // patches without DB refresh" branch (closes the second half of #884). The
 // hub-side fast-path is only safe if applySessionPatch keeps the in-memory
@@ -46,7 +55,7 @@ describe('SessionCache.applySessionPatch', () => {
         store.close()
     })
 
-    it('backfills the reply clock from legacy transcript rows', () => {
+    it('backfills the reply clock from legacy transcript rows without blocking refresh', async () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession(
             'legacy-assistant-reply',
@@ -60,13 +69,58 @@ describe('SessionCache.applySessionPatch', () => {
         }, undefined, undefined, 3_000)
 
         const db = (store as unknown as { db: import('bun:sqlite').Database }).db
-        db.prepare('UPDATE sessions SET last_assistant_message_at = NULL WHERE id = ?').run(session.id)
+        db.prepare(`
+            UPDATE sessions
+            SET last_assistant_message_at = NULL,
+                assistant_reply_clock_backfilled = 0
+            WHERE id = ?
+        `).run(session.id)
 
         const events: SyncEvent[] = []
         const cache = new SessionCache(store, createPublisher(events))
         const loaded = cache.refreshSession(session.id)
-        expect(loaded?.lastAssistantMessageAt).toBe(3_000)
-        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
+        expect(loaded?.lastAssistantMessageAt).toBeNull()
+        expect(store.sessions.getSession(session.id)?.assistantReplyClockBackfilled).toBe(false)
+
+        const backfilled = await waitForAssistantReplyClock(store, session.id)
+        expect(backfilled.lastAssistantMessageAt).toBe(3_000)
+        expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
+        expect(events.at(-1)).toMatchObject({
+            type: 'session-updated',
+            sessionId: session.id,
+            data: { lastAssistantMessageAt: 3_000 }
+        })
+        cache.stop()
+        store.close()
+    })
+
+    it('marks legacy sessions without replies so they are not rescanned', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'legacy-no-assistant-reply',
+            { path: '/tmp', host: 'h' },
+            null,
+            'default'
+        )
+        const db = (store as unknown as { db: import('bun:sqlite').Database }).db
+        db.prepare(`
+            UPDATE sessions
+            SET last_assistant_message_at = NULL,
+                assistant_reply_clock_backfilled = 0
+            WHERE id = ?
+        `).run(session.id)
+
+        const firstCache = new SessionCache(store, createPublisher([]))
+        expect(firstCache.refreshSession(session.id)?.lastAssistantMessageAt).toBeNull()
+        const backfilled = await waitForAssistantReplyClock(store, session.id)
+        expect(backfilled.lastAssistantMessageAt).toBeNull()
+        expect(backfilled.assistantReplyClockBackfilled).toBe(true)
+
+        const secondCache = new SessionCache(store, createPublisher([]))
+        expect(secondCache.refreshSession(session.id)?.lastAssistantMessageAt).toBeNull()
+        expect(store.sessions.getSession(session.id)?.assistantReplyClockBackfilled).toBe(true)
+        firstCache.stop()
+        secondCache.stop()
         store.close()
     })
 

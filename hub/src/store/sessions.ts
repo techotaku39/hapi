@@ -140,6 +140,7 @@ type DbSessionRow = {
     created_at: number
     updated_at: number
     last_assistant_message_at: number | null
+    assistant_reply_clock_backfilled: number
     pinned: number
     global_pinned: number
     metadata: string | null
@@ -168,6 +169,7 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         lastAssistantMessageAt: row.last_assistant_message_at,
+        assistantReplyClockBackfilled: row.assistant_reply_clock_backfilled === 1,
         pinned: row.pinned === 1,
         globalPinned: row.global_pinned === 1,
         metadata: safeJsonParse(row.metadata),
@@ -230,6 +232,7 @@ export function getOrCreateSession(
         INSERT INTO sessions (
             id, tag, namespace, machine_id, created_at, updated_at,
             last_assistant_message_at,
+            assistant_reply_clock_backfilled,
             metadata, metadata_version,
             agent_state, agent_state_version,
             model,
@@ -240,6 +243,7 @@ export function getOrCreateSession(
         ) VALUES (
             @id, @tag, @namespace, NULL, @created_at, @updated_at,
             NULL,
+            1,
             @metadata, 1,
             @agent_state, 1,
             @model,
@@ -696,6 +700,45 @@ export function touchSessionLastAssistantMessageAt(
                   last_assistant_message_at IS NULL
                   OR last_assistant_message_at < @message_at
               )
+        `).run({
+            id,
+            message_at: messageAt,
+            namespace
+        })
+
+        return result.changes === 1
+    } catch {
+        return false
+    }
+}
+
+/**
+ * Finish the one-time transcript backfill without moving the prompt/activity
+ * clock. The marker is written even when the transcript has no visible
+ * assistant prose, so an empty legacy session is not scanned on every restart.
+ */
+export function completeAssistantReplyClockBackfill(
+    db: Database,
+    id: string,
+    messageAt: number | null,
+    namespace: string
+): boolean {
+    if (messageAt !== null && !Number.isFinite(messageAt)) return false
+
+    try {
+        const result = db.prepare(`
+            UPDATE sessions
+            SET last_assistant_message_at = CASE
+                    WHEN @message_at IS NULL THEN last_assistant_message_at
+                    WHEN last_assistant_message_at IS NULL
+                        OR last_assistant_message_at < @message_at THEN @message_at
+                    ELSE last_assistant_message_at
+                END,
+                assistant_reply_clock_backfilled = 1,
+                seq = seq + 1
+            WHERE id = @id
+              AND namespace = @namespace
+              AND assistant_reply_clock_backfilled = 0
         `).run({
             id,
             message_at: messageAt,

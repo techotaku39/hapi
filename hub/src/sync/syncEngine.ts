@@ -221,6 +221,7 @@ export class SyncEngine {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
         }
+        this.sessionCache.stop()
     }
 
     subscribe(listener: SyncEventListener): () => void {

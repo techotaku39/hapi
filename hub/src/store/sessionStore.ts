@@ -21,6 +21,7 @@ import {
     replaceSessionTodos,
     touchSessionUpdatedAt,
     touchSessionLastAssistantMessageAt,
+    completeAssistantReplyClockBackfill,
     updateSessionAgentState,
     updateSessionMetadata
 } from './sessions'
@@ -119,6 +120,10 @@ export class SessionStore {
 
     touchSessionLastAssistantMessageAt(id: string, messageAt: number, namespace: string): boolean {
         return touchSessionLastAssistantMessageAt(this.db, id, messageAt, namespace)
+    }
+
+    completeAssistantReplyClockBackfill(id: string, messageAt: number | null, namespace: string): boolean {
+        return completeAssistantReplyClockBackfill(this.db, id, messageAt, namespace)
     }
 
     getSession(id: string): StoredSession | null {

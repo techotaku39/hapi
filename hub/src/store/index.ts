@@ -40,7 +40,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -303,6 +303,7 @@ export class Store {
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
         })
 
         if (currentVersion === 0) {
@@ -358,6 +359,7 @@ export class Store {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 last_assistant_message_at INTEGER,
+                assistant_reply_clock_backfilled INTEGER NOT NULL DEFAULT 1,
                 metadata TEXT,
                 metadata_version INTEGER DEFAULT 1,
                 agent_state TEXT,
@@ -983,6 +985,22 @@ export class Store {
         if (columns.size === 0) return
         if (!columns.has('last_assistant_message_at')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN last_assistant_message_at INTEGER')
+        }
+    }
+
+    /**
+     * Track whether the durable assistant reply clock has been checked
+     * against the transcript. Existing rows start unchecked so the hub can
+     * backfill them incrementally after startup; new rows opt into the
+     * current write-through path immediately.
+     */
+    private migrateFromV24ToV25(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('assistant_reply_clock_backfilled')) {
+            this.db.exec(
+                'ALTER TABLE sessions ADD COLUMN assistant_reply_clock_backfilled INTEGER NOT NULL DEFAULT 0'
+            )
         }
     }
 

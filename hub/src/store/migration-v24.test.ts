@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v23 to v24', () => {
+describe('schema migration v23 to current', () => {
     it('adds the assistant reply clock and preserves activity time', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-'))
         tempDirs.push(dir)
@@ -30,6 +30,7 @@ describe('schema migration v23 to v24', () => {
         initial.close()
 
         const legacy = new Database(dbPath)
+        legacy.exec('ALTER TABLE sessions DROP COLUMN assistant_reply_clock_backfilled')
         legacy.exec('ALTER TABLE sessions DROP COLUMN last_assistant_message_at')
         legacy.exec('PRAGMA user_version = 23')
         legacy.close()
@@ -41,12 +42,14 @@ describe('schema migration v23 to v24', () => {
                 .all() as Array<{ name: string }>)
             : []
         expect(columns.some((column) => column.name === 'last_assistant_message_at')).toBe(true)
+        expect(columns.some((column) => column.name === 'assistant_reply_clock_backfilled')).toBe(true)
         expect((migrated as unknown as { db: Database }).db
             .prepare('PRAGMA user_version').get() as { user_version: number })
-            .toEqual({ user_version: 24 })
+            .toEqual({ user_version: 25 })
 
         const reloaded = migrated.sessions.getSession(session.id)
         expect(reloaded?.lastAssistantMessageAt).toBeNull()
+        expect(reloaded?.assistantReplyClockBackfilled).toBe(false)
         expect(reloaded?.updatedAt).toBe(activityAt)
         migrated.close()
     })
