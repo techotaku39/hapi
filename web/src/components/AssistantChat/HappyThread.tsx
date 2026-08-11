@@ -744,10 +744,10 @@ export function HappyThread(props: {
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
-    // Conversation-start navigation owns the viewport while it loads and
-    // settles the final jump. Programmatic anchor restoration can otherwise
-    // look like a bottom arrival and switch the bounded history window back to
-    // tail mode, which immediately requests and renders the latest page.
+    // Explicit history navigation owns the viewport while it loads and settles
+    // the final jump. Programmatic anchor restoration can otherwise look like
+    // a bottom arrival and switch the bounded history window back to tail mode,
+    // which immediately requests and renders the latest page.
     const historyNavigationRef = useRef(false)
     // Keep pagination refs current during render. Explicit navigation can
     // continue in a microtask immediately after a layout effect settles a
