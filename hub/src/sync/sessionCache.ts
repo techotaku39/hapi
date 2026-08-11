@@ -3,7 +3,7 @@ import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session,
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
-import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
+import { extractSessionTodosFromMessageContent, TodosSchema } from './todos'
 import { extractBackgroundTaskDelta } from './backgroundTasks'
 
 const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
@@ -93,7 +93,7 @@ export class SessionCache {
 
     /**
      * After fork hydrate / rewind truncate, re-scan the transcript for the
-     * latest TodoWrite (or clear todos). Bypasses the one-shot backfill flag
+     * latest structured task update (or clear todos). Bypasses the one-shot backfill flag
      * and the normal `setSessionTodos` monotonic guard. Watermark still
      * ratchets inside `replaceSessionTodos` — do not pass the remaining
      * message's older `createdAt` as the SSE version.
@@ -108,7 +108,7 @@ export class SessionCache {
         for (let i = messages.length - 1; i >= 0; i -= 1) {
             const message = messages[i]
             if (!message) continue
-            const todos = extractTodoWriteTodosFromMessageContent(message.content)
+            const todos = extractSessionTodosFromMessageContent(message.content)
             if (todos) {
                 foundTodos = todos
                 break
@@ -142,7 +142,7 @@ export class SessionCache {
             const messages = this.store.messages.getMessages(sessionId, 200)
             for (let i = messages.length - 1; i >= 0; i -= 1) {
                 const message = messages[i]
-                const todos = extractTodoWriteTodosFromMessageContent(message.content)
+                const todos = extractSessionTodosFromMessageContent(message.content)
                 if (todos) {
                     const updated = this.store.sessions.setSessionTodos(sessionId, todos, message.createdAt, stored.namespace)
                     if (updated) {

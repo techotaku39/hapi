@@ -6,7 +6,7 @@ import type { AgentState, CodexCollaborationMode, Metadata, PermissionMode } fro
 import { isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
-import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
+import { extractSessionTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
@@ -138,7 +138,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             onSessionActivity?.(sid, msg.createdAt)
         }
 
-        const todos = extractTodoWriteTodosFromMessageContent(content)
+        const todos = extractSessionTodosFromMessageContent(content)
         if (todos) {
             const updated = store.sessions.setSessionTodos(sid, todos, msg.createdAt, session.namespace)
             if (updated) {

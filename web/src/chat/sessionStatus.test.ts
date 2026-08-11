@@ -51,7 +51,7 @@ describe('buildSessionStatusData', () => {
         expect(buildSessionStatusData({ goal: null, tasks: [], blocks: [], messages: [] })).toBeNull()
     })
 
-    it('keeps goal and ordered task snapshots', () => {
+    it('keeps goal and ordered unfinished task snapshots', () => {
         const goal = {
             threadId: 'thread-1',
             objective: 'Ship status panel',
@@ -67,7 +67,19 @@ describe('buildSessionStatusData', () => {
             { id: '2', content: 'Implement', priority: 'high' as const, status: 'in_progress' as const }
         ]
 
-        expect(buildSessionStatusData({ goal, tasks, blocks: [], messages: [] })).toMatchObject({ goal, tasks })
+        expect(buildSessionStatusData({ goal, tasks, blocks: [], messages: [] })).toMatchObject({
+            goal,
+            tasks: [tasks[1]]
+        })
+    })
+
+    it('hides a status panel that only contains completed tasks', () => {
+        expect(buildSessionStatusData({
+            goal: null,
+            tasks: [{ id: 'done', content: 'Finished', priority: 'low', status: 'completed' }],
+            blocks: [],
+            messages: []
+        })).toBeNull()
     })
 
     it('lists only active or failed subagents', () => {

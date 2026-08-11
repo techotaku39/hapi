@@ -168,9 +168,10 @@ export function buildSessionStatusData(args: {
     const possibleTerminalCommands = undiscoveredTerminalCount > 0
         ? detectedTerminals.uncertain.map((terminal) => terminal.command)
         : []
+    const tasks = (args.tasks ?? []).filter((task) => task.status !== 'completed')
     const data: SessionStatusData = {
         goal: args.goal ?? null,
-        tasks: args.tasks ? [...args.tasks] : [],
+        tasks,
         subagents: tools
             .map(subagentFromBlock)
             .filter((subagent): subagent is SessionStatusSubagent => subagent !== null),
