@@ -69,7 +69,22 @@ describe('buildSessionStatusData', () => {
 
         expect(buildSessionStatusData({ goal, tasks, blocks: [], messages: [] })).toMatchObject({
             goal,
-            tasks: [tasks[1]]
+            tasks: [tasks[1]],
+            taskProgress: { completed: 1, total: 2 }
+        })
+    })
+
+    it('reports completed and total task counts separately from unfinished tasks', () => {
+        const tasks = [
+            { id: '1', content: 'Research', priority: 'medium' as const, status: 'completed' as const },
+            { id: '2', content: 'Design', priority: 'medium' as const, status: 'completed' as const },
+            { id: '3', content: 'Implement', priority: 'high' as const, status: 'in_progress' as const },
+            { id: '4', content: 'Verify', priority: 'low' as const, status: 'pending' as const }
+        ]
+
+        expect(buildSessionStatusData({ goal: null, tasks, blocks: [], messages: [] })).toMatchObject({
+            tasks: [tasks[2], tasks[3]],
+            taskProgress: { completed: 2, total: 4 }
         })
     })
 

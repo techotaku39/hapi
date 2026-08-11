@@ -28,8 +28,8 @@ function elapsedSince(startedAt: number | null, now: number): string | null {
 
 export function SessionStatusPanel({ data }: { data: SessionStatusData }) {
     const { t } = useTranslation()
-    const statusTitle = data.tasks.length > 0
-        ? `${t('session.status.tasks')} · ${data.tasks.length}`
+    const statusTitle = data.taskProgress
+        ? `${t('session.status.tasks')} · ${data.taskProgress.completed}/${data.taskProgress.total}`
         : t('session.status.title')
     const hasLiveElapsed = data.terminals.length > 0
         || data.subagents.some((subagent) => subagent.endedAt === null && subagent.startedAt !== null)
