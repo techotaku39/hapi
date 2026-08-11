@@ -41,32 +41,17 @@ function touchLastAssistantMessageAt(
     })
 }
 
-function findLastAssistantMessageAt(db: Database, sessionId: string): number | null {
-    const rows = db.prepare(
-        'SELECT content, created_at FROM messages WHERE session_id = ?'
-    ).all(sessionId) as Array<Pick<DbMessageRow, 'content' | 'created_at'>>
-
-    let latest: number | null = null
-    for (const row of rows) {
-        if (!isAssistantTextMessage(decodeMessageContent(row.content))) continue
-        if (latest === null || row.created_at > latest) {
-            latest = row.created_at
-        }
-    }
-    return latest
-}
-
-function refreshLastAssistantMessageAt(db: Database, sessionId: string): void {
-    const latest = findLastAssistantMessageAt(db, sessionId)
+// Structural transcript edits invalidate the cached reply timestamp. Leave
+// recomputation to SessionCache so merge/rewind transactions never decode the
+// entire transcript while holding SQLite's write lock.
+function markAssistantReplyClockNeedsBackfill(db: Database, sessionId: string): void {
     db.prepare(`
         UPDATE sessions
-        SET last_assistant_message_at = @message_at,
+        SET assistant_reply_clock_backfilled = 0,
             seq = seq + 1
         WHERE id = @session_id
-          AND last_assistant_message_at IS NOT @message_at
     `).run({
-        session_id: sessionId,
-        message_at: latest
+        session_id: sessionId
     })
 }
 
@@ -366,6 +351,25 @@ export function getMessages(
     ).all(sessionId, safeLimit) as DbMessageRow[]
 
     return rows.reverse().map(toStoredMessage)
+}
+
+/** Return one bounded, newest-first page for background transcript scans. */
+export function getMessagesBeforeSeq(
+    db: Database,
+    sessionId: string,
+    beforeSeq: number | null,
+    limit: number = 200
+): StoredMessage[] {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
+    const rows = beforeSeq === null
+        ? db.prepare(
+            'SELECT * FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?'
+        ).all(sessionId, safeLimit) as DbMessageRow[]
+        : db.prepare(
+            'SELECT * FROM messages WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?'
+        ).all(sessionId, beforeSeq, safeLimit) as DbMessageRow[]
+
+    return rows.map(toStoredMessage)
 }
 
 export function getAllMessages(
@@ -1011,8 +1015,8 @@ export function mergeSessionMessages(
         ).run(toSessionId, fromSessionId)
 
         if (result.changes > 0) {
-            refreshLastAssistantMessageAt(db, fromSessionId)
-            refreshLastAssistantMessageAt(db, toSessionId)
+            markAssistantReplyClockNeedsBackfill(db, fromSessionId)
+            markAssistantReplyClockNeedsBackfill(db, toSessionId)
             bumpMessageEpoch(db, fromSessionId)
             bumpMessageEpoch(db, toSessionId)
         }
@@ -1088,7 +1092,7 @@ export function truncateMessagesFromLocalId(
             inserted += 1
         }
 
-        refreshLastAssistantMessageAt(db, sessionId)
+        markAssistantReplyClockNeedsBackfill(db, sessionId)
         const epoch = bumpMessageEpoch(db, sessionId)
         return { deleted: deleted.changes, inserted, epoch }
     })()

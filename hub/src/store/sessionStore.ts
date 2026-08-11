@@ -122,8 +122,8 @@ export class SessionStore {
         return touchSessionLastAssistantMessageAt(this.db, id, messageAt, namespace)
     }
 
-    completeAssistantReplyClockBackfill(id: string, messageAt: number | null, namespace: string): boolean {
-        return completeAssistantReplyClockBackfill(this.db, id, messageAt, namespace)
+    completeAssistantReplyClockBackfill(id: string, messageAt: number | null, initialSeq: number, namespace: string): boolean {
+        return completeAssistantReplyClockBackfill(this.db, id, messageAt, initialSeq, namespace)
     }
 
     getSession(id: string): StoredSession | null {

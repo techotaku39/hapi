@@ -716,32 +716,33 @@ export function touchSessionLastAssistantMessageAt(
  * Finish the one-time transcript backfill without moving the prompt/activity
  * clock. The marker is written even when the transcript has no visible
  * assistant prose, so an empty legacy session is not scanned on every restart.
+ * The sequence guard leaves the marker unset when the session changed while
+ * the paginated scan was yielding, allowing the caller to retry safely.
  */
 export function completeAssistantReplyClockBackfill(
     db: Database,
     id: string,
     messageAt: number | null,
+    initialSeq: number,
     namespace: string
 ): boolean {
     if (messageAt !== null && !Number.isFinite(messageAt)) return false
+    if (!Number.isFinite(initialSeq)) return false
 
     try {
         const result = db.prepare(`
             UPDATE sessions
-            SET last_assistant_message_at = CASE
-                    WHEN @message_at IS NULL THEN last_assistant_message_at
-                    WHEN last_assistant_message_at IS NULL
-                        OR last_assistant_message_at < @message_at THEN @message_at
-                    ELSE last_assistant_message_at
-                END,
+            SET last_assistant_message_at = @message_at,
                 assistant_reply_clock_backfilled = 1,
                 seq = seq + 1
             WHERE id = @id
               AND namespace = @namespace
               AND assistant_reply_clock_backfilled = 0
+              AND seq = @initial_seq
         `).run({
             id,
             message_at: messageAt,
+            initial_seq: initialSeq,
             namespace
         })
 

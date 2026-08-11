@@ -262,6 +262,8 @@ describe('position pagination and structural epochs', () => {
         expect(result.moved).toBe(1)
         expect(store.messages.getMessageEpoch(source.id)).toBe(1)
         expect(store.messages.getMessageEpoch(target.id)).toBe(1)
+        expect(store.sessions.getSession(source.id)?.assistantReplyClockBackfilled).toBe(false)
+        expect(store.sessions.getSession(target.id)?.assistantReplyClockBackfilled).toBe(false)
     })
 
     it('clamps future client timestamps to hub receive time', () => {

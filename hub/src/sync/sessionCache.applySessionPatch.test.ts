@@ -94,6 +94,84 @@ describe('SessionCache.applySessionPatch', () => {
         store.close()
     })
 
+    it('backfills a large legacy transcript page by page', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'legacy-large-transcript',
+            { path: '/tmp', host: 'h' },
+            null,
+            'default'
+        )
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'historical answer' } }
+        }, undefined, undefined, 3_000)
+        for (let index = 0; index < 450; index += 1) {
+            store.messages.addMessage(session.id, {
+                role: 'user',
+                content: { type: 'text', text: `historical prompt ${index}` }
+            }, undefined, undefined, 4_000 + index)
+        }
+
+        const db = (store as unknown as { db: import('bun:sqlite').Database }).db
+        db.prepare(`
+            UPDATE sessions
+            SET last_assistant_message_at = NULL,
+                assistant_reply_clock_backfilled = 0
+            WHERE id = ?
+        `).run(session.id)
+
+        const cache = new SessionCache(store, createPublisher([]))
+        expect(cache.refreshSession(session.id)?.lastAssistantMessageAt).toBeNull()
+
+        const backfilled = await waitForAssistantReplyClock(store, session.id)
+        expect(backfilled.lastAssistantMessageAt).toBe(3_000)
+        expect(backfilled.assistantReplyClockBackfilled).toBe(true)
+        cache.stop()
+        store.close()
+    })
+
+    it('recomputes the reply clock after transcript truncation', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'truncate-reply-clock',
+            { path: '/tmp', host: 'h' },
+            null,
+            'default'
+        )
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'one' }
+        }, 'local-1')
+        store.messages.markMessagesInvoked(session.id, ['local-1'], Date.now())
+        const firstReply = store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'first answer' } }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'two' }
+        }, 'local-2')
+        store.messages.markMessagesInvoked(session.id, ['local-2'], Date.now())
+        const secondReply = store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'second answer' } }
+        })
+
+        const cache = new SessionCache(store, createPublisher([]))
+        cache.refreshSession(session.id)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(secondReply.createdAt)
+
+        store.messages.truncateMessagesFromLocalId(session.id, 'local-2')
+        expect(store.sessions.getSession(session.id)?.assistantReplyClockBackfilled).toBe(false)
+        cache.refreshSession(session.id)
+
+        const backfilled = await waitForAssistantReplyClock(store, session.id)
+        expect(backfilled.lastAssistantMessageAt).toBe(firstReply.createdAt)
+        cache.stop()
+        store.close()
+    })
+
     it('marks legacy sessions without replies so they are not rescanned', async () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession(
