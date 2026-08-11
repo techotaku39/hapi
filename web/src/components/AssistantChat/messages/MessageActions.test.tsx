@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ComponentProps, PropsWithChildren } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
@@ -230,6 +230,48 @@ describe('MessageActions', () => {
 
         expect(screen.queryByRole('button', { name: 'Fork' })).toBeNull()
         expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
+    })
+
+    it('hides Fork and Rewind while a history action is pending', () => {
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            showFork: true,
+            showRewind: true,
+            historyActionPending: true,
+            onFork: async () => {},
+            onRewind: async () => {}
+        })
+
+        expect(screen.queryByRole('button', { name: 'Fork' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
+    })
+
+    it('hides all history actions while a confirmation is pending', async () => {
+        let resolveFork: (() => void) | undefined
+        const onFork = vi.fn(() => new Promise<void>((resolve) => {
+            resolveFork = resolve
+        }))
+
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            showFork: true,
+            showRewind: true,
+            onFork,
+            onRewind: async () => {}
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Fork' }))
+        fireEvent.click(screen.getAllByRole('button', { name: 'Fork' }).at(-1)!)
+
+        await waitFor(() => {
+            expect(document.querySelector('.happy-message-actions')?.querySelectorAll('button')).toHaveLength(1)
+        })
+        expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
+
+        resolveFork?.()
+        await waitFor(() => expect(onFork).toHaveBeenCalledTimes(1))
     })
 
     it('orders user actions as Share, Rewind, Fork, Copy', () => {
