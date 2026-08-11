@@ -344,7 +344,11 @@ export class SessionCache {
                 type: 'session-updated',
                 sessionId,
                 namespace: session.namespace,
-                data: { lastAssistantMessageAt: refreshed.lastAssistantMessageAt } satisfies SessionPatch
+                // This recomputation may legitimately move the reply clock
+                // backward or clear it after merge/rewind. Send the complete
+                // current record so web clients replace their cached summary
+                // instead of applying the monotonic structured-patch path.
+                data: { ...session }
             })
             return false
         }

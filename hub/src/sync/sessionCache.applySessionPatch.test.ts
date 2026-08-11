@@ -158,7 +158,8 @@ describe('SessionCache.applySessionPatch', () => {
             content: { type: 'codex', data: { type: 'message', message: 'second answer' } }
         })
 
-        const cache = new SessionCache(store, createPublisher([]))
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
         cache.refreshSession(session.id)
         expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(secondReply.createdAt)
 
@@ -168,6 +169,14 @@ describe('SessionCache.applySessionPatch', () => {
 
         const backfilled = await waitForAssistantReplyClock(store, session.id)
         expect(backfilled.lastAssistantMessageAt).toBe(firstReply.createdAt)
+        expect(events.at(-1)).toMatchObject({
+            type: 'session-updated',
+            sessionId: session.id,
+            data: {
+                id: session.id,
+                lastAssistantMessageAt: firstReply.createdAt
+            }
+        })
         cache.stop()
         store.close()
     })
