@@ -138,6 +138,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.recordCursorNativeWorktreeMetadata();
 
             backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+            // Harness resume (notify_on_output / mid-idle ACP activity) may not
+            // go through HAPI's prompt() window — bump thinking so the hub list
+            // matches reality (#1470).
+            this.wireAgentActivityThinking(backend, session);
 
             recentStderrHint = null;
             this.wireStderrErrorListener(backend, (hint) => {
@@ -248,6 +252,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                         this.backend = backend;
                         registerAcpSessionTitleSync(backend, session.client);
                         backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+                        this.wireAgentActivityThinking(backend, session);
                         recentStderrHint = null;
                         this.wireStderrErrorListener(backend, (hint) => {
                             recentStderrHint = hint;
@@ -308,6 +313,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                         this.backend = backend;
                         registerAcpSessionTitleSync(backend, session.client);
                         backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+                        this.wireAgentActivityThinking(backend, session);
                         recentStderrHint = null;
                         this.wireStderrErrorListener(backend, (hint) => {
                             recentStderrHint = hint;
@@ -554,6 +560,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         });
         logger.debug('[cursor-acp] CreatePlan accepted — queued continue prompt', {
             executeMode
+        });
+    }
+
+    /** #1470: ACP activity after idle → hub thinking via existing keepalive. */
+    private wireAgentActivityThinking(backend: AcpSdkBackend, session: CursorSession): void {
+        backend.setAgentActivityListener((thinking) => {
+            if (session.thinking !== thinking) {
+                session.onThinkingChange(thinking);
+            }
         });
     }
 
