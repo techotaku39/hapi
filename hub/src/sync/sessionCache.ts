@@ -137,16 +137,18 @@ export class SessionCache {
 
         const existing = this.sessions.get(sessionId)
 
-        if (stored.todos === null && !this.todoBackfillAttemptedSessionIds.has(sessionId)) {
+        if (!this.todoBackfillAttemptedSessionIds.has(sessionId)) {
             this.todoBackfillAttemptedSessionIds.add(sessionId)
             const messages = this.store.messages.getMessages(sessionId, 200)
             for (let i = messages.length - 1; i >= 0; i -= 1) {
                 const message = messages[i]
                 const todos = extractSessionTodosFromMessageContent(message.content)
                 if (todos) {
-                    const updated = this.store.sessions.setSessionTodos(sessionId, todos, message.createdAt, stored.namespace)
-                    if (updated) {
-                        stored = this.store.sessions.getSession(sessionId) ?? stored
+                    if (stored.todosUpdatedAt === null || message.createdAt > stored.todosUpdatedAt) {
+                        const updated = this.store.sessions.setSessionTodos(sessionId, todos, message.createdAt, stored.namespace)
+                        if (updated) {
+                            stored = this.store.sessions.getSession(sessionId) ?? stored
+                        }
                     }
                     break
                 }
