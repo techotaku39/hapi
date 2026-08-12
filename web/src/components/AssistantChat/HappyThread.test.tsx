@@ -560,6 +560,21 @@ describe('conversation-start loading', () => {
         })).resolves.toBe(false)
         expect(loadOlderPreservingScroll).toHaveBeenCalledOnce()
     })
+
+    it('stops before another page when navigation is cancelled', async () => {
+        let cancelled = false
+        const loadOlderPreservingScroll = vi.fn(async () => {
+            cancelled = true
+            return true
+        })
+
+        await expect(loadAllOlderMessages({
+            hasMoreMessages: () => true,
+            loadOlderPreservingScroll,
+            isCancelled: () => cancelled
+        })).resolves.toBe(false)
+        expect(loadOlderPreservingScroll).toHaveBeenCalledOnce()
+    })
 })
 
 describe('pending history navigation', () => {
@@ -612,5 +627,21 @@ describe('navigation history loading', () => {
         })).resolves.toBe(false)
         expect(loadOlder).toHaveBeenCalledTimes(3)
         expect(wait).toHaveBeenCalledTimes(2)
+    })
+
+    it('stops retrying when navigation is cancelled', async () => {
+        let cancelled = false
+        const loadOlder = vi.fn(async () => {
+            cancelled = true
+            return 'transient-stop' as const
+        })
+        const wait = vi.fn(async () => {})
+
+        await expect(loadOlderForNavigationWithRetry(loadOlder, {
+            wait,
+            isCancelled: () => cancelled
+        })).resolves.toBe(false)
+        expect(loadOlder).toHaveBeenCalledOnce()
+        expect(wait).not.toHaveBeenCalled()
     })
 })

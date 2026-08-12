@@ -337,17 +337,25 @@ async function findPreviousUserMessageAfterRender(
 export async function loadAllOlderMessages(options: {
     hasMoreMessages: () => boolean
     loadOlderPreservingScroll: () => Promise<boolean>
+    isCancelled?: () => boolean
 }): Promise<boolean> {
     while (options.hasMoreMessages()) {
+        if (options.isCancelled?.()) return false
         const loaded = await options.loadOlderPreservingScroll()
         if (!loaded) return false
+        if (options.isCancelled?.()) return false
     }
     return true
 }
 
-async function waitForViewportTop(viewport: HTMLElement, timeoutMs = 2500): Promise<boolean> {
+async function waitForViewportTop(
+    viewport: HTMLElement,
+    timeoutMs = 2500,
+    isCancelled?: () => boolean
+): Promise<boolean> {
     const deadline = Date.now() + timeoutMs
     while (viewport.scrollTop > 1 && Date.now() < deadline) {
+        if (isCancelled?.()) return false
         await new Promise<void>((resolve) => {
             if (typeof window.requestAnimationFrame === 'function') {
                 window.requestAnimationFrame(() => resolve())
@@ -356,7 +364,7 @@ async function waitForViewportTop(viewport: HTMLElement, timeoutMs = 2500): Prom
             }
         })
     }
-    return viewport.scrollTop <= 1
+    return !isCancelled?.() && viewport.scrollTop <= 1
 }
 
 export async function runAfterPendingHistoryLoad(
@@ -373,6 +381,7 @@ export async function loadOlderForNavigationWithRetry(
         maxTransientRetries?: number
         retryDelayMs?: number
         wait?: (delayMs: number) => Promise<void>
+        isCancelled?: () => boolean
     } = {}
 ): Promise<boolean> {
     const maxTransientRetries = options.maxTransientRetries ?? MAX_NAVIGATION_TRANSIENT_RETRIES
@@ -382,7 +391,9 @@ export async function loadOlderForNavigationWithRetry(
     }))
 
     for (let transientRetries = 0; ; transientRetries += 1) {
+        if (options.isCancelled?.()) return false
         const result = await loadOlder()
+        if (options.isCancelled?.()) return false
         if (result === 'loaded') return true
         if (result === 'terminal-stop' || transientRetries >= maxTransientRetries) return false
         await wait(retryDelayMs)
@@ -749,6 +760,15 @@ export function HappyThread(props: {
     // a bottom arrival and switch the bounded history window back to tail mode,
     // which immediately requests and renders the latest page.
     const historyNavigationRef = useRef(false)
+    const navigationRunRef = useRef(0)
+    const navigationInFlightRef = useRef(false)
+    const [isNavigationInFlight, setIsNavigationInFlight] = useState(false)
+    const promptNavigationTimerRef = useRef<number | null>(null)
+    const [promptNavigationStatus, setPromptNavigationStatus] = useState<NavigationStatus>('idle')
+    const [loadingPromptMessageId, setLoadingPromptMessageId] = useState<string | null>(null)
+    const [conversationStartStatus, setConversationStartStatus] = useState<NavigationStatus>('idle')
+    const conversationStartStatusTimerRef = useRef<number | null>(null)
+    const isLoadingConversationStart = conversationStartStatus === 'loading'
     // Keep pagination refs current during render. Explicit navigation can
     // continue in a microtask immediately after a layout effect settles a
     // page load, before passive effects would otherwise update these refs.
@@ -807,18 +827,27 @@ export function HappyThread(props: {
         resolve?.(result)
     }, [])
 
-    const cancelActiveHistoryLoad = useCallback(() => {
+    const cancelActiveHistoryLoad = useCallback((includeConsumer = false) => {
         const state = historyLoaderRef.current
+        const hasPendingLoad = pendingLoadPromiseRef.current !== null
+        const isActivePhase = state.phase === 'loading'
+            || state.phase === 'backoff'
+            || state.phase === 'awaiting-render'
         // `awaiting-render` is pre-armed by onBeforeApply and published with an
-        // immediate store notification, so browser input cannot observe the
-        // old DOM after trimming. Only network/backoff work is cancellable.
+        // immediate store notification. Invalidate its pending restore when a
+        // newer navigation takes over, but only cancel an underlying request
+        // while it is still loading or backing off.
         if (
-            state.source === 'consumer'
-            || (state.phase !== 'loading' && state.phase !== 'backoff')
+            (state.source === 'consumer' && !includeConsumer)
+            || (state.phase === 'awaiting-render' && !includeConsumer)
+            || !hasPendingLoad
+            || !isActivePhase
         ) {
             return
         }
-        onCancelLoadMoreRef.current()
+        if (state.phase === 'loading' || state.phase === 'backoff') {
+            onCancelLoadMoreRef.current()
+        }
         isLoadingMoreRef.current = false
         pendingScrollRef.current = null
         clearCoverageCheckTimer()
@@ -833,6 +862,26 @@ export function HappyThread(props: {
         }
         settlePendingLoad('transient-stop')
     }, [clearCoverageCheckTimer, clearFailureRetryTimer, settlePendingLoad])
+
+    const cancelHistoryNavigation = useCallback(() => {
+        navigationRunRef.current += 1
+        historyNavigationRef.current = false
+        navigationInFlightRef.current = false
+        setIsNavigationInFlight(false)
+        cancelActiveHistoryLoad(true)
+
+        if (conversationStartStatusTimerRef.current !== null) {
+            window.clearTimeout(conversationStartStatusTimerRef.current)
+            conversationStartStatusTimerRef.current = null
+        }
+        if (promptNavigationTimerRef.current !== null) {
+            window.clearTimeout(promptNavigationTimerRef.current)
+            promptNavigationTimerRef.current = null
+        }
+        setConversationStartStatus('idle')
+        setPromptNavigationStatus('idle')
+        setLoadingPromptMessageId(null)
+    }, [cancelActiveHistoryLoad])
 
     // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
@@ -1197,7 +1246,7 @@ export function HappyThread(props: {
 
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
-        historyNavigationRef.current = false
+        cancelHistoryNavigation()
         const viewport = viewportRef.current
         if (viewport) {
             tailScrollInProgressRef.current = true
@@ -1213,7 +1262,13 @@ export function HappyThread(props: {
 
     // Reset state when session changes
     useLayoutEffect(() => {
+        navigationRunRef.current += 1
         historyNavigationRef.current = false
+        navigationInFlightRef.current = false
+        setIsNavigationInFlight(false)
+        setConversationStartStatus('idle')
+        setPromptNavigationStatus('idle')
+        setLoadingPromptMessageId(null)
         autoScrollEnabledRef.current = true
         tailScrollInProgressRef.current = false
         lastScrollTopRef.current = viewportRef.current?.scrollTop ?? 0
@@ -1283,6 +1338,9 @@ export function HappyThread(props: {
 
     useEffect(() => {
         return () => {
+            navigationRunRef.current += 1
+            historyNavigationRef.current = false
+            navigationInFlightRef.current = false
             historyLoaderRef.current.runId += 1
             clearInitialScrollTimers()
             clearCoverageCheckTimer()
@@ -1548,7 +1606,10 @@ export function HappyThread(props: {
     }, [loadOlderFromConsumer])
 
     const loadOlderForNavigation = useCallback(async (): Promise<boolean> => {
-        return loadOlderForNavigationWithRetry(loadOlderFromConsumer)
+        const runId = navigationRunRef.current
+        return loadOlderForNavigationWithRetry(loadOlderFromConsumer, {
+            isCancelled: () => navigationRunRef.current !== runId
+        })
     }, [loadOlderFromConsumer])
 
     const markExplicitNavigationAwayFromBottom = useCallback(() => {
@@ -1574,14 +1635,6 @@ export function HappyThread(props: {
         props.onOutlineOpenChange(false)
     }, [loadOlderForOutline, markExplicitNavigationAwayFromBottom, props.onOutlineItemClick, props.onOutlineOpenChange])
 
-    const [promptNavigationStatus, setPromptNavigationStatus] = useState<NavigationStatus>('idle')
-    const [loadingPromptMessageId, setLoadingPromptMessageId] = useState<string | null>(null)
-    const navigationInFlightRef = useRef(false)
-    const [isNavigationInFlight, setIsNavigationInFlight] = useState(false)
-    const promptNavigationTimerRef = useRef<number | null>(null)
-    const [conversationStartStatus, setConversationStartStatus] = useState<NavigationStatus>('idle')
-    const conversationStartStatusTimerRef = useRef<number | null>(null)
-    const isLoadingConversationStart = conversationStartStatus === 'loading'
     const clearConversationStartFeedback = useCallback(() => {
         if (conversationStartStatusTimerRef.current !== null) {
             window.clearTimeout(conversationStartStatusTimerRef.current)
@@ -1597,7 +1650,10 @@ export function HappyThread(props: {
         setLoadingPromptMessageId(null)
         setPromptNavigationStatus('idle')
     }, [])
-    const scrollToPromptForMessage = useCallback(async (messageId: string): Promise<boolean> => {
+    const scrollToPromptForMessage = useCallback(async (
+        messageId: string,
+        isCancelled: () => boolean
+    ): Promise<boolean> => {
         if (promptNavigationTimerRef.current !== null) {
             window.clearTimeout(promptNavigationTimerRef.current)
             promptNavigationTimerRef.current = null
@@ -1610,37 +1666,46 @@ export function HappyThread(props: {
 
         const viewport = viewportRef.current
         try {
+            if (isCancelled()) return false
             if (!viewport) throw new Error('Chat viewport is unavailable')
             const assistantAnchorState = {
                 current: false,
                 nextAnchorId: null as string | null
             }
             let target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState)
+            if (isCancelled()) return false
             while (!target && hasMoreMessagesRef.current) {
                 const loaded = await loadOlderForNavigation()
+                if (isCancelled()) return false
                 if (!loaded) throw new Error('Could not load older messages')
                 // assistant-ui applies the expanded external message list in
                 // its own render pass. Wait for the new anchors instead of
                 // treating a successfully loaded page as an immediate miss.
                 target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState)
+                if (isCancelled()) return false
             }
-            if (!target) throw new Error('Could not find the user prompt')
+            if (!target || isCancelled()) return false
             target.scrollIntoView({ block: 'start', behavior: 'smooth' })
             setPromptNavigationStatus('success')
             promptNavigationTimerRef.current = window.setTimeout(() => setPromptNavigationStatus('idle'), 1400)
             return true
         } catch (error) {
+            if (isCancelled()) return false
             console.error('Failed to locate assistant prompt:', error)
             setPromptNavigationStatus('error')
             promptNavigationTimerRef.current = window.setTimeout(() => setPromptNavigationStatus('idle'), 3000)
             return false
         } finally {
-            setLoadingPromptMessageId(null)
+            if (!isCancelled()) {
+                setLoadingPromptMessageId(null)
+            }
         }
     }, [clearInitialScrollTimers, loadOlderForNavigation, markExplicitNavigationAwayFromBottom])
 
     const jumpToPrompt = useCallback(async (messageId: string, _replyToMessageId?: string): Promise<boolean> => {
         if (navigationInFlightRef.current) return false
+        const runId = navigationRunRef.current
+        const isCancelled = () => navigationRunRef.current !== runId
         navigationInFlightRef.current = true
         historyNavigationRef.current = true
         setIsNavigationInFlight(true)
@@ -1651,16 +1716,21 @@ export function HappyThread(props: {
             // replyToMessageId can race assistant-ui's tail restoration and
             // leave the viewport at its previous position.
             if (pendingLoadPromiseRef.current) await pendingLoadPromiseRef.current
-            return await scrollToPromptForMessage(messageId)
+            if (isCancelled()) return false
+            return await scrollToPromptForMessage(messageId, isCancelled)
         } finally {
-            historyNavigationRef.current = false
-            navigationInFlightRef.current = false
-            setIsNavigationInFlight(false)
+            if (!isCancelled()) {
+                historyNavigationRef.current = false
+                navigationInFlightRef.current = false
+                setIsNavigationInFlight(false)
+            }
         }
     }, [clearConversationStartFeedback, scrollToPromptForMessage])
 
     const scrollToConversationStart = useCallback(async (): Promise<boolean> => {
         if (navigationInFlightRef.current) return false
+        const runId = navigationRunRef.current
+        const isCancelled = () => navigationRunRef.current !== runId
         navigationInFlightRef.current = true
         setIsNavigationInFlight(true)
         historyNavigationRef.current = true
@@ -1676,14 +1746,17 @@ export function HappyThread(props: {
         try {
             const loadedAll = await loadAllOlderMessages({
                 hasMoreMessages: () => hasMoreMessagesRef.current,
-                loadOlderPreservingScroll: loadOlderForNavigation
+                loadOlderPreservingScroll: loadOlderForNavigation,
+                isCancelled
             })
+            if (isCancelled()) return false
             if (!loadedAll) {
                 setConversationStartStatus('error')
                 conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 3000)
                 return false
             }
             const viewport = viewportRef.current
+            if (isCancelled()) return false
             if (!viewport) {
                 setConversationStartStatus('error')
                 conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 3000)
@@ -1695,14 +1768,16 @@ export function HappyThread(props: {
             // tail, compacting the history we just loaded.
             lastScrollTopRef.current = viewport.scrollTop
             viewport.scrollTo({ top: 0, behavior: 'smooth' })
-            if (!await waitForViewportTop(viewport)) {
+            if (!await waitForViewportTop(viewport, 2500, isCancelled)) {
+                if (isCancelled()) return false
                 // Some browsers keep a long smooth scroll alive while the
                 // message list is being resized. The navigation contract is
                 // a deterministic jump, so cancel that animation rather than
                 // allowing a late frame to re-enter tail mode.
                 viewport.scrollTo({ top: 0, behavior: 'instant' })
-                await waitForViewportTop(viewport, 250)
+                await waitForViewportTop(viewport, 250, isCancelled)
             }
+            if (isCancelled()) return false
             if (viewport.scrollTop > 1) {
                 throw new Error('Could not reach conversation start')
             }
@@ -1711,16 +1786,19 @@ export function HappyThread(props: {
             conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 1400)
             return true
         } catch (error) {
+            if (isCancelled()) return false
             console.error('Failed to load conversation start:', error)
             setConversationStartStatus('error')
             conversationStartStatusTimerRef.current = window.setTimeout(() => setConversationStartStatus('idle'), 3000)
             return false
         } finally {
-            historyNavigationRef.current = false
-            autoScrollEnabledRef.current = false
-            atBottomRef.current = false
-            navigationInFlightRef.current = false
-            setIsNavigationInFlight(false)
+            if (!isCancelled()) {
+                historyNavigationRef.current = false
+                autoScrollEnabledRef.current = false
+                atBottomRef.current = false
+                navigationInFlightRef.current = false
+                setIsNavigationInFlight(false)
+            }
         }
     }, [
         clearInitialScrollTimers,
