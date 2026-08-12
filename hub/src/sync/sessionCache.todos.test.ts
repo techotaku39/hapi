@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import type { EventPublisher } from './eventPublisher'
@@ -11,6 +14,14 @@ function createPublisher(events: SyncEvent[]): EventPublisher {
         }
     } as unknown as EventPublisher
 }
+
+const tempDirs: string[] = []
+
+afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+        rmSync(dir, { recursive: true, force: true })
+    }
+})
 
 describe('SessionCache structured task backfill', () => {
     it('restores Codex update_plan tasks when a session is reopened', () => {
@@ -122,7 +133,10 @@ describe('SessionCache structured task backfill', () => {
     })
 
     it('persists the one-time backfill marker and skips the scan after restart', () => {
-        const store = new Store(':memory:')
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-structured-todos-backfill-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+        const store = new Store(dbPath)
         const created = store.sessions.getOrCreateSession('persistent-plan-backfill', { path: '/tmp', host: 'h' }, null, 'default')
         store.messages.addMessage(created.id, {
             role: 'agent',
@@ -149,17 +163,29 @@ describe('SessionCache structured task backfill', () => {
         expect(store.migrations.isCompleted(STRUCTURED_TODOS_BACKFILL_MIGRATION_ID)).toBe(true)
         expect(scanCount).toBe(1)
 
-        const restartedCache = new SessionCache(store, createPublisher([]))
-        restartedCache.reloadAll()
+        store.close()
 
-        expect(scanCount).toBe(1)
-        expect(restartedCache.getSession(created.id)?.todos).toEqual([
-            {
-                content: 'Persist this migration',
-                priority: 'medium',
-                status: 'in_progress',
-                id: 'plan-1'
+        const reopenedStore = new Store(dbPath)
+        try {
+            const restartedOriginalGetMessagesBeforeSeq = reopenedStore.messages.getMessagesBeforeSeq.bind(reopenedStore.messages)
+            reopenedStore.messages.getMessagesBeforeSeq = (...args) => {
+                scanCount += 1
+                return restartedOriginalGetMessagesBeforeSeq(...args)
             }
-        ])
+            const restartedCache = new SessionCache(reopenedStore, createPublisher([]))
+            restartedCache.reloadAll()
+
+            expect(scanCount).toBe(1)
+            expect(restartedCache.getSession(created.id)?.todos).toEqual([
+                {
+                    content: 'Persist this migration',
+                    priority: 'medium',
+                    status: 'in_progress',
+                    id: 'plan-1'
+                }
+            ])
+        } finally {
+            reopenedStore.close()
+        }
     })
 })
