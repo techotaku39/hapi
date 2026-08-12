@@ -554,6 +554,99 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: /Unpinned floater/ })).toBeInTheDocument()
     })
 
+    it('omits the redundant machine label from global pinned rows with one machine', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-global-pinned',
+                globalPinned: true,
+                updatedAt: 100,
+                metadata: {
+                    path: '/work/hapi',
+                    machineId: 'machine-1',
+                    name: 'Global pinned task',
+                    flavor: 'codex',
+                },
+            }),
+        ]
+
+        render(renderSessionList(sessions, null, { 'machine-1': 'NUC' }))
+
+        expect(screen.getByTitle('work/hapi')).toBeInTheDocument()
+        expect(screen.queryByText('work/hapi · NUC')).toBeNull()
+    })
+
+    it('keeps machine labels on global pinned rows with multiple machines', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-global-pinned-one',
+                globalPinned: true,
+                updatedAt: 100,
+                metadata: {
+                    path: '/work/hapi',
+                    machineId: 'machine-1',
+                    name: 'Global pinned task',
+                    flavor: 'codex',
+                },
+            }),
+            makeSession({
+                id: 'session-global-pinned-two',
+                globalPinned: true,
+                updatedAt: 90,
+                metadata: {
+                    path: '/work/docs',
+                    machineId: 'machine-2',
+                    name: 'Other global pinned task',
+                    flavor: 'codex',
+                },
+            }),
+        ]
+
+        render(renderSessionList(sessions, null, {
+            'machine-1': 'NUC',
+            'machine-2': 'Laptop',
+        }))
+
+        expect(screen.getByText('work/hapi · NUC')).toHaveAttribute('title', 'work/hapi · NUC')
+        expect(screen.getByText('work/docs · Laptop')).toHaveAttribute('title', 'work/docs · Laptop')
+    })
+
+    it('omits the machine label from global pinned rows when filtered to one machine', () => {
+        localStorage.setItem('hapi-session-list-machine-filter', 'machine-1')
+        const sessions = [
+            makeSession({
+                id: 'session-global-pinned-one',
+                globalPinned: true,
+                updatedAt: 100,
+                metadata: {
+                    path: '/work/hapi',
+                    machineId: 'machine-1',
+                    name: 'Global pinned task',
+                    flavor: 'codex',
+                },
+            }),
+            makeSession({
+                id: 'session-global-pinned-two',
+                globalPinned: true,
+                updatedAt: 90,
+                metadata: {
+                    path: '/work/docs',
+                    machineId: 'machine-2',
+                    name: 'Other global pinned task',
+                    flavor: 'codex',
+                },
+            }),
+        ]
+
+        render(renderSessionList(sessions, null, {
+            'machine-1': 'NUC',
+            'machine-2': 'Laptop',
+        }))
+
+        expect(screen.getByTitle('work/hapi')).toBeInTheDocument()
+        expect(screen.queryByText('work/hapi · NUC')).toBeNull()
+        expect(screen.queryByRole('button', { name: /Other global pinned task/ })).toBeNull()
+    })
+
     it('omits the redundant machine label from pinned rows with one machine', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
