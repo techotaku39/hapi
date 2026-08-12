@@ -101,6 +101,17 @@ describe('useThemeColors', () => {
         expect(document.documentElement.style.getPropertyValue('--app-link').trim()).toBe('#526fff')
     })
 
+    it('applies custom border colors to the summary divider token', () => {
+        setScheme('dark')
+        const { result } = renderHook(() => useThemeColors())
+
+        act(() => result.current.setColor('border', '#123456'))
+
+        expect(document.documentElement.style.getPropertyValue('--app-border').trim()).toBe('#123456')
+        expect(document.documentElement.style.getPropertyValue('--app-divider').trim()).toBe('#123456')
+        expect(document.documentElement.style.getPropertyValue('--app-summary-divider').trim()).toBe('#123456')
+    })
+
     it('uses the active color theme as the custom color picker baseline', () => {
         localStorage.setItem('hapi-color-theme', 'one')
         setScheme('light')

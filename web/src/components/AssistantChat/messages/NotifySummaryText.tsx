@@ -78,7 +78,7 @@ export function NotifySummaryFooter({ summary }: { summary: NotifySummary }) {
             role="status"
             aria-label={t('session.summary.ariaLabel')}
             data-testid="notify-summary-footer"
-            className="mt-2 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-t border-[var(--app-divider)] pt-2"
+            className="mt-2 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-t border-[var(--app-summary-divider)] pt-2"
         >
             <SummaryStatusIndicator summary={summary} />
             {summaryText ? (

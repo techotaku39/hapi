@@ -47,6 +47,7 @@
     /* Theme-aware colors (light mode defaults) */
     --app-border: rgba(15, 23, 42, 0.08);
     --app-divider: rgba(15, 23, 42, 0.08);
+    --app-summary-divider: rgba(15, 23, 42, 0.14);
     --app-subtle-bg: rgba(15, 23, 42, 0.04);
     --app-code-bg: #f5f6f7;
     --app-inline-code-bg: #ebecef;
@@ -126,6 +127,7 @@
 
     --app-border: rgba(255, 255, 255, 0.08);
     --app-divider: rgba(255, 255, 255, 0.08);
+    --app-summary-divider: rgba(255, 255, 255, 0.14);
     --app-subtle-bg: rgba(255, 255, 255, 0.05);
     --app-code-bg: #2a2f35;
     --app-inline-code-bg: #383e47;
@@ -204,6 +206,7 @@
 
     --app-border: rgba(255, 255, 255, 0.12);
     --app-divider: rgba(255, 255, 255, 0.1);
+    --app-summary-divider: rgba(255, 255, 255, 0.14);
     --app-subtle-bg: rgba(255, 255, 255, 0.06);
     --app-code-bg: #0e0e10;
     --app-inline-code-bg: #1a1a1d;

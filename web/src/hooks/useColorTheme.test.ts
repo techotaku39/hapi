@@ -8,7 +8,7 @@ import {
     useColorTheme,
 } from './useColorTheme'
 
-const THEME_VARS = ['--app-bg', '--app-fg', '--app-link', '--app-button', '--app-secondary-bg', '--app-chat-user-chip-bg']
+const THEME_VARS = ['--app-bg', '--app-fg', '--app-link', '--app-button', '--app-secondary-bg', '--app-chat-user-chip-bg', '--app-summary-divider']
 
 describe('useColorTheme', () => {
     beforeEach(() => {
@@ -34,6 +34,7 @@ describe('useColorTheme', () => {
         expect(document.documentElement).toHaveAttribute('data-color-theme', 'one')
         expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe('#fbfbff')
         expect(document.documentElement.style.getPropertyValue('--app-link')).toBe('#526fff')
+        expect(document.documentElement.style.getPropertyValue('--app-summary-divider')).toBe('rgba(15, 23, 42, 0.16)')
     })
 
     it('removes palette css variables when reset to default', () => {
@@ -43,6 +44,7 @@ describe('useColorTheme', () => {
         expect(document.documentElement).toHaveAttribute('data-color-theme', 'default')
         expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe('')
         expect(document.documentElement.style.getPropertyValue('--app-link')).toBe('')
+        expect(document.documentElement.style.getPropertyValue('--app-summary-divider')).toBe('')
     })
 
     it('persists non-default selections and removes the key for default', () => {

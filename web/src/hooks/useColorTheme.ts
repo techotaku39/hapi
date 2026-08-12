@@ -42,6 +42,7 @@ type ThemePalette = {
     surfaceHover: string
     code: string
     border: string
+    summaryDivider: string
     subtle: string
     buttonText: string
 }
@@ -148,6 +149,7 @@ function palette(accent: string, background: string, foreground: string, hint: s
         surfaceHover: isDark ? mix(background, '#ffffff', 0.14) : mix(background, '#000000', 0.065),
         code: isDark ? mix(background, '#ffffff', 0.11) : mix(background, '#000000', 0.045),
         border: withAlpha(isDark ? '#ffffff' : '#0f172a', isDark ? 0.11 : 0.10),
+        summaryDivider: withAlpha(isDark ? '#ffffff' : '#0f172a', 0.16),
         subtle: withAlpha(isDark ? '#ffffff' : '#0f172a', isDark ? 0.06 : 0.045),
         buttonText: readableText(accent),
     }
@@ -268,6 +270,7 @@ export function applyColorTheme(theme: ColorThemePreset = getStoredColorTheme(),
         '--app-reasoning-bg': values.surface,
         '--app-border': values.border,
         '--app-divider': values.border,
+        '--app-summary-divider': values.summaryDivider,
         '--app-subtle-bg': values.subtle,
         '--app-scrollbar-thumb': withAlpha(values.hint, 0.38),
         '--app-scrollbar-thumb-hover': withAlpha(values.hint, 0.56),
@@ -285,7 +288,7 @@ function removeThemeProperties(root: HTMLElement): void {
         '--app-chat-user-chip-fg', '--app-tool-card-bg', '--app-tool-card-hover-bg', '--app-tool-card-accent',
         '--app-tool-card-muted-action-fg', '--app-tool-card-subtitle', '--app-code-header-bg', '--app-code-header-fg', '--app-code-bg',
         '--app-inline-code-bg', '--app-inline-code-fg', '--app-md-quote-bg', '--app-md-quote-border', '--app-md-quote-fg', '--app-md-table-bg',
-        '--app-md-table-head-bg', '--app-reasoning-bg', '--app-border', '--app-divider', '--app-subtle-bg', '--app-scrollbar-thumb', '--app-scrollbar-thumb-hover',
+        '--app-md-table-head-bg', '--app-reasoning-bg', '--app-border', '--app-divider', '--app-summary-divider', '--app-subtle-bg', '--app-scrollbar-thumb', '--app-scrollbar-thumb-hover',
     ]
     for (const property of properties) root.style.removeProperty(property)
 }

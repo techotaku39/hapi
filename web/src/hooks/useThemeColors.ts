@@ -76,7 +76,7 @@ export const THEME_COLOR_KEYS: readonly ThemeColorKey[] = [
     {
         id: 'border',
         labelKey: 'settings.display.themeColors.key.border',
-        targets: ['--app-border', '--app-divider'],
+        targets: ['--app-border', '--app-divider', '--app-summary-divider'],
     },
     {
         id: 'userBubble',
