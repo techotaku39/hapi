@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import type { EventPublisher } from './eventPublisher'
-import { SessionCache } from './sessionCache'
+import { SessionCache, STRUCTURED_TODOS_BACKFILL_MIGRATION_ID } from './sessionCache'
 
 function createPublisher(events: SyncEvent[]): EventPublisher {
     return {
@@ -114,6 +114,48 @@ describe('SessionCache structured task backfill', () => {
         expect(reopened?.todos).toEqual([
             {
                 content: 'Plan before long history',
+                priority: 'medium',
+                status: 'in_progress',
+                id: 'plan-1'
+            }
+        ])
+    })
+
+    it('persists the one-time backfill marker and skips the scan after restart', () => {
+        const store = new Store(':memory:')
+        const created = store.sessions.getOrCreateSession('persistent-plan-backfill', { path: '/tmp', host: 'h' }, null, 'default')
+        store.messages.addMessage(created.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Persist this migration', status: 'in_progress' }] }
+                }
+            }
+        })
+
+        let scanCount = 0
+        const originalGetMessagesBeforeSeq = store.messages.getMessagesBeforeSeq.bind(store.messages)
+        store.messages.getMessagesBeforeSeq = (...args) => {
+            scanCount += 1
+            return originalGetMessagesBeforeSeq(...args)
+        }
+
+        const firstCache = new SessionCache(store, createPublisher([]))
+        firstCache.reloadAll()
+
+        expect(store.migrations.isCompleted(STRUCTURED_TODOS_BACKFILL_MIGRATION_ID)).toBe(true)
+        expect(scanCount).toBe(1)
+
+        const restartedCache = new SessionCache(store, createPublisher([]))
+        restartedCache.reloadAll()
+
+        expect(scanCount).toBe(1)
+        expect(restartedCache.getSession(created.id)?.todos).toEqual([
+            {
+                content: 'Persist this migration',
                 priority: 'medium',
                 status: 'in_progress',
                 id: 'plan-1'

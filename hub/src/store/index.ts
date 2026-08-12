@@ -13,6 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { MigrationStore } from './migrationStore'
 
 export type {
     StoredMachine,
@@ -34,13 +35,14 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 export { WorkGraphStore } from './workGraphStore'
+export { MigrationStore } from './migrationStore'
 export {
     WorkGraphNotFoundError,
     WorkGraphPrincipalError,
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 23
+const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -53,7 +55,8 @@ const REQUIRED_TABLES = [
     'usage_events',
     'usage_scan_state',
     'events',
-    'event_links'
+    'event_links',
+    'migration_state'
 ] as const
 
 export class Store {
@@ -70,6 +73,7 @@ export class Store {
     readonly scratchlist: ScratchlistStore
     readonly usage: UsageStore
     readonly workGraph: WorkGraphStore
+    readonly migrations: MigrationStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -124,6 +128,7 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+        this.migrations = new MigrationStore(this.db)
     }
 
     /**
@@ -302,6 +307,7 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
         })
 
         if (currentVersion === 0) {
@@ -544,6 +550,11 @@ export class Store {
                 ON event_links(namespace, from_event_id);
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
+
+            CREATE TABLE IF NOT EXISTS migration_state (
+                migration_id TEXT PRIMARY KEY,
+                completed_at INTEGER NOT NULL
+            );
         `)
     }
 
@@ -969,6 +980,15 @@ export class Store {
                 ON event_links(namespace, from_event_id);
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
+        `)
+    }
+
+    private migrateFromV23ToV24(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS migration_state (
+                migration_id TEXT PRIMARY KEY,
+                completed_at INTEGER NOT NULL
+            );
         `)
     }
 
