@@ -69,11 +69,19 @@ function normalizePlanEntries(candidate: unknown): TodoItem[] | null {
 function extractTodosFromPlanText(value: unknown): TodoItem[] | null {
     if (typeof value !== 'string') return null
 
-    const entries = value.split(/\r?\n/)
-        .map((line) => line.match(/^\s*(?:[-*+]\s+|\d+[.)]\s+)(.+?)\s*$/)?.[1] ?? null)
-        .filter((entry): entry is string => entry !== null)
+    const listLines = value.split(/\r?\n/).flatMap((line) => {
+        const match = line.match(/^(\s*)(?:[-*+]\s+|\d+[.)]\s+)(.+?)\s*$/)
+        if (!match?.[2]) return []
+        return [{ indent: match[1]?.length ?? 0, content: match[2] }]
+    })
 
-    return entries.length > 0 ? normalizePlanEntries(entries) : null
+    if (listLines.length === 0) return null
+    const topLevelIndent = Math.min(...listLines.map((line) => line.indent))
+    return normalizePlanEntries(
+        listLines
+            .filter((line) => line.indent === topLevelIndent)
+            .map((line) => line.content)
+    )
 }
 
 function isPlanExitToolName(value: unknown): boolean {

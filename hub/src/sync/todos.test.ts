@@ -98,6 +98,32 @@ describe('extractSessionTodosFromMessageContent', () => {
         ])
     })
 
+    it('ignores nested Markdown plan detail bullets', () => {
+        const todos = extractSessionTodosFromMessageContent({
+            role: 'assistant',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            {
+                                type: 'text',
+                                text: '## Proposed plan\n\n1. Inspect\n   - Read the relevant files\n2. Implement\n   - Add regression tests'
+                            },
+                            { type: 'tool_use', name: 'ExitPlanMode', input: {} }
+                        ]
+                    }
+                }
+            }
+        })
+
+        expect(todos).toEqual([
+            { content: 'Inspect', priority: 'medium', status: 'pending', id: 'plan-1' },
+            { content: 'Implement', priority: 'medium', status: 'pending', id: 'plan-2' }
+        ])
+    })
+
     it('does not promote ordinary assistant text without a plan event', () => {
         const todos = extractSessionTodosFromMessageContent({
             role: 'assistant',

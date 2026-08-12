@@ -80,4 +80,44 @@ describe('SessionCache structured task backfill', () => {
         ])
         expect(reopened?.todosUpdatedAt).toBe(newAt)
     })
+
+    it('finds a newer structured plan beyond the latest 200 messages', () => {
+        const store = new Store(':memory:')
+        const created = store.sessions.getOrCreateSession('long-structured-plan-reopen', { path: '/tmp', host: 'h' }, null, 'default')
+        const oldAt = 1_000
+        const planAt = 2_000
+
+        store.sessions.setSessionTodos(created.id, [
+            { content: 'Old task state', priority: 'medium', status: 'pending', id: 'old-1' }
+        ], oldAt, 'default')
+        store.messages.addMessage(created.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: {
+                        plan: [{ step: 'Plan before long history', status: 'in_progress' }]
+                    }
+                }
+            }
+        }, undefined, undefined, planAt)
+        for (let i = 0; i < 200; i += 1) {
+            store.messages.addMessage(created.id, { role: 'assistant', content: `history-${i}` }, undefined, undefined, planAt + i + 1)
+        }
+
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+        const reopened = cache.refreshSession(created.id)
+
+        expect(reopened?.todos).toEqual([
+            {
+                content: 'Plan before long history',
+                priority: 'medium',
+                status: 'in_progress',
+                id: 'plan-1'
+            }
+        ])
+    })
 })

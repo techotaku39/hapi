@@ -139,7 +139,7 @@ export class SessionCache {
 
         if (!this.todoBackfillAttemptedSessionIds.has(sessionId)) {
             this.todoBackfillAttemptedSessionIds.add(sessionId)
-            const messages = this.store.messages.getMessages(sessionId, 200)
+            const messages = this.store.messages.getAllMessages(sessionId)
             for (let i = messages.length - 1; i >= 0; i -= 1) {
                 const message = messages[i]
                 const todos = extractSessionTodosFromMessageContent(message.content)
