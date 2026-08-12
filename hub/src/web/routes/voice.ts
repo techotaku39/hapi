@@ -135,6 +135,7 @@ async function transcribeStandard(
         if (baseLanguage) {
             if (provider === 'elevenlabs') form.set('language_code', baseLanguage)
             else if (provider === 'openai') form.set('languages[]', normalizeOpenAILanguage(language) ?? baseLanguage)
+            else if (provider === 'openai-compatible') form.set('language', language ?? baseLanguage)
             else form.set('language', baseLanguage)
         }
         url = provider === 'elevenlabs'

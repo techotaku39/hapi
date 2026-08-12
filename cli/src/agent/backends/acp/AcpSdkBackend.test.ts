@@ -1412,4 +1412,83 @@ describe('AcpSdkBackend', () => {
             { type: 'turn_complete', stopReason: 'end_turn' }
         ]);
     });
+
+    it('notifies agent-activity listener for harness-wake activity, not usage noise (#1470)', () => {
+        const backend = new AcpSdkBackend({ command: 'agent' });
+        const activity: boolean[] = [];
+        backend.setAgentActivityListener((thinking) => {
+            activity.push(thinking);
+        });
+
+        const backendInternal = backend as unknown as {
+            handleSessionUpdate: (params: unknown) => void;
+        };
+
+        backendInternal.handleSessionUpdate({
+            sessionId: 'session-1',
+            update: {
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+                content: { type: 'text', text: 'resumed' }
+            }
+        });
+        backendInternal.handleSessionUpdate({
+            sessionId: 'session-1',
+            update: { sessionUpdate: 'usage_update', used: 1_000, size: 200_000 }
+        });
+        backendInternal.handleSessionUpdate({
+            sessionId: 'session-1',
+            update: {
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.sessionInfoUpdate,
+                title: 'noise'
+            }
+        });
+        backendInternal.handleSessionUpdate({
+            sessionId: 'session-1',
+            update: { sessionUpdate: 'state_update', state: 'running' }
+        });
+        backendInternal.handleSessionUpdate({
+            sessionId: 'session-1',
+            update: { sessionUpdate: 'state_update', state: 'idle' }
+        });
+
+        expect(activity).toEqual([true, true, false]);
+    });
+
+    it('notifies agent-activity listener when a permission request arrives (#1470)', async () => {
+        const backend = new AcpSdkBackend({ command: 'agent' });
+        const activity: boolean[] = [];
+        backend.setAgentActivityListener((thinking) => {
+            activity.push(thinking);
+        });
+        backend.onPermissionRequest(() => {
+            // leave pending; we only care that activity fired first
+        });
+
+        const backendInternal = backend as unknown as {
+            handlePermissionRequest: (params: unknown, requestId: string) => Promise<unknown>;
+        };
+
+        const pending = backendInternal.handlePermissionRequest({
+            sessionId: 'session-1',
+            toolCall: {
+                toolCallId: 'tc-1',
+                title: 'Shell',
+                kind: 'execute',
+                status: 'pending'
+            },
+            options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }]
+        }, 'req-1');
+
+        expect(activity).toEqual([true]);
+        // Cancel so the promise does not hang the suite.
+        await backend.respondToPermission('session-1', {
+            id: 'tc-1',
+            sessionId: 'session-1',
+            toolCallId: 'tc-1',
+            title: 'Shell',
+            kind: 'execute',
+            options: []
+        }, { outcome: 'cancelled' });
+        await pending;
+    });
 });

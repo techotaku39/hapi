@@ -193,7 +193,7 @@ describe('SessionList time filter', () => {
         expect(searchButton.nextElementSibling).toBe(filterButton)
         expect(searchButton.parentElement).toBe(filterButton.parentElement)
         expect(searchButton.parentElement).toHaveClass('relative', 'gap-1')
-        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+        expect(screen.queryByPlaceholderText('Search sessions')).toBeNull()
 
         fireEvent.click(filterButton)
         const emptyDate = screen.getByRole('button', { name: new Date(2026, 6, 17).toLocaleDateString() })
@@ -206,7 +206,7 @@ describe('SessionList time filter', () => {
 
         expect(screen.getByRole('button', { name: /Recent session/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Old session/ })).toBeNull()
-        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+        expect(screen.queryByPlaceholderText('Search sessions')).toBeNull()
         expect(filterButton).toHaveAttribute('title', '2026-07-17 – 2026-07-18')
         expect(filterButton).toHaveAccessibleName('Filter sessions by last activity: 2026-07-17 – 2026-07-18')
         expect(filterButton).toHaveFocus()
@@ -297,7 +297,7 @@ describe('SessionList time filter', () => {
         )
 
         fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
-        const input = screen.getByPlaceholderText('Search sessions…')
+        const input = screen.getByPlaceholderText('Search sessions')
         const filterButton = screen.getByRole('button', { name: 'Filter sessions by last activity' })
         fireEvent.click(filterButton)
         fireEvent.click(screen.getByRole('button', { name: new Date(2026, 6, 1).toLocaleDateString() }))
@@ -684,7 +684,7 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByTitle('In progress').getAttribute('aria-expanded')).toBe('false')
 
         fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
-        fireEvent.change(screen.getByPlaceholderText('Search sessions…'), {
+        fireEvent.change(screen.getByPlaceholderText('Search sessions'), {
             target: { value: 'Running' },
         })
 
@@ -756,7 +756,7 @@ describe('SessionList collapse behavior', () => {
 
         render(renderSessionList(sessions, null))
         fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
-        fireEvent.change(screen.getByPlaceholderText('Search sessions…'), {
+        fireEvent.change(screen.getByPlaceholderText('Search sessions'), {
             target: { value: 'Matching task' },
         })
 
@@ -901,10 +901,10 @@ describe('SessionList search toggle', () => {
         )
 
         // Collapsed by default: only the toggle icon is rendered.
-        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+        expect(screen.queryByPlaceholderText('Search sessions')).toBeNull()
 
         fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
-        const input = screen.getByPlaceholderText('Search sessions…')
+        const input = screen.getByPlaceholderText('Search sessions')
         expect(input).toHaveFocus()
 
         fireEvent.change(input, { target: { value: 'Matching' } })
@@ -913,7 +913,7 @@ describe('SessionList search toggle', () => {
 
         // Blur collapses back to the icon; the query stays applied.
         fireEvent.blur(input)
-        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+        expect(screen.queryByPlaceholderText('Search sessions')).toBeNull()
         expect(screen.getByRole('button', { name: /Search sessions/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Matching task/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Other task/ })).toBeNull()
@@ -947,11 +947,11 @@ describe('SessionList search toggle', () => {
         )
 
         fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
-        const input = screen.getByPlaceholderText('Search sessions…')
+        const input = screen.getByPlaceholderText('Search sessions')
         fireEvent.change(input, { target: { value: 'jellybot' } })
         fireEvent.blur(input)
 
-        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+        expect(screen.queryByPlaceholderText('Search sessions')).toBeNull()
         const collapsed = screen.getByRole('button', { name: /Search sessions/ })
         expect(collapsed).toHaveTextContent('jellybot')
         expect(collapsed.className).toContain('bg-[var(--app-chat-user-chip-bg)]')
@@ -979,7 +979,7 @@ describe('SessionList search toggle', () => {
         )
 
         fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
-        const input = screen.getByPlaceholderText('Search sessions…')
+        const input = screen.getByPlaceholderText('Search sessions')
         fireEvent.change(input, { target: { value: 'Task' } })
 
         // The clear button unmounts itself; focus must return to the input so a
@@ -988,7 +988,7 @@ describe('SessionList search toggle', () => {
 
         expect(input).toHaveFocus()
         expect(input).toHaveValue('')
-        expect(screen.getByPlaceholderText('Search sessions…')).toBeInTheDocument()
+        expect(screen.getByPlaceholderText('Search sessions')).toBeInTheDocument()
     })
 
     it('keeps header actions visible when sessions become empty while search is expanded', () => {
