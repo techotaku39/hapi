@@ -1258,7 +1258,7 @@ export function HappyThread(props: {
             atBottomRef.current = true
             onViewModeChangeRef.current('tail')
         }
-    }, [])
+    }, [cancelHistoryNavigation])
 
     // Reset state when session changes
     useLayoutEffect(() => {
