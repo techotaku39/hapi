@@ -1711,7 +1711,11 @@ function SessionChatInner(props: SessionChatProps) {
                 ) : null}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
-                    {sessionStatus ? <SessionStatusPanel data={sessionStatus} /> : null}
+                    {sessionStatus ? (
+                        <div className="relative h-9 shrink-0">
+                            <SessionStatusPanel data={sessionStatus} />
+                        </div>
+                    ) : null}
 
                     <div className="flex flex-col min-h-0 flex-1">
             {props.session.teamState && (
