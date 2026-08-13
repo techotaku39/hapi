@@ -72,6 +72,7 @@ type TailSyncController = {
     api: ApiClient
     running: Promise<void> | null
     trailingRequested: boolean
+    runningPrefersLatest: boolean
 }
 
 const states = new Map<string, InternalState>()
@@ -720,13 +721,16 @@ async function runTailSync(api: ApiClient, sessionId: string): Promise<void> {
 }
 
 function startTailSync(sessionId: string, controller: TailSyncController): Promise<void> {
+    const runningPrefersLatest = getState(sessionId).preferLatestOnActivation
     const running = runTailSync(controller.api, sessionId)
     controller.running = running
+    controller.runningPrefersLatest = runningPrefersLatest
     const finish = () => {
         if (tailSyncControllers.get(sessionId) !== controller || controller.running !== running) {
             return
         }
         controller.running = null
+        controller.runningPrefersLatest = false
         if (!controller.trailingRequested) {
             return
         }
@@ -825,11 +829,23 @@ export function syncTailMessages(
 ): Promise<void> {
     let controller = tailSyncControllers.get(sessionId)
     if (!controller) {
-        controller = { api, running: null, trailingRequested: false }
+        controller = {
+            api,
+            running: null,
+            trailingRequested: false,
+            runningPrefersLatest: false
+        }
         tailSyncControllers.set(sessionId, controller)
     }
     controller.api = api
     if (!controller.running) {
+        return startTailSync(sessionId, controller)
+    }
+    if (getState(sessionId).preferLatestOnActivation) {
+        if (controller.runningPrefersLatest) {
+            return controller.running
+        }
+        controller.trailingRequested = false
         return startTailSync(sessionId, controller)
     }
     const observed = controller.running

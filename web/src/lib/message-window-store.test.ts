@@ -552,6 +552,8 @@ describe('message tail synchronization', () => {
 
         activateMessageWindow(id)
         const reentrySync = syncTailMessages(api, id)
+        await vi.waitFor(() => expect(getMessages).toHaveBeenCalledTimes(2))
+        expect(getMessages.mock.calls[1]?.[1]).toEqual({ limit: 200 })
         staleResponse.resolve(afterResponse([
             makeAgentMessage({ id: 'stale-page', seq: 41, at: 41_000 })
         ], {
@@ -566,7 +568,6 @@ describe('message tail synchronization', () => {
         await initialSync
         await reentrySync
 
-        expect(getMessages.mock.calls[1]?.[1]).toEqual({ limit: 200 })
         expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['latest'])
     })
 
