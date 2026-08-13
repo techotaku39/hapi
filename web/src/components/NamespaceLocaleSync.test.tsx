@@ -167,4 +167,31 @@ describe('NamespaceLocaleSync', () => {
         await waitFor(() => expect(updateNamespaceSettings).toHaveBeenCalledTimes(2), { timeout: 5000 })
         expect(updateNamespaceSettings).toHaveBeenLastCalledWith({ locale: 'zh-CN' })
     })
+
+    it('requeues the locale after all write retries fail', async () => {
+        let resolveSettings!: (value: { locale: 'en' | 'zh-CN' }) => void
+        getNamespaceSettings.mockReturnValue(new Promise((resolve) => { resolveSettings = resolve }))
+        updateNamespaceSettings
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockResolvedValueOnce({ locale: 'zh-CN' })
+        let setLocale: ((locale: 'en' | 'zh-CN') => void) | undefined
+
+        renderWithProviders(
+            <>
+                <NamespaceLocaleSync />
+                <LocaleCapture onReady={(setter) => { setLocale = setter }} />
+            </>
+        )
+
+        await waitFor(() => expect(getNamespaceSettings).toHaveBeenCalled())
+        await act(async () => { resolveSettings({ locale: 'en' }) })
+        await waitFor(() => expect(document.documentElement.lang).toBe('en'))
+        act(() => setLocale?.('zh-CN'))
+        await waitFor(() => expect(updateNamespaceSettings.mock.calls.length).toBeGreaterThanOrEqual(4), { timeout: 5000 })
+        await waitFor(() => expect(updateNamespaceSettings).toHaveBeenCalledTimes(5), { timeout: 7000 })
+        expect(updateNamespaceSettings).toHaveBeenLastCalledWith({ locale: 'zh-CN' })
+    }, 15_000)
 })
