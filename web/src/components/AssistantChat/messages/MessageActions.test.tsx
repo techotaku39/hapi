@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ComponentProps, PropsWithChildren } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
@@ -28,13 +28,19 @@ vi.mock('@/components/ui/ConfirmDialog', () => ({
     ConfirmDialog: (props: {
         isOpen: boolean
         title: string
+        description: string
         confirmLabel: string
+        confirmingLabel: string
         onConfirm: () => Promise<void>
         onClose: () => void
+        isPending: boolean
     }) => props.isOpen ? (
-        <div>
+        <div role="dialog">
             <div>{props.title}</div>
-            <button type="button" onClick={() => void props.onConfirm()}>{props.confirmLabel}</button>
+            <div>{props.description}</div>
+            <button type="button" onClick={() => void props.onConfirm()}>
+                {props.isPending ? props.confirmingLabel : props.confirmLabel}
+            </button>
             <button type="button" onClick={props.onClose}>Cancel</button>
         </div>
     ) : null
@@ -230,6 +236,62 @@ describe('MessageActions', () => {
 
         expect(screen.getByRole('button', { name: '回退' })).toHaveAttribute('title', '回退')
         expect(screen.getByRole('button', { name: '分叉' })).toHaveAttribute('title', '分叉')
+    })
+
+    it('localizes the Fork confirmation dialog in Simplified Chinese', async () => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+        let resolveFork: (() => void) | undefined
+        const onFork = vi.fn(() => new Promise<void>((resolve) => {
+            resolveFork = resolve
+        }))
+
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            showFork: true,
+            onFork
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: '分叉' }))
+        const dialog = screen.getByRole('dialog')
+        expect(dialog.textContent).toContain('分叉对话')
+        expect(dialog.textContent).toContain('从此处创建新会话？')
+        expect(dialog.textContent).toContain('当前会话不会被修改。')
+
+        fireEvent.click(within(dialog).getByRole('button', { name: '分叉' }))
+        expect(onFork).toHaveBeenCalledTimes(1)
+        expect(within(dialog).getByRole('button', { name: '分叉中…' })).not.toBeNull()
+
+        resolveFork?.()
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    })
+
+    it('localizes the Rewind confirmation dialog in Simplified Chinese', async () => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+        let resolveRewind: (() => void) | undefined
+        const onRewind = vi.fn(() => new Promise<void>((resolve) => {
+            resolveRewind = resolve
+        }))
+
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            showRewind: true,
+            onRewind
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: '回退' }))
+        const dialog = screen.getByRole('dialog')
+        expect(dialog.textContent).toContain('回退对话')
+        expect(dialog.textContent).toContain('将此会话回退到此处？')
+        expect(dialog.textContent).toContain('之后的对话历史将永久移除。文件不会被修改。')
+
+        fireEvent.click(within(dialog).getByRole('button', { name: '回退' }))
+        expect(onRewind).toHaveBeenCalledTimes(1)
+        expect(within(dialog).getByRole('button', { name: '回退中…' })).not.toBeNull()
+
+        resolveRewind?.()
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     })
 
     it('hides Fork and Rewind while the thread is running', () => {
