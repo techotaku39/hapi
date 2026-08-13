@@ -72,6 +72,7 @@ describe('useAppGoBack file preview navigation', () => {
 
         expect(routerMocks.navigate).toHaveBeenCalledWith({
             to: '/sessions/session-1',
+            resetScroll: false,
         })
     })
 

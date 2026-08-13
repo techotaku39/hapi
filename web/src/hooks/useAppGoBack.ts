@@ -54,7 +54,10 @@ export function useAppGoBack(): () => void {
                 ? (search as { origin?: unknown }).origin
                 : undefined
             if (origin === 'chat') {
-                navigate({ to: pathname.replace(/\/file$/, '') })
+                navigate({
+                    to: pathname.replace(/\/file$/, ''),
+                    ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+                })
                 return
             }
 
