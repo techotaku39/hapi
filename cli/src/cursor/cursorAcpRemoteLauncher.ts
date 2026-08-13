@@ -110,15 +110,19 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         const autoReview = isCursorAutoReviewMode(session.getPermissionMode() as PermissionMode);
         this.spawnedWithAutoReview = autoReview;
 
-        const requestedSpawnModel = session.model;
+        // Desired hub/UI model (may be a bracket wire). Spawn may use a remap for
+        // `agent --model`, but applyLiveModel must reapply this original so variants
+        // like composer-2.5[fast=true] are not silently coerced to fast=false (#1430).
+        const desiredModel = session.model;
+        const requestedSpawnModel = desiredModel;
         let spawnModel = resolveCursorSpawnModel(requestedSpawnModel);
         let backend: AcpSdkBackend | null = null;
         let recentStderrHint: string | null = null;
 
         for (let connectAttempt = 0; connectAttempt < 2; connectAttempt += 1) {
-            if (spawnModel && spawnModel !== session.model) {
-                session.setModel(spawnModel);
-                session.pushKeepAlive();
+            if (spawnModel && spawnModel !== desiredModel) {
+                // Status only — do not session.setModel(spawnModel) or keepalive will
+                // overwrite the desired variant before ACP apply.
                 this.messageBuffer.addMessage(`[MODEL:${spawnModel}]`, 'system');
             }
 
@@ -134,6 +138,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.recordCursorNativeWorktreeMetadata();
 
             backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+            // Harness resume (notify_on_output / mid-idle ACP activity) may not
+            // go through HAPI's prompt() window — bump thinking so the hub list
+            // matches reality (#1470).
+            this.wireAgentActivityThinking(backend, session);
 
             recentStderrHint = null;
             this.wireStderrErrorListener(backend, (hint) => {
@@ -231,8 +239,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     if (remapped && loadAttempt === 0) {
                         logger.info(`[cursor-acp] Remapping stale resume model ${spawnModel} → ${remapped}`);
                         spawnModel = remapped;
-                        session.setModel(remapped);
-                        session.pushKeepAlive();
+                        // Keep session.model as desiredModel; only the process --model remaps.
                         this.messageBuffer.addMessage(`[MODEL:${remapped}]`, 'system');
                         await backend.disconnect();
                         backend = createCursorAcpBackend({
@@ -245,6 +252,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                         this.backend = backend;
                         registerAcpSessionTitleSync(backend, session.client);
                         backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+                        this.wireAgentActivityThinking(backend, session);
                         recentStderrHint = null;
                         this.wireStderrErrorListener(backend, (hint) => {
                             recentStderrHint = hint;
@@ -274,11 +282,65 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     'Cursor ACP session/load is not supported by this agent build. Start a new Cursor session.'
                 );
             } else {
-                acpSessionId = await backend.newSession({
-                    cwd: session.path,
-                    mcpServers: mcpServerList,
-                });
-                break;
+                try {
+                    acpSessionId = await backend.newSession({
+                        cwd: session.path,
+                        mcpServers: mcpServerList,
+                    });
+                    break;
+                } catch (error) {
+                    // Cursor often accepts initialize then rejects at session/new when
+                    // --model is a stale bracket wire and the shared cache was empty.
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    const remapped = tryRemapCursorSpawnModelFromConnectError(
+                        spawnModel,
+                        requestedSpawnModel,
+                        errMsg,
+                        recentStderrHint
+                    );
+                    if (remapped && loadAttempt === 0) {
+                        logger.info(`[cursor-acp] Remapping stale spawn model ${spawnModel} → ${remapped}`);
+                        spawnModel = remapped;
+                        this.messageBuffer.addMessage(`[MODEL:${remapped}]`, 'system');
+                        await backend.disconnect();
+                        backend = createCursorAcpBackend({
+                            cwd: session.path,
+                            model: spawnModel,
+                            autoReview,
+                            worktree: session.cursorWorktree,
+                            addDirs: session.cursorAddDirs
+                        });
+                        this.backend = backend;
+                        registerAcpSessionTitleSync(backend, session.client);
+                        backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+                        this.wireAgentActivityThinking(backend, session);
+                        recentStderrHint = null;
+                        this.wireStderrErrorListener(backend, (hint) => {
+                            recentStderrHint = hint;
+                        });
+                        await backend.initialize();
+                        await backend.authenticateIfAvailable('cursor_login');
+                        this.extensionAdapter = new CursorExtensionAdapter(
+                            session.client,
+                            backend,
+                            (message) => this.handleAgentMessage(message),
+                            () => this.handleCreatePlanAccepted()
+                        );
+                        this.permissionAdapter = new PermissionAdapter(
+                            session.client,
+                            backend,
+                            () => session.getPermissionMode(),
+                            (response) => this.extensionAdapter!.handlePermissionResponse(response)
+                        );
+                        continue;
+                    }
+
+                    logger.warn('[cursor-acp] session/new failed', formatAcpLoadError(error));
+                    throw new Error(classifyCursorAcpLoadError(error, {
+                        recentStderr: recentStderrHint,
+                        action: 'start'
+                    }));
+                }
             }
         }
         if (!acpSessionId) {
@@ -313,10 +375,19 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         const previousSetModel = session.setModel.bind(session);
 
         await applyCursorAcpMode(backend, acpSessionId, session.getPermissionMode() as PermissionMode);
-        if (session.model) {
-            await this.applyLiveModel(backend, acpSessionId, session.model, previousSetModel, {
+        const modelToApply = desiredModel ?? session.model;
+        if (modelToApply) {
+            // If we remapped --model for spawn, restoring the original variant is
+            // mandatory — continuing on whatever ACP defaulted to silently changes
+            // capabilities/cost (#1430).
+            const mustRestoreDesiredModel = Boolean(
+                desiredModel
+                && spawnModel
+                && spawnModel !== desiredModel
+            );
+            await this.applyLiveModel(backend, acpSessionId, modelToApply, previousSetModel, {
                 optimistic: false,
-                throwOnFailure: false
+                throwOnFailure: mustRestoreDesiredModel
             });
         } else if (this.currentBackendModel && !isSpawnDefaultModel(this.currentBackendModel)) {
             this.pushModelStatusLine(this.currentBackendModel);
@@ -489,6 +560,18 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         });
         logger.debug('[cursor-acp] CreatePlan accepted — queued continue prompt', {
             executeMode
+        });
+    }
+
+    /**
+     * #1470 / #1502: ACP foreground state → hub thinking via keepalive.
+     * Background tool/content updates are ignored; running is debounced in the backend.
+     */
+    private wireAgentActivityThinking(backend: AcpSdkBackend, session: CursorSession): void {
+        backend.setAgentActivityListener((thinking) => {
+            if (session.thinking !== thinking) {
+                session.onThinkingChange(thinking);
+            }
         });
     }
 

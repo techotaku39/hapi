@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ThreadPrimitive, useAuiState } from '@assistant-ui/react'
+import { useQuery } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { HappyRuntimeExtras } from '@/lib/assistant-runtime'
 import type { Session, SessionMetadataSummary } from '@/types/api'
@@ -20,6 +21,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
+import { getSessionTitle } from '@/lib/sessionTitle'
 import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
@@ -30,6 +32,7 @@ import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { getShareTurnReasoningLabel, selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
+import { queryKeys } from '@/lib/query-keys'
 
 type ScrollAnchor = {
     id: string
@@ -58,7 +61,6 @@ type HistoryLoaderState = {
 type ShareTurnState = {
     id: number
     snapshots: ShareTurnSnapshot[]
-    title: string
     sourceContentWidth: number | null
 } | null
 
@@ -471,6 +473,7 @@ export function HappyThread(props: {
     const machineLabelsById = useMachineLabels(machines)
     const [shareTurn, setShareTurn] = useState<ShareTurnState>(null)
     const shareDialogOpen = shareTurn !== null
+    const shareTitle = shareTurn ? getSessionTitle(props.session) : ''
     const shareRelativeTimeTick = useMinuteTick(headerMetadata.lastActive && shareDialogOpen)
     const shareMetadataItems = useMemo(() => {
         const agentFlavor = props.session.metadata?.flavor ?? null
@@ -514,6 +517,15 @@ export function HappyThread(props: {
         })
     }, [headerMetadata, locale, machineLabelsById, props.serviceTier, props.session, shareDialogOpen, shareRelativeTimeTick, t])
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
+    const hubSettingsQuery = useQuery({
+        queryKey: queryKeys.hubSettings,
+        queryFn: async () => props.api.getHubSettings(),
+        enabled: Boolean(props.api),
+        staleTime: 30_000,
+        refetchInterval: 30_000,
+        retry: false,
+    })
+    const showSessionSummaryInChat = hubSettingsQuery.data?.sessionSummaryInChat === true
     const runtimeExtras = useAuiState((s) => s.thread.extras) as HappyRuntimeExtras | undefined
     const appliedMessagesVersion = runtimeExtras?.messagesVersion ?? props.messagesVersion
     const appliedHistoryVersion = runtimeExtras?.historyVersion ?? props.historyVersion
@@ -1515,7 +1527,6 @@ export function HappyThread(props: {
             setShareTurn({
                 id: ++shareTurnIdRef.current,
                 snapshots: fallbackSnapshot ? [fallbackSnapshot] : [],
-                title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
                 sourceContentWidth: sourceContentWidth > 0 ? sourceContentWidth : null,
             })
             return
@@ -1559,10 +1570,9 @@ export function HappyThread(props: {
         setShareTurn({
             id: ++shareTurnIdRef.current,
             snapshots: completeSnapshots,
-            title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
             sourceContentWidth: sourceContentWidth > 0 ? sourceContentWidth : null,
         })
-    }, [props.metadata, props.sessionId])
+    }, [props.session])
 
     return (
         <HappyChatProvider value={{
@@ -1570,6 +1580,7 @@ export function HappyThread(props: {
             sessionId: props.sessionId,
             metadata: props.metadata,
             terminalToolDisplayMode,
+            showSessionSummaryInChat,
             disabled: props.disabled,
             onRefresh: props.onRefresh,
             onRetryMessage: props.onRetryMessage,
@@ -1666,7 +1677,7 @@ export function HappyThread(props: {
                 <ShareTurnDialog
                     key={shareTurn?.id ?? 'closed'}
                     isOpen={shareTurn !== null}
-                    title={shareTurn?.title ?? ''}
+                    title={shareTitle}
                     metadataItems={shareMetadataItems}
                     sourceSnapshots={shareTurn?.snapshots ?? []}
                     sourceContentWidth={shareTurn?.sourceContentWidth ?? null}
