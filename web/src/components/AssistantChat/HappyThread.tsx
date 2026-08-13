@@ -1695,7 +1695,8 @@ export function HappyThread(props: {
                 target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState)
                 if (isCancelled()) return false
             }
-            if (!target || isCancelled()) return false
+            if (isCancelled()) return false
+            if (!target) throw new Error('No preceding user message found')
             target.scrollIntoView({ block: 'start', behavior: 'smooth' })
             setPromptNavigationStatus('success')
             promptNavigationTimerRef.current = window.setTimeout(() => setPromptNavigationStatus('idle'), 1400)
