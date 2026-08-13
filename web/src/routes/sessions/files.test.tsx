@@ -190,4 +190,15 @@ describe('FilesPage reopen draft transfer', () => {
             resetScroll: false,
         })
     })
+
+    it('preserves the directory scroll position across route remounts', () => {
+        const firstRender = renderFilesPage()
+        const firstScrollRegion = document.querySelector('[data-hapi-session-files-scroll="true"]') as HTMLElement
+        firstScrollRegion.scrollTop = 87
+        firstRender.unmount()
+
+        renderFilesPage()
+        const secondScrollRegion = document.querySelector('[data-hapi-session-files-scroll="true"]') as HTMLElement
+        expect(secondScrollRegion.scrollTop).toBe(87)
+    })
 })

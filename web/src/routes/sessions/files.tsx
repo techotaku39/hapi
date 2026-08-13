@@ -347,7 +347,7 @@ export default function FilesPage() {
     useEffect(() => {
         const el = scrollRef.current
         if (!el) return
-        const key = SCROLL_KEY_PREFIX + sessionId
+        const key = `${SCROLL_KEY_PREFIX}${sessionId}:${activeTab}`
         try {
             const saved = sessionStorage.getItem(key)
             if (saved !== null) el.scrollTop = Number(saved)
@@ -362,7 +362,7 @@ export default function FilesPage() {
             }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sessionId])
+    }, [activeTab, sessionId])
 
     const {
         status: gitStatus,
@@ -582,7 +582,11 @@ export default function FilesPage() {
                 </div>
             ) : null}
 
-            <div ref={scrollRef} className="app-scroll-y flex-1 min-h-0">
+            <div
+                ref={scrollRef}
+                data-hapi-session-files-scroll="true"
+                className="app-scroll-y flex-1 min-h-0"
+            >
                 <div className="mx-auto w-full max-w-content">
                     {showGitErrorBanner && activeTab === 'changes' ? (
                         <div className="border-b border-[var(--app-divider)] bg-amber-500/10 px-3 py-2 text-xs text-[var(--app-hint)]">
