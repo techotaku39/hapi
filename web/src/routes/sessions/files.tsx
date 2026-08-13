@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import type { FileSearchItem, GitFileStatus } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
 import { DirectoryTree } from '@/components/SessionFiles/DirectoryTree'
@@ -331,6 +332,7 @@ export default function FilesPage() {
                 ...(query ? { query } : {}),
             },
             replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [activeTab, navigate, sessionId])
 
@@ -389,7 +391,8 @@ export default function FilesPage() {
         navigate({
             to: '/sessions/$sessionId/file',
             params: { sessionId },
-            search: fileSearch
+            search: fileSearch,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [activeTab, navigate, searchQuery, sessionId])
 
@@ -437,6 +440,7 @@ export default function FilesPage() {
                 ...(searchQuery ? { query: searchQuery } : {}),
             },
             replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, searchQuery, sessionId])
 
@@ -444,6 +448,7 @@ export default function FilesPage() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessionId])
 
@@ -452,6 +457,7 @@ export default function FilesPage() {
             to: '/sessions/$sessionId',
             params: { sessionId },
             search: { outline: true },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessionId])
 
@@ -482,6 +488,7 @@ export default function FilesPage() {
                             to: '/sessions/$sessionId/files',
                             params: { sessionId: newSessionId },
                             replace: true,
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         }),
                     )
                 }}

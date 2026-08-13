@@ -92,6 +92,7 @@ describe('useAppGoBack file preview navigation', () => {
                 tab: 'directories',
                 query: 'readme',
             },
+            resetScroll: false,
         })
     })
 })

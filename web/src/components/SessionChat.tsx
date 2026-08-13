@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
 import type { ApiClient } from '@/api/client'
@@ -475,7 +476,11 @@ function SessionChatInner(props: SessionChatProps) {
         setHistoryActionPending(true)
         try {
             const result = await props.api.forkConversation(props.session.id, messageLocalId)
-            await navigate({ to: '/sessions/$sessionId', params: { sessionId: result.sessionId } })
+            await navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId: result.sessionId },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+            })
         } finally {
             setHistoryActionPending(false)
         }
@@ -1397,7 +1402,8 @@ function SessionChatInner(props: SessionChatProps) {
         setOutlineOpen(false)
         navigate({
             to: '/sessions/$sessionId/files',
-            params: { sessionId: props.session.id }
+            params: { sessionId: props.session.id },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, props.session.id])
 
@@ -1408,7 +1414,8 @@ function SessionChatInner(props: SessionChatProps) {
     const handleViewTerminal = useCallback(() => {
         navigate({
             to: '/sessions/$sessionId/terminal',
-            params: { sessionId: props.session.id }
+            params: { sessionId: props.session.id },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, props.session.id])
 
@@ -1602,7 +1609,8 @@ function SessionChatInner(props: SessionChatProps) {
                         () => navigate({
                             to: '/sessions/$sessionId',
                             params: { sessionId: newSessionId },
-                            replace: true
+                            replace: true,
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         }),
                     )
                 }}

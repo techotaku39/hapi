@@ -15,6 +15,7 @@ import rehypeKatex from 'rehype-katex'
 import remarkDisableIndentedCode from '@/lib/remark-disable-indented-code'
 import remarkRepairTables from '@/lib/remark-repair-tables'
 import { useNavigate } from '@tanstack/react-router'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import remarkStripCjkAutolink from '@/lib/remark-strip-cjk-autolink'
 import remarkNonHttpsAutolink from '@/lib/remark-non-https-autolink'
 import { cn, encodeBase64 } from '@/lib/utils'
@@ -513,7 +514,8 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
             search: {
                 path: encodeBase64(filePath),
                 origin: 'chat',
-            }
+            },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }
 
@@ -543,6 +545,7 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
         void navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: props.targetSessionId },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }
 

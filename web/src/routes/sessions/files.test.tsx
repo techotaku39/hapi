@@ -138,6 +138,7 @@ describe('FilesPage search navigation', () => {
                 tab: 'directories',
                 query: '感',
             },
+            resetScroll: false,
         })
 
         fireEvent.change(input, { target: { value: '言' } })
@@ -149,6 +150,7 @@ describe('FilesPage search navigation', () => {
                 query: '言',
             },
             replace: true,
+            resetScroll: false,
         })
 
         fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
@@ -157,6 +159,7 @@ describe('FilesPage search navigation', () => {
             params: { sessionId: 'session-1' },
             search: { tab: 'directories' },
             replace: true,
+            resetScroll: false,
         })
     })
 })
@@ -184,6 +187,7 @@ describe('FilesPage reopen draft transfer', () => {
             to: '/sessions/$sessionId/files',
             params: { sessionId: 'session-reopened' },
             replace: true,
+            resetScroll: false,
         })
     })
 })
