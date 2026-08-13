@@ -8,6 +8,7 @@ import {
 } from './MessageActions'
 
 const copy = vi.fn()
+const onShareTurn = vi.fn()
 const auiState = {
     message: { id: 'msg-1', createdAt: new Date(2026, 6, 12, 10, 30) },
     thread: {
@@ -48,7 +49,7 @@ vi.mock('@/hooks/useCopyToClipboard', () => ({
 }))
 
 vi.mock('@/components/AssistantChat/context', () => ({
-    useOptionalHappyChatContext: () => ({ onShareTurn: vi.fn() })
+    useOptionalHappyChatContext: () => ({ onShareTurn })
 }))
 
 function renderActions(props: ComponentProps<typeof MessageActions>) {
@@ -77,6 +78,7 @@ describe('MessageActions useAuiState selector (#1380)', () => {
 describe('MessageActions', () => {
     beforeEach(() => {
         copy.mockReset()
+        onShareTurn.mockReset()
         localStorage.clear()
         auiState.thread.isRunning = false
     })
@@ -209,7 +211,13 @@ describe('MessageActions', () => {
             messageElementId: 'message-running'
         })
 
-        expect(screen.getByRole('button', { name: 'Share turn as image' })).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Share turn as image' }))
+
+        expect(onShareTurn).toHaveBeenCalledWith('message-running', 0, {
+            html: '',
+            text: 'partial response',
+            role: 'assistant'
+        })
     })
 
     it('hides Fork and Rewind while a history action is pending', () => {
