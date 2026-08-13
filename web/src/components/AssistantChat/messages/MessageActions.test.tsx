@@ -216,6 +216,22 @@ describe('MessageActions', () => {
         }
     })
 
+    it('localizes Fork and Rewind labels in Simplified Chinese', () => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            showFork: true,
+            showRewind: true,
+            onFork: async () => {},
+            onRewind: async () => {}
+        })
+
+        expect(screen.getByRole('button', { name: '回退' })).toHaveAttribute('title', '回退')
+        expect(screen.getByRole('button', { name: '分叉' })).toHaveAttribute('title', '分叉')
+    })
+
     it('hides Fork and Rewind while the thread is running', () => {
         auiState.thread.isRunning = true
 
