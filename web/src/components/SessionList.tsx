@@ -710,6 +710,7 @@ export function SessionListSearch(props: {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
+    const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
 
@@ -793,25 +794,48 @@ export function SessionListSearch(props: {
         const collapsedLabel = hasTextQuery ? `${openLabel}: ${props.value}` : openLabel
         return (
             <div className="relative flex items-center gap-1">
-                <button
-                    type="button"
-                    onClick={() => props.onExpandedChange(true)}
-                    className={cn(
-                        'relative flex min-w-0 max-w-[9rem] items-center gap-1 rounded-full transition-colors',
-                        hasTextQuery
-                            // Dedicated chip tokens (blue wash) so the active query stays
-                            // readable when truncated text disappears at small widths.
-                            ? 'bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
-                            : 'shrink-0 p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
-                    )}
-                    title={collapsedLabel}
-                    aria-label={collapsedLabel}
-                >
-                    <SearchIcon className="h-5 w-5 shrink-0" />
+                <div className={cn(
+                    'relative flex min-w-0 items-center rounded-full transition-colors',
+                    hasTextQuery
+                        // Keep the query and its clear action inside the same compact chip.
+                        ? 'max-w-[9rem] bg-[var(--app-chat-user-chip-bg)] text-[var(--app-chat-user-chip-fg)]'
+                        : 'shrink-0'
+                )}>
+                    <button
+                        ref={collapsedButtonRef}
+                        type="button"
+                        onClick={() => props.onExpandedChange(true)}
+                        className={cn(
+                            'relative flex min-w-0 items-center gap-1 transition-colors',
+                            hasTextQuery
+                                ? 'flex-1 rounded-l-full bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
+                                : 'shrink-0 rounded-full p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                        )}
+                        title={collapsedLabel}
+                        aria-label={collapsedLabel}
+                    >
+                        <SearchIcon className="h-5 w-5 shrink-0" />
+                        {hasTextQuery ? (
+                            <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
+                        ) : null}
+                    </button>
                     {hasTextQuery ? (
-                        <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                props.onChange('')
+                                // The clear button unmounts with the query; keep focus on
+                                // the collapsed search trigger instead of dropping to body.
+                                collapsedButtonRef.current?.focus()
+                            }}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-r-full bg-[var(--app-chat-user-chip-action-bg)] text-[var(--app-chat-user-chip-action-fg)] transition-colors hover:text-[var(--app-chat-user-chip-action-hover-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset"
+                            title={t('sessions.search.clear')}
+                            aria-label={t('sessions.search.clear')}
+                        >
+                            <XIcon className="h-3.5 w-3.5" />
+                        </button>
                     ) : null}
-                </button>
+                </div>
                 {renderDateFilter('standalone')}
             </div>
         )
