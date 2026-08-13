@@ -67,6 +67,26 @@ describe('NamespaceLocaleSync', () => {
         await waitFor(() => expect(updateNamespaceSettings).toHaveBeenCalledWith({ locale: 'zh-CN' }))
     })
 
+    it('persists a UI change back to the hydrated namespace locale', async () => {
+        resetApiMocks()
+        getNamespaceSettings.mockResolvedValue({ locale: 'en' })
+        updateNamespaceSettings.mockImplementation(async ({ locale }: { locale: 'en' | 'zh-CN' }) => ({ locale }))
+        let setLocale: ((locale: 'en' | 'zh-CN') => void) | undefined
+
+        render(
+            <I18nProvider>
+                <NamespaceLocaleSync />
+                <LocaleCapture onReady={(setter) => { setLocale = setter }} />
+            </I18nProvider>
+        )
+
+        await waitFor(() => expect(document.documentElement.lang).toBe('en'))
+        act(() => setLocale?.('zh-CN'))
+        await waitFor(() => expect(updateNamespaceSettings).toHaveBeenNthCalledWith(1, { locale: 'zh-CN' }))
+        act(() => setLocale?.('en'))
+        await waitFor(() => expect(updateNamespaceSettings).toHaveBeenNthCalledWith(2, { locale: 'en' }))
+    })
+
     it('does not persist a stale local preference before the namespace loads', async () => {
         localStorage.setItem('hapi-lang', 'zh-CN')
         let resolveSettings!: (value: { locale: 'en' | 'zh-CN' }) => void

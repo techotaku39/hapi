@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -45,5 +46,22 @@ describe('namespace locale persistence', () => {
             locales?: Record<string, string>
         }
         expect(raw.locales).toEqual({ alpha: 'zh-CN', beta: 'en', gamma: 'zh-CN' })
+    })
+
+    it('preserves the first concurrent writes from independent module instances', async () => {
+        const dataDir = await mkdtemp(join(tmpdir(), 'hapi-namespace-locale-independent-race-'))
+        directories.push(dataDir)
+
+        const moduleUrl = pathToFileURL(new URL('./namespaceSettings.ts', import.meta.url).pathname).href
+        const firstModule = await import(`${moduleUrl}?instance=first`)
+        const secondModule = await import(`${moduleUrl}?instance=second`)
+
+        await Promise.all([
+            firstModule.writeNamespaceLocale(dataDir, 'alpha', 'zh-CN'),
+            secondModule.writeNamespaceLocale(dataDir, 'beta', 'en')
+        ])
+
+        expect(await readNamespaceLocale(dataDir, 'alpha')).toBe('zh-CN')
+        expect(await readNamespaceLocale(dataDir, 'beta')).toBe('en')
     })
 })

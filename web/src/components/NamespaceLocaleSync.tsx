@@ -12,7 +12,7 @@ export function NamespaceLocaleSync() {
     const { api } = useAppContext()
     const { locale, setLocale } = useTranslation()
     const hydratedApiRef = useRef<typeof api | null>(null)
-    const lastServerLocaleRef = useRef<SupportedLocale | null>(null)
+    const lastQueuedLocaleRef = useRef<SupportedLocale | null>(null)
     const writeChainRef = useRef(Promise.resolve())
     const localeRef = useRef(locale)
     localeRef.current = locale
@@ -20,18 +20,17 @@ export function NamespaceLocaleSync() {
     useEffect(() => {
         let cancelled = false
         hydratedApiRef.current = null
-        lastServerLocaleRef.current = null
+        lastQueuedLocaleRef.current = null
         writeChainRef.current = Promise.resolve()
 
         void api.getNamespaceSettings()
             .then((settings) => {
                 if (cancelled) return
                 hydratedApiRef.current = api
+                lastQueuedLocaleRef.current = settings.locale
                 if (settings.locale === localeRef.current) {
-                    lastServerLocaleRef.current = settings.locale
                     return
                 }
-                lastServerLocaleRef.current = settings.locale
                 setLocale(settings.locale)
             })
             .catch((error) => {
@@ -47,10 +46,11 @@ export function NamespaceLocaleSync() {
 
     useEffect(() => {
         if (hydratedApiRef.current !== api) return
-        if (lastServerLocaleRef.current === locale) {
+        if (lastQueuedLocaleRef.current === locale) {
             return
         }
 
+        lastQueuedLocaleRef.current = locale
         writeChainRef.current = writeChainRef.current
             .catch(() => undefined)
             .then(() => api.updateNamespaceSettings({ locale }).then(() => undefined))

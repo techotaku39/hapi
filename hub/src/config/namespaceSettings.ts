@@ -44,9 +44,13 @@ async function withNamespaceSettingsFileLock<T>(
     settingsFile: string,
     work: () => Promise<T>
 ): Promise<T> {
-    if (!existsSync(settingsFile)) {
-        await mkdir(dirname(settingsFile), { recursive: true, mode: 0o700 })
-        await writeFile(settingsFile, '{}', { mode: 0o600 })
+    await mkdir(dirname(settingsFile), { recursive: true, mode: 0o700 })
+    try {
+        await writeFile(settingsFile, '{}', { flag: 'wx', mode: 0o600 })
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+            throw error
+        }
     }
     return withSettingsFileLock(settingsFile, work)
 }
