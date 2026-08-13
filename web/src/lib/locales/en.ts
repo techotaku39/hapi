@@ -502,6 +502,14 @@ export default {
   'file.error.diffUnavailable': 'Diff unavailable.',
   'file.error.diffUnavailableWithDetail': 'Diff unavailable: {error}',
 
+  // Inline media
+  'media.displayed.image': 'Displayed image',
+  'media.displayed.video': 'Displayed video',
+  'media.displayed.audio': 'Displayed audio',
+  'media.displayed.file': 'Displayed file',
+  'media.displayed.header': '{label}: {fileName}',
+  'media.displayed.unavailable': '{label} is unavailable. {error}',
+
   // Tool card
   'tool.askQuestion': 'Other',
   'tool.edit': 'Edit',

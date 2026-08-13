@@ -501,6 +501,14 @@ export default {
   'file.error.diffUnavailable': 'Diff 不可用。',
   'file.error.diffUnavailableWithDetail': 'Diff 不可用：{error}',
 
+  // 内联媒体
+  'media.displayed.image': '展示图片',
+  'media.displayed.video': '展示视频',
+  'media.displayed.audio': '展示音频',
+  'media.displayed.file': '展示文件',
+  'media.displayed.header': '{label}：{fileName}',
+  'media.displayed.unavailable': '{label}不可用：{error}',
+
   // Tool card
   'tool.askQuestion': '其他',
   'tool.edit': '编辑',
