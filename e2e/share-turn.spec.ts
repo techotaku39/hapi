@@ -149,6 +149,9 @@ test('keeps long inline code aligned when exporting a wrapped message', async ({
     const size = pngSize(bytes)
     expect(size.width).toBe(1730)
     expect(size.height).toBeGreaterThan(1_000)
+    expect(bytes).toMatchSnapshot('wrapped-inline-code-export.png', {
+        maxDiffPixelRatio: 0.005,
+    })
 })
 
 test('localizes the share dialog actions in Chinese', async ({ page }) => {
