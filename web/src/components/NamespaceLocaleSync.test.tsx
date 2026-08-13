@@ -3,10 +3,26 @@ import { act, render, waitFor } from '@testing-library/react'
 import { NamespaceLocaleSync } from './NamespaceLocaleSync'
 import { I18nProvider } from '@/lib/i18n-context'
 import { useTranslation } from '@/lib/use-translation'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 
 const getNamespaceSettings = vi.fn()
 const updateNamespaceSettings = vi.fn()
 const api = { getNamespaceSettings, updateNamespaceSettings }
+
+function renderWithProviders(children: ReactNode) {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        }
+    })
+    return render(
+        <QueryClientProvider client={queryClient}>
+            <I18nProvider>{children}</I18nProvider>
+        </QueryClientProvider>
+    )
+}
 
 function resetApiMocks(): void {
     getNamespaceSettings.mockReset()
@@ -39,11 +55,7 @@ describe('NamespaceLocaleSync', () => {
         getNamespaceSettings.mockResolvedValue({ locale: 'zh-CN' })
         updateNamespaceSettings.mockResolvedValue({ locale: 'zh-CN' })
 
-        render(
-            <I18nProvider>
-                <NamespaceLocaleSync />
-            </I18nProvider>
-        )
+        renderWithProviders(<NamespaceLocaleSync />)
 
         await waitFor(() => expect(document.documentElement.lang).toBe('zh-CN'))
         expect(updateNamespaceSettings).not.toHaveBeenCalled()
@@ -55,14 +67,15 @@ describe('NamespaceLocaleSync', () => {
         updateNamespaceSettings.mockResolvedValue({ locale: 'zh-CN' })
         let setLocale: ((locale: 'en' | 'zh-CN') => void) | undefined
 
-        render(
-            <I18nProvider>
+        renderWithProviders(
+            <>
                 <NamespaceLocaleSync />
                 <LocaleCapture onReady={(setter) => { setLocale = setter }} />
-            </I18nProvider>
+            </>
         )
 
         await waitFor(() => expect(document.documentElement.lang).toBe('en'))
+        expect(setLocale).toBeDefined()
         act(() => setLocale?.('zh-CN'))
         await waitFor(() => expect(updateNamespaceSettings).toHaveBeenCalledWith({ locale: 'zh-CN' }))
     })
@@ -73,14 +86,15 @@ describe('NamespaceLocaleSync', () => {
         updateNamespaceSettings.mockImplementation(async ({ locale }: { locale: 'en' | 'zh-CN' }) => ({ locale }))
         let setLocale: ((locale: 'en' | 'zh-CN') => void) | undefined
 
-        render(
-            <I18nProvider>
+        renderWithProviders(
+            <>
                 <NamespaceLocaleSync />
                 <LocaleCapture onReady={(setter) => { setLocale = setter }} />
-            </I18nProvider>
+            </>
         )
 
         await waitFor(() => expect(document.documentElement.lang).toBe('en'))
+        expect(setLocale).toBeDefined()
         act(() => setLocale?.('zh-CN'))
         await waitFor(() => expect(updateNamespaceSettings).toHaveBeenNthCalledWith(1, { locale: 'zh-CN' }))
         act(() => setLocale?.('en'))
@@ -93,11 +107,11 @@ describe('NamespaceLocaleSync', () => {
         getNamespaceSettings.mockReturnValue(new Promise((resolve) => { resolveSettings = resolve }))
 
         let setLocale: ((locale: 'en' | 'zh-CN') => void) | undefined
-        render(
-            <I18nProvider>
+        renderWithProviders(
+            <>
                 <NamespaceLocaleSync />
                 <LocaleCapture onReady={(setter) => { setLocale = setter }} />
-            </I18nProvider>
+            </>
         )
 
         act(() => setLocale?.('en'))
@@ -111,16 +125,46 @@ describe('NamespaceLocaleSync', () => {
         getNamespaceSettings.mockReturnValue(new Promise((resolve) => { resolveSettings = resolve }))
         let setLocale: ((locale: 'en' | 'zh-CN') => void) | undefined
 
-        render(
-            <I18nProvider>
+        renderWithProviders(
+            <>
                 <NamespaceLocaleSync />
                 <LocaleCapture onReady={(setter) => { setLocale = setter }} />
-            </I18nProvider>
+            </>
         )
 
         act(() => setLocale?.('zh-CN'))
         await act(async () => { resolveSettings({ locale: 'en' }) })
         await waitFor(() => expect(document.documentElement.lang).toBe('en'))
         expect(updateNamespaceSettings).not.toHaveBeenCalled()
+    })
+
+    it('retries a transient namespace read failure', async () => {
+        getNamespaceSettings
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockResolvedValueOnce({ locale: 'zh-CN' })
+        renderWithProviders(<NamespaceLocaleSync />)
+
+        await waitFor(() => expect(document.documentElement.lang).toBe('zh-CN'))
+        expect(getNamespaceSettings).toHaveBeenCalledTimes(2)
+    })
+
+    it('retries a transient locale write failure', async () => {
+        updateNamespaceSettings
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockResolvedValueOnce({ locale: 'zh-CN' })
+        let setLocale: ((locale: 'en' | 'zh-CN') => void) | undefined
+
+        renderWithProviders(
+            <>
+                <NamespaceLocaleSync />
+                <LocaleCapture onReady={(setter) => { setLocale = setter }} />
+            </>
+        )
+
+        await waitFor(() => expect(document.documentElement.lang).toBe('en'))
+        await waitFor(() => expect(getNamespaceSettings).toHaveBeenCalled())
+        act(() => setLocale?.('zh-CN'))
+        await waitFor(() => expect(updateNamespaceSettings).toHaveBeenCalledTimes(2), { timeout: 5000 })
+        expect(updateNamespaceSettings).toHaveBeenLastCalledWith({ locale: 'zh-CN' })
     })
 })
