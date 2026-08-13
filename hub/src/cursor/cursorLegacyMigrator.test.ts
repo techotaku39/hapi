@@ -205,7 +205,7 @@ function cleanupHarness(h: Harness): void {
     try { rmSync(h.tmp, { recursive: true, force: true }) } catch {}
 }
 
-function makeMigrator(h: Harness, probe: ReturnType<typeof makeMockProbe> | null, opts: { archiveSession?: (id: string) => Promise<void>; updateOverride?: (sessionId: string, namespace: string, lastUsedModel: string | null) => { ok: true } | { ok: false; reason: 'version_mismatch_or_missing' } | { ok: false; reason: 'session_active' }; isAgentAcpTransportActive?: () => { active: boolean; holderPid: number | null }; getCurrentSession?: (sessionId: string, namespace: string) => { active: boolean; lifecycleState?: string; cursorSessionProtocol?: string } | null; acquireAcpActiveLock?: () => { release(): void } | null; checkpointLegacyStore?: (storeDbPath: string) => void; getHapiMessageCount?: (sessionId: string, namespace: string) => number } = {}): CursorLegacyMigrator {
+function makeMigrator(h: Harness, probe: ReturnType<typeof makeMockProbe> | null, opts: { archiveSession?: (id: string) => Promise<void>; updateOverride?: (sessionId: string, namespace: string, lastUsedModel: string | null) => { ok: true } | { ok: false; reason: 'version_mismatch_or_missing' } | { ok: false; reason: 'session_active' }; isAgentAcpTransportActive?: () => { active: boolean; holderPid: number | null }; getCurrentSession?: (sessionId: string, namespace: string) => { active: boolean; lifecycleState?: string; cursorSessionProtocol?: string } | null; acquireAcpActiveLock?: () => { release(): void } | null; checkpointLegacyStore?: (storeDbPath: string) => void; removeSourceFile?: (storeDbPath: string) => void; getHapiMessageCount?: (sessionId: string, namespace: string) => number } = {}): CursorLegacyMigrator {
     return new CursorLegacyMigrator({}, {
         homeDir: () => h.home,
         hostName: () => 'h', // matches the test sessions' metadata.host
@@ -229,6 +229,7 @@ function makeMigrator(h: Harness, probe: ReturnType<typeof makeMockProbe> | null
         // implementations to simulate post-checkpoint WAL growth.
         // Codex review #34 P2 v8.
         checkpointLegacyStore: opts.checkpointLegacyStore ?? (() => {}),
+        removeSourceFile: opts.removeSourceFile,
         getCurrentSession: opts.getCurrentSession,
         logger: { debug() {}, info() {}, warn() {}, error() {} },
         archiveSession: opts.archiveSession ?? (async (id) => { h.archiveCalls.push(id) }),
@@ -785,6 +786,62 @@ describe('CursorLegacyMigrator.migrateOne — happy path', () => {
         if (!out.ok) return
         expect(out.lastUsedModelPreserved).toBeNull()
         expect(h.updateCalls[0].lastUsedModel).toBeNull()
+    })
+
+    it('runs Windows-style source cleanup GC and retries sharing failures without rolling back ACP', async () => {
+        const cursorSessionId = 'windows-cleanup-retry-uuid'
+        const sourceStore = h.placeLegacyStore(cursorSessionId)
+        let removeCalls = 0
+        const session = h.makeSession({
+            metadata: { path: '/workspace/x', host: 'h', flavor: 'cursor', cursorSessionId }
+        })
+        const migrator = makeMigrator(h, makeMockProbe(), {
+            removeSourceFile: (storeDbPath) => {
+                removeCalls += 1
+                if (removeCalls < 2) {
+                    const error = new Error('resource busy or locked') as NodeJS.ErrnoException
+                    error.code = process.platform === 'win32' ? 'EBUSY' : 'EACCES'
+                    throw error
+                }
+                rmSync(storeDbPath, { force: true })
+            }
+        })
+
+        const out = await migrator.migrateOne(session, {})
+
+        expect(out.ok).toBe(true)
+        if (!out.ok) return
+        expect(out.sourceRemoved).toBe(true)
+        expect(removeCalls).toBe(process.platform === 'win32' ? 2 : 1)
+        expect(existsSync(sourceStore)).toBe(false)
+        expect(existsSync(join(h.acpSessionsDir, cursorSessionId, 'store.db'))).toBe(true)
+    })
+
+    it('keeps the ACP target when source cleanup ultimately fails', async () => {
+        const cursorSessionId = 'cleanup-failure-target-intact-uuid'
+        const sourceStore = h.placeLegacyStore(cursorSessionId)
+        let removeCalls = 0
+        const session = h.makeSession({
+            metadata: { path: '/workspace/x', host: 'h', flavor: 'cursor', cursorSessionId }
+        })
+        const migrator = makeMigrator(h, makeMockProbe(), {
+            removeSourceFile: () => {
+                removeCalls += 1
+                const error = new Error('resource busy or locked') as NodeJS.ErrnoException
+                error.code = process.platform === 'win32' ? 'EBUSY' : 'EACCES'
+                throw error
+            }
+        })
+
+        const out = await migrator.migrateOne(session, {})
+
+        expect(out.ok).toBe(true)
+        if (!out.ok) return
+        expect(out.sourceRemoved).toBe(false)
+        expect(removeCalls).toBe(process.platform === 'win32' ? 3 : 1)
+        expect(existsSync(sourceStore)).toBe(true)
+        expect(existsSync(join(h.acpSessionsDir, cursorSessionId, 'store.db'))).toBe(true)
+        expect(h.updateCalls).toHaveLength(1)
     })
 })
 
