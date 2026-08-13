@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
     applyHubSessionSummaryContract,
+    applyHubSessionSummaryLocale,
     buildSessionSummaryInstruction,
     isSessionSummaryContractEnabled,
     resetSessionSummaryContractForTests,
@@ -49,6 +50,16 @@ describe('sessionSummaryInstruction', () => {
         expect(body.toLowerCase()).toContain('session tracking')
         expect(body.toLowerCase()).not.toContain('overseer')
         expect(body.toLowerCase()).not.toContain('surveillance')
+    })
+
+    it('localizes the instruction while keeping the protocol line unchanged', () => {
+        applyHubSessionSummaryLocale('zh-CN')
+        const body = buildSessionSummaryInstruction()
+        expect(body).toContain('会话状态摘要：')
+        expect(body).toContain('请用中文书写 "action" 和 "summary" 的值。')
+        expect(body).toContain('action 不得超过 12 个词语。')
+        expect(body).toContain(SESSION_SUMMARY_CONTRACT_LINE)
+        expect(body).not.toContain('Session status summary:')
     })
 
     it('appends to an existing base prompt when enabled', () => {

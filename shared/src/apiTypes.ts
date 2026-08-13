@@ -16,6 +16,21 @@ import type {
 } from './schemas'
 import type { SessionSummary } from './sessionSummary'
 
+export const SupportedLocaleSchema = z.enum(['en', 'zh-CN'])
+export type SupportedLocale = z.infer<typeof SupportedLocaleSchema>
+
+export const NamespaceSettingsResponseSchema = z.object({
+    locale: SupportedLocaleSchema
+})
+
+export type NamespaceSettingsResponse = z.infer<typeof NamespaceSettingsResponseSchema>
+
+export const UpdateNamespaceSettingsRequestSchema = z.object({
+    locale: SupportedLocaleSchema
+})
+
+export type UpdateNamespaceSettingsRequest = z.infer<typeof UpdateNamespaceSettingsRequestSchema>
+
 export const CreateOrLoadMachineRequestSchema = z.object({
     id: z.string().min(1),
     metadata: z.unknown(),
@@ -52,7 +67,9 @@ export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 export const CreateSessionResponseSchema = z.object({
     session: SessionSchema,
     /** Hub opt-in for AGENT_NOTIFY_SUMMARY prompt injection (default off when omitted). */
-    sessionSummaryContract: z.boolean().optional()
+    sessionSummaryContract: z.boolean().optional(),
+    /** Namespace-scoped UI locale used to localize AGENT_NOTIFY_SUMMARY instructions. */
+    sessionSummaryLocale: SupportedLocaleSchema.optional()
 })
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>

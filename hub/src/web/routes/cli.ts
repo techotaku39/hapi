@@ -9,6 +9,7 @@ import {
 } from '@hapi/protocol'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
+import { readNamespaceLocale } from '../../config/namespaceSettings'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
@@ -65,7 +66,10 @@ function clearErrorStatus(code: string): 403 | 404 | 409 | 500 {
                 : 500
 }
 
-export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<CliEnv> {
+export function createCliRoutes(
+    getSyncEngine: () => SyncEngine | null,
+    dataDir?: string
+): Hono<CliEnv> {
     const app = new Hono<CliEnv>()
 
     app.use('*', async (c, next) => {
@@ -129,10 +133,13 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
                 parsed.data.modelReasoningEffort,
                 parsed.data.id
             )
-            const sessionSummaryContract = await readSessionSummaryContractEnabled(
-                getConfiguration().dataDir
+            const resolvedDataDir = dataDir ?? getConfiguration().dataDir
+            const sessionSummaryContract = await readSessionSummaryContractEnabled(resolvedDataDir)
+            const sessionSummaryLocale = await readNamespaceLocale(
+                resolvedDataDir,
+                namespace
             )
-            return c.json({ session, sessionSummaryContract })
+            return c.json({ session, sessionSummaryContract, sessionSummaryLocale })
         } catch (error) {
             if (error instanceof SessionIdentityConflictError) {
                 return c.json({ error: error.message }, 409)
@@ -250,9 +257,13 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             return c.json({ error: resolved.error }, resolved.status)
         }
         const sessionSummaryContract = await readSessionSummaryContractEnabled(
-            getConfiguration().dataDir
+            dataDir ?? getConfiguration().dataDir
         )
-        return c.json({ session: resolved.session, sessionSummaryContract })
+        const sessionSummaryLocale = await readNamespaceLocale(
+            dataDir ?? getConfiguration().dataDir,
+            namespace
+        )
+        return c.json({ session: resolved.session, sessionSummaryContract, sessionSummaryLocale })
     })
 
     app.get('/sessions/:id/messages', (c) => {

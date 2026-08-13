@@ -15,6 +15,21 @@ describe('ApiClient error mapping', () => {
         globalThis.fetch = originalFetch
     })
 
+    it('reads and updates namespace-scoped locale settings', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ locale: 'zh-CN' }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ locale: 'en' }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getNamespaceSettings()).resolves.toEqual({ locale: 'zh-CN' })
+        await expect(api.updateNamespaceSettings({ locale: 'en' })).resolves.toEqual({ locale: 'en' })
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/namespace-settings')
+        expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+            method: 'PUT',
+            body: JSON.stringify({ locale: 'en' })
+        })
+    })
+
     it('prefers the stable `code` field over the human-readable `error` message in ApiError.code', async () => {
         // Match the shape /sessions/:id/reopen actually returns on a 503.
         fetchMock.mockResolvedValueOnce(

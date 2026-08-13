@@ -4,6 +4,10 @@ import type { SyncEngine } from '../../sync/syncEngine'
 import { createConfiguration } from '../../configuration'
 import { createCliRoutes } from './cli'
 import { SessionIdentityConflictError } from '../../store/sessions'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { writeNamespaceLocale } from '../../config/namespaceSettings'
 
 function createApp(engine: Partial<SyncEngine>) {
     const app = new Hono()
@@ -236,6 +240,29 @@ describe('cli lazy session creation', () => {
             undefined,
             sessionId
         )
+    })
+
+    it('returns the namespace locale during session bootstrap', async () => {
+        const dataDir = await mkdtemp(join(tmpdir(), 'hapi-cli-locale-'))
+        try {
+            await writeNamespaceLocale(dataDir, 'default', 'zh-CN')
+            const app = new Hono()
+            app.route('/cli', createCliRoutes(() => ({
+                getOrCreateSession: () => ({ id: sessionId })
+            } as never), dataDir))
+
+            const response = await app.request('/cli/sessions', {
+                method: 'POST',
+                headers: { ...authHeaders(), 'content-type': 'application/json' },
+                body: JSON.stringify({ tag: 'localized', metadata: {} })
+            })
+
+            expect(response.status).toBe(200)
+            const body = await response.json() as { sessionSummaryLocale?: string }
+            expect(body.sessionSummaryLocale).toBe('zh-CN')
+        } finally {
+            await rm(dataDir, { recursive: true, force: true })
+        }
     })
 
     it('rejects an embedded machine owned by another namespace', async () => {
