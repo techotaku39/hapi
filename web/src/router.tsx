@@ -566,7 +566,8 @@ function SessionPage() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: resolvedSessionId },
-            replace: true
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
         if (api) {
             void refreshSessionDetailPreservingActive(
