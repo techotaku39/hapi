@@ -22,7 +22,8 @@ const harness = vi.hoisted(() => ({
     releaseLoadSession: null as (() => void) | null,
     stderrErrorHandler: null as ((error: { type: string; message: string; raw?: string }) => void) | null,
     disconnectError: null as Error | null,
-    overlayCleanup: null as ReturnType<typeof vi.fn> | null
+    overlayCleanup: null as ReturnType<typeof vi.fn> | null,
+    agentActivityListener: null as ((thinking: boolean) => void) | null
 }));
 
 const legacyLauncher = vi.hoisted(() => vi.fn());
@@ -135,6 +136,9 @@ vi.mock('./utils/cursorAcpBackend', () => ({
                 harness.stderrErrorHandler = handler ?? null;
             }),
             setUsageUpdateListener: vi.fn(),
+            setAgentActivityListener: vi.fn((listener: ((thinking: boolean) => void) | null) => {
+                harness.agentActivityListener = listener;
+            }),
             setSessionInfoUpdateListener: vi.fn(),
             refreshSessionInfo: vi.fn(async () => {}),
             onPermissionRequest: vi.fn(),
@@ -256,6 +260,7 @@ describe('cursorAcpRemoteLauncher', () => {
         harness.stderrErrorHandler = null;
         harness.disconnectError = null;
         harness.overlayCleanup = null;
+        harness.agentActivityListener = null;
         legacyLauncher.mockClear();
         process.stdin.isTTY = false;
         process.stdout.isTTY = false;
@@ -273,6 +278,45 @@ describe('cursorAcpRemoteLauncher', () => {
         expect(createCursorAcpBackend).toHaveBeenCalled();
         expect(harness.backendArgs).toEqual({ command: 'agent', args: ['acp'] });
         expect(legacyLauncher).not.toHaveBeenCalled();
+    });
+
+    it('applies harness thinking transitions once per edge (#1470)', async () => {
+        const keepAlive = vi.fn();
+        const queue = new MessageQueue2<EnhancedMode>(() => 'mode');
+        const client = {
+            ...makeClient(),
+            keepAlive
+        } as unknown as ApiSessionClient;
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn();
+        // Keep the launcher in the main loop long enough to wire the listener.
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.agentActivityListener).not.toBeNull());
+
+        expect(session.thinking).toBe(false);
+        keepAlive.mockClear();
+
+        harness.agentActivityListener!(true);
+        harness.agentActivityListener!(true);
+        harness.agentActivityListener!(false);
+
+        expect(session.thinking).toBe(false);
+        expect(keepAlive.mock.calls.map((call) => call[0])).toEqual([true, false]);
+
+        queue.close();
+        await runPromise;
     });
 
     it('removes the Cursor MCP overlay even when backend.disconnect rejects', async () => {
