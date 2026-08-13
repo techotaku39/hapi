@@ -798,9 +798,9 @@ describe('CursorLegacyMigrator.migrateOne — happy path', () => {
         const migrator = makeMigrator(h, makeMockProbe(), {
             removeSourceFile: (storeDbPath) => {
                 removeCalls += 1
-                if (removeCalls < 2) {
+                if (process.platform === 'win32' && removeCalls < 2) {
                     const error = new Error('resource busy or locked') as NodeJS.ErrnoException
-                    error.code = process.platform === 'win32' ? 'EBUSY' : 'EACCES'
+                    error.code = 'EBUSY'
                     throw error
                 }
                 rmSync(storeDbPath, { force: true })
@@ -828,7 +828,7 @@ describe('CursorLegacyMigrator.migrateOne — happy path', () => {
             removeSourceFile: () => {
                 removeCalls += 1
                 const error = new Error('resource busy or locked') as NodeJS.ErrnoException
-                error.code = process.platform === 'win32' ? 'EBUSY' : 'EACCES'
+                error.code = 'EBUSY'
                 throw error
             }
         })
