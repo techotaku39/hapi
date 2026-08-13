@@ -278,6 +278,7 @@ export default function FilePage() {
 
     const [displayMode, setDisplayMode] = useState<'diff' | 'file'>('diff')
     const fileScrollRef = useRef<HTMLDivElement>(null)
+    const restoredScrollKeyRef = useRef<string | null>(null)
     const fileScrollKey = useMemo(
         () => getFileScrollStorageKey(sessionId, filePath, staged),
         [filePath, sessionId, staged]
@@ -313,11 +314,14 @@ export default function FilePage() {
     }, [fileScrollKey, restoreFileScroll])
 
     // Query results can arrive after the route first renders. Re-apply the
-    // saved position once content has been mounted without overwriting it on
-    // every render or query refresh.
+    // saved position once content has been mounted, but do not overwrite
+    // user scrolling when a query refreshes the same file.
     useEffect(() => {
+        if (diffQuery.isLoading || fileQuery.isLoading) return
+        if (restoredScrollKeyRef.current === fileScrollKey) return
         restoreFileScroll()
-    }, [diffQuery.data, fileQuery.data, restoreFileScroll])
+        restoredScrollKeyRef.current = fileScrollKey
+    }, [diffQuery.isLoading, fileQuery.isLoading, fileScrollKey, restoreFileScroll])
 
     const setMarkdownPreviewMode = (mode: MarkdownPreviewMode) => {
         setMarkdownMode(mode)
