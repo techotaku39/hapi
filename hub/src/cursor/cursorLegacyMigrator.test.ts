@@ -24,7 +24,7 @@
  *   - skipVerify path (load + prompt both skipped, no probe spawned)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -239,6 +239,12 @@ function makeMigrator(h: Harness, probe: ReturnType<typeof makeMockProbe> | null
         }),
         getHapiMessageCount: opts.getHapiMessageCount
     })
+}
+
+function stubPlatform(value: NodeJS.Platform): () => void {
+    const original = process.platform
+    Object.defineProperty(process, 'platform', { value, configurable: true })
+    return () => Object.defineProperty(process, 'platform', { value: original, configurable: true })
 }
 
 /* ---------- tests ---------- */
@@ -792,56 +798,72 @@ describe('CursorLegacyMigrator.migrateOne — happy path', () => {
         const cursorSessionId = 'windows-cleanup-retry-uuid'
         const sourceStore = h.placeLegacyStore(cursorSessionId)
         let removeCalls = 0
+        const gcSpy = spyOn(Bun, 'gc')
+        const restorePlatform = stubPlatform('win32')
         const session = h.makeSession({
             metadata: { path: '/workspace/x', host: 'h', flavor: 'cursor', cursorSessionId }
         })
-        const migrator = makeMigrator(h, makeMockProbe(), {
-            removeSourceFile: (storeDbPath) => {
-                removeCalls += 1
-                if (process.platform === 'win32' && removeCalls < 2) {
-                    const error = new Error('resource busy or locked') as NodeJS.ErrnoException
-                    error.code = 'EBUSY'
-                    throw error
+        try {
+            const migrator = makeMigrator(h, makeMockProbe(), {
+                removeSourceFile: (storeDbPath) => {
+                    removeCalls += 1
+                    if (removeCalls < 2) {
+                        const error = new Error('resource busy or locked') as NodeJS.ErrnoException
+                        error.code = 'EBUSY'
+                        throw error
+                    }
+                    rmSync(storeDbPath, { force: true })
                 }
-                rmSync(storeDbPath, { force: true })
-            }
-        })
+            })
 
-        const out = await migrator.migrateOne(session, {})
+            const out = await migrator.migrateOne(session, {})
 
-        expect(out.ok).toBe(true)
-        if (!out.ok) return
-        expect(out.sourceRemoved).toBe(true)
-        expect(removeCalls).toBe(process.platform === 'win32' ? 2 : 1)
-        expect(existsSync(sourceStore)).toBe(false)
-        expect(existsSync(join(h.acpSessionsDir, cursorSessionId, 'store.db'))).toBe(true)
+            expect(out.ok).toBe(true)
+            if (!out.ok) return
+            expect(out.sourceRemoved).toBe(true)
+            expect(removeCalls).toBe(2)
+            expect(gcSpy.mock.calls.length).toBe(2)
+            expect(existsSync(sourceStore)).toBe(false)
+            expect(existsSync(join(h.acpSessionsDir, cursorSessionId, 'store.db'))).toBe(true)
+        } finally {
+            gcSpy.mockRestore()
+            restorePlatform()
+        }
     })
 
     it('keeps the ACP target when source cleanup ultimately fails', async () => {
         const cursorSessionId = 'cleanup-failure-target-intact-uuid'
         const sourceStore = h.placeLegacyStore(cursorSessionId)
         let removeCalls = 0
+        const gcSpy = spyOn(Bun, 'gc')
+        const restorePlatform = stubPlatform('win32')
         const session = h.makeSession({
             metadata: { path: '/workspace/x', host: 'h', flavor: 'cursor', cursorSessionId }
         })
-        const migrator = makeMigrator(h, makeMockProbe(), {
-            removeSourceFile: () => {
-                removeCalls += 1
-                const error = new Error('resource busy or locked') as NodeJS.ErrnoException
-                error.code = 'EBUSY'
-                throw error
-            }
-        })
+        try {
+            const migrator = makeMigrator(h, makeMockProbe(), {
+                removeSourceFile: () => {
+                    removeCalls += 1
+                    const error = new Error('resource busy or locked') as NodeJS.ErrnoException
+                    error.code = 'EBUSY'
+                    throw error
+                }
+            })
 
-        const out = await migrator.migrateOne(session, {})
+            const out = await migrator.migrateOne(session, {})
 
-        expect(out.ok).toBe(true)
-        if (!out.ok) return
-        expect(out.sourceRemoved).toBe(false)
-        expect(removeCalls).toBe(process.platform === 'win32' ? 3 : 1)
-        expect(existsSync(sourceStore)).toBe(true)
-        expect(existsSync(join(h.acpSessionsDir, cursorSessionId, 'store.db'))).toBe(true)
-        expect(h.updateCalls).toHaveLength(1)
+            expect(out.ok).toBe(true)
+            if (!out.ok) return
+            expect(out.sourceRemoved).toBe(false)
+            expect(removeCalls).toBe(3)
+            expect(gcSpy.mock.calls.length).toBe(3)
+            expect(existsSync(sourceStore)).toBe(true)
+            expect(existsSync(join(h.acpSessionsDir, cursorSessionId, 'store.db'))).toBe(true)
+            expect(h.updateCalls).toHaveLength(1)
+        } finally {
+            gcSpy.mockRestore()
+            restorePlatform()
+        }
     })
 })
 
