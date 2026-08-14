@@ -222,7 +222,7 @@ export function SessionHeader(props: {
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, setPinMode, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -550,6 +550,8 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
+                onSuggestTitle={api ? suggestSessionTitle : undefined}
+                onUpdateSummary={api ? updateSessionSummary : undefined}
                 isPending={isPending}
             />
 

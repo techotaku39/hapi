@@ -911,7 +911,7 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, setPinMode, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -1042,6 +1042,8 @@ function SessionItem(props: {
                     onClose={() => setRenameOpen(false)}
                     currentName={sessionName}
                     onRename={renameSession}
+                    onSuggestTitle={api ? suggestSessionTitle : undefined}
+                    onUpdateSummary={api ? updateSessionSummary : undefined}
                     isPending={isPending}
                 />
             ) : null}

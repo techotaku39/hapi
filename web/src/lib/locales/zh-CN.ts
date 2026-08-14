@@ -275,6 +275,9 @@ export default {
   'dialog.rename.save': '保存',
   'dialog.rename.saving': '保存中…',
   'dialog.rename.error': '重命名失败，请重试。',
+  'dialog.rename.generate': '生成',
+  'dialog.rename.generating': '生成中…',
+  'dialog.rename.generateError': '标题生成失败，请重试。',
 
   'dialog.archive.title': '归档会话',
   'dialog.archive.description': '确定要归档 "{name}" 吗？这将断开活动会话。',

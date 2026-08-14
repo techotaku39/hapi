@@ -316,6 +316,18 @@ export const RenameSessionRequestSchema = z.object({
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
 
+export const UpdateSessionSummaryRequestSchema = z.object({
+    text: z.string().trim().min(1).max(255)
+})
+
+export type UpdateSessionSummaryRequest = z.infer<typeof UpdateSessionSummaryRequestSchema>
+
+export const SessionTitleSuggestionResponseSchema = z.object({
+    title: z.string().min(1).max(255)
+})
+
+export type SessionTitleSuggestionResponse = z.infer<typeof SessionTitleSuggestionResponseSchema>
+
 export const SetSessionPinnedRequestSchema = z.object({
     mode: z.enum(['none', 'project', 'global'])
 })

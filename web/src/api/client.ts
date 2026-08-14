@@ -25,6 +25,7 @@ import type {
     VisibilityPayload,
     HapiSessionExport,
     SessionResponse,
+    SessionTitleSuggestionResponse,
     SessionsResponse
 } from '@/types/api'
 import type {
@@ -935,6 +936,20 @@ export class ApiClient {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'PATCH',
             body: JSON.stringify({ name })
+        })
+    }
+
+    async suggestSessionTitle(sessionId: string): Promise<SessionTitleSuggestionResponse> {
+        return await this.request<SessionTitleSuggestionResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/title-suggestion`,
+            { method: 'POST' }
+        )
+    }
+
+    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/summary`, {
+            method: 'PATCH',
+            body: JSON.stringify({ text })
         })
     }
 

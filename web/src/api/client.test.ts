@@ -93,6 +93,24 @@ describe('ApiClient error mapping', () => {
         expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%20cursor/cursor-chat-store')
     })
 
+    it('generates a title and saves the summary through separate session endpoints', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ title: 'Generated title' }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.suggestSessionTitle('session /?#')).resolves.toEqual({ title: 'Generated title' })
+        await api.updateSessionSummary('session /?#', 'Generated title')
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%20%2F%3F%23/title-suggestion')
+        expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/sessions/session%20%2F%3F%23/summary')
+        expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+            method: 'PATCH',
+            body: JSON.stringify({ text: 'Generated title' })
+        })
+    })
+
     it('lists and imports Pi sessions through the selected machine', async () => {
         fetchMock
             .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, sessions: [], machineId: 'machine-1' }), { status: 200 }))
