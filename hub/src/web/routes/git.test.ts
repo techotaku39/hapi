@@ -105,11 +105,17 @@ describe('file search route', () => {
         expect((await app.request('/api/sessions/session-1/files?query=.txt')).status).toBe(200)
         expect((await app.request('/api/sessions/session-1/files?query=*.ts')).status).toBe(200)
         expect((await app.request('/api/sessions/session-1/files?query=test-%3F%3F')).status).toBe(200)
+        expect((await app.request('/api/sessions/session-1/files?query=%21*.ts')).status).toBe(200)
+        expect((await app.request('/api/sessions/session-1/files?query=%5Bab%5D*.ts')).status).toBe(200)
+        expect((await app.request('/api/sessions/session-1/files?query=%7Ba%2Cb%7D*.ts')).status).toBe(200)
 
         expect(ripgrepArgs).toEqual([
             ['--files', '--iglob', '*.txt*'],
             ['--files', '--iglob', '*.ts'],
-            ['--files', '--iglob', 'test-??']
+            ['--files', '--iglob', 'test-??'],
+            ['--files', '--iglob', '\\!*.ts'],
+            ['--files', '--iglob', '\\[ab\\]*.ts'],
+            ['--files', '--iglob', '\\{a,b\\}*.ts']
         ])
     })
 

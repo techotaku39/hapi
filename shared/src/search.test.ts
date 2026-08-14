@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { isWildcardSearch, matchesSearchQuery, toSearchGlob, wildcardToRegExp } from './search'
+import { isWildcardSearch, matchesSearchQuery, toSearchGlob } from './search'
 
 describe('search wildcard helpers', () => {
     it('only enables wildcard mode for star and question mark patterns', () => {
@@ -25,14 +25,21 @@ describe('search wildcard helpers', () => {
     })
 
     it('treats non-wildcard characters as literals', () => {
-        expect(wildcardToRegExp('file?.ts').test('file1.ts')).toBe(true)
+        expect(matchesSearchQuery('file1.ts', 'file?.ts')).toBe(true)
         expect(matchesSearchQuery('file+.ts', 'file+.ts')).toBe(true)
         expect(matchesSearchQuery('fileX.ts', 'file+.ts')).toBe(false)
+    })
+
+    it('handles adversarial wildcard patterns without regex backtracking', () => {
+        expect(matchesSearchQuery('a'.repeat(100), '*a*a*a*a*a*a*b')).toBe(false)
     })
 
     it('preserves implicit contains matching only for plain file queries', () => {
         expect(toSearchGlob('  .ts  ')).toBe('*.ts*')
         expect(toSearchGlob('*.ts')).toBe('*.ts')
         expect(toSearchGlob('test-??')).toBe('test-??')
+        expect(toSearchGlob('!*.ts')).toBe('\\!*.ts')
+        expect(toSearchGlob('[ab]*.ts')).toBe('\\[ab\\]*.ts')
+        expect(toSearchGlob('{a,b}*.ts')).toBe('\\{a,b\\}*.ts')
     })
 })
