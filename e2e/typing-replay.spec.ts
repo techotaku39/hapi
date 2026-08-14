@@ -21,6 +21,20 @@ test('keeps the typewriter for newly generated assistant output', async ({ page 
         .toBe(NEW_ASSISTANT_TEXT)
 })
 
+test('keeps the typewriter for the first response in an empty active thread', async ({ page }) => {
+    await page.goto('/e2e-fixtures/typing-replay-fixture.html?empty-thread=1&active-turn=1&stream-new=1')
+
+    await expect(page.getByTestId('assistant-message')).toHaveCount(0)
+    await page.getByTestId('start-running').click()
+
+    await expect(page.getByTestId('assistant-message')).toHaveCount(1)
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.newOutputFirstLayoutText))
+        .toBe('')
+
+    await expect(page.getByTestId('assistant-message').last().getByTestId('assistant-text'))
+        .toHaveText(NEW_ASSISTANT_TEXT)
+})
+
 // Regression: a resumed session may expose an already-materialized assistant
 // part as the currently running part. The first paint must show the full text,
 // rather than replaying assistant-ui's typewriter animation from empty.
@@ -46,6 +60,19 @@ test('does not treat prepended older history as new assistant output', async ({ 
         .toBe('complete')
     await expect(page.getByTestId('assistant-message').last().getByTestId('assistant-text'))
         .toHaveText(EXISTING_ASSISTANT_TEXT)
+})
+
+test('does not release the handoff when history pagination trims the old tail', async ({ page }) => {
+    await page.goto('/e2e-fixtures/typing-replay-fixture.html?running=1&history-window=1')
+
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('complete')
+
+    await page.getByTestId('prepend-history-window').click()
+
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('complete')
+    await expect(page.getByTestId('assistant-text').last()).toHaveText('Older history response 799.')
 })
 
 test('does not replay a hydrated assistant part when a running session mounts before history', async ({ page }) => {

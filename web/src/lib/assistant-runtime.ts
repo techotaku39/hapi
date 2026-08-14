@@ -448,6 +448,17 @@ function isOlderAssistantHistoryPrepended(
     return baseline.every((value, index) => current[suffixStart + index] === value)
 }
 
+function containsActiveAssistantOutput(
+    blocks: readonly VisibleChatBlock[],
+    activeTurnStartedAt: number | null
+): boolean {
+    return activeTurnStartedAt !== null
+        && blocks.some((block) => (
+            visibleBlockRole(block) === 'assistant'
+            && getBlockPresentationTimestamp(block) >= activeTurnStartedAt
+        ))
+}
+
 function toThreadMessageLike(
     block: VisibleChatBlock,
     threadMessageId: string,
@@ -717,13 +728,16 @@ export function useHappyRuntime(props: {
     pendingSendIntentRef?: React.MutableRefObject<ComposerSendIntent>
 }) {
     const isRunning = props.isRunning ?? props.session.thinking
+    const activeTurnStartedAt = props.session.activeTurnStartedAt ?? null
     const assistantBlockSignatures = useMemo(
         () => getAssistantBlockSignatures(props.blocks),
         [props.blocks]
     )
+    const hasActiveAssistantOutput = containsActiveAssistantOutput(props.blocks, activeTurnStartedAt)
     const runningHandoffRef = useRef({
         sessionId: props.session.id,
         wasRunning: isRunning,
+        historyVersion: props.historyVersion,
         assistantBlockSignatures: isRunning ? assistantBlockSignatures : null,
         // A running session can mount before its first message page arrives.
         // Treat that first non-empty snapshot as hydration, not as new stream
@@ -740,15 +754,28 @@ export function useHappyRuntime(props: {
     if (runningHandoff.sessionId !== props.session.id) {
         runningHandoff.sessionId = props.session.id
         runningHandoff.wasRunning = isRunning
+        runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = isRunning ? assistantBlockSignatures : null
         runningHandoff.hasObservedAssistantBlocks = !isRunning || assistantBlockSignatures.length > 0
     } else if (!isRunning) {
+        runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = null
     } else if (!runningHandoff.wasRunning) {
+        runningHandoff.historyVersion = props.historyVersion
+        runningHandoff.assistantBlockSignatures = hasActiveAssistantOutput
+            ? null
+            : assistantBlockSignatures
+        runningHandoff.hasObservedAssistantBlocks = props.blocks.length > 0
+    } else if (runningHandoff.historyVersion !== props.historyVersion) {
+        // A bounded older-history prepend can drop the previous tail, so the
+        // new signature list is not necessarily a suffix of the old one.
+        runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = assistantBlockSignatures
-        runningHandoff.hasObservedAssistantBlocks = assistantBlockSignatures.length > 0
-    } else if (!runningHandoff.hasObservedAssistantBlocks && assistantBlockSignatures.length > 0) {
-        runningHandoff.assistantBlockSignatures = assistantBlockSignatures
+        runningHandoff.hasObservedAssistantBlocks = props.blocks.length > 0
+    } else if (!runningHandoff.hasObservedAssistantBlocks && props.blocks.length > 0) {
+        runningHandoff.assistantBlockSignatures = hasActiveAssistantOutput
+            ? null
+            : assistantBlockSignatures
         runningHandoff.hasObservedAssistantBlocks = true
     } else if (
         runningHandoff.assistantBlockSignatures !== null

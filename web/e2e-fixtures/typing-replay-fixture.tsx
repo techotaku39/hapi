@@ -91,6 +91,31 @@ const OLDER_HISTORY_BLOCKS: readonly VisibleChatBlock[] = [
     }
 ]
 
+const HISTORY_WINDOW_BLOCKS: readonly VisibleChatBlock[] = Array.from(
+    { length: 800 },
+    (_, index): VisibleChatBlock => {
+        const timestamp = 1_699_999_000_000 + index
+        if (index % 2 === 0) {
+            return {
+                kind: 'user-text',
+                id: `window-user-${index}`,
+                localId: `window-user-${index}`,
+                createdAt: timestamp,
+                invokedAt: timestamp,
+                text: `Older history prompt ${index}.`
+            }
+        }
+        return {
+            kind: 'agent-text',
+            id: `window-assistant-${index}`,
+            localId: `window-assistant-${index}`,
+            createdAt: timestamp,
+            invokedAt: timestamp,
+            text: `Older history response ${index}.`
+        }
+    }
+)
+
 function ProbeText(props: TextMessagePartProps) {
     useLayoutEffect(() => {
         const probe = window.__typingReplayProbe ?? { firstLayoutText: '' }
@@ -174,10 +199,13 @@ function FixtureThread() {
     const hydrateBlocks = params.has('hydrate')
     const hydrateAfterStart = params.has('hydrate-after-start')
     const streamNewOutput = params.has('stream-new')
+    const emptyThread = params.has('empty-thread')
     const [sessionId, setSessionId] = useState('typing-replay-fixture')
     const blocks = useMemo(
-        () => includeReasoning ? [FIXTURE_BLOCKS[0]!, REASONING_BLOCK] : FIXTURE_BLOCKS,
-        [includeReasoning]
+        () => emptyThread
+            ? []
+            : includeReasoning ? [FIXTURE_BLOCKS[0]!, REASONING_BLOCK] : FIXTURE_BLOCKS,
+        [emptyThread, includeReasoning]
     )
     const newOutputBlocks = useMemo<readonly VisibleChatBlock[]>(
         () => [
@@ -194,16 +222,17 @@ function FixtureThread() {
                 kind: 'agent-text',
                 id: 'assistant-2',
                 localId: 'assistant-2',
-                createdAt: 1_700_000_000_003,
-                invokedAt: 1_700_000_000_003,
+                createdAt: hasActiveTurn ? 1_700_000_000_101 : 1_700_000_000_003,
+                invokedAt: hasActiveTurn ? 1_700_000_000_101 : 1_700_000_000_003,
                 text: NEW_ASSISTANT_TEXT
             }
         ],
-        [blocks]
+        [blocks, hasActiveTurn]
     )
     const [visibleBlocks, setVisibleBlocks] = useState<readonly VisibleChatBlock[]>(
         () => hydrateBlocks || hydrateAfterStart ? [] : blocks
     )
+    const [historyVersion, setHistoryVersion] = useState(1)
     useEffect(() => {
         if (!hydrateBlocks || hydrateAfterStart) return
         const timer = window.setTimeout(() => setVisibleBlocks(blocks), 50)
@@ -222,7 +251,7 @@ function FixtureThread() {
         session,
         blocks: visibleBlocks,
         messagesVersion: 1,
-        historyVersion: 1,
+        historyVersion,
         isSending: false,
         isRunning,
         onSendMessage: () => {},
@@ -272,6 +301,18 @@ function FixtureThread() {
                         onClick={() => setVisibleBlocks((current) => [...OLDER_HISTORY_BLOCKS, ...current])}
                     >
                         Prepend older history
+                    </button>
+                ) : null}
+                {params.has('history-window') ? (
+                    <button
+                        type="button"
+                        data-testid="prepend-history-window"
+                        onClick={() => {
+                            setVisibleBlocks(HISTORY_WINDOW_BLOCKS)
+                            setHistoryVersion((current) => current + 1)
+                        }}
+                    >
+                        Load older history window
                     </button>
                 ) : null}
             </ThreadPrimitive.Root>
