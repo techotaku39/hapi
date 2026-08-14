@@ -1098,6 +1098,9 @@ export function markMessagesConsumed(sessionId: string, localIds: string[], invo
             }
         })
         if (!changed) return previous
-        return buildState(previous, { messages: mergeMessages([], updated) })
+        return buildState(previous, {
+            messages: mergeMessages([], updated),
+            tailRevision: previous.tailRevision + 1
+        })
     })
 }
