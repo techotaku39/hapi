@@ -49,7 +49,7 @@ function ShimmerDot() {
 
 export const Reasoning: ReasoningMessagePartComponent = ({ text, status }) => {
     const previousTextRef = useRef(text)
-    const previousStatusTypeRef = useRef(status.type)
+    const runStartedWithRunningRef = useRef(status.type === 'running')
     const hasTextChangedDuringRunRef = useRef(false)
 
     // The runtime keeps resumed reasoning history complete until a new output
@@ -57,6 +57,7 @@ export const Reasoning: ReasoningMessagePartComponent = ({ text, status }) => {
     // typewriter from its first paint. A complete -> running transition with
     // unchanged text is still treated as hydration, not new reasoning output.
     if (status.type !== 'running') {
+        runStartedWithRunningRef.current = false
         hasTextChangedDuringRunRef.current = false
     } else if (
         text !== previousTextRef.current
@@ -64,10 +65,9 @@ export const Reasoning: ReasoningMessagePartComponent = ({ text, status }) => {
         hasTextChangedDuringRunRef.current = true
     }
     const smooth = status.type === 'running'
-        && (hasTextChangedDuringRunRef.current || previousStatusTypeRef.current === 'running')
+        && (runStartedWithRunningRef.current || hasTextChangedDuringRunRef.current)
 
     previousTextRef.current = text
-    previousStatusTypeRef.current = status.type
 
     return (
         <UriConfirmProvider>

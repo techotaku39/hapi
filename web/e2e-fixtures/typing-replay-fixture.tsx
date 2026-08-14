@@ -72,6 +72,25 @@ const REASONING_BLOCK: VisibleChatBlock = {
     text: EXISTING_REASONING_TEXT
 }
 
+const OLDER_HISTORY_BLOCKS: readonly VisibleChatBlock[] = [
+    {
+        kind: 'user-text',
+        id: 'older-user-1',
+        localId: 'older-user-1',
+        createdAt: 1_699_999_999_998,
+        invokedAt: 1_699_999_999_998,
+        text: 'Show an older response.'
+    },
+    {
+        kind: 'agent-text',
+        id: 'older-assistant-1',
+        localId: 'older-assistant-1',
+        createdAt: 1_699_999_999_999,
+        invokedAt: 1_699_999_999_999,
+        text: 'This response was generated in an older history page.'
+    }
+]
+
 function ProbeText(props: TextMessagePartProps) {
     useLayoutEffect(() => {
         const probe = window.__typingReplayProbe ?? { firstLayoutText: '' }
@@ -244,6 +263,15 @@ function FixtureThread() {
                         }}
                     >
                         Switch session
+                    </button>
+                ) : null}
+                {params.has('prepend-history') ? (
+                    <button
+                        type="button"
+                        data-testid="prepend-history"
+                        onClick={() => setVisibleBlocks((current) => [...OLDER_HISTORY_BLOCKS, ...current])}
+                    >
+                        Prepend older history
                     </button>
                 ) : null}
             </ThreadPrimitive.Root>

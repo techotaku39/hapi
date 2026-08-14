@@ -105,7 +105,7 @@ export function NotifySummaryFooter({ summary }: { summary: NotifySummary }) {
 export const NotifySummaryText: TextMessagePartComponent = ({ text, status }) => {
     const showInChat = useSessionSummaryInChat()
     const previousTextRef = useRef(text)
-    const previousStatusTypeRef = useRef(status.type)
+    const runStartedWithRunningRef = useRef(status.type === 'running')
     const hasTextChangedDuringRunRef = useRef(false)
 
     // The runtime keeps already-materialized history complete while a session
@@ -114,6 +114,7 @@ export const NotifySummaryText: TextMessagePartComponent = ({ text, status }) =>
     // enabled from its first paint. A status-only complete -> running change
     // with unchanged text is still treated as hydration, not new output.
     if (status.type !== 'running') {
+        runStartedWithRunningRef.current = false
         hasTextChangedDuringRunRef.current = false
     } else if (
         text !== previousTextRef.current
@@ -121,10 +122,9 @@ export const NotifySummaryText: TextMessagePartComponent = ({ text, status }) =>
         hasTextChangedDuringRunRef.current = true
     }
     const smooth = status.type === 'running'
-        && (hasTextChangedDuringRunRef.current || previousStatusTypeRef.current === 'running')
+        && (runStartedWithRunningRef.current || hasTextChangedDuringRunRef.current)
 
     previousTextRef.current = text
-    previousStatusTypeRef.current = status.type
 
     if (!showInChat) {
         const stripped = stripNotifySummaryFooter(text)

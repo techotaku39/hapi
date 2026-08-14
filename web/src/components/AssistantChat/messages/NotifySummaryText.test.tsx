@@ -143,6 +143,11 @@ describe('NotifySummaryText', () => {
                 <NotifySummaryText type="text" text="Already generated." status={{ type: 'running' }} />
             </I18nProvider>
         )
+        view.rerender(
+            <I18nProvider>
+                <NotifySummaryText type="text" text="Already generated." status={{ type: 'running' }} />
+            </I18nProvider>
+        )
 
         expect(screen.getByTestId('raw-markdown')).toHaveAttribute('data-smooth', 'false')
     })

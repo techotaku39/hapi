@@ -420,7 +420,7 @@ export function findLatestCompletedBoundaryId(
     return candidate
 }
 
-function getAssistantBlockSignature(blocks: readonly VisibleChatBlock[]): string {
+function getAssistantBlockSignatures(blocks: readonly VisibleChatBlock[]): string[] {
     return blocks
         .filter((block) => visibleBlockRole(block) === 'assistant')
         .map((block) => {
@@ -429,7 +429,23 @@ function getAssistantBlockSignature(blocks: readonly VisibleChatBlock[]): string
             const textMarker = text.length <= 64 ? text : `${text.length}:${text.slice(-32)}`
             return `${block.id}:${getBlockPresentationTimestamp(block)}:${textMarker}:${toolCount}`
         })
-        .join('|')
+}
+
+function haveSameAssistantBlockSignatures(
+    first: readonly string[],
+    second: readonly string[]
+): boolean {
+    return first.length === second.length
+        && first.every((value, index) => value === second[index])
+}
+
+function isOlderAssistantHistoryPrepended(
+    current: readonly string[],
+    baseline: readonly string[]
+): boolean {
+    if (baseline.length === 0 || current.length <= baseline.length) return false
+    const suffixStart = current.length - baseline.length
+    return baseline.every((value, index) => current[suffixStart + index] === value)
 }
 
 function toThreadMessageLike(
@@ -701,18 +717,18 @@ export function useHappyRuntime(props: {
     pendingSendIntentRef?: React.MutableRefObject<ComposerSendIntent>
 }) {
     const isRunning = props.isRunning ?? props.session.thinking
-    const assistantBlockSignature = useMemo(
-        () => getAssistantBlockSignature(props.blocks),
+    const assistantBlockSignatures = useMemo(
+        () => getAssistantBlockSignatures(props.blocks),
         [props.blocks]
     )
     const runningHandoffRef = useRef({
         sessionId: props.session.id,
         wasRunning: isRunning,
-        assistantBlockSignature: isRunning ? assistantBlockSignature : null,
+        assistantBlockSignatures: isRunning ? assistantBlockSignatures : null,
         // A running session can mount before its first message page arrives.
         // Treat that first non-empty snapshot as hydration, not as new stream
         // output, so a resumed reasoning part cannot start from an empty view.
-        hasObservedAssistantBlocks: !isRunning || assistantBlockSignature !== ''
+        hasObservedAssistantBlocks: !isRunning || assistantBlockSignatures.length > 0
     })
     // assistant-ui derives the last message's status from the thread-level
     // isRunning flag. On a send, that flag can become true before the new
@@ -724,26 +740,40 @@ export function useHappyRuntime(props: {
     if (runningHandoff.sessionId !== props.session.id) {
         runningHandoff.sessionId = props.session.id
         runningHandoff.wasRunning = isRunning
-        runningHandoff.assistantBlockSignature = isRunning ? assistantBlockSignature : null
-        runningHandoff.hasObservedAssistantBlocks = !isRunning || assistantBlockSignature !== ''
+        runningHandoff.assistantBlockSignatures = isRunning ? assistantBlockSignatures : null
+        runningHandoff.hasObservedAssistantBlocks = !isRunning || assistantBlockSignatures.length > 0
     } else if (!isRunning) {
-        runningHandoff.assistantBlockSignature = null
+        runningHandoff.assistantBlockSignatures = null
     } else if (!runningHandoff.wasRunning) {
-        runningHandoff.assistantBlockSignature = assistantBlockSignature
-        runningHandoff.hasObservedAssistantBlocks = assistantBlockSignature !== ''
-    } else if (!runningHandoff.hasObservedAssistantBlocks && assistantBlockSignature !== '') {
-        runningHandoff.assistantBlockSignature = assistantBlockSignature
+        runningHandoff.assistantBlockSignatures = assistantBlockSignatures
+        runningHandoff.hasObservedAssistantBlocks = assistantBlockSignatures.length > 0
+    } else if (!runningHandoff.hasObservedAssistantBlocks && assistantBlockSignatures.length > 0) {
+        runningHandoff.assistantBlockSignatures = assistantBlockSignatures
         runningHandoff.hasObservedAssistantBlocks = true
     } else if (
-        runningHandoff.assistantBlockSignature !== null
-        && runningHandoff.assistantBlockSignature !== assistantBlockSignature
+        runningHandoff.assistantBlockSignatures !== null
+        && !haveSameAssistantBlockSignatures(
+            runningHandoff.assistantBlockSignatures,
+            assistantBlockSignatures
+        )
     ) {
-        runningHandoff.assistantBlockSignature = null
+        if (isOlderAssistantHistoryPrepended(
+            assistantBlockSignatures,
+            runningHandoff.assistantBlockSignatures
+        )) {
+            runningHandoff.assistantBlockSignatures = assistantBlockSignatures
+        } else {
+            runningHandoff.assistantBlockSignatures = null
+        }
     }
     runningHandoff.wasRunning = isRunning
 
     const waitingForAssistantOutput = isRunning
-        && runningHandoff.assistantBlockSignature === assistantBlockSignature
+        && runningHandoff.assistantBlockSignatures !== null
+        && haveSameAssistantBlockSignatures(
+            runningHandoff.assistantBlockSignatures,
+            assistantBlockSignatures
+        )
     const isRunningForMessages = isRunning && !waitingForAssistantOutput
 
     // Compute response-group aggregates once per block list so we can

@@ -34,6 +34,20 @@ test('does not replay existing assistant text when opening a running session', a
     await expect(page.getByTestId('assistant-text')).toHaveText(EXISTING_ASSISTANT_TEXT)
 })
 
+test('does not treat prepended older history as new assistant output', async ({ page }) => {
+    await page.goto('/e2e-fixtures/typing-replay-fixture.html?running=1&prepend-history=1')
+
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('complete')
+
+    await page.getByTestId('prepend-history').click()
+
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('complete')
+    await expect(page.getByTestId('assistant-message').last().getByTestId('assistant-text'))
+        .toHaveText(EXISTING_ASSISTANT_TEXT)
+})
+
 test('does not replay a hydrated assistant part when a running session mounts before history', async ({ page }) => {
     await page.goto('/e2e-fixtures/typing-replay-fixture.html?running=1&hydrate=1')
 

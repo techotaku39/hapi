@@ -324,6 +324,7 @@ describe('Reasoning', () => {
         const view = renderReasoning('Already thought.')
 
         view.rerender(<Reasoning type="reasoning" text="Already thought." status={{ type: 'running' }} />)
+        view.rerender(<Reasoning type="reasoning" text="Already thought." status={{ type: 'running' }} />)
 
         expect(screen.getByTestId('reasoning-markdown')).toHaveAttribute('data-smooth', 'false')
     })
