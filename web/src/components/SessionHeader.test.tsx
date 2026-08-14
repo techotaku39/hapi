@@ -273,6 +273,31 @@ describe('SessionHeader', () => {
         }
     })
 
+    it('anchors the action menu to the center of the More actions trigger', () => {
+        renderHeader(baseSession())
+
+        const moreButton = screen.getByTitle('More actions')
+        const getBoundingClientRect = vi.spyOn(moreButton, 'getBoundingClientRect').mockReturnValue({
+            bottom: 64,
+            height: 32,
+            left: 100,
+            right: 132,
+            top: 32,
+            width: 32,
+            x: 100,
+            y: 32,
+            toJSON: () => ({})
+        } as DOMRect)
+
+        try {
+            fireEvent.click(moreButton)
+
+            expect(screen.getByRole('menu').parentElement).toHaveStyle({ left: '116px' })
+        } finally {
+            getBoundingClientRect.mockRestore()
+        }
+    })
+
     it('toggles pin state from the header action menu', async () => {
         const setSessionPinMode = vi.fn().mockResolvedValue(undefined)
         const api = {
