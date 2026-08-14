@@ -34,12 +34,4 @@ describe('search wildcard helpers', () => {
         expect(matchesSearchQuery('a'.repeat(100), '*a*a*a*a*a*a*b')).toBe(false)
     })
 
-    it('preserves implicit contains matching only for plain file queries', () => {
-        expect(toSearchGlob('  .ts  ')).toBe('*.ts*')
-        expect(toSearchGlob('*.ts')).toBe('*.ts')
-        expect(toSearchGlob('test-??')).toBe('test-??')
-        expect(toSearchGlob('!*.ts')).toBe('\\!*.ts')
-        expect(toSearchGlob('[ab]*.ts')).toBe('\\[ab\\]*.ts')
-        expect(toSearchGlob('{a,b}*.ts')).toBe('\\{a,b\\}*.ts')
-    })
 })

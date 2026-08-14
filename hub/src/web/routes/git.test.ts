@@ -84,7 +84,7 @@ describe('generated images route', () => {
 })
 
 describe('file search route', () => {
-    it('keeps plain text contains matching and passes wildcard patterns through unchanged', async () => {
+    it('uses shared matching semantics for plain and wildcard queries', async () => {
         const session = {
             id: 'session-1',
             namespace: 'default',
@@ -92,30 +92,53 @@ describe('file search route', () => {
             metadata: { path: '/project' }
         } as unknown as Session
         const ripgrepArgs: string[][] = []
+        const stdout = [
+            'src/file.ts',
+            'other.ts',
+            'test-AB',
+            '!literal.ts',
+            '[ab]literal.ts',
+            '{a,b}literal.ts',
+            'notes.txt'
+        ].join('\n')
         const engine = {
             resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
             runRipgrep: async (_sessionId: string, args: string[]) => {
                 ripgrepArgs.push(args)
-                return { success: true, stdout: '' }
+                return { success: true, stdout }
             },
-            statFiles: async () => ({ success: true, entries: [] })
+            statFiles: async (_sessionId: string, paths: string[]) => ({
+                success: true,
+                entries: paths.map((path) => ({ path, size: 1, modified: 1 }))
+            })
         } as unknown as Partial<SyncEngine>
 
         const app = buildApp(engine)
-        expect((await app.request('/api/sessions/session-1/files?query=.txt')).status).toBe(200)
-        expect((await app.request('/api/sessions/session-1/files?query=*.ts')).status).toBe(200)
-        expect((await app.request('/api/sessions/session-1/files?query=test-%3F%3F')).status).toBe(200)
-        expect((await app.request('/api/sessions/session-1/files?query=%21*.ts')).status).toBe(200)
-        expect((await app.request('/api/sessions/session-1/files?query=%5Bab%5D*.ts')).status).toBe(200)
-        expect((await app.request('/api/sessions/session-1/files?query=%7Ba%2Cb%7D*.ts')).status).toBe(200)
+        const queries: Array<[string, string[]]> = [
+            ['.txt', ['notes.txt']],
+            ['*.ts', ['src/file.ts', 'other.ts', '!literal.ts', '[ab]literal.ts', '{a,b}literal.ts']],
+            ['test-%3F%3F', ['test-AB']],
+            ['%21*.ts', ['!literal.ts']],
+            ['%5Bab%5D*.ts', ['[ab]literal.ts']],
+            ['%7Ba%2Cb%7D*.ts', ['{a,b}literal.ts']],
+            ['src*.ts', ['src/file.ts']]
+        ]
+
+        for (const [query, expected] of queries) {
+            const response = await app.request(`/api/sessions/session-1/files?query=${query}`)
+            expect(response.status).toBe(200)
+            const body = await response.json() as { files: Array<{ fullPath: string }> }
+            expect(body.files.map((file) => file.fullPath)).toEqual(expected)
+        }
 
         expect(ripgrepArgs).toEqual([
-            ['--files', '--iglob', '*.txt*'],
-            ['--files', '--iglob', '*.ts'],
-            ['--files', '--iglob', 'test-??'],
-            ['--files', '--iglob', '\\!*.ts'],
-            ['--files', '--iglob', '\\[ab\\]*.ts'],
-            ['--files', '--iglob', '\\{a,b\\}*.ts']
+            ['--files'],
+            ['--files'],
+            ['--files'],
+            ['--files'],
+            ['--files'],
+            ['--files'],
+            ['--files']
         ])
     })
 

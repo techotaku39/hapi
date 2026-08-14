@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { toSearchGlob } from '@hapi/protocol'
+import { matchesSearchQuery } from '@hapi/protocol'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -231,9 +231,6 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         const query = parsed.data.query?.trim() ?? ''
         const limit = parsed.data.limit ?? 200
         const args = ['--files']
-        if (query) {
-            args.push('--iglob', toSearchGlob(query))
-        }
 
         const result = await runRpc(() => engine.runRipgrep(sessionResult.sessionId, args, sessionPath))
         if (!result.success) {
@@ -249,6 +246,7 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             .map((line) => line.trim())
             .filter((line) => line.length > 0)
             .map(normalizePath)
+            .filter((path) => !query || matchesSearchQuery(path, query))
             .slice(0, limit)
 
         const metadataResult = await runRpc(() => engine.statFiles(sessionResult.sessionId, paths))

@@ -44,24 +44,3 @@ export function matchesSearchQuery(value: string, query: string): boolean {
 
     return matchesWildcard(value, normalizedQuery)
 }
-
-function escapeRipgrepGlobSyntax(pattern: string): string {
-    let escaped = ''
-    for (const [index, character] of Array.from(pattern).entries()) {
-        if (character === '\\' || character === '[' || character === ']' || character === '{' || character === '}') {
-            escaped += `\\${character}`
-        } else if (index === 0 && character === '!') {
-            escaped += '\\!'
-        } else {
-            escaped += character
-        }
-    }
-    return escaped
-}
-
-/** Build the ripgrep Glob used by file search while preserving plain-text behavior. */
-export function toSearchGlob(query: string): string {
-    const normalizedQuery = query.trim()
-    const pattern = isWildcardSearch(normalizedQuery) ? normalizedQuery : `*${normalizedQuery}*`
-    return escapeRipgrepGlobSyntax(pattern)
-}
