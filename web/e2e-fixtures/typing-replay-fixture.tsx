@@ -63,6 +63,25 @@ const FIXTURE_BLOCKS: readonly VisibleChatBlock[] = [
     }
 ]
 
+const ACTIVE_HYDRATED_BLOCKS: readonly VisibleChatBlock[] = [
+    {
+        kind: 'user-text',
+        id: 'active-user-1',
+        localId: 'active-user-1',
+        createdAt: 1_700_000_000_100,
+        invokedAt: 1_700_000_000_100,
+        text: 'Continue the active response.'
+    },
+    {
+        kind: 'agent-text',
+        id: 'active-assistant-1',
+        localId: 'active-assistant-1',
+        createdAt: 1_700_000_000_101,
+        invokedAt: 1_700_000_000_101,
+        text: EXISTING_ASSISTANT_TEXT
+    }
+]
+
 const REASONING_BLOCK: VisibleChatBlock = {
     kind: 'agent-reasoning',
     id: 'reasoning-1',
@@ -200,12 +219,15 @@ function FixtureThread() {
     const hydrateAfterStart = params.has('hydrate-after-start')
     const streamNewOutput = params.has('stream-new')
     const emptyThread = params.has('empty-thread')
+    const hydrateActiveOutput = params.has('hydrate-active-output')
     const [sessionId, setSessionId] = useState('typing-replay-fixture')
     const blocks = useMemo(
         () => emptyThread
             ? []
+            : hydrateActiveOutput
+                ? ACTIVE_HYDRATED_BLOCKS
             : includeReasoning ? [FIXTURE_BLOCKS[0]!, REASONING_BLOCK] : FIXTURE_BLOCKS,
-        [emptyThread, includeReasoning]
+        [emptyThread, hydrateActiveOutput, includeReasoning]
     )
     const newOutputBlocks = useMemo<readonly VisibleChatBlock[]>(
         () => [
@@ -313,6 +335,15 @@ function FixtureThread() {
                         }}
                     >
                         Load older history window
+                    </button>
+                ) : null}
+                {params.has('history-after-output') ? (
+                    <button
+                        type="button"
+                        data-testid="history-after-output"
+                        onClick={() => setHistoryVersion((current) => current + 1)}
+                    >
+                        Refresh history
                     </button>
                 ) : null}
             </ThreadPrimitive.Root>

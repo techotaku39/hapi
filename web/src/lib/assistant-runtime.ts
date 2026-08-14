@@ -739,6 +739,7 @@ export function useHappyRuntime(props: {
         wasRunning: isRunning,
         historyVersion: props.historyVersion,
         assistantBlockSignatures: isRunning ? assistantBlockSignatures : null,
+        awaitingExistingRunHydration: isRunning && props.blocks.length === 0,
         // A running session can mount before its first message page arrives.
         // Treat that first non-empty snapshot as hydration, not as new stream
         // output, so a resumed reasoning part cannot start from an empty view.
@@ -756,26 +757,34 @@ export function useHappyRuntime(props: {
         runningHandoff.wasRunning = isRunning
         runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = isRunning ? assistantBlockSignatures : null
+        runningHandoff.awaitingExistingRunHydration = isRunning && props.blocks.length === 0
         runningHandoff.hasObservedAssistantBlocks = !isRunning || assistantBlockSignatures.length > 0
     } else if (!isRunning) {
         runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = null
+        runningHandoff.awaitingExistingRunHydration = false
     } else if (!runningHandoff.wasRunning) {
         runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = hasActiveAssistantOutput
             ? null
             : assistantBlockSignatures
+        runningHandoff.awaitingExistingRunHydration = false
         runningHandoff.hasObservedAssistantBlocks = props.blocks.length > 0
     } else if (runningHandoff.historyVersion !== props.historyVersion) {
         // A bounded older-history prepend can drop the previous tail, so the
         // new signature list is not necessarily a suffix of the old one.
         runningHandoff.historyVersion = props.historyVersion
-        runningHandoff.assistantBlockSignatures = assistantBlockSignatures
-        runningHandoff.hasObservedAssistantBlocks = props.blocks.length > 0
+        if (runningHandoff.assistantBlockSignatures !== null) {
+            runningHandoff.assistantBlockSignatures = assistantBlockSignatures
+            runningHandoff.hasObservedAssistantBlocks = props.blocks.length > 0
+        }
     } else if (!runningHandoff.hasObservedAssistantBlocks && props.blocks.length > 0) {
-        runningHandoff.assistantBlockSignatures = hasActiveAssistantOutput
-            ? null
-            : assistantBlockSignatures
+        runningHandoff.assistantBlockSignatures = (
+            runningHandoff.awaitingExistingRunHydration || !hasActiveAssistantOutput
+        )
+            ? assistantBlockSignatures
+            : null
+        runningHandoff.awaitingExistingRunHydration = false
         runningHandoff.hasObservedAssistantBlocks = true
     } else if (
         runningHandoff.assistantBlockSignatures !== null

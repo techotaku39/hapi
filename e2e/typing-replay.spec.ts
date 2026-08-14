@@ -85,6 +85,16 @@ test('does not replay a hydrated assistant part when a running session mounts be
     await expect(page.getByTestId('assistant-text')).toHaveText(EXISTING_ASSISTANT_TEXT)
 })
 
+test('does not replay active-turn output when a running session hydrates history', async ({ page }) => {
+    await page.goto('/e2e-fixtures/typing-replay-fixture.html?running=1&hydrate=1&active-turn=1&hydrate-active-output=1')
+
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.firstLayoutText ?? ''))
+        .toBe(EXISTING_ASSISTANT_TEXT)
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('complete')
+    await expect(page.getByTestId('assistant-text')).toHaveText(EXISTING_ASSISTANT_TEXT)
+})
+
 test('does not replay history after a completed session starts running before its history arrives', async ({ page }) => {
     await page.goto('/e2e-fixtures/typing-replay-fixture.html?hydrate-after-start=1')
 
@@ -110,6 +120,19 @@ test('does not replay the previous response during a new send', async ({ page })
     await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.reasoningGroupStatusTypes ?? []))
         .not.toContain('running')
     await expect(page.getByTestId('assistant-text')).toHaveText(EXISTING_ASSISTANT_TEXT)
+})
+
+test('keeps a live response running after history pagination', async ({ page }) => {
+    await page.goto('/e2e-fixtures/typing-replay-fixture.html?stream-new=1&history-after-output=1')
+
+    await page.getByTestId('start-running').click()
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('running')
+
+    await page.getByTestId('history-after-output').click()
+
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('running')
 })
 
 test('does not replay existing reasoning when opening a running session', async ({ page }) => {
