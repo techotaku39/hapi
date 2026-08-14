@@ -146,6 +146,7 @@ export function SessionHeader(props: {
     onToggleTerminal?: () => void
     terminalActive?: boolean
     api: ApiClient | null
+    titleSuggestionAvailable?: boolean
     canReopen?: boolean
     reopenDisabledReason?: string
     reopenHint?: string
@@ -550,8 +551,8 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
-                onSuggestTitle={api ? suggestSessionTitle : undefined}
-                onUpdateSummary={api ? updateSessionSummary : undefined}
+                onSuggestTitle={api && props.titleSuggestionAvailable ? suggestSessionTitle : undefined}
+                onUpdateSummary={api && props.titleSuggestionAvailable ? updateSessionSummary : undefined}
                 isPending={isPending}
             />
 

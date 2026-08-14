@@ -126,6 +126,42 @@ describe('TitleSuggestionService', () => {
         expect(prompts[0]).toContain('Explain the release process')
     })
 
+    it('uses display-position order when a queued prompt is invoked late', async () => {
+        const { store, sessionId } = makeStore()
+        store.messages.addMessage(
+            sessionId,
+            { role: 'user', content: { type: 'text', text: 'The late queued prompt is the current topic' } },
+            'queued-local-id'
+        )
+        for (let index = 0; index < 201; index += 1) {
+            store.messages.addMessage(
+                sessionId,
+                { role: 'user', content: { type: 'text', text: `Older stored message ${index}` } }
+            )
+        }
+
+        const latestStoredMessage = store.messages.getMessages(sessionId).at(-1)
+        if (!latestStoredMessage) throw new Error('Expected test messages')
+        store.messages.markMessagesInvoked(
+            sessionId,
+            ['queued-local-id'],
+            latestStoredMessage.createdAt + 1
+        )
+
+        let prompt = ''
+        const service = new TitleSuggestionService(store, {
+            provider: {
+                suggest: async (value) => {
+                    prompt = value
+                    return 'Current topic'
+                }
+            }
+        })
+
+        await expect(service.suggestTitle(sessionId)).resolves.toBe('Current topic')
+        expect(prompt).toContain('The late queued prompt is the current topic')
+    })
+
     it('reports unavailable configuration and enforces the per-session request limit', async () => {
         const { store, sessionId } = makeStore()
         const unavailable = createTitleSuggestionService(store)

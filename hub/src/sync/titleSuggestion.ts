@@ -304,7 +304,7 @@ export class TitleSuggestionService {
         }
 
         const conversation = buildTitleConversation(
-            this.store.messages.getMessages(sessionId, TITLE_SUGGESTION_MESSAGE_LIMIT)
+            this.store.messages.getMessagesByPosition(sessionId, TITLE_SUGGESTION_MESSAGE_LIMIT)
         )
         if (!conversation) {
             throw new TitleSuggestionError(

@@ -24,6 +24,7 @@ import type {
     SpawnResponse,
     VisibilityPayload,
     HapiSessionExport,
+    HubHealthResponse,
     SessionResponse,
     SessionTitleSuggestionResponse,
     SessionsResponse
@@ -246,6 +247,10 @@ export class ApiClient {
 
     async getSessions(): Promise<SessionsResponse> {
         return await this.request<SessionsResponse>('/api/sessions')
+    }
+
+    async getHealth(): Promise<HubHealthResponse> {
+        return await this.request<HubHealthResponse>('/health')
     }
 
     async getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse> {

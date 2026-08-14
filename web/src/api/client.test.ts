@@ -111,6 +111,22 @@ describe('ApiClient error mapping', () => {
         })
     })
 
+    it('reads the Hub title suggestion capability', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            status: 'ok',
+            protocolVersion: 1,
+            capabilities: { titleSuggestion: true }
+        }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getHealth()).resolves.toEqual({
+            status: 'ok',
+            protocolVersion: 1,
+            capabilities: { titleSuggestion: true }
+        })
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/health')
+    })
+
     it('lists and imports Pi sessions through the selected machine', async () => {
         fetchMock
             .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, sessions: [], machineId: 'machine-1' }), { status: 200 }))

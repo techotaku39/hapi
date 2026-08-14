@@ -40,7 +40,7 @@ function baseSession(overrides: Partial<Session> = {}): Session {
     }
 }
 
-function renderHeader(session: Session, extra?: { serviceTier?: string | null }) {
+function renderHeader(session: Session, extra?: { serviceTier?: string | null; titleSuggestionAvailable?: boolean }) {
     return render(
         <QueryClientProvider client={new QueryClient()}>
             <ToastProvider>
@@ -48,6 +48,7 @@ function renderHeader(session: Session, extra?: { serviceTier?: string | null })
                     <SessionHeader
                         session={session}
                         serviceTier={extra?.serviceTier}
+                        titleSuggestionAvailable={extra?.titleSuggestionAvailable}
                         onBack={vi.fn()}
                         api={null}
                     />
@@ -82,6 +83,33 @@ describe('resolveSessionHeaderMachineLabel', () => {
 })
 
 describe('SessionHeader', () => {
+    it('hides title generation when the Hub does not advertise the capability', () => {
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] })
+        } as unknown as ApiClient
+
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={baseSession()}
+                            onBack={vi.fn()}
+                            api={api}
+                            titleSuggestionAvailable={false}
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByTitle('More actions'))
+        fireEvent.click(screen.getByRole('menuitem', { name: /Rename/ }))
+
+        expect(screen.queryByRole('button', { name: 'Generate' })).not.toBeInTheDocument()
+    })
+
     it('manually syncs an inactive Pi session through its owning machine', async () => {
         const importPiSessions = vi.fn().mockResolvedValue({
             success: true,
