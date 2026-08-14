@@ -69,17 +69,30 @@ describe('resolvePiContextWindow', () => {
 
 describe('resolveLatestCompletedBoundaryIdForView', () => {
     it('uses the live tail boundary when following the latest messages', () => {
-        expect(resolveLatestCompletedBoundaryIdForView('tail', 'agent-text:latest', 'agent-text:old'))
+        expect(resolveLatestCompletedBoundaryIdForView('tail', 'agent-text:latest', {
+            id: 'agent-text:old',
+            tailRevision: 1
+        }, 2))
             .toBe('agent-text:latest')
     })
 
     it('keeps the live tail boundary while reading older messages', () => {
-        expect(resolveLatestCompletedBoundaryIdForView('history', null, 'agent-text:latest'))
+        expect(resolveLatestCompletedBoundaryIdForView('history', null, {
+            id: 'agent-text:latest',
+            tailRevision: 2
+        }, 2))
             .toBe('agent-text:latest')
     })
 
+    it('invalidates the remembered boundary after a live tail revision', () => {
+        expect(resolveLatestCompletedBoundaryIdForView('history', null, {
+            id: 'agent-text:old',
+            tailRevision: 2
+        }, 3)).toBeNull()
+    })
+
     it('does not invent a boundary before the tail has been observed', () => {
-        expect(resolveLatestCompletedBoundaryIdForView('history', null, null)).toBeNull()
+        expect(resolveLatestCompletedBoundaryIdForView('history', null, null, 0)).toBeNull()
     })
 })
 

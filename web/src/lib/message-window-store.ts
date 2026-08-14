@@ -34,6 +34,7 @@ export type MessageWindowState = {
     viewMode: MessageViewMode
     messagesVersion: number
     historyVersion: number
+    tailRevision: number
 }
 
 export const VISIBLE_WINDOW_SIZE = 400
@@ -232,6 +233,7 @@ function createState(sessionId: string): InternalState {
         viewMode: 'tail',
         messagesVersion: 0,
         historyVersion: 0,
+        tailRevision: 0,
         oldestPositionAt: null,
         oldestPositionSeq: null,
         newestPositionAt: null,
@@ -389,6 +391,7 @@ function buildState(
         | 'syncGeneration'
         | 'olderGeneration'
         | 'historyVersion'
+        | 'tailRevision'
     >>
 ): InternalState {
     const messages = updates.messages ?? previous.messages
@@ -488,6 +491,7 @@ function mergeIntoWindow(
     options: {
         mode?: 'append' | 'prepend'
         regularLimit?: number
+        advanceTailRevision?: boolean
     } = {}
 ): InternalState {
     const retainedIncoming = incoming.filter(shouldRetainWindowMessage)
@@ -500,7 +504,10 @@ function mergeIntoWindow(
     const merged = mergeMessages(previous.messages, retainedIncoming)
     const { kept, dropped } = trimPreservingQueued(merged, regularLimit, mode)
     let next = buildState(previous, {
-        messages: kept
+        messages: kept,
+        ...(options.advanceTailRevision
+            ? { tailRevision: previous.tailRevision + 1 }
+            : {})
     })
     if (dropped.length === 0) {
         return next
@@ -569,6 +576,7 @@ function applyLatestResponse(
         oldestPositionSeq: oldest?.seq ?? null,
         newestPositionAt: newest?.at ?? null,
         newestPositionSeq: newest?.seq ?? null,
+        tailRevision: previous.tailRevision + 1,
         requiresLatestReset: false,
         isLoadingMore: options.replaceServerRows ? false : previous.isLoadingMore,
         olderGeneration: options.replaceServerRows
@@ -666,7 +674,9 @@ async function runTailSync(api: ApiClient, sessionId: string): Promise<void> {
 
             updateState(sessionId, (previous) => {
                 if (previous.syncGeneration !== generation) return previous
-                const merged = mergeIntoWindow(previous, response.messages)
+                const merged = mergeIntoWindow(previous, response.messages, {
+                    advanceTailRevision: true
+                })
                 if (merged.requiresLatestReset) {
                     return buildState(merged, {
                         epoch: response.page.epoch,
@@ -932,7 +942,9 @@ export function setMessageViewMode(sessionId: string, mode: MessageViewMode): vo
 export function ingestIncomingMessages(sessionId: string, incoming: DecryptedMessage[]): void {
     if (incoming.length === 0) return
     updateState(sessionId, (previous) => {
-        let merged = mergeIntoWindow(previous, incoming)
+        let merged = mergeIntoWindow(previous, incoming, {
+            advanceTailRevision: true
+        })
         if (merged.epoch === null || merged.requiresLatestReset) {
             return merged
         }
@@ -986,6 +998,7 @@ export function seedMessageWindowFromSession(fromSessionId: string, toSessionId:
     const seeded = buildState(createState(toSessionId), {
         messages: [...source.messages],
         hasMore: source.hasMore,
+        tailRevision: source.tailRevision,
         oldestPositionAt: source.oldestPositionAt,
         oldestPositionSeq: source.oldestPositionSeq,
         requiresLatestReset: true,
@@ -1034,7 +1047,8 @@ export function reconcileQueuedLocalIds(
 export function appendOptimisticMessage(sessionId: string, message: DecryptedMessage): void {
     updateState(sessionId, (previous) => {
         return mergeIntoWindow(previous, [message], {
-            mode: previous.viewMode === 'history' ? 'prepend' : 'append'
+            mode: previous.viewMode === 'history' ? 'prepend' : 'append',
+            advanceTailRevision: true
         })
     }, true)
 }

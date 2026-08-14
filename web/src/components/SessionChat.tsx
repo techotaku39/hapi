@@ -382,13 +382,20 @@ export function buildGoalStateMessages(
  * The history window can no longer contain the tail after older pages are
  * loaded, so recomputing a boundary from that window would either hide the
  * current Fork action or incorrectly mark an older message as current.
+ * A live tail revision invalidates the remembered boundary until tail view
+ * observes the authoritative current boundary again.
  */
 export function resolveLatestCompletedBoundaryIdForView(
     viewMode: 'tail' | 'history',
     currentTailBoundaryId: string | null,
-    rememberedTailBoundaryId: string | null
+    rememberedTailBoundary: { id: string | null; tailRevision: number } | null,
+    currentTailRevision: number
 ): string | null {
-    return viewMode === 'tail' ? currentTailBoundaryId : rememberedTailBoundaryId
+    if (viewMode === 'tail') return currentTailBoundaryId
+    if (!rememberedTailBoundary || rememberedTailBoundary.tailRevision !== currentTailRevision) {
+        return null
+    }
+    return rememberedTailBoundary.id
 }
 
 function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
@@ -424,6 +431,7 @@ type SessionChatProps = {
     viewMode: 'tail' | 'history'
     messagesVersion: number
     historyVersion: number
+    tailRevision: number
     onBack: () => void
     onRefresh: () => void
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
@@ -521,7 +529,10 @@ function SessionChatInner(props: SessionChatProps) {
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
-    const [rememberedTailBoundaryId, setRememberedTailBoundaryId] = useState<string | null>(null)
+    const [rememberedTailBoundary, setRememberedTailBoundary] = useState<{
+        id: string | null
+        tailRevision: number
+    } | null>(null)
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const uploadDraftSnapshotRef = useRef<{ text: string; attachments: AttachmentDraftInput[] }>({
         text: '',
@@ -1242,15 +1253,18 @@ function SessionChatInner(props: SessionChatProps) {
 
     useEffect(() => {
         if (props.viewMode !== 'tail') return
-        setRememberedTailBoundaryId((previous) => (
-            previous === currentTailBoundaryId ? previous : currentTailBoundaryId
+        setRememberedTailBoundary((previous) => (
+            previous?.id === currentTailBoundaryId && previous.tailRevision === props.tailRevision
+                ? previous
+                : { id: currentTailBoundaryId, tailRevision: props.tailRevision }
         ))
-    }, [currentTailBoundaryId, props.viewMode])
+    }, [currentTailBoundaryId, props.tailRevision, props.viewMode])
 
     const latestCompletedBoundaryId = resolveLatestCompletedBoundaryIdForView(
         props.viewMode,
         currentTailBoundaryId,
-        rememberedTailBoundaryId
+        rememberedTailBoundary,
+        props.tailRevision
     )
 
     const isLatestCompletedBoundary = useCallback((messageId: string) => {
