@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
+import { isWildcardSearch, matchesSearchQuery } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
@@ -515,7 +516,7 @@ export function normalizeSearch(value: string | null | undefined): string {
 
 export function sessionMatchesQuery(session: SessionSummary, query: string, machineLabel: string): boolean {
     if (!query) return true
-    const searchable = [
+    const searchableParts = [
         getSessionTitle(session),
         getWorktreeSessionLabel(session),
         session.id,
@@ -528,9 +529,10 @@ export function sessionMatchesQuery(session: SessionSummary, query: string, mach
         machineLabel,
     ]
         .filter((part): part is string => typeof part === 'string' && part.length > 0)
-        .join('\n')
-        .toLowerCase()
-    return searchable.includes(query)
+    if (isWildcardSearch(query)) {
+        return searchableParts.some((part) => matchesSearchQuery(part, query))
+    }
+    return searchableParts.join('\n').toLowerCase().includes(query)
 }
 
 

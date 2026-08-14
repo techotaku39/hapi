@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'bun:test'
+import { isWildcardSearch, matchesSearchQuery, toSearchGlob, wildcardToRegExp } from './search'
+
+describe('search wildcard helpers', () => {
+    it('only enables wildcard mode for star and question mark patterns', () => {
+        expect(isWildcardSearch('feature-*')).toBe(true)
+        expect(isWildcardSearch('file-??')).toBe(true)
+        expect(isWildcardSearch('feature-[ab]')).toBe(false)
+        expect(isWildcardSearch('feature')).toBe(false)
+    })
+
+    it('keeps plain text matching as a case-insensitive substring search', () => {
+        expect(matchesSearchQuery('Fix Bot Review', 'bot review')).toBe(true)
+        expect(matchesSearchQuery('Fix Bot Review', 'BOT')).toBe(true)
+        expect(matchesSearchQuery('Fix Bot Review', 'reviewed')).toBe(false)
+    })
+
+    it('matches complete wildcard patterns with star and question mark', () => {
+        expect(matchesSearchQuery('feature-sidebar-search', 'feature-*')).toBe(true)
+        expect(matchesSearchQuery('feature-sidebar-search', 'feature-????')).toBe(false)
+        expect(matchesSearchQuery('file-01.ts', 'file-??.ts')).toBe(true)
+        expect(matchesSearchQuery('file-001.ts', 'file-??.ts')).toBe(false)
+        expect(matchesSearchQuery('src/file.ts', '*.ts')).toBe(true)
+        expect(matchesSearchQuery('src/file.ts.bak', '*.ts')).toBe(false)
+    })
+
+    it('treats non-wildcard characters as literals', () => {
+        expect(wildcardToRegExp('file?.ts').test('file1.ts')).toBe(true)
+        expect(matchesSearchQuery('file+.ts', 'file+.ts')).toBe(true)
+        expect(matchesSearchQuery('fileX.ts', 'file+.ts')).toBe(false)
+    })
+
+    it('preserves implicit contains matching only for plain file queries', () => {
+        expect(toSearchGlob('  .ts  ')).toBe('*.ts*')
+        expect(toSearchGlob('*.ts')).toBe('*.ts')
+        expect(toSearchGlob('test-??')).toBe('test-??')
+    })
+})

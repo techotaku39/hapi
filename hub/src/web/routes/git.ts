@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { toSearchGlob } from '@hapi/protocol'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -231,7 +232,7 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         const limit = parsed.data.limit ?? 200
         const args = ['--files']
         if (query) {
-            args.push('--iglob', `*${query}*`)
+            args.push('--iglob', toSearchGlob(query))
         }
 
         const result = await runRpc(() => engine.runRipgrep(sessionResult.sessionId, args, sessionPath))

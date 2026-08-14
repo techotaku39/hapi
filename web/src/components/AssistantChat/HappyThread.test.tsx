@@ -136,6 +136,21 @@ describe('ConversationOutlinePanel', () => {
         expect(onLoadMore).toHaveBeenCalledTimes(1)
     })
 
+    it('supports wildcard patterns in outline search', () => {
+        renderPanel()
+
+        const searchbox = screen.getByRole('searchbox', { name: 'Search outline items' })
+        fireEvent.change(searchbox, { target: { value: 'Implement*' } })
+
+        expect(screen.getByText('Implement the panel')).toBeInTheDocument()
+        expect(screen.queryByText('Second user prompt')).not.toBeInTheDocument()
+
+        fireEvent.change(searchbox, { target: { value: 'Second user p?????' } })
+
+        expect(screen.queryByText('Implement the panel')).not.toBeInTheDocument()
+        expect(screen.getByText('Second user prompt')).toBeInTheDocument()
+    })
+
     it('shows a search-specific empty state', () => {
         renderPanel()
 

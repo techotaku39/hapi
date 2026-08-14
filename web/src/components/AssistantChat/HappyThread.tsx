@@ -33,6 +33,7 @@ import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { getShareTurnReasoningLabel, selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { queryKeys } from '@/lib/query-keys'
+import { matchesSearchQuery } from '@hapi/protocol'
 
 type ScrollAnchor = {
     id: string
@@ -317,7 +318,7 @@ export function ConversationOutlinePanel(props: {
             return props.items
         }
         return props.items.filter((item) => (
-            item.label.toLocaleLowerCase().includes(normalizedSearchQuery)
+            matchesSearchQuery(item.label, normalizedSearchQuery)
         ))
     }, [normalizedSearchQuery, props.items])
 

@@ -84,6 +84,35 @@ describe('generated images route', () => {
 })
 
 describe('file search route', () => {
+    it('keeps plain text contains matching and passes wildcard patterns through unchanged', async () => {
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: true,
+            metadata: { path: '/project' }
+        } as unknown as Session
+        const ripgrepArgs: string[][] = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            runRipgrep: async (_sessionId: string, args: string[]) => {
+                ripgrepArgs.push(args)
+                return { success: true, stdout: '' }
+            },
+            statFiles: async () => ({ success: true, entries: [] })
+        } as unknown as Partial<SyncEngine>
+
+        const app = buildApp(engine)
+        expect((await app.request('/api/sessions/session-1/files?query=.txt')).status).toBe(200)
+        expect((await app.request('/api/sessions/session-1/files?query=*.ts')).status).toBe(200)
+        expect((await app.request('/api/sessions/session-1/files?query=test-%3F%3F')).status).toBe(200)
+
+        expect(ripgrepArgs).toEqual([
+            ['--files', '--iglob', '*.txt*'],
+            ['--files', '--iglob', '*.ts'],
+            ['--files', '--iglob', 'test-??']
+        ])
+    })
+
     it('adds size and modification metadata to search results', async () => {
         const session = {
             id: 'session-1',
