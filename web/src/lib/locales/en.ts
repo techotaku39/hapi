@@ -235,7 +235,7 @@ export default {
   'session.action.pinFailed': 'Could not update pin',
   'sessions.pinnedSection': 'Pinned sessions',
   'session.action.export': 'Export conversation',
-  'session.action.syncCodex': 'Sync from Codex',
+  'session.action.syncCodex': 'Sync Codex',
   'session.action.syncPi': 'Sync Pi history',
   'session.action.archive': 'Archive',
   'session.action.reopen': 'Reopen',

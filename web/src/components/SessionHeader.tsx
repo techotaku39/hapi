@@ -355,7 +355,7 @@ export function SessionHeader(props: {
     const handleMenuToggle = () => {
         if (!menuOpen && menuAnchorRef.current) {
             const rect = menuAnchorRef.current.getBoundingClientRect()
-            setMenuAnchorPoint({ x: rect.right, y: rect.bottom })
+            setMenuAnchorPoint({ x: rect.left + rect.width / 2, y: rect.bottom })
         }
         setMenuOpen((open) => !open)
     }
