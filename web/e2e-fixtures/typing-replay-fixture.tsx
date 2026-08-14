@@ -220,14 +220,17 @@ function FixtureThread() {
     const streamNewOutput = params.has('stream-new')
     const emptyThread = params.has('empty-thread')
     const hydrateActiveOutput = params.has('hydrate-active-output')
+    const userOnlyThread = params.has('user-only')
     const [sessionId, setSessionId] = useState('typing-replay-fixture')
     const blocks = useMemo(
         () => emptyThread
             ? []
             : hydrateActiveOutput
                 ? ACTIVE_HYDRATED_BLOCKS
-            : includeReasoning ? [FIXTURE_BLOCKS[0]!, REASONING_BLOCK] : FIXTURE_BLOCKS,
-        [emptyThread, hydrateActiveOutput, includeReasoning]
+                : userOnlyThread
+                    ? [FIXTURE_BLOCKS[0]!]
+                    : includeReasoning ? [FIXTURE_BLOCKS[0]!, REASONING_BLOCK] : FIXTURE_BLOCKS,
+        [emptyThread, hydrateActiveOutput, includeReasoning, userOnlyThread]
     )
     const newOutputBlocks = useMemo<readonly VisibleChatBlock[]>(
         () => [

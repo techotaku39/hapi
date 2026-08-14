@@ -35,6 +35,19 @@ test('keeps the typewriter for the first response in an empty active thread', as
         .toHaveText(NEW_ASSISTANT_TEXT)
 })
 
+test('keeps the typewriter for the first response after a running user-only turn', async ({ page }) => {
+    await page.goto('/e2e-fixtures/typing-replay-fixture.html?running=1&user-only=1&stream-new=1')
+
+    await page.getByTestId('start-running').click()
+
+    await expect(page.getByTestId('assistant-message')).toHaveCount(1)
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.newOutputFirstLayoutText))
+        .toBe('')
+
+    await expect(page.getByTestId('assistant-message').last().getByTestId('assistant-text'))
+        .toHaveText(NEW_ASSISTANT_TEXT)
+})
+
 // Regression: a resumed session may expose an already-materialized assistant
 // part as the currently running part. The first paint must show the full text,
 // rather than replaying assistant-ui's typewriter animation from empty.

@@ -740,17 +740,18 @@ export function useHappyRuntime(props: {
         [props.blocks]
     )
     const hasActiveAssistantOutput = containsActiveAssistantOutput(props.blocks, activeTurnStartedAt)
+    const awaitingInitialSnapshot = isRunning && props.blocks.length === 0
     const runningHandoffRef = useRef({
         sessionId: props.session.id,
         wasRunning: isRunning,
         historyVersion: props.historyVersion,
         assistantBlockSignatures: isRunning ? assistantBlockSignatures : null,
-        awaitingExistingRunHydration: isRunning && props.blocks.length === 0,
+        awaitingExistingRunHydration: awaitingInitialSnapshot,
         wasHydratingWindow: hydratingWindow,
         // A running session can mount before its first message page arrives.
         // Treat that first non-empty snapshot as hydration, not as new stream
         // output, so a resumed reasoning part cannot start from an empty view.
-        hasObservedAssistantBlocks: !isRunning || assistantBlockSignatures.length > 0
+        hasObservedAssistantBlocks: !isRunning || !awaitingInitialSnapshot
     })
     // assistant-ui derives the last message's status from the thread-level
     // isRunning flag. On a send, that flag can become true before the new
@@ -764,9 +765,9 @@ export function useHappyRuntime(props: {
         runningHandoff.wasRunning = isRunning
         runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = isRunning ? assistantBlockSignatures : null
-        runningHandoff.awaitingExistingRunHydration = isRunning && props.blocks.length === 0
+        runningHandoff.awaitingExistingRunHydration = awaitingInitialSnapshot
         runningHandoff.wasHydratingWindow = hydratingWindow
-        runningHandoff.hasObservedAssistantBlocks = !isRunning || assistantBlockSignatures.length > 0
+        runningHandoff.hasObservedAssistantBlocks = !isRunning || !awaitingInitialSnapshot
     } else if (!isRunning) {
         runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = null
