@@ -27,9 +27,22 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
     const [draftEdited, setDraftEdited] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
+    const generationRef = useRef(0)
     const busy = isPending || isGenerating
 
+    const handleClose = () => {
+        generationRef.current += 1
+        setIsGenerating(false)
+        onClose()
+    }
+
     useEffect(() => {
+        generationRef.current += 1
+        if (!isOpen) {
+            setIsGenerating(false)
+            return
+        }
+
         if (isOpen) {
             setName(currentName)
             setError(null)
@@ -46,17 +59,23 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
     const handleGenerate = async () => {
         if (!onSuggestTitle) return
 
+        const generation = ++generationRef.current
         setError(null)
         setIsGenerating(true)
         try {
             const suggested = (await onSuggestTitle()).trim()
+            if (generation !== generationRef.current) return
             if (!suggested) throw new Error('Empty title suggestion')
             setName(suggested)
             setDraftSource('generated')
         } catch {
-            setError(t('dialog.rename.generateError'))
+            if (generation === generationRef.current) {
+                setError(t('dialog.rename.generateError'))
+            }
         } finally {
-            setIsGenerating(false)
+            if (generation === generationRef.current) {
+                setIsGenerating(false)
+            }
         }
     }
 
@@ -64,7 +83,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
         e.preventDefault()
         const trimmed = name.trim()
         if (!trimmed || (!draftEdited && draftSource === 'manual' && trimmed === currentName)) {
-            onClose()
+            handleClose()
             return
         }
         setError(null)
@@ -74,7 +93,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
             } else {
                 await onRename(trimmed)
             }
-            onClose()
+            handleClose()
         } catch {
             setError(t('dialog.rename.error'))
         }
@@ -82,12 +101,12 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
-            onClose()
+            handleClose()
         }
     }
 
     return (
-        <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
             <DialogContent className="max-w-sm">
                 <DialogHeader className="pr-0">
                     <DialogTitle className="min-h-6 px-10 text-center leading-6">
@@ -121,7 +140,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
                         <Button
                             type="button"
                             variant="secondary"
-                            onClick={onClose}
+                            onClick={handleClose}
                             disabled={busy}
                         >
                             {t('button.cancel')}

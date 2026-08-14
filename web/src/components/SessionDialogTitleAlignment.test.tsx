@@ -115,6 +115,63 @@ describe('session dialog title alignment', () => {
         expect(onUpdateSummary).not.toHaveBeenCalled()
     })
 
+    it('ignores a generated result after the dialog closes and reopens', async () => {
+        let resolveSuggestion: ((title: string) => void) | undefined
+        const onSuggestTitle = vi.fn(() => new Promise<string>((resolve) => {
+            resolveSuggestion = resolve
+        }))
+        const onClose = vi.fn()
+        const { rerender } = renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={onClose}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={onSuggestTitle}
+                onUpdateSummary={vi.fn(async () => {})}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+        await waitFor(() => expect(onSuggestTitle).toHaveBeenCalledOnce())
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+        rerender(
+            <I18nProvider>
+                <ToastProvider>
+                    <RenameSessionDialog
+                        isOpen={false}
+                        onClose={onClose}
+                        currentName="Session"
+                        onRename={vi.fn(async () => {})}
+                        onSuggestTitle={onSuggestTitle}
+                        onUpdateSummary={vi.fn(async () => {})}
+                        isPending={false}
+                    />
+                </ToastProvider>
+            </I18nProvider>
+        )
+        rerender(
+            <I18nProvider>
+                <ToastProvider>
+                    <RenameSessionDialog
+                        isOpen={true}
+                        onClose={onClose}
+                        currentName="Session"
+                        onRename={vi.fn(async () => {})}
+                        onSuggestTitle={onSuggestTitle}
+                        onUpdateSummary={vi.fn(async () => {})}
+                        isPending={false}
+                    />
+                </ToastProvider>
+            </I18nProvider>
+        )
+
+        resolveSuggestion?.('Stale title')
+        await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('Session'))
+        expect(screen.getByRole('textbox')).not.toHaveValue('Stale title')
+    })
+
     it('uses metadata.name for direct manual input and does not save on cancel', async () => {
         const onRename = vi.fn(async () => {})
         const onUpdateSummary = vi.fn(async () => {})
