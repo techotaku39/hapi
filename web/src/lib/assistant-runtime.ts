@@ -420,6 +420,18 @@ export function findLatestCompletedBoundaryId(
     return candidate
 }
 
+function getAssistantBlockSignature(blocks: readonly VisibleChatBlock[]): string {
+    return blocks
+        .filter((block) => visibleBlockRole(block) === 'assistant')
+        .map((block) => {
+            const text = 'text' in block ? block.text : ''
+            const toolCount = block.kind === 'tool-group' ? block.tools.length : 0
+            const textMarker = text.length <= 64 ? text : `${text.length}:${text.slice(-32)}`
+            return `${block.id}:${getBlockPresentationTimestamp(block)}:${textMarker}:${toolCount}`
+        })
+        .join('|')
+}
+
 function toThreadMessageLike(
     block: VisibleChatBlock,
     threadMessageId: string,
@@ -689,6 +701,50 @@ export function useHappyRuntime(props: {
     pendingSendIntentRef?: React.MutableRefObject<ComposerSendIntent>
 }) {
     const isRunning = props.isRunning ?? props.session.thinking
+    const assistantBlockSignature = useMemo(
+        () => getAssistantBlockSignature(props.blocks),
+        [props.blocks]
+    )
+    const runningHandoffRef = useRef({
+        sessionId: props.session.id,
+        wasRunning: isRunning,
+        assistantBlockSignature: isRunning ? assistantBlockSignature : null,
+        // A running session can mount before its first message page arrives.
+        // Treat that first non-empty snapshot as hydration, not as new stream
+        // output, so a resumed reasoning part cannot start from an empty view.
+        hasObservedAssistantBlocks: !isRunning || assistantBlockSignature !== ''
+    })
+    // assistant-ui derives the last message's status from the thread-level
+    // isRunning flag. On a send, that flag can become true before the new
+    // assistant block is visible, so keep the previous materialized response
+    // complete until the block list proves that the new turn has produced
+    // output. Reset the baseline when the viewed session changes so switching
+    // from one running session to another gets the same protection.
+    const runningHandoff = runningHandoffRef.current
+    if (runningHandoff.sessionId !== props.session.id) {
+        runningHandoff.sessionId = props.session.id
+        runningHandoff.wasRunning = isRunning
+        runningHandoff.assistantBlockSignature = isRunning ? assistantBlockSignature : null
+        runningHandoff.hasObservedAssistantBlocks = !isRunning || assistantBlockSignature !== ''
+    } else if (!isRunning) {
+        runningHandoff.assistantBlockSignature = null
+    } else if (!runningHandoff.wasRunning) {
+        runningHandoff.assistantBlockSignature = assistantBlockSignature
+        runningHandoff.hasObservedAssistantBlocks = assistantBlockSignature !== ''
+    } else if (!runningHandoff.hasObservedAssistantBlocks && assistantBlockSignature !== '') {
+        runningHandoff.assistantBlockSignature = assistantBlockSignature
+        runningHandoff.hasObservedAssistantBlocks = true
+    } else if (
+        runningHandoff.assistantBlockSignature !== null
+        && runningHandoff.assistantBlockSignature !== assistantBlockSignature
+    ) {
+        runningHandoff.assistantBlockSignature = null
+    }
+    runningHandoff.wasRunning = isRunning
+
+    const waitingForAssistantOutput = isRunning
+        && runningHandoff.assistantBlockSignature === assistantBlockSignature
+    const isRunningForMessages = isRunning && !waitingForAssistantOutput
 
     // Compute response-group aggregates once per block list so we can
     // inject the summed metadata onto each group's first visible block.
@@ -748,7 +804,7 @@ export function useHappyRuntime(props: {
     const convertedMessages = useExternalMessageConverter<BlockWithThreadMessageId>({
         callback: convertBlock,
         messages: blocksWithThreadIds,
-        isRunning,
+        isRunning: isRunningForMessages,
     })
 
     const onNew = useCallback(async (message: AppendMessage) => {
