@@ -255,6 +255,9 @@ function FixtureThread() {
         () => hydrateBlocks || hydrateAfterStart ? [] : blocks
     )
     const [historyVersion, setHistoryVersion] = useState(1)
+    const [viewMode, setViewMode] = useState<'tail' | 'history'>(() => (
+        params.has('history-window') ? 'history' : 'tail'
+    ))
     useEffect(() => {
         if (!hydrateBlocks || hydrateAfterStart) return
         const timer = window.setTimeout(() => setVisibleBlocks(blocks), 50)
@@ -274,6 +277,9 @@ function FixtureThread() {
         blocks: visibleBlocks,
         messagesVersion: 1,
         historyVersion,
+        viewMode,
+        isSyncingTail: false,
+        isLoadingMore: false,
         isSending: false,
         isRunning,
         onSendMessage: () => {},
@@ -344,6 +350,18 @@ function FixtureThread() {
                         onClick={() => setHistoryVersion((current) => current + 1)}
                     >
                         Refresh history
+                    </button>
+                ) : null}
+                {params.has('return-to-tail') ? (
+                    <button
+                        type="button"
+                        data-testid="return-to-tail"
+                        onClick={() => {
+                            setViewMode('tail')
+                            setVisibleBlocks(blocks)
+                        }}
+                    >
+                        Return to tail
                     </button>
                 ) : null}
             </ThreadPrimitive.Root>

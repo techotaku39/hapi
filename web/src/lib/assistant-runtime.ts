@@ -708,6 +708,9 @@ export function useHappyRuntime(props: {
     blocks: readonly VisibleChatBlock[]
     messagesVersion: number
     historyVersion: number
+    viewMode?: 'tail' | 'history'
+    isSyncingTail?: boolean
+    isLoadingMore?: boolean
     isSending: boolean
     isRunning?: boolean
     onSendMessage: (
@@ -729,6 +732,9 @@ export function useHappyRuntime(props: {
 }) {
     const isRunning = props.isRunning ?? props.session.thinking
     const activeTurnStartedAt = props.session.activeTurnStartedAt ?? null
+    const hydratingWindow = props.viewMode === 'history'
+        || props.isSyncingTail === true
+        || props.isLoadingMore === true
     const assistantBlockSignatures = useMemo(
         () => getAssistantBlockSignatures(props.blocks),
         [props.blocks]
@@ -740,6 +746,7 @@ export function useHappyRuntime(props: {
         historyVersion: props.historyVersion,
         assistantBlockSignatures: isRunning ? assistantBlockSignatures : null,
         awaitingExistingRunHydration: isRunning && props.blocks.length === 0,
+        wasHydratingWindow: hydratingWindow,
         // A running session can mount before its first message page arrives.
         // Treat that first non-empty snapshot as hydration, not as new stream
         // output, so a resumed reasoning part cannot start from an empty view.
@@ -758,6 +765,7 @@ export function useHappyRuntime(props: {
         runningHandoff.historyVersion = props.historyVersion
         runningHandoff.assistantBlockSignatures = isRunning ? assistantBlockSignatures : null
         runningHandoff.awaitingExistingRunHydration = isRunning && props.blocks.length === 0
+        runningHandoff.wasHydratingWindow = hydratingWindow
         runningHandoff.hasObservedAssistantBlocks = !isRunning || assistantBlockSignatures.length > 0
     } else if (!isRunning) {
         runningHandoff.historyVersion = props.historyVersion
@@ -774,6 +782,11 @@ export function useHappyRuntime(props: {
         // A bounded older-history prepend can drop the previous tail, so the
         // new signature list is not necessarily a suffix of the old one.
         runningHandoff.historyVersion = props.historyVersion
+        if (runningHandoff.assistantBlockSignatures !== null) {
+            runningHandoff.assistantBlockSignatures = assistantBlockSignatures
+            runningHandoff.hasObservedAssistantBlocks = props.blocks.length > 0
+        }
+    } else if (hydratingWindow || runningHandoff.wasHydratingWindow) {
         if (runningHandoff.assistantBlockSignatures !== null) {
             runningHandoff.assistantBlockSignatures = assistantBlockSignatures
             runningHandoff.hasObservedAssistantBlocks = props.blocks.length > 0
@@ -803,6 +816,7 @@ export function useHappyRuntime(props: {
         }
     }
     runningHandoff.wasRunning = isRunning
+    runningHandoff.wasHydratingWindow = hydratingWindow
 
     const waitingForAssistantOutput = isRunning
         && runningHandoff.assistantBlockSignatures !== null

@@ -75,6 +75,20 @@ test('does not release the handoff when history pagination trims the old tail', 
     await expect(page.getByTestId('assistant-text').last()).toHaveText('Older history response 799.')
 })
 
+test('does not replay when returning to tail after bounded history pagination', async ({ page }) => {
+    await page.goto('/e2e-fixtures/typing-replay-fixture.html?running=1&history-window=1&return-to-tail=1')
+
+    await page.getByTestId('prepend-history-window').click()
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('complete')
+
+    await page.getByTestId('return-to-tail').click()
+
+    await expect.poll(async () => await page.evaluate(() => window.__typingReplayProbe?.statusTypes?.at(-1) ?? ''))
+        .toBe('complete')
+    await expect(page.getByTestId('assistant-text').last()).toHaveText(EXISTING_ASSISTANT_TEXT)
+})
+
 test('does not replay a hydrated assistant part when a running session mounts before history', async ({ page }) => {
     await page.goto('/e2e-fixtures/typing-replay-fixture.html?running=1&hydrate=1')
 
