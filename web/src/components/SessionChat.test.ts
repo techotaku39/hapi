@@ -5,6 +5,7 @@ import {
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
     resolvePiContextWindow,
+    resolveLatestCompletedBoundaryIdForView,
     shouldAutoClearPendingSchedule,
     shouldRouteToScratchlist,
 } from './SessionChat'
@@ -63,6 +64,22 @@ describe('resolvePiContextWindow', () => {
 
     it('falls back to the legacy model id when selected-model metadata is absent', () => {
         expect(resolvePiContextWindow(models, undefined, 'shared-model')).toBe(100_000)
+    })
+})
+
+describe('resolveLatestCompletedBoundaryIdForView', () => {
+    it('uses the live tail boundary when following the latest messages', () => {
+        expect(resolveLatestCompletedBoundaryIdForView('tail', 'agent-text:latest', 'agent-text:old'))
+            .toBe('agent-text:latest')
+    })
+
+    it('keeps the live tail boundary while reading older messages', () => {
+        expect(resolveLatestCompletedBoundaryIdForView('history', null, 'agent-text:latest'))
+            .toBe('agent-text:latest')
+    })
+
+    it('does not invent a boundary before the tail has been observed', () => {
+        expect(resolveLatestCompletedBoundaryIdForView('history', null, null)).toBeNull()
     })
 })
 
