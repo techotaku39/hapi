@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { matchesSearchQuery } from '@hapi/protocol'
+import { isWildcardSearch, matchesSearchQuery, toSearchGlob } from '@hapi/protocol'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -231,8 +231,16 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         const query = parsed.data.query?.trim() ?? ''
         const limit = parsed.data.limit ?? 200
         const args = ['--files']
+        if (query && !isWildcardSearch(query)) {
+            args.push('--iglob', toSearchGlob(query))
+        }
 
-        const result = await runRpc(() => engine.runRipgrep(sessionResult.sessionId, args, sessionPath))
+        const result = await runRpc(() => engine.runRipgrep(
+            sessionResult.sessionId,
+            args,
+            sessionPath,
+            { query, limit }
+        ))
         if (!result.success) {
             return c.json({ success: false, error: result.error ?? 'Failed to list files' })
         }

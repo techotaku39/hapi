@@ -34,4 +34,12 @@ describe('search wildcard helpers', () => {
         expect(matchesSearchQuery('a'.repeat(100), '*a*a*a*a*a*a*b')).toBe(false)
     })
 
+    it('keeps ripgrep prefilters literal outside the supported wildcard operators', () => {
+        expect(toSearchGlob('  .ts  ')).toBe('*.ts*')
+        expect(toSearchGlob('*.ts')).toBe('*.ts')
+        expect(toSearchGlob('!*.ts')).toBe('\\!*.ts')
+        expect(toSearchGlob('[ab]*.ts')).toBe('\\[ab\\]*.ts')
+        expect(toSearchGlob('{a,b}*.ts')).toBe('\\{a,b\\}*.ts')
+    })
+
 })

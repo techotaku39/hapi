@@ -92,6 +92,7 @@ describe('file search route', () => {
             metadata: { path: '/project' }
         } as unknown as Session
         const ripgrepArgs: string[][] = []
+        const fileSearchOptions: Array<{ query: string; limit: number }> = []
         const stdout = [
             'src/file.ts',
             'other.ts',
@@ -103,8 +104,9 @@ describe('file search route', () => {
         ].join('\n')
         const engine = {
             resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
-            runRipgrep: async (_sessionId: string, args: string[]) => {
+            runRipgrep: async (_sessionId: string, args: string[], _cwd: string, fileSearch?: { query: string; limit: number }) => {
                 ripgrepArgs.push(args)
+                if (fileSearch) fileSearchOptions.push(fileSearch)
                 return { success: true, stdout }
             },
             statFiles: async (_sessionId: string, paths: string[]) => ({
@@ -132,13 +134,22 @@ describe('file search route', () => {
         }
 
         expect(ripgrepArgs).toEqual([
-            ['--files'],
+            ['--files', '--iglob', '*.txt*'],
             ['--files'],
             ['--files'],
             ['--files'],
             ['--files'],
             ['--files'],
             ['--files']
+        ])
+        expect(fileSearchOptions).toEqual([
+            { query: '.txt', limit: 200 },
+            { query: '*.ts', limit: 200 },
+            { query: 'test-??', limit: 200 },
+            { query: '!*.ts', limit: 200 },
+            { query: '[ab]*.ts', limit: 200 },
+            { query: '{a,b}*.ts', limit: 200 },
+            { query: 'src*.ts', limit: 200 }
         ])
     })
 
