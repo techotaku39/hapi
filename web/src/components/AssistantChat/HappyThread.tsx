@@ -312,7 +312,7 @@ export function ConversationOutlinePanel(props: {
 }) {
     const { t, locale } = useTranslation()
     const [searchQuery, setSearchQuery] = useState('')
-    const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase()
+    const normalizedSearchQuery = searchQuery.trim()
     const filteredItems = useMemo(() => {
         if (normalizedSearchQuery.length === 0) {
             return props.items

@@ -151,6 +151,33 @@ describe('ConversationOutlinePanel', () => {
         expect(screen.getByText('Second user prompt')).toBeInTheDocument()
     })
 
+    it('lets the shared matcher normalize outline queries consistently', () => {
+        const toLocaleLowerCase = vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(function (this: string) {
+            return this.toString() === 'I' ? 'ı' : this.toLowerCase()
+        })
+        try {
+            renderPanel({
+                items: [
+                    ...outlineItems,
+                    {
+                        id: 'outline:user-text:m3',
+                        targetMessageId: 'user-text:m3',
+                        kind: 'user',
+                        label: 'Istanbul deployment',
+                        createdAt: 3000
+                    }
+                ]
+            })
+            fireEvent.change(screen.getByRole('searchbox', { name: 'Search outline items' }), {
+                target: { value: 'I' }
+            })
+
+            expect(screen.getByText('Istanbul deployment')).toBeInTheDocument()
+        } finally {
+            toLocaleLowerCase.mockRestore()
+        }
+    })
+
     it('shows a search-specific empty state', () => {
         renderPanel()
 
