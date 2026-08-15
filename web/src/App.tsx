@@ -66,11 +66,32 @@ function AppInner() {
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
     const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
     const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
+    const [titleSuggestionAvailable, setTitleSuggestionAvailable] = useState(false)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
     const router = useRouter()
     const { addToast } = useToast()
+
+    useEffect(() => {
+        let cancelled = false
+        setTitleSuggestionAvailable(false)
+        if (!api) return () => { cancelled = true }
+
+        void api.getHealth()
+            .then((health) => {
+                if (!cancelled) {
+                    setTitleSuggestionAvailable(health.capabilities?.titleSuggestion === true)
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setTitleSuggestionAvailable(false)
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [api])
 
     useEffect(() => {
         const tg = getTelegramWebApp()
@@ -464,7 +485,7 @@ function AppInner() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, baseUrl }}>
+        <AppContextProvider value={{ api, token, baseUrl, titleSuggestionAvailable }}>
             <NamespaceLocaleSync />
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
