@@ -344,7 +344,11 @@ export function buildAssistantReplyTargets(
     for (const { block, threadMessageId } of blocks) {
         const role = visibleBlockRole(block)
         if (role === 'user') {
-            latestUserMessageId = threadMessageId
+            const isPending = block.invokedAt === null
+            const isFailed = block.kind === 'user-text' && block.status === 'failed'
+            if (!isPending && !isFailed) {
+                latestUserMessageId = threadMessageId
+            }
             continue
         }
         if (role === 'assistant' && latestUserMessageId !== null) {

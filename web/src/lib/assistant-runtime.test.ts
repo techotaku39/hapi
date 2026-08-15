@@ -327,6 +327,23 @@ describe('buildAssistantReplyTargets', () => {
             'cli-output:command'
         ])
     })
+
+    it('keeps queued and failed user rows from becoming response targets', () => {
+        const blocks = assignThreadMessageIds([
+            userText('prompt', { invokedAt: 1_000 }),
+            agentText('answer-1'),
+            userText('queued', { invokedAt: null, status: 'queued' }),
+            agentText('answer-2'),
+            userText('failed', { invokedAt: null, status: 'failed' }),
+            agentText('answer-3')
+        ])
+
+        expect([...buildAssistantReplyTargets(blocks)]).toEqual([
+            ['agent-text:answer-1', 'user-text:prompt'],
+            ['agent-text:answer-2', 'user-text:prompt'],
+            ['agent-text:answer-3', 'user-text:prompt']
+        ])
+    })
 })
 
 describe('aggregateResponseGroups', () => {

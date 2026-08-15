@@ -294,8 +294,16 @@ export function findPreviousUserMessage(
 export function findPromptTarget(
     viewport: HTMLElement,
     messageId: string,
-    assistantAnchorState: { current: boolean; nextAnchorId: string | null }
+    assistantAnchorState: { current: boolean; nextAnchorId: string | null },
+    replyToMessageId?: string
 ): HTMLElement | null {
+    if (replyToMessageId) {
+        const replyTargetAnchorId = getConversationMessageAnchorId(replyToMessageId)
+        const replyTarget = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
+            .find((message) => message.id === replyTargetAnchorId)
+        if (replyTarget?.dataset.hapiMessageRole === 'user') return replyTarget
+    }
+
     const assistantAnchorId = getConversationMessageAnchorId(messageId)
     const assistantAnchor = document.getElementById(assistantAnchorId)
     if (assistantAnchor) {
@@ -327,14 +335,15 @@ export function findPromptTarget(
 async function findPreviousUserMessageAfterRender(
     viewport: HTMLElement,
     messageId: string,
-    assistantAnchorState: { current: boolean; nextAnchorId: string | null }
+    assistantAnchorState: { current: boolean; nextAnchorId: string | null },
+    replyToMessageId?: string
 ): Promise<HTMLElement | null> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
-        const target = findPromptTarget(viewport, messageId, assistantAnchorState)
+        const target = findPromptTarget(viewport, messageId, assistantAnchorState, replyToMessageId)
         if (target) return target
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
     }
-    return findPromptTarget(viewport, messageId, assistantAnchorState)
+    return findPromptTarget(viewport, messageId, assistantAnchorState, replyToMessageId)
 }
 
 export async function loadAllOlderMessages(options: {
@@ -1690,6 +1699,7 @@ export function HappyThread(props: {
     }, [])
     const scrollToPromptForMessage = useCallback(async (
         messageId: string,
+        replyToMessageId: string | undefined,
         isCancelled: () => boolean
     ): Promise<boolean> => {
         if (promptNavigationTimerRef.current !== null) {
@@ -1710,7 +1720,7 @@ export function HappyThread(props: {
                 current: false,
                 nextAnchorId: null as string | null
             }
-            let target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState)
+            let target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState, replyToMessageId)
             if (isCancelled()) return false
             while (!target && hasMoreMessagesRef.current) {
                 const loaded = await loadOlderForNavigation()
@@ -1719,7 +1729,7 @@ export function HappyThread(props: {
                 // assistant-ui applies the expanded external message list in
                 // its own render pass. Wait for the new anchors instead of
                 // treating a successfully loaded page as an immediate miss.
-                target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState)
+                target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState, replyToMessageId)
                 if (isCancelled()) return false
             }
             if (isCancelled()) return false
@@ -1741,7 +1751,7 @@ export function HappyThread(props: {
         }
     }, [clearInitialScrollTimers, loadOlderForNavigation, markExplicitNavigationAwayFromBottom])
 
-    const jumpToPrompt = useCallback(async (messageId: string, _replyToMessageId?: string): Promise<boolean> => {
+    const jumpToPrompt = useCallback(async (messageId: string, replyToMessageId?: string): Promise<boolean> => {
         if (navigationInFlightRef.current) return false
         const runId = navigationRunRef.current
         const isCancelled = () => navigationRunRef.current !== runId
@@ -1756,7 +1766,7 @@ export function HappyThread(props: {
             // leave the viewport at its previous position.
             if (pendingLoadPromiseRef.current) await pendingLoadPromiseRef.current
             if (isCancelled()) return false
-            return await scrollToPromptForMessage(messageId, isCancelled)
+            return await scrollToPromptForMessage(messageId, replyToMessageId, isCancelled)
         } finally {
             if (!isCancelled()) {
                 historyNavigationRef.current = false

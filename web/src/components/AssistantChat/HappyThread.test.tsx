@@ -158,6 +158,24 @@ describe('assistant prompt lookup', () => {
             .toBe('hapi-message-cli-output:command')
     })
 
+    it('prefers the stable response target over a later queued user row', () => {
+        const viewport = document.createElement('div')
+        viewport.innerHTML = `
+            <div class="happy-thread-messages">
+                <div id="hapi-message-user-text:prompt" data-hapi-message-role="user"></div>
+                <div id="hapi-message-agent-text:answer"></div>
+                <div id="hapi-message-user-text:queued" data-hapi-message-role="user"></div>
+            </div>
+        `
+
+        expect(findPromptTarget(
+            viewport,
+            'agent-text:answer',
+            { current: false, nextAnchorId: null },
+            'user-text:prompt'
+        )?.id).toBe('hapi-message-user-text:prompt')
+    })
+
     it('bounds prompt lookup when prepending re-keys the selected assistant card', () => {
         const viewport = document.createElement('div')
         viewport.innerHTML = `
