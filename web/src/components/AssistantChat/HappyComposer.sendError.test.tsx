@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode, TextareaHTMLAttributes } from 'react'
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -186,6 +186,12 @@ function ComposerHarness(props: {
         text: string
         status: 'success' | 'error'
     } | null>(null)
+    const sessionId = 'session-a'
+    const consumeSendSettlement = useCallback((attemptId: string) => {
+        setSendSettlement((current) =>
+            current?.attemptId === attemptId ? null : current
+        )
+    }, [])
     const clearErrorCallsRef = useRef(0)
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
 
@@ -225,7 +231,7 @@ function ComposerHarness(props: {
             if (error) setSendError(error)
             setSendSettlement({
                 attemptId: 'attempt-1',
-                sessionId: composerKey,
+                sessionId,
                 text: props.initialText,
                 status: error ? 'error' : 'success',
             })
@@ -234,7 +240,7 @@ function ComposerHarness(props: {
         settleAttachmentSendFailure: () => {
             setSendSettlement({
                 attemptId: 'attempt-1',
-                sessionId: composerKey,
+                sessionId,
                 text: props.initialText,
                 status: 'error',
             })
@@ -247,11 +253,12 @@ function ComposerHarness(props: {
         <I18nProvider>
             <HappyComposer
                 key={composerKey}
-                sessionId={composerKey}
+                sessionId={sessionId}
                 disabled={isSending}
                 pendingSchedule={schedule}
                 sendAcceptance={sendAcceptance}
                 sendSettlement={sendSettlement}
+                onConsumeSendSettlement={consumeSendSettlement}
                 onSchedule={setSchedule}
                 onClearSchedule={() => setSchedule(null)}
                 sendError={sendError}
@@ -462,6 +469,22 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.settleSend())
 
         await waitFor(() => expect(input()).toHaveValue('replacement draft'))
+    })
+
+    it('preserves a later same-text draft after success and a session remount', async () => {
+        const controls = renderComposer('foo', null)
+        fireEvent.change(input(), { target: { value: 'foo' } })
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue(''))
+
+        fireEvent.change(input(), { target: { value: 'foo' } })
+        act(() => controls.current!.remount())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
     })
 
     it('does not implicitly restore after a keyed remount receives a new draft interaction', async () => {

@@ -574,6 +574,7 @@ function SessionPage() {
         retryMessage,
         isSending,
         sendSettlement,
+        consumeSendSettlement,
     } = useSendMessage(api, sessionId, {
         isSessionThinking: session?.thinking ?? false,
         onSuccess: (sentSessionId, sentText) => {
@@ -786,6 +787,7 @@ function SessionPage() {
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
             sendSettlement={sendSettlement}
+            onConsumeSendSettlement={consumeSendSettlement}
             viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}

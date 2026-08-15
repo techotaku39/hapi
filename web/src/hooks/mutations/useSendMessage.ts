@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
 import { makeClientSideId } from '@/lib/messages'
@@ -205,10 +205,16 @@ export function useSendMessage(
     retryMessage: (localId: string) => boolean
     isSending: boolean
     sendSettlement: SendMessageSettlement | null
+    consumeSendSettlement: (attemptId: string) => void
 } {
     const { haptic } = usePlatform()
     const [isResolving, setIsResolving] = useState(false)
     const [sendSettlement, setSendSettlement] = useState<SendMessageSettlement | null>(null)
+    const consumeSendSettlement = useCallback((attemptId: string) => {
+        setSendSettlement((current) =>
+            current?.attemptId === attemptId ? null : current
+        )
+    }, [])
     const resolveGuardRef = useRef(false)
     const isSessionThinkingRef = useRef(options?.isSessionThinking ?? false)
     isSessionThinkingRef.current = options?.isSessionThinking ?? false
@@ -409,5 +415,6 @@ export function useSendMessage(
         retryMessage,
         isSending: mutation.isPending || isResolving,
         sendSettlement,
+        consumeSendSettlement,
     }
 }

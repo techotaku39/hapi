@@ -372,6 +372,8 @@ export function HappyComposer(props: {
     sendAcceptance?: { attemptId: string | null } | null
     /** Terminal result for a chat mutation, including attachment-bearing failures. */
     sendSettlement?: SendMessageSettlement | null
+    /** Consume a terminal result after this composer makes its clear/preserve decision. */
+    onConsumeSendSettlement?: (attemptId: string) => void
     /**
      * Resume/handoff path for inactive drafts that only exist in IndexedDB
      * (no visible text/attachments for assistant-ui to append).
@@ -717,6 +719,10 @@ export function HappyComposer(props: {
         const settlementKey = `${settlement.sessionId}:${settlement.attemptId}`
         if (handledSuccessfulSendRef.current === settlementKey) return
         if (draftHydration.sessionId !== sessionId || !draftHydration.complete) return
+        const consumeSettlement = () => {
+            handledSuccessfulSendRef.current = settlementKey
+            props.onConsumeSendSettlement?.(settlement.attemptId)
+        }
 
         const acceptedSend = acceptedSendEditGenerationRef.current
         const sendEditGeneration = acceptedSend?.attemptId === settlement.attemptId
@@ -726,12 +732,12 @@ export function HappyComposer(props: {
             ? userEditGenerationRef.current > sendEditGeneration
             : userEditGenerationRef.current > 0
         if (userEditedAfterSend) {
-            handledSuccessfulSendRef.current = settlementKey
+            consumeSettlement()
             return
         }
 
         if (composerText !== settlement.text && composerText !== '') {
-            handledSuccessfulSendRef.current = settlementKey
+            consumeSettlement()
             return
         }
 
@@ -739,8 +745,8 @@ export function HappyComposer(props: {
             api.composer().setText('')
         }
         clearComposerDraftSnapshotIfText(sessionId, settlement.text)
-        handledSuccessfulSendRef.current = settlementKey
-    }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.sendSettlement, sessionId])
+        consumeSettlement()
+    }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.sendSettlement, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the
