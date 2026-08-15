@@ -4,7 +4,7 @@ import {
     describeDonutArc,
     formatStoragePercent,
     polarToCartesian,
-} from './storageUsagePie'
+} from './storageUsageSlices'
 
 describe('buildStorageUsageSlices', () => {
     it('drops zero-byte sidecars and returns empty when nothing has size', () => {
