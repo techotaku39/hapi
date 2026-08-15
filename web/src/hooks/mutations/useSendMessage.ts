@@ -25,7 +25,8 @@ type SendMessageInput = {
 }
 
 export type SendMessageAcceptance = {
-    attemptId: string
+    attemptId: string | null
+    sessionId: string
 }
 
 export type SendMessageSettlement = {
@@ -379,7 +380,7 @@ export function useSendMessage(
             deliveryMode,
             source: 'send',
         })
-        return { attemptId: localId }
+        return { attemptId: localId, sessionId: targetSessionId }
     }
 
     const retryMessage = (localId: string): boolean => {

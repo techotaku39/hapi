@@ -579,7 +579,7 @@ describe('useSendMessage', () => {
         act(() => {
             acceptedPromise = result.current.sendMessage('hello')
         })
-        await expect(acceptedPromise!).resolves.toEqual({ attemptId: 'local-id-1' })
+        await expect(acceptedPromise!).resolves.toEqual({ attemptId: 'local-id-1', sessionId: 'session-A' })
     })
 
     it('resolves false when blocked (no api) so the caller can preserve schedule state', async () => {
@@ -639,7 +639,7 @@ describe('useSendMessage', () => {
         act(() => {
             acceptedPromise = result.current.sendMessage('hello')
         })
-        await expect(acceptedPromise!).resolves.toEqual({ attemptId: 'local-id-1' })
+        await expect(acceptedPromise!).resolves.toEqual({ attemptId: 'local-id-1', sessionId: 'session-resolved' })
     })
 
     it('awaits onSessionResolved before starting the send mutation', async () => {

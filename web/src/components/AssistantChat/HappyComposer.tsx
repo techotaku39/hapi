@@ -371,6 +371,7 @@ export function HappyComposer(props: {
     /** Emitted by SessionChat after a send is accepted. Null attempt ids are settled scratchlist sends. */
     sendAcceptance?: {
         attemptId: string | null
+        sessionId?: string
         programmaticEditRevision?: number
     } | null
     /** Monotonic programmatic Queued Edit revision owned outside this keyed composer. */
@@ -739,6 +740,10 @@ export function HappyComposer(props: {
         // matching draft that belongs to the operator.
         if (
             settlement.source !== 'send'
+            || (
+                props.sendAcceptance?.sessionId !== undefined
+                && props.sendAcceptance.sessionId !== sessionId
+            )
             || props.sendAcceptance?.attemptId !== settlement.attemptId
         ) {
             consumeSettlement()

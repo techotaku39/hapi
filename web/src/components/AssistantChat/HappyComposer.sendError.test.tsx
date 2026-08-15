@@ -171,6 +171,7 @@ function ComposerHarness(props: {
     initialText: string
     initialSchedule?: PendingSchedule | null
     piRunning?: boolean
+    sessionId?: string
     controls: { current: HarnessControls | null }
 }) {
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
@@ -184,6 +185,7 @@ function ComposerHarness(props: {
     const [programmaticEditRevision, setProgrammaticEditRevision] = useState(0)
     const [sendAcceptance, setSendAcceptance] = useState<{
         attemptId: string | null
+        sessionId: string
         programmaticEditRevision: number
     } | null>(null)
     const [sendSettlement, setSendSettlement] = useState<{
@@ -193,7 +195,7 @@ function ComposerHarness(props: {
         status: 'success' | 'error'
         source: 'send' | 'retry'
     } | null>(null)
-    const sessionId = 'session-a'
+    const sessionId = props.sessionId ?? 'session-a'
     const consumeSendSettlement = useCallback((attemptId: string) => {
         setSendSettlement((current) =>
             current?.attemptId === attemptId ? null : current
@@ -234,7 +236,7 @@ function ComposerHarness(props: {
         acceptSend: () => {
             setIsSending(true)
             setSendSettlement(null)
-            setSendAcceptance({ attemptId: 'attempt-1', programmaticEditRevision })
+            setSendAcceptance({ attemptId: 'attempt-1', sessionId, programmaticEditRevision })
         },
         setSending: setIsSending,
         setThreadDisabled: (disabled) => setSnapshot((current) => ({
@@ -312,11 +314,12 @@ function renderComposer(
     initialText = 'failed text',
     initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 },
     piRunning = false,
+    sessionId = 'session-a',
 ) {
     const controls: { current: HarnessControls | null } = { current: null }
     runtime.sentIntents = []
     runtime.modelChanges = []
-    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} controls={controls} />)
+    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} sessionId={sessionId} controls={controls} />)
     return controls
 }
 
@@ -527,6 +530,18 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.settleRetrySend())
 
         await waitFor(() => expect(input()).toHaveValue('foo'))
+    })
+
+    it('clears the matching draft in the resolved target session after success', async () => {
+        // The target session id models an inactive-session resume that retargets
+        // the accepted send from its original route to this composer.
+        const controls = renderComposer('foo', null, false, 'session-resolved')
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue(''))
     })
 
     it('preserves a later same-text draft after success and a session remount', async () => {

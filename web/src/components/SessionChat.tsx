@@ -410,10 +410,11 @@ type SessionChatProps = {
     onConsumeSendSettlement?: (attemptId: string) => void
     sendAcceptance?: {
         attemptId: string | null
+        sessionId: string
         programmaticEditRevision: number
     } | null
     programmaticEditRevision?: number
-    onSendAccepted?: (attemptId: string | null) => void
+    onSendAccepted?: (sessionId: string, attemptId: string | null) => void
     onProgrammaticEdit?: () => void
     viewMode: 'tail' | 'history'
     messagesVersion: number
@@ -471,6 +472,7 @@ type SessionChatProps = {
 export function SessionChat(props: SessionChatProps) {
     const sendAcceptanceBySessionRef = useRef(new Map<string, {
         attemptId: string | null
+        sessionId: string
         programmaticEditRevision: number
     }>())
     const programmaticEditRevisionBySessionRef = useRef(new Map<string, number>())
@@ -478,13 +480,14 @@ export function SessionChat(props: SessionChatProps) {
     const sessionId = props.session.id
     const sendAcceptance = sendAcceptanceBySessionRef.current.get(sessionId) ?? null
     const programmaticEditRevision = programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0
-    const onSendAccepted = useCallback((attemptId: string | null) => {
-        sendAcceptanceBySessionRef.current.set(sessionId, {
+    const onSendAccepted = useCallback((acceptedSessionId: string, attemptId: string | null) => {
+        sendAcceptanceBySessionRef.current.set(acceptedSessionId, {
             attemptId,
-            programmaticEditRevision: programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0,
+            sessionId: acceptedSessionId,
+            programmaticEditRevision: programmaticEditRevisionBySessionRef.current.get(acceptedSessionId) ?? 0,
         })
         forceComposerStateUpdate((version) => version + 1)
-    }, [sessionId])
+    }, [])
     const onProgrammaticEdit = useCallback(() => {
         const nextRevision = (programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0) + 1
         programmaticEditRevisionBySessionRef.current.set(sessionId, nextRevision)
@@ -728,7 +731,7 @@ function SessionChatInner(props: SessionChatProps) {
             attachments?: AttachmentMetadata[],
             scheduledAt?: number | null,
             deliveryMode: MessageDeliveryMode = 'queue',
-        ): Promise<{ attemptId: string | null } | false> => {
+        ): Promise<SendMessageAcceptance | false> => {
             if (
                 scratchlistMode
                 && scheduledAt == null
@@ -747,7 +750,7 @@ function SessionChatInner(props: SessionChatProps) {
                     attachments,
                     accepted,
                 )
-                return accepted ? { attemptId: null } : false
+                return accepted ? { attemptId: null, sessionId: props.session.id } : false
             }
             // If the user uploaded while scratchlist mode was on, then toggled
             // it off before send, pending items still carry hub paths. Stage
@@ -1538,7 +1541,7 @@ function SessionChatInner(props: SessionChatProps) {
         })
         const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode)
         if (!accepted) return
-        props.onSendAccepted?.(accepted.attemptId)
+        props.onSendAccepted?.(accepted.sessionId, accepted.attemptId)
         if (!routedToScratchlist) {
             // Clear pendingSchedule only after the mutation is actually
             // accepted - covers both pre-mutation guards AND async
