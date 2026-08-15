@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
-import type { ComponentProps } from 'react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState, type ComponentProps } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
     ConversationOutlinePanel,
@@ -23,7 +23,10 @@ import {
     shouldLoadOlderForViewport,
     shouldHoldHistoryNavigation,
     shouldCancelInitialScrollSettling,
+    ThreadMessagesById,
 } from '@/components/AssistantChat/HappyThread'
+import { AssistantRuntimeProvider, useExternalStoreRuntime } from '@assistant-ui/react'
+import type { ThreadMessageLike } from '@assistant-ui/react'
 import type { ConversationOutlineItem } from '@/chat/outline'
 
 const outlineItems: ConversationOutlineItem[] = [
@@ -182,6 +185,65 @@ describe('assistant prompt lookup', () => {
         expect(findPromptTarget(viewport, 'agent-text:answer', assistantAnchorState)?.id)
             .toBe('hapi-message-user-text:prompt')
         viewport.remove()
+    })
+})
+
+describe('ThreadMessagesById', () => {
+    it('does not crash when rewind shortens the transcript and then clears it', async () => {
+        type TestMessage = { id: string; role: 'user' | 'assistant'; text: string }
+        let setMessages!: (messages: TestMessage[]) => void
+        function Harness() {
+            const [messages, updateMessages] = useState<TestMessage[]>([
+                { id: 'user-1', role: 'user', text: 'first' },
+                { id: 'assistant-1', role: 'assistant', text: 'answer' },
+                { id: 'user-2', role: 'user', text: 'second' },
+                { id: 'assistant-2', role: 'assistant', text: 'second answer' }
+            ])
+            setMessages = updateMessages
+            const runtime = useExternalStoreRuntime({
+                messages,
+                convertMessage: (message): ThreadMessageLike => ({
+                    id: message.id,
+                    role: message.role,
+                    content: [{ type: 'text', text: message.text }]
+                }),
+                onNew: async () => {}
+            })
+            return (
+                <AssistantRuntimeProvider runtime={runtime}>
+                    <ThreadMessagesById components={{
+                        UserMessage: () => <div data-testid="user-message" />,
+                        AssistantMessage: () => <div data-testid="assistant-message" />,
+                        SystemMessage: () => <div data-testid="system-message" />
+                    }} />
+                </AssistantRuntimeProvider>
+            )
+        }
+
+        render(<Harness />)
+        expect(screen.getAllByTestId('user-message')).toHaveLength(2)
+        expect(screen.getAllByTestId('assistant-message')).toHaveLength(2)
+
+        await act(async () => {
+            setMessages([
+                { id: 'user-1', role: 'user', text: 'first' },
+                { id: 'assistant-1', role: 'assistant', text: 'answer' }
+            ])
+        })
+
+        await waitFor(() => {
+            expect(screen.getAllByTestId('user-message')).toHaveLength(1)
+            expect(screen.getAllByTestId('assistant-message')).toHaveLength(1)
+        })
+
+        await act(async () => {
+            setMessages([])
+        })
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('user-message')).not.toBeInTheDocument()
+            expect(screen.queryByTestId('assistant-message')).not.toBeInTheDocument()
+        })
     })
 })
 
