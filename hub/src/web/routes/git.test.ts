@@ -84,6 +84,63 @@ describe('generated images route', () => {
 })
 
 describe('file search route', () => {
+    it('normalizes Windows path separators in search queries before invoking ripgrep', async () => {
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: true,
+            metadata: { path: 'C:\\project' }
+        } as unknown as Session
+        let ripgrepArgs: string[] = []
+        let fileSearchQuery: string | undefined
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            runRipgrep: async (_sessionId: string, args: string[], _cwd: string, fileSearch?: { query: string }) => {
+                ripgrepArgs = args
+                fileSearchQuery = fileSearch?.query
+                return { success: true, stdout: 'src/nested/file.ts\n' }
+            },
+            statFiles: async (_sessionId: string, paths: string[]) => ({
+                success: true,
+                entries: paths.map((path) => ({ path, size: 10, modified: 100 }))
+            })
+        } as unknown as Partial<SyncEngine>
+
+        const query = new URLSearchParams({ query: 'src\\nested\\file.ts' }).toString()
+        const response = await buildApp(engine).request(`/api/sessions/session-1/files?${query}`)
+
+        expect(response.status).toBe(200)
+        expect(ripgrepArgs).toEqual(['--files', '--iglob', '*src/nested/file.ts*'])
+        expect(fileSearchQuery).toBe('src/nested/file.ts')
+    })
+
+    it('preserves backslashes in POSIX search queries', async () => {
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: true,
+            metadata: { path: '/project' }
+        } as unknown as Session
+        let ripgrepArgs: string[] = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            runRipgrep: async (_sessionId: string, args: string[]) => {
+                ripgrepArgs = args
+                return { success: true, stdout: 'src/file\\name.ts\n' }
+            },
+            statFiles: async (_sessionId: string, paths: string[]) => ({
+                success: true,
+                entries: paths.map((path) => ({ path, size: 10, modified: 100 }))
+            })
+        } as unknown as Partial<SyncEngine>
+
+        const query = new URLSearchParams({ query: 'src\\file\\name.ts' }).toString()
+        const response = await buildApp(engine).request(`/api/sessions/session-1/files?${query}`)
+
+        expect(response.status).toBe(200)
+        expect(ripgrepArgs).toEqual(['--files', '--iglob', '*src\\\\file\\\\name.ts*'])
+    })
+
     it('uses shared matching semantics for plain and wildcard queries', async () => {
         const session = {
             id: 'session-1',
