@@ -157,10 +157,12 @@ type HarnessControls = {
     acceptAndClearSchedule: () => void
     remount: () => void
     programmaticSetText: (text: string) => void
+    queuedEditSetText: (text: string) => void
     acceptSend: () => void
     setSending: (sending: boolean) => void
     setThreadDisabled: (disabled: boolean) => void
     settleSend: (error?: ComposerSendError) => void
+    settleRetrySend: () => void
     settleAttachmentSendFailure: () => void
     getClearErrorCalls: () => number
 }
@@ -179,12 +181,17 @@ function ComposerHarness(props: {
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
     const [isSending, setIsSending] = useState(false)
     const [composerKey, setComposerKey] = useState('composer-a')
-    const [sendAcceptance, setSendAcceptance] = useState<{ attemptId: string | null } | null>(null)
+    const [programmaticEditRevision, setProgrammaticEditRevision] = useState(0)
+    const [sendAcceptance, setSendAcceptance] = useState<{
+        attemptId: string | null
+        programmaticEditRevision: number
+    } | null>(null)
     const [sendSettlement, setSendSettlement] = useState<{
         attemptId: string
         sessionId: string
         text: string
         status: 'success' | 'error'
+        source: 'send' | 'retry'
     } | null>(null)
     const sessionId = 'session-a'
     const consumeSendSettlement = useCallback((attemptId: string) => {
@@ -217,10 +224,17 @@ function ComposerHarness(props: {
             ...current,
             composer: { ...current.composer, text },
         })),
+        queuedEditSetText: (text) => {
+            setProgrammaticEditRevision((revision) => revision + 1)
+            setSnapshot((current) => ({
+                ...current,
+                composer: { ...current.composer, text },
+            }))
+        },
         acceptSend: () => {
             setIsSending(true)
             setSendSettlement(null)
-            setSendAcceptance({ attemptId: 'attempt-1' })
+            setSendAcceptance({ attemptId: 'attempt-1', programmaticEditRevision })
         },
         setSending: setIsSending,
         setThreadDisabled: (disabled) => setSnapshot((current) => ({
@@ -234,6 +248,17 @@ function ComposerHarness(props: {
                 sessionId,
                 text: props.initialText,
                 status: error ? 'error' : 'success',
+                source: 'send',
+            })
+            setIsSending(false)
+        },
+        settleRetrySend: () => {
+            setSendSettlement({
+                attemptId: 'retry-1',
+                sessionId,
+                text: props.initialText,
+                status: 'success',
+                source: 'retry',
             })
             setIsSending(false)
         },
@@ -243,6 +268,7 @@ function ComposerHarness(props: {
                 sessionId,
                 text: props.initialText,
                 status: 'error',
+                source: 'send',
             })
             setIsSending(false)
         },
@@ -257,6 +283,7 @@ function ComposerHarness(props: {
                 disabled={isSending}
                 pendingSchedule={schedule}
                 sendAcceptance={sendAcceptance}
+                programmaticEditRevision={programmaticEditRevision}
                 sendSettlement={sendSettlement}
                 onConsumeSendSettlement={consumeSendSettlement}
                 onSchedule={setSchedule}
@@ -476,8 +503,28 @@ describe('HappyComposer send-error atomic restore', () => {
         send()
 
         act(() => controls.current!.acceptSend())
-        act(() => controls.current!.programmaticSetText('foo'))
+        act(() => controls.current!.queuedEditSetText('foo'))
         act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+    })
+
+    it('preserves a same-text queued edit after the composer remounts', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.queuedEditSetText('foo'))
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+    })
+
+    it('preserves a matching draft when a retry settles without composer acceptance', async () => {
+        const controls = renderComposer('foo', null)
+
+        act(() => controls.current!.settleRetrySend())
 
         await waitFor(() => expect(input()).toHaveValue('foo'))
     })

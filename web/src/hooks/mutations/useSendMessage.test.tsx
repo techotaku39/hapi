@@ -69,6 +69,7 @@ describe('useSendMessage', () => {
             sessionId: 'session-A',
             text: 'hello',
             status: 'success',
+            source: 'send',
         })
     })
 
@@ -489,6 +490,7 @@ describe('useSendMessage', () => {
                 sessionId: 'session-A',
                 text: 'see this image',
                 status: 'error',
+                source: 'send',
             })
             // No composer-restore: onError is NOT fired and the optimistic
             // row is NOT removed -- both would destroy the attachment UX.
@@ -896,6 +898,15 @@ describe('useSendMessage', () => {
             scheduledAt,
             'queue',
         )
+        await waitFor(() => {
+            expect(result.current.sendSettlement).toEqual({
+                attemptId: 'local-retry-1',
+                sessionId: 'session-A',
+                text: 'hi later',
+                status: 'success',
+                source: 'retry',
+            })
+        })
     })
 
     it('downgrades a failed steer to queue when retrying the message', async () => {

@@ -21,6 +21,7 @@ type SendMessageInput = {
     attachments?: AttachmentMetadata[]
     scheduledAt?: number | null
     deliveryMode: MessageDeliveryMode
+    source: 'send' | 'retry'
 }
 
 export type SendMessageAcceptance = {
@@ -32,6 +33,7 @@ export type SendMessageSettlement = {
     sessionId: string
     text: string
     status: 'success' | 'error'
+    source: 'send' | 'retry'
 }
 
 type BlockedReason = 'no-api' | 'no-session' | 'pending'
@@ -244,6 +246,7 @@ export function useSendMessage(
                 sessionId: input.sessionId,
                 text: input.text,
                 status: 'success',
+                source: input.source,
             })
             updateMessageStatus(
                 input.sessionId,
@@ -259,6 +262,7 @@ export function useSendMessage(
                 sessionId: input.sessionId,
                 text: input.text,
                 status: 'error',
+                source: input.source,
             })
             // Attachment sends keep the legacy failed-bubble UX: the
             // composer-restore path can only re-seat text + scheduledAt,
@@ -373,6 +377,7 @@ export function useSendMessage(
             attachments: sendAttachments,
             scheduledAt,
             deliveryMode,
+            source: 'send',
         })
         return { attemptId: localId }
     }
@@ -406,6 +411,7 @@ export function useSendMessage(
             attachments: getMessageAttachments(message),
             scheduledAt: message.scheduledAt ?? null,
             deliveryMode: getRetryDeliveryMode(getMessageDeliveryMode(message)),
+            source: 'retry',
         })
         return true
     }

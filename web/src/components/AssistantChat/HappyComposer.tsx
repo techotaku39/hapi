@@ -369,7 +369,12 @@ export function HappyComposer(props: {
     onClearSendError?: () => void
     onSuppressSendErrorRestore?: (id: number) => void
     /** Emitted by SessionChat after a send is accepted. Null attempt ids are settled scratchlist sends. */
-    sendAcceptance?: { attemptId: string | null } | null
+    sendAcceptance?: {
+        attemptId: string | null
+        programmaticEditRevision?: number
+    } | null
+    /** Monotonic programmatic Queued Edit revision owned outside this keyed composer. */
+    programmaticEditRevision?: number
     /** Terminal result for a chat mutation, including attachment-bearing failures. */
     sendSettlement?: SendMessageSettlement | null
     /** Consume a terminal result after this composer makes its clear/preserve decision. */
@@ -724,11 +729,22 @@ export function HappyComposer(props: {
         ) return
         const settlementKey = `${settlement.sessionId}:${settlement.attemptId}`
         if (handledSuccessfulSendRef.current === settlementKey) return
-        if (draftHydration.sessionId !== sessionId || !draftHydration.complete) return
         const consumeSettlement = () => {
             handledSuccessfulSendRef.current = settlementKey
             props.onConsumeSendSettlement?.(settlement.attemptId)
         }
+
+        // Retry settlements reuse the failed message's local id and do not
+        // represent a composer-accepted send. Consume them without touching a
+        // matching draft that belongs to the operator.
+        if (
+            settlement.source !== 'send'
+            || props.sendAcceptance?.attemptId !== settlement.attemptId
+        ) {
+            consumeSettlement()
+            return
+        }
+        if (draftHydration.sessionId !== sessionId || !draftHydration.complete) return
 
         const acceptedSend = acceptedSendEditGenerationRef.current
         const sendEditGeneration = acceptedSend?.attemptId === settlement.attemptId
@@ -747,12 +763,16 @@ export function HappyComposer(props: {
             return
         }
 
+        const editedProgrammaticallyAfterSend =
+            (props.programmaticEditRevision ?? 0)
+            > (props.sendAcceptance?.programmaticEditRevision ?? 0)
+
         // Queued-message Edit restores text through the assistant-ui store and
         // does not fire the composer input handlers. If the accepted send
         // started in this composer, an exact-text replacement is still newer
         // state and must survive the settlement. A keyed remount has no local
         // accepted-send marker, so its hydrated stale draft remains clearable.
-        if (composerText === settlement.text && acceptedSend?.startedHere) {
+        if (editedProgrammaticallyAfterSend || (composerText === settlement.text && acceptedSend?.startedHere)) {
             consumeSettlement()
             return
         }
@@ -762,7 +782,7 @@ export function HappyComposer(props: {
         }
         clearComposerDraftSnapshotIfText(sessionId, settlement.text)
         consumeSettlement()
-    }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.sendSettlement, sessionId])
+    }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the

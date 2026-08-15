@@ -408,6 +408,13 @@ type SessionChatProps = {
     isSending: boolean
     sendSettlement: SendMessageSettlement | null
     onConsumeSendSettlement?: (attemptId: string) => void
+    sendAcceptance?: {
+        attemptId: string | null
+        programmaticEditRevision: number
+    } | null
+    programmaticEditRevision?: number
+    onSendAccepted?: (attemptId: string | null) => void
+    onProgrammaticEdit?: () => void
     viewMode: 'tail' | 'history'
     messagesVersion: number
     historyVersion: number
@@ -462,7 +469,38 @@ type SessionChatProps = {
  * SessionChatInner.
  */
 export function SessionChat(props: SessionChatProps) {
-    return <SessionChatInner key={props.session.id} {...props} />
+    const sendAcceptanceBySessionRef = useRef(new Map<string, {
+        attemptId: string | null
+        programmaticEditRevision: number
+    }>())
+    const programmaticEditRevisionBySessionRef = useRef(new Map<string, number>())
+    const [, forceComposerStateUpdate] = useState(0)
+    const sessionId = props.session.id
+    const sendAcceptance = sendAcceptanceBySessionRef.current.get(sessionId) ?? null
+    const programmaticEditRevision = programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0
+    const onSendAccepted = useCallback((attemptId: string | null) => {
+        sendAcceptanceBySessionRef.current.set(sessionId, {
+            attemptId,
+            programmaticEditRevision: programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0,
+        })
+        forceComposerStateUpdate((version) => version + 1)
+    }, [sessionId])
+    const onProgrammaticEdit = useCallback(() => {
+        const nextRevision = (programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0) + 1
+        programmaticEditRevisionBySessionRef.current.set(sessionId, nextRevision)
+        forceComposerStateUpdate((version) => version + 1)
+    }, [sessionId])
+
+    return (
+        <SessionChatInner
+            key={sessionId}
+            {...props}
+            sendAcceptance={sendAcceptance}
+            programmaticEditRevision={programmaticEditRevision}
+            onSendAccepted={onSendAccepted}
+            onProgrammaticEdit={onProgrammaticEdit}
+        />
+    )
 }
 
 function SessionChatInner(props: SessionChatProps) {
@@ -1420,7 +1458,6 @@ function SessionChatInner(props: SessionChatProps) {
     // absolute epoch-ms using Date.now() at that moment (send-time base for presets).
     const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null)
     const [pendingScheduleRevision, setPendingScheduleRevision] = useState(0)
-    const [sendAcceptance, setSendAcceptance] = useState<{ attemptId: string | null } | null>(null)
     const updatePendingSchedule = useCallback((next: PendingSchedule | null) => {
         setPendingSchedule(next)
         setPendingScheduleRevision((revision) => revision + 1)
@@ -1501,7 +1538,7 @@ function SessionChatInner(props: SessionChatProps) {
         })
         const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode)
         if (!accepted) return
-        setSendAcceptance({ attemptId: accepted.attemptId })
+        props.onSendAccepted?.(accepted.attemptId)
         if (!routedToScratchlist) {
             // Clear pendingSchedule only after the mutation is actually
             // accepted - covers both pre-mutation guards AND async
@@ -1726,6 +1763,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 pendingSchedule={pendingSchedule}
                                 pendingScheduleRevision={pendingScheduleRevision}
                                 onEdit={({ pendingSchedule: restored }) => {
+                                    props.onProgrammaticEdit?.()
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
@@ -1743,7 +1781,8 @@ function SessionChatInner(props: SessionChatProps) {
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
-                        sendAcceptance={sendAcceptance}
+                        sendAcceptance={props.sendAcceptance}
+                        programmaticEditRevision={props.programmaticEditRevision ?? 0}
                         sendSettlement={props.sendSettlement}
                         onConsumeSendSettlement={props.onConsumeSendSettlement}
                         onSchedule={updatePendingSchedule}
