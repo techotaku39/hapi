@@ -576,8 +576,8 @@ function SessionPage() {
         sendSettlement,
     } = useSendMessage(api, sessionId, {
         isSessionThinking: session?.thinking ?? false,
-        onSuccess: (sentSessionId) => {
-            clearDraftsAfterSend(sentSessionId, sessionId)
+        onSuccess: (sentSessionId, sentText) => {
+            clearDraftsAfterSend(sentSessionId, sessionId, sentText)
             // 中文注释：一旦用户已经在 Hapi 内继续这个 Codex 会话，就清除"刚从 Codex 导入"的标记。
             clearCodexImportedSession(session?.metadata?.codexSessionId)
             // A successful send supersedes any previously-rendered error

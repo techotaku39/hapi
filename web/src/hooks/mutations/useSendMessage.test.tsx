@@ -62,10 +62,12 @@ describe('useSendMessage', () => {
         })
 
         await waitFor(() => {
-            expect(onSuccess).toHaveBeenCalledWith('session-A')
+            expect(onSuccess).toHaveBeenCalledWith('session-A', 'hello')
         })
         expect(result.current.sendSettlement).toEqual({
             attemptId: 'local-id-1',
+            sessionId: 'session-A',
+            text: 'hello',
             status: 'success',
         })
     })
@@ -159,7 +161,7 @@ describe('useSendMessage', () => {
         })
 
         await waitFor(() => {
-            expect(onSuccess).toHaveBeenCalledWith('session-resolved')
+            expect(onSuccess).toHaveBeenCalledWith('session-resolved', 'hello')
         })
     })
 
@@ -308,7 +310,7 @@ describe('useSendMessage', () => {
             })
 
             await waitFor(() => {
-                expect(onSuccess).toHaveBeenCalledWith('session-A')
+                expect(onSuccess).toHaveBeenCalledWith('session-A', 'clean send')
             })
             expect(onError).not.toHaveBeenCalled()
         })
@@ -484,6 +486,8 @@ describe('useSendMessage', () => {
             })
             expect(result.current.sendSettlement).toEqual({
                 attemptId: 'local-id-1',
+                sessionId: 'session-A',
+                text: 'see this image',
                 status: 'error',
             })
             // No composer-restore: onError is NOT fired and the optimistic

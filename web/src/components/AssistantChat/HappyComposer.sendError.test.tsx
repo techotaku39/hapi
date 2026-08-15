@@ -182,6 +182,8 @@ function ComposerHarness(props: {
     const [sendAcceptance, setSendAcceptance] = useState<{ attemptId: string | null } | null>(null)
     const [sendSettlement, setSendSettlement] = useState<{
         attemptId: string
+        sessionId: string
+        text: string
         status: 'success' | 'error'
     } | null>(null)
     const clearErrorCallsRef = useRef(0)
@@ -221,11 +223,21 @@ function ComposerHarness(props: {
         })),
         settleSend: (error) => {
             if (error) setSendError(error)
-            setSendSettlement({ attemptId: 'attempt-1', status: error ? 'error' : 'success' })
+            setSendSettlement({
+                attemptId: 'attempt-1',
+                sessionId: composerKey,
+                text: props.initialText,
+                status: error ? 'error' : 'success',
+            })
             setIsSending(false)
         },
         settleAttachmentSendFailure: () => {
-            setSendSettlement({ attemptId: 'attempt-1', status: 'error' })
+            setSendSettlement({
+                attemptId: 'attempt-1',
+                sessionId: composerKey,
+                text: props.initialText,
+                status: 'error',
+            })
             setIsSending(false)
         },
         getClearErrorCalls: () => clearErrorCallsRef.current,
@@ -399,6 +411,57 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue('failed text'))
         expect(screen.getByTestId('pending-schedule')).toHaveTextContent('{"type":"absolute","ms":1234}')
+    })
+
+    it('clears an untouched remounted send draft after a successful settlement', async () => {
+        const controls = renderComposer('submitted text', null)
+        send()
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.programmaticSetText('submitted text'))
+
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue(''))
+        fireEvent.change(input(), { target: { value: 'new draft after send' } })
+        expect(input()).toHaveValue('new draft after send')
+    })
+
+    it('clears a remounted draft from the original user submission after success', async () => {
+        const controls = renderComposer('submitted text', null)
+        fireEvent.change(input(), { target: { value: 'submitted text' } })
+        send()
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.programmaticSetText('submitted text'))
+
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue(''))
+    })
+
+    it('preserves a new user draft typed during a remounted send', async () => {
+        const controls = renderComposer('submitted text', null)
+        send()
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        fireEvent.change(input(), { target: { value: 'new draft while pending' } })
+
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('new draft while pending'))
+    })
+
+    it('preserves a different remounted draft after a successful settlement', async () => {
+        const controls = renderComposer('submitted text', null)
+        send()
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.programmaticSetText('replacement draft'))
+
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('replacement draft'))
     })
 
     it('does not implicitly restore after a keyed remount receives a new draft interaction', async () => {

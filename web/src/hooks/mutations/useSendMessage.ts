@@ -29,6 +29,8 @@ export type SendMessageAcceptance = {
 
 export type SendMessageSettlement = {
     attemptId: string
+    sessionId: string
+    text: string
     status: 'success' | 'error'
 }
 
@@ -101,7 +103,7 @@ type UseSendMessageOptions = {
         context: SessionResolvedContext,
     ) => void | Promise<void | SessionResolution>
     onBlocked?: (reason: BlockedReason) => void
-    onSuccess?: (sessionId: string) => void
+    onSuccess?: (sessionId: string, text: string) => void
     onError?: (info: SendErrorInfo) => void
     isSessionThinking?: boolean
 }
@@ -231,17 +233,27 @@ export function useSendMessage(
             return { successStatus }
         },
         onSuccess: (_, input, context) => {
-            setSendSettlement({ attemptId: input.localId, status: 'success' })
+            setSendSettlement({
+                attemptId: input.localId,
+                sessionId: input.sessionId,
+                text: input.text,
+                status: 'success',
+            })
             updateMessageStatus(
                 input.sessionId,
                 input.localId,
                 context?.successStatus ?? 'sent'
             )
             haptic.notification('success')
-            options?.onSuccess?.(input.sessionId)
+            options?.onSuccess?.(input.sessionId, input.text)
         },
         onError: (error, input) => {
-            setSendSettlement({ attemptId: input.localId, status: 'error' })
+            setSendSettlement({
+                attemptId: input.localId,
+                sessionId: input.sessionId,
+                text: input.text,
+                status: 'error',
+            })
             // Attachment sends keep the legacy failed-bubble UX: the
             // composer-restore path can only re-seat text + scheduledAt,
             // not the uploaded attachment metadata.  Removing the row
