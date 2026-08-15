@@ -529,7 +529,11 @@ export function HappyComposer(props: {
     const lastSendAcceptanceRef = useRef(props.sendAcceptance)
     const pendingSendAttemptIdRef = useRef<string | null>(null)
     const pendingSendEditGenerationRef = useRef<number | null>(null)
-    const acceptedSendEditGenerationRef = useRef<{ attemptId: string; generation: number } | null>(null)
+    const acceptedSendEditGenerationRef = useRef<{
+        attemptId: string
+        generation: number
+        startedHere: boolean
+    } | null>(null)
     const handledSuccessfulSendRef = useRef<string | null>(null)
     const [showSettings, setShowSettings] = useState(false)
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
@@ -555,9 +559,11 @@ export function HappyComposer(props: {
             return
         }
         pendingSendAttemptIdRef.current = acceptance.attemptId
+        const pendingGeneration = pendingSendEditGenerationRef.current
         acceptedSendEditGenerationRef.current = {
             attemptId: acceptance.attemptId,
-            generation: pendingSendEditGenerationRef.current ?? userEditGenerationRef.current,
+            generation: pendingGeneration ?? userEditGenerationRef.current,
+            startedHere: pendingGeneration !== null,
         }
         pendingSendEditGenerationRef.current = null
         const settlement = props.sendSettlement
@@ -737,6 +743,16 @@ export function HappyComposer(props: {
         }
 
         if (composerText !== settlement.text && composerText !== '') {
+            consumeSettlement()
+            return
+        }
+
+        // Queued-message Edit restores text through the assistant-ui store and
+        // does not fire the composer input handlers. If the accepted send
+        // started in this composer, an exact-text replacement is still newer
+        // state and must survive the settlement. A keyed remount has no local
+        // accepted-send marker, so its hydrated stale draft remains clearable.
+        if (composerText === settlement.text && acceptedSend?.startedHere) {
             consumeSettlement()
             return
         }

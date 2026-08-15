@@ -471,6 +471,17 @@ describe('HappyComposer send-error atomic restore', () => {
         await waitFor(() => expect(input()).toHaveValue('replacement draft'))
     })
 
+    it('preserves a same-text programmatic replacement during an accepted send', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.programmaticSetText('foo'))
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+    })
+
     it('preserves a later same-text draft after success and a session remount', async () => {
         const controls = renderComposer('foo', null)
         fireEvent.change(input(), { target: { value: 'foo' } })
