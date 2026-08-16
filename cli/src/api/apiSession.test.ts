@@ -647,6 +647,98 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('keeps live messages behind every reconnect backfill page', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const download = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const makeBackfillMessage = (seq: number, text: string, withAttachment = false) => ({
+            id: `backfilled-${seq}`,
+            seq,
+            createdAt: seq,
+            localId: null,
+            content: {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text,
+                    ...(withAttachment ? {
+                        attachments: [{
+                            id: 'backfill-attachment-metadata',
+                            filename: 'slow.txt',
+                            mimeType: 'text/plain',
+                            size: 4,
+                            attachmentId: 'backfill-attachment'
+                        }]
+                    } : {})
+                },
+                meta: { sentFrom: 'webapp' }
+            }
+        })
+        const firstPage = Array.from({ length: 200 }, (_, index) => (
+            makeBackfillMessage(index + 2, `backfill page one ${index + 1}`, index === 0)
+        ))
+        axiosHarness.get.mockImplementation((url: string, options?: { params?: { afterSeq?: number } }) => {
+            if (!url.includes('/messages')) return download.promise
+            const afterSeq = options?.params?.afterSeq
+            if (afterSeq === 1) {
+                return Promise.resolve({ data: { messages: firstPage } })
+            }
+            if (afterSeq === 201) {
+                return Promise.resolve({
+                    data: { messages: [makeBackfillMessage(202, 'backfill page two')] }
+                })
+            }
+            return Promise.resolve({ data: { messages: [] } })
+        })
+
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const receivedTexts: string[] = []
+        client.onUserMessage((message) => {
+            receivedTexts.push(message.content.text)
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'initial-message',
+            seq: 1,
+            text: 'initial prompt',
+            sentFrom: 'webapp'
+        })
+
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+
+        await vi.waitFor(() => expect(
+            axiosHarness.get.mock.calls.some(([url]) => String(url).includes('/attachments/'))
+        ).toBe(true))
+        triggerIncomingUserMessage(socket, {
+            id: 'live-message-during-backfill-pages',
+            seq: 203,
+            text: 'live prompt during backfill pages',
+            sentFrom: 'webapp'
+        })
+        expect(receivedTexts).not.toContain('live prompt during backfill pages')
+
+        download.resolve({
+            data: Buffer.from('slow'),
+            headers: {
+                'content-length': '4',
+                'x-hapi-attachment-size': '4'
+            }
+        })
+        await vi.waitFor(() => expect(receivedTexts).toHaveLength(203))
+        expect(receivedTexts.slice(-3)).toEqual([
+            'backfill page one 200',
+            'backfill page two',
+            'live prompt during backfill pages'
+        ])
+        expect(axiosHarness.get.mock.calls.some(([, options]) => (
+            (options as { params?: { afterSeq?: number } } | undefined)?.params?.afterSeq === 201
+        ))).toBe(true)
+        client.close()
+    })
+
     it.each(['webapp', 'telegram-bot'] as const)(
         'delivers %s-originated user messages',
         (sentFrom) => {

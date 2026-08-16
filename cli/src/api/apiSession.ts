@@ -250,6 +250,12 @@ export class ApiSessionClient extends EventEmitter {
     private readonly cancelledMaterializingLocalIds = new Set<string>()
     private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
+    private readonly deferredLiveMessages: Array<{
+        id?: string
+        seq?: number
+        localId?: string | null
+        content: unknown
+    }> = []
     private backfillInFlight: Promise<void> | null = null
     private needsBackfill = false
     private hasConnectedOnce = false
@@ -435,6 +441,10 @@ export class ApiSessionClient extends EventEmitter {
                 if (!data.body) return
 
                 if (data.body.t === 'new-message') {
+                    if (this.backfillInFlight) {
+                        this.deferredLiveMessages.push(data.body.message)
+                        return
+                    }
                     void this.handleIncomingMessage(data.body.message).catch((error) => {
                         logger.debug('[API] Failed to materialize incoming attachment', { error })
                     })
@@ -891,63 +901,77 @@ export class ApiSessionClient extends EventEmitter {
 
         const limit = 200
         const run = async () => {
-            let cursor = startSeq
-            while (true) {
-                const response = await axios.get(
-                    `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/messages`,
-                    {
-                        params: { afterSeq: cursor, limit },
-                        headers: buildHubRequestHeaders({
-                            Authorization: `Bearer ${this.token}`,
-                            'Content-Type': 'application/json'
-                        }),
-                        timeout: 15_000
-                    }
-                )
-
-                const parsed = CliMessagesResponseSchema.safeParse(response.data)
-                if (!parsed.success) {
-                    throw apiValidationError('Invalid /cli/sessions/:id/messages response', response)
-                }
-
-                const messages = parsed.data.messages
-                if (messages.length === 0) {
-                    break
-                }
-
-                let maxSeq = cursor
-                // Register the whole page with the delivery queue before
-                // awaiting any attachment materialization. Otherwise a live
-                // socket message can arrive while the first backfill row is
-                // downloading and get queued ahead of the remaining, older
-                // rows from this page.
-                const pending = messages.map((message) => {
-                    if (typeof message.seq === 'number') {
-                        if (message.seq > maxSeq) {
-                            maxSeq = message.seq
+            try {
+                let cursor = startSeq
+                while (true) {
+                    const response = await axios.get(
+                        `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/messages`,
+                        {
+                            params: { afterSeq: cursor, limit },
+                            headers: buildHubRequestHeaders({
+                                Authorization: `Bearer ${this.token}`,
+                                'Content-Type': 'application/json'
+                            }),
+                            timeout: 15_000
                         }
+                    )
+
+                    const parsed = CliMessagesResponseSchema.safeParse(response.data)
+                    if (!parsed.success) {
+                        throw apiValidationError('Invalid /cli/sessions/:id/messages response', response)
                     }
-                    return this.handleIncomingMessage(message)
-                })
-                await Promise.all(pending)
 
-                // Only advance the HTTP cursor by the page that this request
-                // actually fetched. A live socket message may have advanced
-                // the incoming filter while this page was materializing; using
-                // that live seq here could skip rows from a later page.
-                const nextCursor = maxSeq
-                if (nextCursor <= cursor) {
-                    logger.debug('[API] Backfill stopped due to non-advancing cursor', {
-                        cursor,
-                        maxSeq,
-                        nextCursor
+                    const messages = parsed.data.messages
+                    if (messages.length === 0) {
+                        break
+                    }
+
+                    let maxSeq = cursor
+                    // Register the whole page with the delivery queue before
+                    // awaiting any attachment materialization. Otherwise a live
+                    // socket message can arrive while the first backfill row is
+                    // downloading and get queued ahead of the remaining, older
+                    // rows from this page.
+                    const pending = messages.map((message) => {
+                        if (typeof message.seq === 'number') {
+                            if (message.seq > maxSeq) {
+                                maxSeq = message.seq
+                            }
+                        }
+                        return this.handleIncomingMessage(message)
                     })
-                    break
-                }
+                    await Promise.all(pending)
 
-                cursor = nextCursor
-                if (messages.length < limit) {
-                    break
+                    // Only advance the HTTP cursor by the page that this request
+                    // actually fetched. A live socket message may have advanced
+                    // the incoming filter while this page was materializing; using
+                    // that live seq here could skip rows from a later page.
+                    const nextCursor = maxSeq
+                    if (nextCursor <= cursor) {
+                        logger.debug('[API] Backfill stopped due to non-advancing cursor', {
+                            cursor,
+                            maxSeq,
+                            nextCursor
+                        })
+                        break
+                    }
+
+                    cursor = nextCursor
+                    if (messages.length < limit) {
+                        break
+                    }
+                }
+            } finally {
+                // Keep live socket messages behind every fetched backfill page.
+                // Drain repeatedly because another socket event can arrive while
+                // a deferred attachment is materializing.
+                while (this.deferredLiveMessages.length > 0) {
+                    const deferred = this.deferredLiveMessages.splice(0)
+                    await Promise.all(deferred.map((message) => (
+                        this.handleIncomingMessage(message).catch((error) => {
+                            logger.debug('[API] Failed to materialize deferred live attachment', { error })
+                        })
+                    )))
                 }
             }
         }

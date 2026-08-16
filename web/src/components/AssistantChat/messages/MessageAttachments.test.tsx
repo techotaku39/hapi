@@ -1,11 +1,14 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { MessageAttachments } from './MessageAttachments'
 
-afterEach(() => cleanup())
+afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+})
 
 const attachment: AttachmentMetadata = {
     id: 'attachment-row-1',
@@ -36,5 +39,24 @@ describe('MessageAttachments', () => {
         expect(screen.getByText('photo.png')).toBeInTheDocument()
         expect(screen.getByText('2.0 MB')).toBeInTheDocument()
         expect(screen.queryByText('Loading preview…')).not.toBeInTheDocument()
+    })
+
+    it('loads the original only after an explicit action when the thumbnail is unavailable', async () => {
+        const fetchAttachmentBlob = vi.fn()
+            .mockRejectedValueOnce(new Error('thumbnail unavailable'))
+            .mockResolvedValueOnce(new Blob(['original'], { type: 'image/png' }))
+        vi.stubGlobal('URL', {
+            createObjectURL: vi.fn(() => 'blob:original'),
+            revokeObjectURL: vi.fn()
+        })
+
+        renderAttachments(fetchAttachmentBlob)
+
+        await waitFor(() => expect(fetchAttachmentBlob).toHaveBeenCalledTimes(1))
+        const loadButton = screen.getByRole('button', { name: /Load original/ })
+        fireEvent.click(loadButton)
+
+        await waitFor(() => expect(fetchAttachmentBlob).toHaveBeenCalledTimes(2))
+        expect(fetchAttachmentBlob).toHaveBeenNthCalledWith(2, 'session-1', 'attachment-1', 'original')
     })
 })

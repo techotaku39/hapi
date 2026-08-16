@@ -11,6 +11,7 @@ export default {
   'image.original.loading': 'Loading original…',
   'image.original.unavailable': 'Original image unavailable',
   'image.original.retry': 'Retry loading original',
+  'image.original.load': 'Load original',
   'message.copy': 'Copy',
   'message.copied': 'Copied',
   'message.info': 'Message details',

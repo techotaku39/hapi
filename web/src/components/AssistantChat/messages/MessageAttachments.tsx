@@ -4,6 +4,7 @@ import type { ApiClient } from '@/api/client'
 import { FileIcon } from '@/components/FileIcon'
 import { isImageMimeType } from '@/lib/fileAttachments'
 import { ImagePreview } from '@/components/ImagePreview'
+import { useTranslation } from '@/lib/use-translation'
 
 function formatFileSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -13,8 +14,11 @@ function formatFileSize(bytes: number): string {
 
 function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient; sessionId: string }) {
     const { attachment } = props
+    const { t } = useTranslation()
     const [thumbnailUrl, setThumbnailUrl] = useState(attachment.previewUrl ?? '')
     const [previewFailed, setPreviewFailed] = useState(false)
+    const [originalLoading, setOriginalLoading] = useState(false)
+    const [originalFailed, setOriginalFailed] = useState(false)
     const thumbnailUrlRef = useRef<string | undefined>(undefined)
     const originalUrlRef = useRef<string | undefined>(undefined)
 
@@ -22,6 +26,8 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
         let cancelled = false
         setThumbnailUrl(attachment.previewUrl ?? '')
         setPreviewFailed(false)
+        setOriginalLoading(false)
+        setOriginalFailed(false)
         const attachmentId = attachment.attachmentId
         if (attachmentId && !attachment.previewUrl) {
             void (async () => {
@@ -45,10 +51,6 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
         }
     }, [attachment.attachmentId, attachment.previewUrl, props.api, props.sessionId])
 
-    if (previewFailed) {
-        return <FileAttachment attachment={attachment} />
-    }
-
     const openOriginal = async (): Promise<string | undefined> => {
         if (!attachment.attachmentId) return undefined
         if (originalUrlRef.current) return originalUrlRef.current
@@ -60,6 +62,35 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
         } catch {
             return undefined
         }
+    }
+
+    const loadOriginalFromCard = async () => {
+        if (originalLoading) return
+        setOriginalLoading(true)
+        setOriginalFailed(false)
+        const url = await openOriginal()
+        if (url) {
+            setThumbnailUrl(url)
+            setPreviewFailed(false)
+        } else {
+            setOriginalFailed(true)
+        }
+        setOriginalLoading(false)
+    }
+
+    if (previewFailed) {
+        return (
+            <FileAttachment
+                attachment={attachment}
+                onClick={attachment.attachmentId ? loadOriginalFromCard : undefined}
+                actionLabel={originalLoading
+                    ? t('image.original.loading')
+                    : originalFailed
+                        ? t('image.original.retry')
+                        : t('image.original.load')}
+                disabled={originalLoading}
+            />
+        )
     }
 
     if (!thumbnailUrl) {
@@ -89,10 +120,15 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
     )
 }
 
-function FileAttachment(props: { attachment: AttachmentMetadata }) {
+function FileAttachment(props: {
+    attachment: AttachmentMetadata
+    onClick?: () => void | Promise<void>
+    actionLabel?: string
+    disabled?: boolean
+}) {
     const { attachment } = props
-    return (
-        <div className="flex items-center gap-2 rounded-lg bg-[var(--app-bg)] px-3 py-2">
+    const content = (
+        <>
             <FileIcon fileName={attachment.filename} size={24} />
             <div className="min-w-0 flex-1">
                 <div className="truncate text-base font-medium text-[var(--app-fg)]">
@@ -101,8 +137,26 @@ function FileAttachment(props: { attachment: AttachmentMetadata }) {
                 <div className="text-xs text-[var(--app-hint)]">
                     {formatFileSize(attachment.size)}
                 </div>
+                {props.actionLabel ? (
+                    <div className="text-xs text-[var(--app-hint)]">
+                        {props.actionLabel}
+                    </div>
+                ) : null}
             </div>
-        </div>
+        </>
+    )
+    const className = 'flex items-center gap-2 rounded-lg bg-[var(--app-bg)] px-3 py-2 text-left'
+    if (!props.onClick) return <div className={className}>{content}</div>
+    return (
+        <button
+            type="button"
+            className={`${className} w-full hover:bg-[var(--app-subtle-bg)] disabled:cursor-wait disabled:opacity-70`}
+            onClick={() => { void props.onClick?.() }}
+            disabled={props.disabled}
+            title={props.actionLabel}
+        >
+            {content}
+        </button>
     )
 }
 

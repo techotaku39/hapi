@@ -11,6 +11,7 @@ export default {
   'image.original.loading': '加载原图中…',
   'image.original.unavailable': '原图加载失败',
   'image.original.retry': '重试加载原图',
+  'image.original.load': '加载原图',
   'message.copy': '复制',
   'message.copied': '已复制',
   'message.info': '消息详情',
