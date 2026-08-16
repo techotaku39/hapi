@@ -97,6 +97,9 @@ export function useVisibilityReporter(options: {
                     }, 2000)
                 }
             }).finally(() => {
+                if (lastSubscriptionRef.current !== activeSubscription) {
+                    return
+                }
                 inFlightRef.current = false
                 if (hadError || retryTimerRef.current) {
                     return

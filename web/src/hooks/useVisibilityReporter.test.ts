@@ -91,4 +91,43 @@ describe('useVisibilityReporter', () => {
             visibility: 'visible',
         })
     })
+
+    it('does not let a previous subscription unlock a new report', async () => {
+        const oldReport = deferred<void>()
+        const newReport = deferred<void>()
+        const api = {
+            setVisibility: vi.fn()
+                .mockImplementationOnce(() => oldReport.promise)
+                .mockImplementationOnce(() => newReport.promise)
+                .mockResolvedValue(undefined),
+        } as unknown as ApiClient
+
+        setVisibilityState('visible')
+        const { rerender } = renderHook(
+            ({ subscriptionId }) => useVisibilityReporter({ api, subscriptionId }),
+            { initialProps: { subscriptionId: 'sub-old' } },
+        )
+
+        rerender({ subscriptionId: 'sub-new' })
+        expect(api.setVisibility).toHaveBeenCalledTimes(2)
+
+        await act(async () => {
+            oldReport.resolve(undefined)
+        })
+
+        setVisibilityState('hidden')
+        act(() => {
+            document.dispatchEvent(new Event('visibilitychange'))
+        })
+        expect(api.setVisibility).toHaveBeenCalledTimes(2)
+
+        await act(async () => {
+            newReport.resolve(undefined)
+        })
+
+        expect(api.setVisibility).toHaveBeenNthCalledWith(3, {
+            subscriptionId: 'sub-new',
+            visibility: 'hidden',
+        })
+    })
 })

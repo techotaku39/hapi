@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,10 @@ function makeTempDir(): string {
 describe('loadServerSettings', () => {
     let dir: string | null = null
     const originalBackgroundOnly = process.env.SERVERCHAN_BACKGROUND_ONLY
+
+    beforeEach(() => {
+        delete process.env.SERVERCHAN_BACKGROUND_ONLY
+    })
 
     afterEach(() => {
         if (dir) {
