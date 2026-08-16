@@ -145,6 +145,29 @@ export class Store {
         this.attachments = new AttachmentStore(this.db, options?.attachmentsRoot)
     }
 
+    /** Reclaim attachment rows whose owning session no longer exists. */
+    async cleanupOrphanedAttachments(): Promise<number> {
+        const rows = this.db.prepare(`
+            SELECT DISTINCT a.namespace, a.session_id
+            FROM attachments AS a
+            LEFT JOIN sessions AS s
+                ON s.id = a.session_id AND s.namespace = a.namespace
+            WHERE s.id IS NULL
+        `).all() as Array<{ namespace: string; session_id: string }>
+
+        let deleted = 0
+        let firstError: unknown
+        for (const row of rows) {
+            try {
+                deleted += await this.attachments.deleteAllForSession(row.namespace, row.session_id)
+            } catch (error) {
+                firstError ??= error
+            }
+        }
+        if (firstError) throw firstError
+        return deleted
+    }
+
     /**
      * Atomically records a CLI prompt-consumption acknowledgement and returns
      * the persisted session activity timestamp. A duplicate or sibling-stamped

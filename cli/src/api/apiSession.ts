@@ -780,6 +780,7 @@ export class ApiSessionClient extends EventEmitter {
         }
         this.incomingMessagePending += 1
         const run = this.incomingMessageTail.then(async () => {
+            if (this.isClosed()) return
             const userResult = UserMessageSchema.safeParse(message.content)
             if (!userResult.success) {
                 if (message.localId && this.cancelledMaterializingLocalIds.has(message.localId)) return
@@ -790,6 +791,7 @@ export class ApiSessionClient extends EventEmitter {
             if (userResult.data.content.attachments) {
                 materializationResults = []
                 for (const attachment of userResult.data.content.attachments) {
+                    if (this.isClosed()) return
                     try {
                         materializationResults.push({
                             attachment: await this.attachmentMaterializer.materialize(attachment),
@@ -800,6 +802,7 @@ export class ApiSessionClient extends EventEmitter {
                             attachmentId: attachment.attachmentId,
                             error
                         })
+                        if (this.isClosed()) return
                         materializationResults.push({
                             attachment,
                             failure: `Attachment unavailable: ${attachment.filename}`
@@ -824,6 +827,7 @@ export class ApiSessionClient extends EventEmitter {
                 }
                 : userResult.data
             if (message.localId && this.cancelledMaterializingLocalIds.has(message.localId)) return
+            if (this.isClosed()) return
             this.deliverIncomingMessage(message, materializedUser)
         }).finally(() => {
             this.incomingMessagePending -= 1
@@ -845,6 +849,7 @@ export class ApiSessionClient extends EventEmitter {
         message: { id?: string; seq?: number; localId?: string | null; content: unknown },
         userMessage: UserMessage | null
     ): void {
+        if (this.isClosed()) return
         if (!this.incomingFilter.accept({ id: message.id, seq: message.seq })) {
             return
         }

@@ -1073,9 +1073,9 @@ export class SessionCache {
             await this.store.attachments.deleteAllForSession(session.namespace, sessionId)
         } catch (error) {
             // The session row is already gone, so still finalize the in-memory
-            // lifecycle. The leftover bytes/metadata can be reclaimed by a
-            // later storage cleanup pass instead of leaving a ghost session
-            // in the running Hub.
+            // lifecycle. The leftover bytes/metadata are retained for the
+            // startup orphan sweep instead of leaving a ghost session in the
+            // running Hub.
             console.warn('[attachments] Failed to clean up deleted session attachments', {
                 sessionId,
                 error

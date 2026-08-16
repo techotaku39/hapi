@@ -855,6 +855,64 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('drops queued attachment materialization after the client closes', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const first = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const second = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const response = (text: string) => ({
+            data: Buffer.from(text),
+            headers: {
+                'content-length': String(text.length),
+                'x-hapi-attachment-size': String(text.length)
+            }
+        })
+        axiosHarness.get.mockImplementation((url: string) => (
+            url.includes('first-attachment') ? first.promise : second.promise
+        ))
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'first-attachment-message',
+            seq: 1,
+            text: 'first attachment prompt',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'first.txt',
+                mimeType: 'text/plain',
+                size: 5,
+                attachmentId: 'first-attachment'
+            }]
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'second-attachment-message',
+            seq: 2,
+            text: 'second attachment prompt',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-2',
+                filename: 'second.txt',
+                mimeType: 'text/plain',
+                size: 6,
+                attachmentId: 'second-attachment'
+            }]
+        })
+
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledTimes(1))
+        client.close()
+        first.resolve(response('first'))
+        second.resolve(response('second'))
+
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        expect(axiosHarness.get).toHaveBeenCalledTimes(1)
+        expect(onUserMessage).not.toHaveBeenCalled()
+    })
+
     it('materializes multiple attachments in one prompt sequentially', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()

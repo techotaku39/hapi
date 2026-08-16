@@ -169,6 +169,29 @@ describe('AttachmentStore', () => {
         store.close()
     })
 
+    it('reclaims orphaned attachments after reopening the database', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.sqlite')
+        const attachmentsRoot = join(dir, 'attachments')
+        const initialStore = new Store(dbPath, { attachmentsRoot })
+        const orphan = await initialStore.attachments.create({
+            namespace: 'namespace-a',
+            sessionId: 'deleted-session',
+            filename: 'orphan.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('orphan')
+        })
+        initialStore.close()
+
+        const reopenedStore = new Store(dbPath, { attachmentsRoot })
+        expect(await reopenedStore.cleanupOrphanedAttachments()).toBe(1)
+        expect(reopenedStore.attachments.getForSession(orphan.id, 'namespace-a', 'deleted-session'))
+            .toBeNull()
+        expect(existsSync(orphan.originalPath)).toBe(false)
+        reopenedStore.close()
+    })
+
     it('clones durable message attachments for a fork without changing the source', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
