@@ -13,7 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
-import { AttachmentStore } from './attachments'
+import { AttachmentStore, type StoredAttachment } from './attachments'
 
 export type {
     StoredMachine,
@@ -189,10 +189,63 @@ export class Store {
                 ? Boolean(this.db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
                     .get(targetSessionId, localId))
                 : false
-            return {
-                sessionId: targetSessionId,
-                message: addMessage(this.db, targetSessionId, content, localId, scheduledAt),
-                inserted: !alreadyExists
+            const clonedAttachments = new Map<string, StoredAttachment>()
+            let messageContent = content
+            try {
+                if (targetSessionId !== sessionId && !alreadyExists) {
+                    messageContent = this.attachments.cloneMessageAttachments(
+                        row.namespace,
+                        sessionId,
+                        targetSessionId,
+                        content,
+                        clonedAttachments
+                    )
+                }
+                return {
+                    sessionId: targetSessionId,
+                    message: addMessage(this.db, targetSessionId, messageContent, localId, scheduledAt),
+                    inserted: !alreadyExists
+                }
+            } catch (error) {
+                for (const attachment of clonedAttachments.values()) {
+                    this.attachments.deleteForSession(attachment.id, row.namespace, targetSessionId)
+                }
+                throw error
+            }
+        })()
+    }
+
+    /** Move queued messages between OpenCode clear sessions with readable attachments. */
+    moveUninvokedMessages(namespace: string, fromSessionId: string, toSessionId: string): number {
+        if (fromSessionId === toSessionId) return 0
+        return this.db.transaction(() => {
+            const targetLocalIds = new Set(
+                this.messages.getAllMessages(toSessionId)
+                    .map((message) => message.localId)
+                    .filter((localId): localId is string => localId !== null)
+            )
+            const clonedAttachments = new Map<string, StoredAttachment>()
+            try {
+                for (const message of this.messages.getAllMessages(fromSessionId)) {
+                    if (message.invokedAt !== null) continue
+                    if (message.localId !== null && targetLocalIds.has(message.localId)) continue
+                    const rewritten = this.attachments.cloneMessageAttachments(
+                        namespace,
+                        fromSessionId,
+                        toSessionId,
+                        message.content,
+                        clonedAttachments
+                    )
+                    if (rewritten !== message.content && !this.messages.updateMessageContent(message.id, rewritten)) {
+                        throw new Error(`Failed to rewrite queued message ${message.id}`)
+                    }
+                }
+                return this.messages.moveUninvokedMessages(fromSessionId, toSessionId)
+            } catch (error) {
+                for (const attachment of clonedAttachments.values()) {
+                    this.attachments.deleteForSession(attachment.id, namespace, toSessionId)
+                }
+                throw error
             }
         })()
     }
@@ -238,7 +291,7 @@ export class Store {
                 return { result: 'version-mismatch' as const }
             }
             const result = this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
-            if (result.result === 'success') this.messages.moveUninvokedMessages(replacementSessionId, sessionId)
+            if (result.result === 'success') this.moveUninvokedMessages(namespace, replacementSessionId, sessionId)
             return result
         })()
     }

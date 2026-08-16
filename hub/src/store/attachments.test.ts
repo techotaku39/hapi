@@ -154,6 +154,104 @@ describe('AttachmentStore', () => {
         store.close()
     })
 
+    it('rewrites durable attachment ids when queued messages change session ownership', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
+        const target = store.sessions.getOrCreateSession(
+            'target', { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }, null, 'default'
+        )
+        const source = store.sessions.getOrCreateSession(
+            'source', {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'opencode',
+                supersededBySessionId: target.id
+            }, null, 'default'
+        )
+        const makeContent = (attachment: { id: string; filename: string; mimeType: string; size: number }) => ({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'inspect this',
+                attachments: [{
+                    id: 'message-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id,
+                    path: '/legacy/path-that-must-not-survive'
+                }]
+            }
+        })
+        const getAttachmentId = (message: { content: unknown } | undefined): string => {
+            if (!message) throw new Error('expected moved message')
+            const content = message.content as { content: { attachments: Array<{ attachmentId: string }> } }
+            return content.content.attachments[0]!.attachmentId
+        }
+
+        const redirectedAttachment = store.attachments.create({
+            namespace: 'default',
+            sessionId: source.id,
+            filename: 'redirected.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('redirected')
+        })
+        const redirected = store.addMessageForCurrentSession(
+            source.id,
+            makeContent(redirectedAttachment),
+            'redirected-local'
+        )
+        const redirectedId = getAttachmentId(redirected.message)
+        expect(redirected.sessionId).toBe(target.id)
+        expect(redirectedId).not.toBe(redirectedAttachment.id)
+        expect(store.attachments.readForSession(redirectedId, 'default', target.id, 'original')?.data)
+            .toEqual(Buffer.from('redirected'))
+        expect(store.attachments.getForSession(redirectedAttachment.id, 'default', source.id)).not.toBeNull()
+
+        const queuedSource = store.sessions.getOrCreateSession(
+            'queued-source', { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }, null, 'default'
+        )
+        const queuedAttachment = store.attachments.create({
+            namespace: 'default',
+            sessionId: queuedSource.id,
+            filename: 'queued.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('queued')
+        })
+        store.messages.addMessage(queuedSource.id, makeContent(queuedAttachment), 'queued-local')
+
+        expect(store.moveUninvokedMessages('default', queuedSource.id, target.id)).toBe(1)
+        const moved = store.messages.getAllMessages(target.id).find((message) => message.localId === 'queued-local')
+        const movedId = getAttachmentId(moved)
+        expect(movedId).not.toBe(queuedAttachment.id)
+        expect(store.attachments.readForSession(movedId, 'default', target.id, 'original')?.data)
+            .toEqual(Buffer.from('queued'))
+
+        const abortSource = store.sessions.getOrCreateSession(
+            'abort-source', { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }, null, 'default'
+        )
+        const abortTarget = store.sessions.getOrCreateSession(
+            'abort-target', { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }, null, 'default'
+        )
+        const replacementAttachment = store.attachments.create({
+            namespace: 'default',
+            sessionId: abortTarget.id,
+            filename: 'restored.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('restored')
+        })
+        store.messages.addMessage(abortTarget.id, makeContent(replacementAttachment), 'restored-local')
+
+        expect(store.moveUninvokedMessages('default', abortTarget.id, abortSource.id)).toBe(1)
+        const restored = store.messages.getAllMessages(abortSource.id).find((message) => message.localId === 'restored-local')
+        const restoredId = getAttachmentId(restored)
+        expect(restoredId).not.toBe(replacementAttachment.id)
+        expect(store.attachments.readForSession(restoredId, 'default', abortSource.id, 'original')?.data)
+            .toEqual(Buffer.from('restored'))
+        store.close()
+    })
+
     it('expands tilde-based attachment roots before resolving them', () => {
         const previousHome = process.env.HAPI_HOME
         const previousRoot = process.env.HAPI_ATTACHMENTS_ROOT

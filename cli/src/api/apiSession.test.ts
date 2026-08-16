@@ -810,6 +810,56 @@ describe('ApiSessionClient incoming user messages', () => {
         expect(onUserMessage).not.toHaveBeenCalled()
         client.close()
     })
+
+    it('keeps cancellation active across duplicate deliveries of one local message', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const download = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        axiosHarness.get.mockReturnValue(download.promise)
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        const message = {
+            id: 'duplicate-attachment-message',
+            localId: 'duplicate-attachment-local-id',
+            seq: 1,
+            text: 'do not deliver duplicate copies',
+            sentFrom: 'webapp' as const,
+            attachments: [{
+                id: 'att-1',
+                filename: 'slow.txt',
+                mimeType: 'text/plain',
+                size: 4,
+                attachmentId: 'slow-attachment'
+            }]
+        }
+        triggerIncomingUserMessage(socket, message)
+        triggerIncomingUserMessage(socket, message)
+
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledOnce())
+        const ack = vi.fn()
+        socket.trigger('update', {
+            body: {
+                t: 'cancel-queued-message',
+                localId: 'duplicate-attachment-local-id'
+            }
+        }, ack)
+        expect(ack).toHaveBeenCalledWith({ removed: true })
+
+        download.resolve({
+            data: Buffer.from('slow'),
+            headers: {
+                'content-length': '4',
+                'x-hapi-attachment-size': '4'
+            }
+        })
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(onUserMessage).not.toHaveBeenCalled()
+        client.close()
+    })
 })
 
 describe('isExternalUserMessage', () => {

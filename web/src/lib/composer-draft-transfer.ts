@@ -117,7 +117,20 @@ export function forgetComposerDraftHandoff(sessionId: string): void {
     completedHandoffs.delete(sessionId)
 }
 
-function stripSessionScopedUploadFields(attachment: AttachmentDraftInput): AttachmentDraftInput {
+function stripSessionScopedUploadFields(
+    attachment: AttachmentDraftInput,
+    targetSessionId: string,
+): AttachmentDraftInput {
+    if (attachment.attachmentId) {
+        // Durable Hub attachments are transferred with the session merge. Keep
+        // the opaque id and retarget its ownership context instead of uploading
+        // the same File again under the resumed session.
+        return {
+            ...attachment,
+            path: undefined,
+            uploadSessionId: targetSessionId,
+        }
+    }
     return {
         ...attachment,
         path: undefined,
@@ -385,17 +398,23 @@ export async function transferComposerDraft(
             const normalizedBase = (
                 sourceSessionId === targetSessionId
                     ? currentBase
-                    : currentBase.map(stripSessionScopedUploadFields)
+                    : currentBase.map((item) => stripSessionScopedUploadFields(item, targetSessionId))
             ).filter((item) => !cancelledIds.has(item.id))
             const normalizedPending = pendingAttachments
                 .filter((item) => !cancelledIds.has(item.id))
-                .map((attachment) => ({
-                    id: attachment.id,
-                    file: attachment.file,
-                    previewUrl: attachment.previewUrl,
-                    path: undefined,
-                    uploadSessionId: undefined,
-                }))
+                .map((attachment) => attachment.attachmentId
+                    ? {
+                        ...attachment,
+                        path: undefined,
+                        uploadSessionId: targetSessionId,
+                    }
+                    : {
+                        id: attachment.id,
+                        file: attachment.file,
+                        previewUrl: attachment.previewUrl,
+                        path: undefined,
+                        uploadSessionId: undefined,
+                    })
             return mergeAttachmentsById(normalizedBase, normalizedPending)
         }
 

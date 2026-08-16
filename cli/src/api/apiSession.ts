@@ -244,7 +244,7 @@ export class ApiSessionClient extends EventEmitter {
     private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
     private incomingMessageTail: Promise<void> = Promise.resolve()
     private incomingMessagePending = 0
-    private readonly materializingLocalIds = new Set<string>()
+    private readonly materializingLocalIdCounts = new Map<string, number>()
     private readonly cancelledMaterializingLocalIds = new Set<string>()
     private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
@@ -442,7 +442,7 @@ export class ApiSessionClient extends EventEmitter {
                 if (data.body.t === 'cancel-queued-message') {
                     const localId = data.body.localId
                     let removed = false
-                    if (localId && this.materializingLocalIds.has(localId)) {
+                    if (localId && (this.materializingLocalIdCounts.get(localId) ?? 0) > 0) {
                         // The prompt has not reached the agent queue yet. Mark it
                         // cancelled so the async attachment download cannot enqueue
                         // it after the Hub has already acknowledged cancellation.
@@ -771,13 +771,16 @@ export class ApiSessionClient extends EventEmitter {
         }
 
         if (message.localId) {
-            this.materializingLocalIds.add(message.localId)
+            this.materializingLocalIdCounts.set(
+                message.localId,
+                (this.materializingLocalIdCounts.get(message.localId) ?? 0) + 1
+            )
         }
         this.incomingMessagePending += 1
         const run = this.incomingMessageTail.then(async () => {
             const userResult = UserMessageSchema.safeParse(message.content)
             if (!userResult.success) {
-                if (message.localId && this.cancelledMaterializingLocalIds.delete(message.localId)) return
+                if (message.localId && this.cancelledMaterializingLocalIds.has(message.localId)) return
                 this.deliverIncomingMessage(message, null)
                 return
             }
@@ -816,13 +819,18 @@ export class ApiSessionClient extends EventEmitter {
                     }
                 }
                 : userResult.data
-            if (message.localId && this.cancelledMaterializingLocalIds.delete(message.localId)) return
+            if (message.localId && this.cancelledMaterializingLocalIds.has(message.localId)) return
             this.deliverIncomingMessage(message, materializedUser)
         }).finally(() => {
             this.incomingMessagePending -= 1
             if (message.localId) {
-                this.materializingLocalIds.delete(message.localId)
-                this.cancelledMaterializingLocalIds.delete(message.localId)
+                const remaining = (this.materializingLocalIdCounts.get(message.localId) ?? 1) - 1
+                if (remaining <= 0) {
+                    this.materializingLocalIdCounts.delete(message.localId)
+                    this.cancelledMaterializingLocalIds.delete(message.localId)
+                } else {
+                    this.materializingLocalIdCounts.set(message.localId, remaining)
+                }
             }
         })
         this.incomingMessageTail = run.catch(() => {})
@@ -1544,7 +1552,7 @@ export class ApiSessionClient extends EventEmitter {
         this.materializationRetryAbortController = null
         this.awaitingMaterializedConnection = false
         this.pendingOutboundEvents.length = 0
-        this.materializingLocalIds.clear()
+        this.materializingLocalIdCounts.clear()
         this.cancelledMaterializingLocalIds.clear()
         void this.attachmentMaterializer.close()
         this.rpcHandlerManager.onSocketDisconnect()

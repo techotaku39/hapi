@@ -230,6 +230,67 @@ describe('SyncEngine.clearOpenCodeSession', () => {
         }
     )
 
+    it('clones durable attachments when a new OpenCode message is redirected', async () => {
+        const { store, engine } = createEngine()
+        let sourceAttachmentId: string | undefined
+        let targetAttachmentId: string | undefined
+        try {
+            const target = engine.getOrCreateSession(
+                'attachment-redirect-target', { path: '/tmp/project', host: 'host', flavor: 'opencode' }, null, 'default'
+            )
+            const source = engine.getOrCreateSession(
+                'attachment-redirect-source', {
+                    path: '/tmp/project',
+                    host: 'host',
+                    flavor: 'opencode',
+                    supersededBySessionId: target.id
+                }, null, 'default'
+            )
+            const attachment = store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'redirected.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('redirected')
+            })
+            sourceAttachmentId = attachment.id
+
+            await engine.sendMessage(source.id, {
+                text: 'inspect redirected attachment',
+                localId: 'redirected-attachment-local',
+                attachments: [{
+                    id: 'message-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id
+                }]
+            })
+
+            const message = store.messages.getAllMessages(target.id).find(
+                (candidate) => candidate.localId === 'redirected-attachment-local'
+            )
+            if (!message) throw new Error('redirected message was not persisted')
+            const content = message.content as {
+                content: { attachments: Array<{ attachmentId: string }> }
+            }
+            targetAttachmentId = content.content.attachments[0]!.attachmentId
+            expect(targetAttachmentId).not.toBe(sourceAttachmentId)
+            expect(store.attachments.readForSession(targetAttachmentId, 'default', target.id, 'original')?.data)
+                .toEqual(Buffer.from('redirected'))
+        } finally {
+            const sessions = store.sessions.getSessionsByNamespace('default')
+            for (const session of sessions) {
+                for (const attachmentId of [sourceAttachmentId, targetAttachmentId]) {
+                    if (attachmentId) {
+                        store.attachments.deleteForSession(attachmentId, 'default', session.id)
+                    }
+                }
+            }
+            engine.stop()
+        }
+    })
+
     it('recovers cleanup-confirmed clear when the CLI dies before writing archive metadata', async () => {
         const { engine } = createEngine()
         try {

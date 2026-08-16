@@ -2237,7 +2237,7 @@ export class SyncEngine {
             }
         }
         try {
-            const moved = this.store.messages.moveUninvokedMessages(sessionId, replacementSessionId)
+            const moved = this.store.moveUninvokedMessages(namespace, sessionId, replacementSessionId)
             if (moved > 0) {
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId })
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId: replacementSessionId })
