@@ -218,10 +218,12 @@ export class Store {
                     inserted: !latestAlreadyExists
                 }
             })()
-            if (!result.inserted) this.cleanupClonedAttachments(clonedAttachments, initialRoute.namespace, initialRoute.targetSessionId)
+            if (!result.inserted) {
+                await this.cleanupClonedAttachments(clonedAttachments, initialRoute.namespace, initialRoute.targetSessionId)
+            }
             return result
         } catch (error) {
-            this.cleanupClonedAttachments(clonedAttachments, initialRoute.namespace, initialRoute.targetSessionId)
+            await this.cleanupClonedAttachments(clonedAttachments, initialRoute.namespace, initialRoute.targetSessionId)
             throw error
         }
     }
@@ -244,7 +246,7 @@ export class Store {
                 return this.messages.moveUninvokedMessages(fromSessionId, toSessionId)
             })()
         } catch (error) {
-            this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, toSessionId)
+            await this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, toSessionId)
             throw error
         }
     }
@@ -307,11 +309,11 @@ export class Store {
                 return result
             })()
             if (result.result !== 'success') {
-                this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, sessionId)
+                await this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, sessionId)
             }
             return result
         } catch (error) {
-            this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, sessionId)
+            await this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, sessionId)
             throw error
         }
     }
@@ -368,18 +370,18 @@ export class Store {
             }
             return { rewrittenContents, clonedAttachments }
         } catch (error) {
-            this.cleanupClonedAttachments(clonedAttachments, namespace, toSessionId)
+            await this.cleanupClonedAttachments(clonedAttachments, namespace, toSessionId)
             throw error
         }
     }
 
-    private cleanupClonedAttachments(
+    private async cleanupClonedAttachments(
         clonedAttachments: Map<string, StoredAttachment>,
         namespace: string,
         sessionId: string
-    ): void {
+    ): Promise<void> {
         for (const attachment of clonedAttachments.values()) {
-            this.attachments.deleteForSession(attachment.id, namespace, sessionId)
+            await this.attachments.deleteForSession(attachment.id, namespace, sessionId).catch(() => {})
         }
     }
 

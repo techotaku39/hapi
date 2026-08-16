@@ -283,7 +283,7 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             for (const session of sessions) {
                 for (const attachmentId of [sourceAttachmentId, targetAttachmentId]) {
                     if (attachmentId) {
-                        store.attachments.deleteForSession(attachmentId, 'default', session.id)
+                        await store.attachments.deleteForSession(attachmentId, 'default', session.id)
                     }
                 }
             }

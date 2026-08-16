@@ -205,13 +205,15 @@ export class AttachmentStore {
         }
     }
 
-    deleteForSession(id: string, namespace: string, sessionId: string): boolean {
+    async deleteForSession(id: string, namespace: string, sessionId: string): Promise<boolean> {
         const attachment = this.getForSession(id, namespace, sessionId)
         if (!attachment) return false
-        this.db.prepare('DELETE FROM attachments WHERE id = ?').run(id)
-        rmSync(attachment.originalPath, { force: true })
-        if (attachment.thumbnailPath) rmSync(attachment.thumbnailPath, { force: true })
-        return true
+        await rm(attachment.originalPath, { force: true })
+        if (attachment.thumbnailPath) await rm(attachment.thumbnailPath, { force: true })
+        const result = this.db.prepare(
+            'DELETE FROM attachments WHERE id = ? AND namespace = ? AND session_id = ?'
+        ).run(id, namespace, sessionId)
+        return Number(result.changes) > 0
     }
 
     async cloneForSession(

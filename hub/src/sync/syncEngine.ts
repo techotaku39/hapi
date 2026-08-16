@@ -8,6 +8,7 @@
  */
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { AttachmentMetadataSchema } from '@hapi/protocol/schemas'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -127,6 +128,17 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function normalizeUserMessageText(value: string): string | undefined {
     const text = value.trim().replace(/\s+/g, ' ')
     return text.length > 0 ? text : undefined
+}
+
+function messageReferencesAttachment(content: unknown, attachmentId: string): boolean {
+    const message = asRecord(content)
+    if (message?.role !== 'user') return false
+    const messageContent = asRecord(message.content)
+    if (!Array.isArray(messageContent?.attachments)) return false
+    return messageContent.attachments.some((attachment) => {
+        const parsed = AttachmentMetadataSchema.safeParse(attachment)
+        return parsed.success && parsed.data.attachmentId === attachmentId
+    })
 }
 
 function decodeBase64Attachment(value: string): Buffer {
@@ -3919,7 +3931,15 @@ export class SyncEngine {
         if (!access.ok) {
             return { success: false, error: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found' }
         }
-        const deleted = this.store.attachments.deleteForSession(attachmentId, namespace, access.sessionId)
+        if (!this.store.attachments.getForSession(attachmentId, namespace, access.sessionId)) {
+            return { success: false, error: 'Attachment not found' }
+        }
+        const referenced = this.store.messages.getAllMessages(access.sessionId)
+            .some((message) => messageReferencesAttachment(message.content, attachmentId))
+        if (referenced) {
+            return { success: false, error: 'Attachment is already referenced by a message' }
+        }
+        const deleted = await this.store.attachments.deleteForSession(attachmentId, namespace, access.sessionId)
         return deleted ? { success: true } : { success: false, error: 'Attachment not found' }
     }
 

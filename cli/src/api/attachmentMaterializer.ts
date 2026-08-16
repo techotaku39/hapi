@@ -29,7 +29,7 @@ function sha256(data: Buffer): string {
 export class AttachmentMaterializer {
     private readonly paths = new Map<string, string>()
     private readonly identities = new Map<string, string>()
-    private directory: string | null = null
+    private directoryPromise: Promise<string> | null = null
 
     constructor(
         private readonly sessionId: string,
@@ -95,16 +95,24 @@ export class AttachmentMaterializer {
     async close(): Promise<void> {
         this.paths.clear()
         this.identities.clear()
-        const directory = this.directory
-        this.directory = null
+        const directoryPromise = this.directoryPromise
+        this.directoryPromise = null
+        const directory = await directoryPromise?.catch(() => null)
         if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})
     }
 
     private async getDirectory(): Promise<string> {
-        if (this.directory) return this.directory
+        if (this.directoryPromise) return this.directoryPromise
+        this.directoryPromise = this.createDirectory().catch((error) => {
+            this.directoryPromise = null
+            throw error
+        })
+        return this.directoryPromise
+    }
+
+    private async createDirectory(): Promise<string> {
         const root = getHapiBlobsDir()
         await mkdir(root, { recursive: true, mode: 0o700 })
-        this.directory = await mkdtemp(join(root, `attachment-${safeSegment(this.sessionId)}-`))
-        return this.directory
+        return await mkdtemp(join(root, `attachment-${safeSegment(this.sessionId)}-`))
     }
 }

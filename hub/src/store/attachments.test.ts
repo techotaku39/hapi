@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './index'
@@ -51,10 +51,34 @@ describe('AttachmentStore', () => {
             'original'
         ))?.data).toEqual(original)
 
-        expect(store.attachments.deleteForSession(created.id, 'namespace-b', 'session-a')).toBe(false)
-        expect(store.attachments.deleteForSession(created.id, 'namespace-a', 'session-a')).toBe(true)
+        expect(await store.attachments.deleteForSession(created.id, 'namespace-b', 'session-a')).toBe(false)
+        expect(await store.attachments.deleteForSession(created.id, 'namespace-a', 'session-a')).toBe(true)
         expect(existsSync(created.originalPath)).toBe(false)
         expect(await store.attachments.readForSessionAsync(created.id, 'namespace-a', 'session-a', 'original')).toBeNull()
+        store.close()
+    })
+
+    it('keeps attachment metadata when a blob unlink fails', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
+        const created = await store.attachments.create({
+            namespace: 'namespace-a',
+            sessionId: 'session-a',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            original: Buffer.from('original'),
+            thumbnail: Buffer.from('thumbnail'),
+            thumbnailMimeType: 'image/webp'
+        })
+        if (!created.thumbnailPath) throw new Error('expected thumbnail path')
+        rmSync(created.thumbnailPath)
+        mkdirSync(created.thumbnailPath)
+
+        await expect(store.attachments.deleteForSession(created.id, 'namespace-a', 'session-a')).rejects.toBeTruthy()
+        expect(store.attachments.getForSession(created.id, 'namespace-a', 'session-a')).not.toBeNull()
+        expect(existsSync(created.originalPath)).toBe(false)
+        expect(existsSync(created.thumbnailPath)).toBe(true)
         store.close()
     })
 

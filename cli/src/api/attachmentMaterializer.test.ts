@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { basename } from 'node:path'
+import { basename, dirname } from 'node:path'
 
 const axiosGet = vi.hoisted(() => vi.fn())
 
@@ -52,6 +52,28 @@ describe('AttachmentMaterializer', () => {
         await materializer.close()
         expect(existsSync(path)).toBe(false)
         expect(materializer.isAuthorizedPath(path)).toBe(false)
+    })
+
+    it('shares one session directory across concurrent first-use downloads', async () => {
+        axiosGet.mockImplementation(async (url: string) => ({
+            data: Buffer.from(url.endsWith('attachment-1/original') ? 'first' : 'second'),
+            headers: {}
+        }))
+        const materializer = new AttachmentMaterializer('session-1', 'token')
+
+        const [first, second] = await Promise.all([
+            materializer.materialize({ ...attachment, attachmentId: 'attachment-1' }),
+            materializer.materialize({ ...attachment, attachmentId: 'attachment-2' })
+        ])
+
+        expect(dirname(first.path!)).toBe(dirname(second.path!))
+        expect(readFileSync(first.path!)).toEqual(Buffer.from('first'))
+        expect(readFileSync(second.path!)).toEqual(Buffer.from('second'))
+        const firstPath = first.path!
+        const secondPath = second.path!
+        await materializer.close()
+        expect(existsSync(firstPath)).toBe(false)
+        expect(existsSync(secondPath)).toBe(false)
     })
 
     it('rejects a hash mismatch without returning a local path', async () => {
