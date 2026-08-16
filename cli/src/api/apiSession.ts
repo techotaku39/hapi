@@ -243,7 +243,7 @@ export class ApiSessionClient extends EventEmitter {
     private pendingHubPromptEchoes: { text: string; localIds: string[] }[] = []
     private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
     private incomingMessageTail: Promise<void> = Promise.resolve()
-    private incomingMessageBusy = false
+    private incomingMessagePending = 0
     private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
     private backfillInFlight: Promise<void> | null = null
@@ -747,12 +747,12 @@ export class ApiSessionClient extends EventEmitter {
 
         // Preserve the existing synchronous delivery contract for ordinary
         // messages. Only hub attachment references need an async download.
-        if (!this.incomingMessageBusy && !needsMaterialization) {
+        if (this.incomingMessagePending === 0 && !needsMaterialization) {
             this.deliverIncomingMessage(message, parsed.success ? parsed.data : null)
             return Promise.resolve()
         }
 
-        this.incomingMessageBusy = true
+        this.incomingMessagePending += 1
         const run = this.incomingMessageTail.then(async () => {
             const userResult = UserMessageSchema.safeParse(message.content)
             if (!userResult.success) {
@@ -780,7 +780,7 @@ export class ApiSessionClient extends EventEmitter {
                 : userResult.data
             this.deliverIncomingMessage(message, materializedUser)
         }).finally(() => {
-            this.incomingMessageBusy = false
+            this.incomingMessagePending -= 1
         })
         this.incomingMessageTail = run.catch(() => {})
         return run

@@ -71,4 +71,38 @@ describe('AttachmentStore', () => {
         expect(store.attachments.readForSession(created.id, 'namespace-a', 'session-a', 'thumbnail')).toBeNull()
         store.close()
     })
+
+    it('transfers and deletes all attachments by session without crossing namespaces', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
+        const created = store.attachments.create({
+            namespace: 'namespace-a',
+            sessionId: 'session-a',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            original: Buffer.from('original'),
+            thumbnail: Buffer.from('thumb'),
+            thumbnailMimeType: 'image/webp'
+        })
+        const otherNamespace = store.attachments.create({
+            namespace: 'namespace-b',
+            sessionId: 'session-a',
+            filename: 'other.png',
+            mimeType: 'image/png',
+            original: Buffer.from('other')
+        })
+
+        expect(store.attachments.transferSession('namespace-a', 'session-a', 'session-b')).toBe(1)
+        expect(store.attachments.getForSession(created.id, 'namespace-a', 'session-a')).toBeNull()
+        expect(store.attachments.getForSession(created.id, 'namespace-a', 'session-b')).not.toBeNull()
+        expect(store.attachments.getForSession(otherNamespace.id, 'namespace-b', 'session-a')).not.toBeNull()
+
+        expect(store.attachments.deleteAllForSession('namespace-a', 'session-b')).toBe(1)
+        expect(store.attachments.getForSession(created.id, 'namespace-a', 'session-b')).toBeNull()
+        expect(existsSync(created.originalPath)).toBe(false)
+        expect(created.thumbnailPath && existsSync(created.thumbnailPath)).toBe(false)
+        expect(existsSync(otherNamespace.originalPath)).toBe(true)
+        store.close()
+    })
 })

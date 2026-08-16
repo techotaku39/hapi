@@ -204,6 +204,36 @@ export class AttachmentStore {
         return true
     }
 
+    transferSession(namespace: string, fromSessionId: string, toSessionId: string): number {
+        if (fromSessionId === toSessionId) return 0
+        const result = this.db.prepare(`
+            UPDATE attachments
+            SET session_id = ?
+            WHERE namespace = ? AND session_id = ?
+        `).run(toSessionId, namespace, fromSessionId)
+        return Number(result.changes)
+    }
+
+    deleteAllForSession(namespace: string, sessionId: string): number {
+        const attachments = this.db.prepare(`
+            SELECT id, namespace, session_id, filename, mime_type, size,
+                   sha256, original_path, thumbnail_path, thumbnail_mime_type,
+                   thumbnail_size, created_at
+            FROM attachments
+            WHERE namespace = ? AND session_id = ?
+        `).all(namespace, sessionId) as AttachmentRow[]
+        if (attachments.length === 0) return 0
+
+        const result = this.db.prepare(
+            'DELETE FROM attachments WHERE namespace = ? AND session_id = ?'
+        ).run(namespace, sessionId)
+        for (const row of attachments) {
+            rmSync(row.original_path, { force: true })
+            if (row.thumbnail_path) rmSync(row.thumbnail_path, { force: true })
+        }
+        return Number(result.changes)
+    }
+
     private writeAtomically(target: string, data: Buffer): void {
         const temp = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
         try {

@@ -14,28 +14,35 @@ function formatFileSize(bytes: number): string {
 function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient; sessionId: string }) {
     const { attachment } = props
     const [thumbnailUrl, setThumbnailUrl] = useState(attachment.previewUrl ?? '')
+    const [previewFailed, setPreviewFailed] = useState(false)
     const thumbnailUrlRef = useRef<string | undefined>(undefined)
     const originalUrlRef = useRef<string | undefined>(undefined)
 
     useEffect(() => {
         let cancelled = false
         setThumbnailUrl(attachment.previewUrl ?? '')
-        if (attachment.attachmentId && !attachment.previewUrl) {
+        setPreviewFailed(false)
+        const attachmentId = attachment.attachmentId
+        if (attachmentId && !attachment.previewUrl) {
             void (async () => {
-                let blob: Blob
-                let isOriginal = false
                 try {
-                    blob = await props.api.fetchAttachmentBlob(props.sessionId, attachment.attachmentId!, 'thumbnail')
+                    let blob: Blob
+                    let isOriginal = false
+                    try {
+                        blob = await props.api.fetchAttachmentBlob(props.sessionId, attachmentId, 'thumbnail')
+                    } catch {
+                        blob = await props.api.fetchAttachmentBlob(props.sessionId, attachmentId, 'original')
+                        isOriginal = true
+                    }
+                    if (cancelled) return
+                    const url = URL.createObjectURL(blob)
+                    thumbnailUrlRef.current = url
+                    if (isOriginal) originalUrlRef.current = url
+                    setThumbnailUrl(url)
                 } catch {
-                    blob = await props.api.fetchAttachmentBlob(props.sessionId, attachment.attachmentId!, 'original')
-                    isOriginal = true
+                    if (!cancelled) setPreviewFailed(true)
                 }
-                if (cancelled) return
-                const url = URL.createObjectURL(blob)
-                thumbnailUrlRef.current = url
-                if (isOriginal) originalUrlRef.current = url
-                setThumbnailUrl(url)
-            })().catch(() => {})
+            })()
         }
         return () => {
             cancelled = true
@@ -45,6 +52,10 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
             originalUrlRef.current = undefined
         }
     }, [attachment.attachmentId, attachment.previewUrl, props.api, props.sessionId])
+
+    if (previewFailed) {
+        return <FileAttachment attachment={attachment} />
+    }
 
     const openOriginal = async (): Promise<string | undefined> => {
         if (!attachment.attachmentId) return undefined

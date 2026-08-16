@@ -1062,6 +1062,7 @@ export class SessionCache {
             .list(sessionId)
             .flatMap((entry) => entry.attachments)
 
+        this.store.attachments.deleteAllForSession(session.namespace, sessionId)
         const deleted = this.store.sessions.deleteSession(sessionId, session.namespace)
         if (!deleted) {
             throw new Error('Failed to delete session')
@@ -1118,6 +1119,7 @@ export class SessionCache {
         }
 
         const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
+        this.store.attachments.transferSession(namespace, oldSessionId, newSessionId)
         // mergeSessions deletes the source. mergeSessionHistory keeps it alive
         // with the original socket, so its notify chain must stay on that id.
         if (options.deleteOldSession) {

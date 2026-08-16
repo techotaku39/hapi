@@ -660,6 +660,77 @@ describe('ApiSessionClient incoming user messages', () => {
         }))
         client.close()
     })
+
+    it('keeps plain messages behind all queued attachment materialization', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const first = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const second = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const response = (text: string) => ({
+            data: Buffer.from(text),
+            headers: {
+                'content-length': String(text.length),
+                'x-hapi-attachment-size': String(text.length)
+            }
+        })
+        axiosHarness.get.mockImplementation((url: string) => {
+            if (url.includes('first-attachment')) return first.promise
+            return second.promise
+        })
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const receivedTexts: string[] = []
+        client.onUserMessage((message) => receivedTexts.push(message.content.text))
+
+        triggerIncomingUserMessage(socket, {
+            id: 'first-attachment-message',
+            seq: 1,
+            text: 'first attachment prompt',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'first.txt',
+                mimeType: 'text/plain',
+                size: 5,
+                attachmentId: 'first-attachment'
+            }]
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'second-attachment-message',
+            seq: 2,
+            text: 'second attachment prompt',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-2',
+                filename: 'second.txt',
+                mimeType: 'text/plain',
+                size: 6,
+                attachmentId: 'second-attachment'
+            }]
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'plain-message',
+            seq: 3,
+            text: 'plain prompt',
+            sentFrom: 'webapp'
+        })
+
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledTimes(1))
+        expect(receivedTexts).toEqual([])
+
+        first.resolve(response('first'))
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledTimes(2))
+        expect(receivedTexts).toEqual(['first attachment prompt'])
+
+        second.resolve(response('second'))
+        await vi.waitFor(() => expect(receivedTexts).toEqual([
+            'first attachment prompt',
+            'second attachment prompt',
+            'plain prompt'
+        ]))
+        client.close()
+    })
 })
 
 describe('isExternalUserMessage', () => {
