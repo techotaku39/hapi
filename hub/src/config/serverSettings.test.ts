@@ -10,11 +10,17 @@ function makeTempDir(): string {
 
 describe('loadServerSettings', () => {
     let dir: string | null = null
+    const originalBackgroundOnly = process.env.SERVERCHAN_BACKGROUND_ONLY
 
     afterEach(() => {
         if (dir) {
             rmSync(dir, { recursive: true, force: true })
             dir = null
+        }
+        if (originalBackgroundOnly === undefined) {
+            delete process.env.SERVERCHAN_BACKGROUND_ONLY
+        } else {
+            process.env.SERVERCHAN_BACKGROUND_ONLY = originalBackgroundOnly
         }
     })
 
@@ -27,5 +33,39 @@ describe('loadServerSettings', () => {
         }))
 
         await expect(loadServerSettings(dir)).rejects.toThrow('Unsupported old settings field')
+    })
+
+    it('defaults ServerChan background-only mode to disabled', async () => {
+        dir = makeTempDir()
+
+        const result = await loadServerSettings(dir)
+
+        expect(result.settings.serverChanBackgroundOnly).toBe(false)
+        expect(result.sources.serverChanBackgroundOnly).toBe('default')
+    })
+
+    it('loads ServerChan background-only mode from settings.json', async () => {
+        dir = makeTempDir()
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({
+            serverChanBackgroundOnly: true
+        }))
+
+        const result = await loadServerSettings(dir)
+
+        expect(result.settings.serverChanBackgroundOnly).toBe(true)
+        expect(result.sources.serverChanBackgroundOnly).toBe('file')
+    })
+
+    it('loads ServerChan background-only mode with environment precedence', async () => {
+        dir = makeTempDir()
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({
+            serverChanBackgroundOnly: false
+        }))
+        process.env.SERVERCHAN_BACKGROUND_ONLY = 'true'
+
+        const result = await loadServerSettings(dir)
+
+        expect(result.settings.serverChanBackgroundOnly).toBe(true)
+        expect(result.sources.serverChanBackgroundOnly).toBe('env')
     })
 })
