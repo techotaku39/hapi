@@ -450,20 +450,18 @@ describe('buildVisibleChatBlocks', () => {
         expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
     })
 
-    it('groups ordinary tools across assistant text in grouped mode', () => {
+    it('keeps ordinary tools separated by assistant text in grouped mode', () => {
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'read_file', { path: 'src/a.ts' }),
             makeTextBlock('text-1', 'located the issue'),
             makeToolBlock('edit-1', 'edit_file', { path: 'src/a.ts' }),
         ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
-        expect(visible).toHaveLength(2)
-        expect(isToolGroupBlock(visible[0])).toBe(true)
-        expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual(['read-1', 'edit-1'])
-        expect(visible[1].kind).toBe('agent-text')
+        expect(visible).toHaveLength(3)
+        expect(visible.map((block) => block.kind)).toEqual(['tool-call', 'agent-text', 'tool-call'])
     })
 
-    it('groups ordinary tools across standalone milestones in grouped mode', () => {
+    it('keeps ordinary tools separated by standalone milestones in grouped mode', () => {
         const question = makeToolBlock('ask-1', 'request_user_input')
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
@@ -471,9 +469,8 @@ describe('buildVisibleChatBlocks', () => {
             makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
         ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
-        expect(visible).toHaveLength(2)
-        expect(isToolGroupBlock(visible[0])).toBe(true)
-        expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual(['read-1', 'edit-1'])
+        expect(visible).toHaveLength(3)
+        expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
         expect(visible[1]).toBe(question)
     })
 
@@ -499,7 +496,7 @@ describe('buildVisibleChatBlocks', () => {
         expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
     })
 
-    it('keeps interactive cards standalone while grouped ordinary tools span them', () => {
+    it('keeps interactive cards standalone and preserves grouped tool order', () => {
         const interactive = makeToolBlock('ask-1', 'request_user_input')
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
@@ -509,15 +506,18 @@ describe('buildVisibleChatBlocks', () => {
             makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
         ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
-        expect(visible).toHaveLength(2)
+        expect(visible).toHaveLength(3)
         expect(isToolGroupBlock(visible[0])).toBe(true)
         expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual([
             'read-1',
-            'bash-1',
+            'bash-1'
+        ])
+        expect(visible[1]).toBe(interactive)
+        expect(isToolGroupBlock(visible[2])).toBe(true)
+        expect(isToolGroupBlock(visible[2]) ? visible[2].tools.map((tool) => tool.id) : []).toEqual([
             'edit-1',
             'write-1'
         ])
-        expect(visible[1]).toBe(interactive)
     })
 
     it('keeps completed Codex permission cards standalone in grouped mode', () => {
@@ -549,15 +549,18 @@ describe('buildVisibleChatBlocks', () => {
             makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
         ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
-        expect(visible).toHaveLength(2)
+        expect(visible).toHaveLength(3)
         expect(isToolGroupBlock(visible[0])).toBe(true)
         expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual([
             'read-1',
-            'bash-1',
+            'bash-1'
+        ])
+        expect(visible[1]).toBe(permission)
+        expect(isToolGroupBlock(visible[2])).toBe(true)
+        expect(isToolGroupBlock(visible[2]) ? visible[2].tools.map((tool) => tool.id) : []).toEqual([
             'edit-1',
             'write-1'
         ])
-        expect(visible[1]).toBe(permission)
     })
 
     it('marks only the oldest visible grouped run as needing older history', () => {

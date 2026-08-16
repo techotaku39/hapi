@@ -384,37 +384,6 @@ export function buildVisibleChatBlocks(
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]
 
-        if (groupingMode === 'grouped' && visibleBlockRole(block) === 'assistant') {
-            let responseEnd = index + 1
-            while (responseEnd < blocks.length && visibleBlockRole(blocks[responseEnd]) === 'assistant') {
-                responseEnd += 1
-            }
-
-            const responseBlocks = blocks.slice(index, responseEnd)
-            const tools = responseBlocks.filter((candidate): candidate is ToolCallBlock => (
-                candidate.kind === 'tool-call' && isEligibleForToolGrouping(candidate, groupingMode)
-            ))
-
-            if (tools.length >= 2) {
-                const firstTool = tools[0]
-                for (const candidate of responseBlocks) {
-                    if (candidate === firstTool) {
-                        appendToolGroup(visibleBlocks, tools, 'default', options, previousGroups)
-                        continue
-                    }
-                    if (candidate.kind === 'tool-call' && isEligibleForToolGrouping(candidate, groupingMode)) {
-                        continue
-                    }
-                    visibleBlocks.push(candidate)
-                }
-            } else {
-                visibleBlocks.push(...responseBlocks)
-            }
-
-            index = responseEnd - 1
-            continue
-        }
-
         if (block.kind !== 'tool-call') {
             visibleBlocks.push(block)
             continue
