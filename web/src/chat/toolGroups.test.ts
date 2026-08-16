@@ -144,7 +144,7 @@ describe('isEligibleForToolGrouping', () => {
         expect(isEligibleForToolGrouping(makeToolBlock('error-1', 'AgyError'))).toBe(false)
     })
 
-    it('keeps completed permissioned execution cards eligible for grouping', () => {
+    it('keeps approved permissioned execution cards eligible while preserving denial reasons', () => {
         expect(isEligibleForToolGrouping(makeToolBlock('approved-1', 'Bash', {}, {
             tool: {
                 id: 'approved-1',
@@ -182,7 +182,7 @@ describe('isEligibleForToolGrouping', () => {
                     reason: 'blocked'
                 }
             }
-        }))).toBe(true)
+        }))).toBe(false)
     })
 
     it('keeps Codex permission milestones standalone after completion', () => {
@@ -413,6 +413,9 @@ describe('buildVisibleChatBlocks', () => {
         expect(grouped.filter(isToolGroupBlock)).toHaveLength(1)
         expect(classifiedGroups).toHaveLength(2)
         expect(new Set(classifiedGroups.map((group) => group.id)).size).toBe(2)
+        const groupedGroup = grouped.find(isToolGroupBlock)
+        expect(groupedGroup).toBeDefined()
+        expect(classifiedGroups.every((group) => group.id !== groupedGroup?.id)).toBe(true)
     })
 
     it('groups contiguous eligible root tool cards in grouped mode', () => {
@@ -561,6 +564,41 @@ describe('buildVisibleChatBlocks', () => {
             'edit-1',
             'write-1'
         ])
+    })
+
+    it('keeps terminal permission reasons visible in grouped mode', () => {
+        const denied = makeToolBlock('denied-1', 'Bash', { command: 'rm -rf build' }, {
+            tool: {
+                id: 'denied-1',
+                name: 'Bash',
+                state: 'completed',
+                input: { command: 'rm -rf build' },
+                createdAt: 1,
+                startedAt: 1,
+                completedAt: 2,
+                execStartedAt: null,
+                execCompletedAt: null,
+                description: null,
+                result: 'Denied',
+                permission: {
+                    id: 'denied-1',
+                    status: 'denied',
+                    reason: 'Command rejected by policy'
+                }
+            }
+        })
+        const visible = buildVisibleChatBlocks([
+            makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
+            makeToolBlock('read-2', 'Read', { file_path: 'src/b.ts' }),
+            denied,
+            makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
+            makeToolBlock('edit-2', 'Edit', { file_path: 'src/b.ts' })
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
+
+        expect(visible).toHaveLength(3)
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(visible[1]).toBe(denied)
+        expect(isToolGroupBlock(visible[2])).toBe(true)
     })
 
     it('marks only the oldest visible grouped run as needing older history', () => {

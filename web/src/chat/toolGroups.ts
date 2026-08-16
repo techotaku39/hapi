@@ -293,8 +293,14 @@ function summarizeToolGroup(tools: ToolCallBlock[]): ToolGroupSummary {
 }
 
 function isInteractiveToolBlock(block: ToolCallBlock): boolean {
+    const permission = block.tool.permission
+    const hasTerminalPermissionReason = (
+        permission?.status === 'denied' || permission?.status === 'canceled'
+    ) && Boolean(permission.reason)
+
     return INTERACTIVE_TOOL_NAMES.has(normalizeToolIdentifier(block.tool.name))
-        || block.tool.permission?.status === 'pending'
+        || permission?.status === 'pending'
+        || hasTerminalPermissionReason
         || isAskUserQuestionToolName(block.tool.name)
         || isRequestUserInputToolName(block.tool.name)
 }
@@ -320,7 +326,8 @@ function getGroupingFamily(block: ToolCallBlock, groupingMode: ToolGroupingMode)
 function createToolGroupId(
     tools: ToolCallBlock[],
     needsOlderHistory: boolean,
-    previousGroups: ToolGroupBlock[]
+    previousGroups: ToolGroupBlock[],
+    groupingFamily: 'default' | 'codex-exploration'
 ): string {
     const firstToolId = tools[0]?.id ?? 'unknown'
     const lastToolId = tools[tools.length - 1]?.id ?? firstToolId
@@ -330,9 +337,8 @@ function createToolGroupId(
         return previous.id
     }
 
-    return needsOlderHistory
-        ? `tool-group:${lastToolId}`
-        : `tool-group:${firstToolId}`
+    const boundaryId = needsOlderHistory ? lastToolId : firstToolId
+    return `tool-group:${groupingFamily}:${boundaryId}`
 }
 
 export function isToolGroupBlock(block: VisibleChatBlock | ChatBlock): block is ToolGroupBlock {
@@ -356,7 +362,7 @@ function appendToolGroup(
 
     visibleBlocks.push({
         kind: 'tool-group',
-        id: createToolGroupId(tools, needsOlderHistory, previousGroups),
+        id: createToolGroupId(tools, needsOlderHistory, previousGroups, groupingFamily),
         createdAt: tools[0].createdAt,
         invokedAt: tools[0].invokedAt,
         firstToolId: tools[0].id,
