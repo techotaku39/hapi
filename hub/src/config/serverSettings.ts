@@ -173,9 +173,11 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
                 settings.serverChanBackgroundOnly = serverChanBackgroundOnly
                 needsSave = true
             }
-        } else if (settings.serverChanBackgroundOnly !== undefined) {
+        } else if (typeof settings.serverChanBackgroundOnly === 'boolean') {
             serverChanBackgroundOnly = settings.serverChanBackgroundOnly
             sources.serverChanBackgroundOnly = 'file'
+        } else if (settings.serverChanBackgroundOnly !== undefined) {
+            throw new Error('serverChanBackgroundOnly must be a boolean')
         }
 
         // listenHost: env > file > default

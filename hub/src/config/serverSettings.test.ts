@@ -68,4 +68,13 @@ describe('loadServerSettings', () => {
         expect(result.settings.serverChanBackgroundOnly).toBe(true)
         expect(result.sources.serverChanBackgroundOnly).toBe('env')
     })
+
+    it('rejects a non-boolean ServerChan background-only setting', async () => {
+        dir = makeTempDir()
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({
+            serverChanBackgroundOnly: 'false'
+        }))
+
+        await expect(loadServerSettings(dir)).rejects.toThrow('serverChanBackgroundOnly must be a boolean')
+    })
 })
