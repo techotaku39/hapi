@@ -1061,7 +1061,8 @@ function createMode(): EnhancedMode {
 function createSessionStub(
     messages = ['hello from launcher test'],
     mode = createMode(),
-    isolateMessages = false
+    isolateMessages = false,
+    initialMetadata: Record<string, unknown> = {}
 ) {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
     messages.forEach((message, index) => {
@@ -1090,6 +1091,8 @@ function createSessionStub(
         requests: {},
         completedRequests: {}
     };
+    let metadata = initialMetadata;
+    const metadataUpdates: Record<string, unknown>[] = [];
 
     const rpcHandlers = new Map<string, (params: unknown) => unknown>();
     const client = {
@@ -1098,7 +1101,13 @@ function createSessionStub(
                 rpcHandlers.set(method, handler);
             }
         },
-        updateMetadata(_handler: (metadata: Record<string, unknown>) => Record<string, unknown>) {},
+        getMetadata() {
+            return metadata;
+        },
+        updateMetadata(handler: (metadata: Record<string, unknown>) => Record<string, unknown>) {
+            metadata = handler(metadata);
+            metadataUpdates.push(metadata);
+        },
         updateAgentState(handler: (state: FakeAgentState) => FakeAgentState) {
             agentState = handler(agentState);
         },
@@ -1174,6 +1183,8 @@ function createSessionStub(
         foundSessionIds,
         resetThreadCalls,
         rpcHandlers,
+        getMetadata: () => metadata,
+        metadataUpdates,
         setPermissionMode: (nextMode: EnhancedMode['permissionMode']) => {
             currentPermissionMode = nextMode;
         },
@@ -1271,6 +1282,27 @@ describe('codexRemoteLauncher', () => {
         harness.emitCompletedChildTurnBeforeSuppressedParent = false;
         harness.emitTurnAbortedOnInterrupt = false;
         harness.bridgeOptions = [];
+    });
+
+    it('clears stale history capabilities until a resumed native thread is ready', async () => {
+        const { session, getMetadata } = createSessionStub([], createMode(), false, {
+            capabilities: {
+                conversationHistory: {
+                    forkCurrent: true,
+                    forkAtMessage: true,
+                    rewindToMessage: true
+                },
+                otherCapability: true
+            }
+        });
+        session.sessionId = 'native-thread';
+
+        await codexRemoteLauncher(session as never);
+
+        expect(getMetadata()).toMatchObject({
+            capabilities: { otherCapability: true }
+        });
+        expect(getMetadata().capabilities).not.toHaveProperty('conversationHistory');
     });
 
     it('finishes a turn and emits ready when task lifecycle events include turn_id', async () => {
