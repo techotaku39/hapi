@@ -133,7 +133,8 @@ describe('ImagePreview gallery navigation', () => {
 
     it('retries the active gallery image with its own original loader', async () => {
         const firstOnOpen = vi.fn(async () => undefined)
-        const secondOnOpen = vi.fn(async () => '/second-original.jpg')
+        const secondSources: Array<string | undefined> = [undefined, '/second-original.jpg']
+        const secondOnOpen = vi.fn(async () => secondSources.shift())
 
         renderWithLocale(
             <>
@@ -162,13 +163,52 @@ describe('ImagePreview gallery navigation', () => {
 
         fireEvent.click(within(dialog).getByRole('button', { name: 'Next image' }))
         expect(within(dialog).getByRole('img', { name: 'Second image' })).toHaveAttribute('src', '/second-thumbnail.png')
+        await waitFor(() => {
+            expect(within(dialog).getByRole('status')).toHaveTextContent('Original image unavailable')
+        })
         fireEvent.click(within(dialog).getByRole('button', { name: 'Retry loading original' }))
 
+        await waitFor(() => {
+            expect(secondOnOpen).toHaveBeenCalledTimes(2)
+            expect(within(dialog).getByRole('img', { name: 'Second image' })).toHaveAttribute('src', '/second-original.jpg')
+        })
+        expect(firstOnOpen).toHaveBeenCalledOnce()
+    })
+
+    it('loads the original for the newly active gallery image', async () => {
+        const firstOnOpen = vi.fn(async () => '/first-original.jpg')
+        const secondOnOpen = vi.fn(async () => '/second-original.jpg')
+
+        renderWithLocale(
+            <>
+                <ImagePreview
+                    src="/first-thumbnail.png"
+                    fileName="first.jpg"
+                    label="First image"
+                    galleryId="photos"
+                    onOpen={firstOnOpen}
+                />
+                <ImagePreview
+                    src="/second-thumbnail.png"
+                    fileName="second.jpg"
+                    label="Second image"
+                    galleryId="photos"
+                    onOpen={secondOnOpen}
+                />
+            </>
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: /first image/i }))
+        const dialog = screen.getByRole('dialog', { name: 'First image' })
+        await waitFor(() => {
+            expect(within(dialog).getByRole('img', { name: 'First image' })).toHaveAttribute('src', '/first-original.jpg')
+        })
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Next image' }))
         await waitFor(() => {
             expect(secondOnOpen).toHaveBeenCalledOnce()
             expect(within(dialog).getByRole('img', { name: 'Second image' })).toHaveAttribute('src', '/second-original.jpg')
         })
-        expect(firstOnOpen).toHaveBeenCalledOnce()
     })
 
     it('localizes original-image status and retry labels for Chinese UI', async () => {

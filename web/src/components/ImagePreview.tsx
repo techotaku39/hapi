@@ -170,7 +170,15 @@ export function ImagePreview(props: {
     const showPreview = useCallback((index: number) => {
         setPreviewIndex(index)
         resetView()
-    }, [resetView])
+        const openOriginal = previewImages[index]?.onOpen
+        if (openOriginal) {
+            void loadOriginal(index, openOriginal)
+        } else {
+            originalRequestRef.current += 1
+            setOriginalLoading(false)
+            setOriginalLoadFailed(false)
+        }
+    }, [loadOriginal, previewImages, resetView])
 
     const zoomBy = useCallback((delta: number) => {
         updateScale((current) => clampImageScale(current + delta))
