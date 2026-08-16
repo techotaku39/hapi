@@ -907,14 +907,20 @@ export class ApiSessionClient extends EventEmitter {
                 }
 
                 let maxSeq = cursor
-                for (const message of messages) {
+                // Register the whole page with the delivery queue before
+                // awaiting any attachment materialization. Otherwise a live
+                // socket message can arrive while the first backfill row is
+                // downloading and get queued ahead of the remaining, older
+                // rows from this page.
+                const pending = messages.map((message) => {
                     if (typeof message.seq === 'number') {
                         if (message.seq > maxSeq) {
                             maxSeq = message.seq
                         }
                     }
-                    await this.handleIncomingMessage(message)
-                }
+                    return this.handleIncomingMessage(message)
+                })
+                await Promise.all(pending)
 
                 const observedSeq = this.incomingFilter.cursorSeq() ?? maxSeq
                 const nextCursor = Math.max(maxSeq, observedSeq)

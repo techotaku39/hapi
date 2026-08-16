@@ -347,7 +347,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
     })
 
-    app.get('/sessions/:id/attachments/:attachmentId/:variant', (c) => {
+    app.get('/sessions/:id/attachments/:attachmentId/:variant', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {
             return engine
@@ -360,7 +360,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (variant !== 'original' && variant !== 'thumbnail') {
             return c.json({ error: 'Invalid attachment variant' }, 400)
         }
-        const attachment = engine.readAttachment(
+        const attachment = await engine.readAttachment(
             sessionResult.sessionId,
             c.get('namespace'),
             c.req.param('attachmentId'),

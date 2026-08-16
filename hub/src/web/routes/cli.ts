@@ -285,7 +285,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return c.json({ messages })
     })
 
-    app.get('/sessions/:id/attachments/:attachmentId/original', (c) => {
+    app.get('/sessions/:id/attachments/:attachmentId/original', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {
             return c.json({ error: 'Not ready' }, 503)
@@ -295,7 +295,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
-        const attachment = engine.readAttachment(
+        const attachment = await engine.readAttachment(
             resolved.sessionId,
             namespace,
             c.req.param('attachmentId'),

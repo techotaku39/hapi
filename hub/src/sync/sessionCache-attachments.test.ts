@@ -105,4 +105,23 @@ describe('durable attachment session lifecycle', () => {
 
         deleteSession.mockRestore()
     })
+
+    it('finalizes cache eviction when attachment cleanup fails after row deletion', async () => {
+        const { store, cache } = setup()
+        const { oldSession } = makeSessions(cache)
+        const cached = cache.getSession(oldSession.id)
+        if (cached) cached.active = false
+        const cleanup = spyOn(store.attachments, 'deleteAllForSession').mockImplementation(() => {
+            throw new Error('unlink failed')
+        })
+        const warning = spyOn(console, 'warn').mockImplementation(() => {})
+
+        await cache.deleteSession(oldSession.id)
+
+        expect(cache.getSession(oldSession.id)).toBeUndefined()
+        expect(warning).toHaveBeenCalled()
+        expect(cleanup).toHaveBeenCalledWith('default', oldSession.id)
+        cleanup.mockRestore()
+        warning.mockRestore()
+    })
 })

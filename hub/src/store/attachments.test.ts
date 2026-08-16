@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 describe('AttachmentStore', () => {
-    it('stores original and thumbnail bytes with session and namespace isolation', () => {
+    it('stores original and thumbnail bytes with session and namespace isolation', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
         const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
@@ -44,6 +44,12 @@ describe('AttachmentStore', () => {
         expect(originalBlob?.sha256).toBe(created.sha256)
         expect(thumbnailBlob?.data).toEqual(thumbnail)
         expect(thumbnailBlob?.mimeType).toBe('image/webp')
+        expect((await store.attachments.readForSessionAsync(
+            created.id,
+            'namespace-a',
+            'session-a',
+            'original'
+        ))?.data).toEqual(original)
 
         expect(store.attachments.deleteForSession(created.id, 'namespace-b', 'session-a')).toBe(false)
         expect(store.attachments.deleteForSession(created.id, 'namespace-a', 'session-a')).toBe(true)

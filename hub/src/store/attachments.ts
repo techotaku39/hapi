@@ -8,6 +8,7 @@ import {
     rmSync,
     writeFileSync
 } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Database } from 'bun:sqlite'
@@ -191,6 +192,38 @@ export class AttachmentStore {
         const path = variant === 'original' ? attachment.originalPath : attachment.thumbnailPath
         if (!path || !existsSync(path)) return null
         const data = readFileSync(path)
+        return {
+            attachment,
+            variant,
+            data,
+            mimeType: variant === 'original'
+                ? attachment.mimeType
+                : (attachment.thumbnailMimeType || attachment.mimeType),
+            size: data.length,
+            sha256: variant === 'original' ? attachment.sha256 : hashBytes(data)
+        }
+    }
+
+    async readForSessionAsync(
+        id: string,
+        namespace: string,
+        sessionId: string,
+        variant: 'original' | 'thumbnail'
+    ): Promise<AttachmentBlob | null> {
+        const attachment = this.getForSession(id, namespace, sessionId)
+        if (!attachment) return null
+        const path = variant === 'original' ? attachment.originalPath : attachment.thumbnailPath
+        if (!path || !existsSync(path)) return null
+
+        let data: Buffer
+        try {
+            data = await readFile(path)
+        } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+                return null
+            }
+            throw error
+        }
         return {
             attachment,
             variant,

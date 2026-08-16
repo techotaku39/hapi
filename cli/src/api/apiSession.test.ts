@@ -555,6 +555,98 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('queues a complete reconnect backfill page before live messages', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const download = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        axiosHarness.get.mockImplementation((url: string) => {
+            if (url.includes('/messages')) {
+                return Promise.resolve({
+                    data: {
+                        messages: [
+                            {
+                                id: 'backfilled-attachment-message',
+                                seq: 2,
+                                createdAt: 2,
+                                localId: null,
+                                content: {
+                                    role: 'user',
+                                    content: {
+                                        type: 'text',
+                                        text: 'backfilled attachment prompt',
+                                        attachments: [{
+                                            id: 'backfill-attachment-metadata',
+                                            filename: 'slow.txt',
+                                            mimeType: 'text/plain',
+                                            size: 4,
+                                            attachmentId: 'backfill-attachment'
+                                        }]
+                                    },
+                                    meta: { sentFrom: 'webapp' }
+                                }
+                            },
+                            {
+                                id: 'backfilled-plain-message',
+                                seq: 3,
+                                createdAt: 3,
+                                localId: null,
+                                content: {
+                                    role: 'user',
+                                    content: { type: 'text', text: 'backfilled plain prompt' },
+                                    meta: { sentFrom: 'webapp' }
+                                }
+                            }
+                        ]
+                    }
+                })
+            }
+            return download.promise
+        })
+
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const receivedTexts: string[] = []
+        client.onUserMessage((message) => {
+            receivedTexts.push(message.content.text)
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'initial-message',
+            seq: 1,
+            text: 'initial prompt',
+            sentFrom: 'webapp'
+        })
+
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+
+        await vi.waitFor(() => expect(
+            axiosHarness.get.mock.calls.some(([url]) => String(url).includes('/attachments/'))
+        ).toBe(true))
+        triggerIncomingUserMessage(socket, {
+            id: 'live-message-during-backfill',
+            seq: 4,
+            text: 'live prompt during backfill',
+            sentFrom: 'webapp'
+        })
+
+        download.resolve({
+            data: Buffer.from('slow'),
+            headers: {
+                'content-length': '4',
+                'x-hapi-attachment-size': '4'
+            }
+        })
+        await vi.waitFor(() => expect(receivedTexts).toEqual([
+            'initial prompt',
+            'backfilled attachment prompt',
+            'backfilled plain prompt',
+            'live prompt during backfill'
+        ]))
+        client.close()
+    })
+
     it.each(['webapp', 'telegram-bot'] as const)(
         'delivers %s-originated user messages',
         (sentFrom) => {

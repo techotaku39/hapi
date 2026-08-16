@@ -172,7 +172,7 @@ function createApp(session: Session, opts?: {
         createAttachment: opts?.createAttachment ?? (async () => ({ success: false, error: 'not configured' })),
         deleteAttachment: opts?.deleteAttachment ?? (async () => ({ success: false, error: 'not configured' })),
         deleteUploadFile: opts?.deleteUploadFile ?? (async () => ({ success: false, error: 'not configured' })),
-        readAttachment: opts?.readAttachment ?? (() => null)
+        readAttachment: opts?.readAttachment ?? (async () => null)
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -1579,7 +1579,7 @@ describe('durable attachment routes', () => {
 
     it('returns durable attachment bytes with integrity headers', async () => {
         const { app } = createApp(createSession(), {
-            readAttachment: () => ({
+            readAttachment: async () => ({
                 attachment: {} as never,
                 variant: 'thumbnail' as const,
                 data: Buffer.from([7, 8, 9]),

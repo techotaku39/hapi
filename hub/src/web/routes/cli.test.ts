@@ -292,7 +292,7 @@ describe('cli lazy session creation', () => {
 
 describe('cli durable attachment delivery', () => {
     it('serves an owned original through the authenticated CLI endpoint', async () => {
-        const readAttachment = mock(() => ({
+        const readAttachment = mock(async () => ({
             attachment: {} as never,
             variant: 'original' as const,
             data: Buffer.from([1, 2, 3, 4]),
@@ -321,7 +321,7 @@ describe('cli durable attachment delivery', () => {
     })
 
     it('does not expose an attachment when the session is outside the CLI namespace', async () => {
-        const readAttachment = mock(() => null)
+        const readAttachment = mock(async () => null)
         const app = createApp({
             resolveSessionAccess: () => ({ ok: false as const, reason: 'access-denied' as const }),
             readAttachment

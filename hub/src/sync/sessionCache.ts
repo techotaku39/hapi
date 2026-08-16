@@ -1069,7 +1069,18 @@ export class SessionCache {
         // Delete durable bytes only after the session row is gone. If the row
         // deletion fails, retaining the attachment keeps surviving messages
         // from pointing at missing originals.
-        this.store.attachments.deleteAllForSession(session.namespace, sessionId)
+        try {
+            this.store.attachments.deleteAllForSession(session.namespace, sessionId)
+        } catch (error) {
+            // The session row is already gone, so still finalize the in-memory
+            // lifecycle. The leftover bytes/metadata can be reclaimed by a
+            // later storage cleanup pass instead of leaving a ghost session
+            // in the running Hub.
+            console.warn('[attachments] Failed to clean up deleted session attachments', {
+                sessionId,
+                error
+            })
+        }
 
         this.sessions.delete(sessionId)
         this.lastBroadcastAtBySessionId.delete(sessionId)

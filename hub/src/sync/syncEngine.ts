@@ -3912,7 +3912,7 @@ export class SyncEngine {
         return deleted ? { success: true } : { success: false, error: 'Attachment not found' }
     }
 
-    readAttachment(
+    async readAttachment(
         sessionId: string,
         namespace: string,
         attachmentId: string,
@@ -3920,7 +3920,7 @@ export class SyncEngine {
     ) {
         const access = this.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) return null
-        return this.store.attachments.readForSession(attachmentId, namespace, access.sessionId, variant)
+        return await this.store.attachments.readForSessionAsync(attachmentId, namespace, access.sessionId, variant)
     }
 
     hasAttachment(sessionId: string, namespace: string, attachmentId: string): boolean {
