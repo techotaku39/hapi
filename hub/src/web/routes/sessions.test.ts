@@ -1625,4 +1625,37 @@ describe('durable attachment routes', () => {
         expect(durableCalls).toEqual([['session-1', 'default', 'attachment-1']])
         expect(legacyCalls).toEqual([])
     })
+
+    it('allows durable attachment cleanup for inactive sessions but keeps legacy deletion active-only', async () => {
+        const durableCalls: string[][] = []
+        const legacyCalls: string[][] = []
+        const { app } = createApp(createSession({ active: false }), {
+            deleteAttachment: async (...args) => {
+                durableCalls.push(args)
+                return { success: true }
+            },
+            deleteUploadFile: async (...args) => {
+                legacyCalls.push(args)
+                return { success: true }
+            }
+        })
+
+        const durableResponse = await app.request('/api/sessions/session-1/upload/delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ attachmentId: 'attachment-1' })
+        })
+        expect(durableResponse.status).toBe(200)
+        expect(await durableResponse.json()).toEqual({ success: true })
+
+        const legacyResponse = await app.request('/api/sessions/session-1/upload/delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: '/tmp/legacy-upload' })
+        })
+        expect(legacyResponse.status).toBe(409)
+        expect(await legacyResponse.json()).toEqual({ error: 'Session is inactive' })
+        expect(durableCalls).toEqual([['session-1', 'default', 'attachment-1']])
+        expect(legacyCalls).toEqual([])
+    })
 })

@@ -454,13 +454,21 @@ export class ApiSessionClient extends EventEmitter {
                 if (data.body.t === 'cancel-queued-message') {
                     const localId = data.body.localId
                     let removed = false
+                    if (localId) {
+                        for (let index = this.deferredLiveMessages.length - 1; index >= 0; index -= 1) {
+                            if (this.deferredLiveMessages[index]?.localId === localId) {
+                                this.deferredLiveMessages.splice(index, 1)
+                                removed = true
+                            }
+                        }
+                    }
                     if (localId && (this.materializingLocalIdCounts.get(localId) ?? 0) > 0) {
                         // The prompt has not reached the agent queue yet. Mark it
                         // cancelled so the async attachment download cannot enqueue
                         // it after the Hub has already acknowledged cancellation.
                         this.cancelledMaterializingLocalIds.add(localId)
                         removed = true
-                    } else if (localId && this.cancelQueuedMessageCallback) {
+                    } else if (!removed && localId && this.cancelQueuedMessageCallback) {
                         removed = this.cancelQueuedMessageCallback(localId)
                     }
                     ack?.({ removed })

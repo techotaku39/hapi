@@ -323,7 +323,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: false })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -332,6 +332,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const parsed = DeleteUploadRequestSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
+        }
+        if (!parsed.data.attachmentId && !sessionResult.session.active) {
+            return c.json({ error: 'Session is inactive' }, 409)
         }
 
         try {

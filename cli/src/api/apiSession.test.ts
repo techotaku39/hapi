@@ -820,6 +820,93 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('cancels a live message deferred during reconnect backfill', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const download = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        axiosHarness.get.mockImplementation((url: string) => {
+            if (url.includes('/messages')) {
+                return Promise.resolve({
+                    data: {
+                        messages: [{
+                            id: 'backfilled-attachment-message',
+                            seq: 2,
+                            createdAt: 2,
+                            localId: null,
+                            content: {
+                                role: 'user',
+                                content: {
+                                    type: 'text',
+                                    text: 'backfilled attachment prompt',
+                                    attachments: [{
+                                        id: 'backfill-attachment-metadata',
+                                        filename: 'slow.txt',
+                                        mimeType: 'text/plain',
+                                        size: 4,
+                                        attachmentId: 'backfill-attachment'
+                                    }]
+                                },
+                                meta: { sentFrom: 'webapp' }
+                            }
+                        }]
+                    }
+                })
+            }
+            return download.promise
+        })
+
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const receivedTexts: string[] = []
+        client.onUserMessage((message) => {
+            receivedTexts.push(message.content.text)
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'initial-message',
+            seq: 1,
+            text: 'initial prompt',
+            sentFrom: 'webapp'
+        })
+
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+        await vi.waitFor(() => expect(
+            axiosHarness.get.mock.calls.some(([url]) => String(url).includes('/attachments/'))
+        ).toBe(true))
+
+        triggerIncomingUserMessage(socket, {
+            id: 'deferred-live-message',
+            localId: 'deferred-live-local-id',
+            seq: 3,
+            text: 'do not deliver this deferred prompt',
+            sentFrom: 'webapp'
+        })
+        const ack = vi.fn()
+        socket.trigger('update', {
+            body: {
+                t: 'cancel-queued-message',
+                localId: 'deferred-live-local-id'
+            }
+        }, ack)
+        expect(ack).toHaveBeenCalledWith({ removed: true })
+
+        download.resolve({
+            data: Buffer.from('slow'),
+            headers: {
+                'content-length': '4',
+                'x-hapi-attachment-size': '4'
+            }
+        })
+        await vi.waitFor(() => expect(receivedTexts).toEqual([
+            'initial prompt',
+            'backfilled attachment prompt'
+        ]))
+        expect(receivedTexts).not.toContain('do not deliver this deferred prompt')
+        client.close()
+    })
+
     it.each(['webapp', 'telegram-bot'] as const)(
         'delivers %s-originated user messages',
         (sentFrom) => {
