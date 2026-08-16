@@ -136,6 +136,7 @@ function triggerIncomingUserMessage(
     socket: (typeof socketHarness.sockets)[number],
     message: {
         id?: string
+        localId?: string | null
         seq: number
         text: string
         sentFrom: 'cli' | 'webapp' | 'telegram-bot'
@@ -154,7 +155,7 @@ function triggerIncomingUserMessage(
             message: {
                 id: message.id,
                 seq: message.seq,
-                localId: null,
+                localId: message.localId ?? null,
                 content: {
                     role: 'user',
                     content: {
@@ -759,6 +760,54 @@ describe('ApiSessionClient incoming user messages', () => {
             'second attachment prompt',
             'plain prompt'
         ]))
+        client.close()
+    })
+
+    it('acknowledges cancellation during attachment materialization without enqueueing the prompt', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const download = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        axiosHarness.get.mockReturnValue(download.promise)
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'cancelled-attachment-message',
+            localId: 'cancelled-attachment-local-id',
+            seq: 1,
+            text: 'do not deliver this prompt',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'slow.txt',
+                mimeType: 'text/plain',
+                size: 4,
+                attachmentId: 'slow-attachment'
+            }]
+        })
+
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledOnce())
+        const ack = vi.fn()
+        socket.trigger('update', {
+            body: {
+                t: 'cancel-queued-message',
+                localId: 'cancelled-attachment-local-id'
+            }
+        }, ack)
+        expect(ack).toHaveBeenCalledWith({ removed: true })
+
+        download.resolve({
+            data: Buffer.from('slow'),
+            headers: {
+                'content-length': '4',
+                'x-hapi-attachment-size': '4'
+            }
+        })
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(onUserMessage).not.toHaveBeenCalled()
         client.close()
     })
 })

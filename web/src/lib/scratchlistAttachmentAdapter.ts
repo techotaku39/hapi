@@ -199,6 +199,13 @@ export function createScratchlistAttachmentAdapter(
                 await api.deleteScratchlistAttachment(sessionId, hubId).catch(() => {})
                 return
             }
+            // A durable chat attachment can be moved into scratchlist mode
+            // without becoming a scratchlist blob. Remove its Hub record when
+            // the composer chip is cancelled in that mode.
+            if (pending.attachmentId) {
+                await api.deleteAttachment(sessionId, pending.attachmentId).catch(() => {})
+                return
+            }
             // Chat-path chip attached before scratchlist mode was enabled (#1226).
             if (pending.path && !isHubScratchlistAttachmentPath(pending.path)) {
                 await api.deleteUploadFile(sessionId, pending.path).catch(() => {})

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -83,5 +83,26 @@ describe('durable attachment session lifecycle', () => {
 
         expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).toBeNull()
         expect(existsSync(attachment.originalPath)).toBe(false)
+    })
+
+    it('preserves durable attachments when deleting the session row fails', async () => {
+        const { store, cache } = setup()
+        const { oldSession } = makeSessions(cache)
+        const attachment = store.attachments.create({
+            namespace: 'default',
+            sessionId: oldSession.id,
+            filename: 'document.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('content')
+        })
+        const cached = cache.getSession(oldSession.id)
+        if (cached) cached.active = false
+        const deleteSession = spyOn(store.sessions, 'deleteSession').mockReturnValue(false)
+
+        await expect(cache.deleteSession(oldSession.id)).rejects.toThrow('Failed to delete session')
+        expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
+        expect(existsSync(attachment.originalPath)).toBe(true)
+
+        deleteSession.mockRestore()
     })
 })

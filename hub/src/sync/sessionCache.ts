@@ -1062,11 +1062,14 @@ export class SessionCache {
             .list(sessionId)
             .flatMap((entry) => entry.attachments)
 
-        this.store.attachments.deleteAllForSession(session.namespace, sessionId)
         const deleted = this.store.sessions.deleteSession(sessionId, session.namespace)
         if (!deleted) {
             throw new Error('Failed to delete session')
         }
+        // Delete durable bytes only after the session row is gone. If the row
+        // deletion fails, retaining the attachment keeps surviving messages
+        // from pointing at missing originals.
+        this.store.attachments.deleteAllForSession(session.namespace, sessionId)
 
         this.sessions.delete(sessionId)
         this.lastBroadcastAtBySessionId.delete(sessionId)
