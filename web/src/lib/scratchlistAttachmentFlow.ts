@@ -240,13 +240,40 @@ export async function stageScratchlistAttachmentsForComposeSend(
         }
         return staged
     } catch (error) {
-        await Promise.allSettled(
-            staged.map((att) => att.attachmentId
-                ? api.deleteAttachment(sessionId, att.attachmentId)
-                : att.path
-                    ? api.deleteUploadFile(sessionId, att.path)
-                    : Promise.resolve({ success: true }))
-        )
+        await cleanupStagedComposeAttachments(api, sessionId, staged)
+        throw error
+    }
+}
+
+export async function cleanupStagedComposeAttachments(
+    api: ApiClient,
+    sessionId: string,
+    attachments: AttachmentMetadata[],
+): Promise<void> {
+    await Promise.allSettled(
+        attachments.flatMap((attachment) => attachment.attachmentId
+            ? [api.deleteAttachment(sessionId, attachment.attachmentId)]
+            : attachment.path
+                ? [api.deleteUploadFile(sessionId, attachment.path)]
+                : [])
+    )
+}
+
+/** Run a send after staging and reclaim the staged copy when the send is rejected. */
+export async function sendStagedComposeAttachments<T>(
+    api: ApiClient,
+    sessionId: string,
+    attachments: AttachmentMetadata[],
+    send: () => Promise<T | false>,
+): Promise<T | false> {
+    try {
+        const accepted = await send()
+        if (accepted === false) {
+            await cleanupStagedComposeAttachments(api, sessionId, attachments)
+        }
+        return accepted
+    } catch (error) {
+        await cleanupStagedComposeAttachments(api, sessionId, attachments)
         throw error
     }
 }

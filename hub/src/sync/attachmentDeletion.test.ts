@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import * as fsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RpcRegistry } from '../socket/rpcRegistry'
@@ -116,6 +117,61 @@ describe('SyncEngine.deleteAttachment', () => {
             await expect(deletion).resolves.toEqual({ success: true })
         } finally {
             releaseDelete?.()
+            engine.stop()
+            store.close()
+        }
+    })
+
+    it('keeps deletion stable when ownership transfers during unlink', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-transfer-delete-'))
+        tempDirs.push(root)
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const engine = createEngine(store)
+        let releaseUnlink!: () => void
+        let unlinkStarted!: () => void
+        const unlinkStartedPromise = new Promise<void>((resolve) => { unlinkStarted = resolve })
+        const unlinkGate = new Promise<void>((resolve) => { releaseUnlink = resolve })
+        try {
+            const source = engine.getOrCreateSession(
+                'attachment-transfer-delete-source',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const target = engine.getOrCreateSession(
+                'attachment-transfer-delete-target',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const attachment = await store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'photo.png',
+                mimeType: 'image/png',
+                original: Buffer.from('original')
+            })
+            const originalRm = fsPromises.rm.bind(fsPromises)
+            const rmSpy = spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+                if (path === attachment.originalPath) {
+                    unlinkStarted()
+                    await unlinkGate
+                }
+                return originalRm(path, options)
+            })
+            try {
+                const deletion = engine.deleteAttachment(source.id, 'default', attachment.id)
+                await unlinkStartedPromise
+                expect(store.attachments.transferSession('default', source.id, target.id)).toBe(1)
+                expect(engine.hasAttachment(target.id, 'default', attachment.id)).toBe(false)
+                releaseUnlink()
+                await expect(deletion).resolves.toEqual({ success: true })
+                expect(store.attachments.getForSession(attachment.id, 'default', target.id)).toBeNull()
+            } finally {
+                rmSpy.mockRestore()
+                releaseUnlink()
+            }
+        } finally {
             engine.stop()
             store.close()
         }

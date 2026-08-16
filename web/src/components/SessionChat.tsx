@@ -64,6 +64,7 @@ import {
     finalizeMigratedScratchlistParkCleanup,
     prepareScratchlistParkAttachments,
     rehydrateScratchlistAttachmentsToComposer,
+    sendStagedComposeAttachments,
     stageScratchlistAttachmentsForComposeSend,
     type PendingParkAttachment,
     type ScratchlistParkResult,
@@ -351,7 +352,12 @@ export function ScratchlistDrawerHost(props: {
         }
         // This action is explicitly labelled “Send to queue”. It must retain
         // that contract even when the Pi session is actively thinking.
-        const accepted = await props.onSend(entry.text, attachments, undefined, 'queue')
+        const accepted = await sendStagedComposeAttachments(
+            props.api,
+            props.sessionId,
+            attachments ?? [],
+            () => props.onSend(entry.text, attachments, undefined, 'queue'),
+        )
         if (accepted) {
             props.onExitScratchlistMode()
         }
@@ -723,11 +729,16 @@ function SessionChatInner(props: SessionChatProps) {
                     props.session.id,
                     hubItems,
                 )
-                const accepted = await props.onSend(
-                    text,
-                    [...normalItems, ...staged],
-                    scheduledAt,
-                    deliveryMode,
+                const accepted = await sendStagedComposeAttachments(
+                    props.api,
+                    props.session.id,
+                    staged,
+                    () => props.onSend(
+                        text,
+                        [...normalItems, ...staged],
+                        scheduledAt,
+                        deliveryMode,
+                    ),
                 )
                 if (accepted) {
                     // Hub blobs were copied into the normal upload dir; drop the

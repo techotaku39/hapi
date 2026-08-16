@@ -210,8 +210,8 @@ export class AttachmentStore {
         await rm(attachment.originalPath, { force: true })
         if (attachment.thumbnailPath) await rm(attachment.thumbnailPath, { force: true })
         const result = this.db.prepare(
-            'DELETE FROM attachments WHERE id = ? AND namespace = ? AND session_id = ?'
-        ).run(id, namespace, sessionId)
+            'DELETE FROM attachments WHERE id = ? AND namespace = ?'
+        ).run(id, namespace)
         return Number(result.changes) > 0
     }
 

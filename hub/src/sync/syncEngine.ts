@@ -1036,11 +1036,7 @@ export class SyncEngine {
         const session = this.getSession(sessionId)
         if (session && payload.attachments?.some((attachment) => (
             attachment.attachmentId
-            && this.deletingAttachmentKeys.has(this.attachmentKey(
-                session.namespace,
-                sessionId,
-                attachment.attachmentId
-            ))
+            && this.deletingAttachmentKeys.has(this.attachmentKey(session.namespace, attachment.attachmentId))
         ))) {
             throw new Error('Attachment deletion in progress')
         }
@@ -3943,7 +3939,7 @@ export class SyncEngine {
         if (!access.ok) {
             return { success: false, error: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found' }
         }
-        const key = this.attachmentKey(namespace, access.sessionId, attachmentId)
+        const key = this.attachmentKey(namespace, attachmentId)
         if (this.deletingAttachmentKeys.has(key)) {
             return { success: false, error: 'Attachment deletion in progress' }
         }
@@ -3978,12 +3974,12 @@ export class SyncEngine {
     hasAttachment(sessionId: string, namespace: string, attachmentId: string): boolean {
         const access = this.resolveSessionAccess(sessionId, namespace)
         return access.ok
-            && !this.deletingAttachmentKeys.has(this.attachmentKey(namespace, access.sessionId, attachmentId))
+            && !this.deletingAttachmentKeys.has(this.attachmentKey(namespace, attachmentId))
             && Boolean(this.store.attachments.getForSession(attachmentId, namespace, access.sessionId))
     }
 
-    private attachmentKey(namespace: string, sessionId: string, attachmentId: string): string {
-        return `${namespace}:${sessionId}:${attachmentId}`
+    private attachmentKey(namespace: string, attachmentId: string): string {
+        return `${namespace}:${attachmentId}`
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
