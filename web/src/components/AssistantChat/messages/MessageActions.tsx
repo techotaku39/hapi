@@ -143,6 +143,7 @@ export function MessageActions({
                 confirmLabel={t('message.fork')}
                 confirmingLabel={t('message.fork.confirming')}
                 isPending={forkPending}
+                centerTitle
                 onConfirm={async () => {
                     if (!onFork) return
                     setForkPending(true)
@@ -166,6 +167,7 @@ export function MessageActions({
                 confirmingLabel={t('message.rewind.confirming')}
                 isPending={rewindPending}
                 destructive
+                centerTitle
                 onConfirm={async () => {
                     if (!onRewind) return
                     setRewindPending(true)
