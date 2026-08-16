@@ -17,7 +17,10 @@ type PreviewImage = {
     src: string
     fileName: string
     label: string
+    onOpen?: () => Promise<string | undefined>
 }
+
+const imagePreviewOpeners = new WeakMap<HTMLButtonElement, () => Promise<string | undefined>>()
 
 function getPointDistance(a: ImagePoint, b: ImagePoint): number {
     return Math.hypot(a.x - b.x, a.y - b.y)
@@ -56,18 +59,32 @@ export function ImagePreview(props: {
     const pinchRef = useRef<{ startDistance: number; startScale: number; startCenter: ImagePoint; origin: ImagePoint } | null>(null)
     const backdropPressRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
     const originalRequestRef = useRef(0)
+    const triggerRef = useRef<HTMLButtonElement | null>(null)
+
+    useEffect(() => {
+        const trigger = triggerRef.current
+        if (!trigger || !props.onOpen) return
+        imagePreviewOpeners.set(trigger, props.onOpen)
+        return () => {
+            imagePreviewOpeners.delete(trigger)
+        }
+    }, [props.onOpen])
 
     const stopEvent = useCallback((event: SyntheticEvent) => {
         event.stopPropagation()
     }, [])
 
-    const loadOriginal = useCallback(async (activeIndex: number) => {
-        if (!props.onOpen) return
+    const loadOriginal = useCallback(async (
+        activeIndex: number,
+        openOriginal?: () => Promise<string | undefined>
+    ) => {
+        const onOpen = openOriginal ?? previewImages[activeIndex]?.onOpen ?? props.onOpen
+        if (!onOpen) return
         const requestId = ++originalRequestRef.current
         setOriginalLoading(true)
         setOriginalLoadFailed(false)
         try {
-            const original = await props.onOpen()
+            const original = await onOpen()
             if (requestId !== originalRequestRef.current) return
             if (original) {
                 setPreviewImages((current) => current.map((preview, previewIndex) => (
@@ -85,7 +102,7 @@ export function ImagePreview(props: {
                 setOriginalLoading(false)
             }
         }
-    }, [props.onOpen])
+    }, [previewImages, props.onOpen])
 
     const openViewer = useCallback((event: MouseEvent<HTMLButtonElement>) => {
         event.preventDefault()
@@ -99,10 +116,12 @@ export function ImagePreview(props: {
             return [{
                 src: image.getAttribute('src') ?? image.src,
                 fileName: trigger.dataset.imagePreviewFileName ?? image.alt,
-                label: trigger.dataset.imagePreviewLabel ?? image.alt
+                label: trigger.dataset.imagePreviewLabel ?? image.alt,
+                onOpen: imagePreviewOpeners.get(trigger)
             }]
         })
         const index = triggers.indexOf(event.currentTarget)
+        const activeOpener = imagePreviewOpeners.get(event.currentTarget) ?? props.onOpen
         setPreviewImages(images)
         const activeIndex = index >= 0 ? index : 0
         setPreviewIndex(activeIndex)
@@ -110,7 +129,7 @@ export function ImagePreview(props: {
         setOriginalLoadFailed(false)
         setViewerOpen(true)
         if (props.onOpen) {
-            void loadOriginal(activeIndex)
+            void loadOriginal(activeIndex, activeOpener)
         }
     }, [loadOriginal, props.galleryId, props.onOpen])
 
@@ -145,8 +164,8 @@ export function ImagePreview(props: {
     }, [resetView])
 
     const retryOriginal = useCallback(() => {
-        void loadOriginal(previewIndex)
-    }, [loadOriginal, previewIndex])
+        void loadOriginal(previewIndex, previewImages[previewIndex]?.onOpen)
+    }, [loadOriginal, previewImages, previewIndex])
 
     const showPreview = useCallback((index: number) => {
         setPreviewIndex(index)
@@ -303,6 +322,7 @@ export function ImagePreview(props: {
     return (
         <>
             <button
+                ref={triggerRef}
                 type="button"
                 onPointerDown={stopEvent}
                 onMouseDown={stopEvent}
