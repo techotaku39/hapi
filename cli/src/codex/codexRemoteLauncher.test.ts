@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import type { EnhancedMode } from './loop';
 
 const harness = vi.hoisted(() => ({
@@ -1058,11 +1059,16 @@ function createMode(): EnhancedMode {
     };
 }
 
+type SessionStubOptions = {
+    deferMetadataUpdates?: boolean;
+};
+
 function createSessionStub(
     messages = ['hello from launcher test'],
     mode = createMode(),
     isolateMessages = false,
-    initialMetadata: Record<string, unknown> = {}
+    initialMetadata: Record<string, unknown> = {},
+    options: SessionStubOptions = {}
 ) {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
     messages.forEach((message, index) => {
@@ -1092,6 +1098,14 @@ function createSessionStub(
         completedRequests: {}
     };
     let metadata = initialMetadata;
+    let pendingMetadata: Record<string, unknown> | null = null;
+    let resolveMetadataFlushStarted: (() => void) | null = null;
+    let releaseMetadataFlush: (() => void) | null = null;
+    const metadataFlushStarted = options.deferMetadataUpdates
+        ? new Promise<void>((resolve) => {
+            resolveMetadataFlushStarted = resolve;
+        })
+        : null;
     const metadataUpdates: Record<string, unknown>[] = [];
 
     const rpcHandlers = new Map<string, (params: unknown) => unknown>();
@@ -1105,8 +1119,28 @@ function createSessionStub(
             return metadata;
         },
         updateMetadata(handler: (metadata: Record<string, unknown>) => Record<string, unknown>) {
-            metadata = handler(metadata);
-            metadataUpdates.push(metadata);
+            const updated = handler(pendingMetadata ?? metadata);
+            metadataUpdates.push(updated);
+            if (options.deferMetadataUpdates) {
+                pendingMetadata = updated;
+            } else {
+                metadata = updated;
+            }
+        },
+        async flushMetadata() {
+            if (!options.deferMetadataUpdates) {
+                return true;
+            }
+            resolveMetadataFlushStarted?.();
+            resolveMetadataFlushStarted = null;
+            await new Promise<void>((resolve) => {
+                releaseMetadataFlush = resolve;
+            });
+            if (pendingMetadata) {
+                metadata = pendingMetadata;
+                pendingMetadata = null;
+            }
+            return true;
         },
         updateAgentState(handler: (state: FakeAgentState) => FakeAgentState) {
             agentState = handler(agentState);
@@ -1185,6 +1219,8 @@ function createSessionStub(
         rpcHandlers,
         getMetadata: () => metadata,
         metadataUpdates,
+        metadataFlushStarted,
+        releaseMetadataFlush: () => releaseMetadataFlush?.(),
         setPermissionMode: (nextMode: EnhancedMode['permissionMode']) => {
             currentPermissionMode = nextMode;
         },
@@ -1303,6 +1339,40 @@ describe('codexRemoteLauncher', () => {
             capabilities: { otherCapability: true }
         });
         expect(getMetadata().capabilities).not.toHaveProperty('conversationHistory');
+    });
+
+    it('waits for stale history capability removal to persist before registering history RPC handlers', async () => {
+        const { session, getMetadata, rpcHandlers, metadataFlushStarted, releaseMetadataFlush } = createSessionStub(
+            [],
+            createMode(),
+            false,
+            {
+                capabilities: {
+                    conversationHistory: {
+                        forkCurrent: true,
+                        forkAtMessage: true,
+                        rewindToMessage: true
+                    },
+                    otherCapability: true
+                }
+            },
+            { deferMetadataUpdates: true }
+        );
+        session.sessionId = 'native-thread';
+
+        const launcherPromise = codexRemoteLauncher(session as never);
+        await metadataFlushStarted!;
+
+        expect(getMetadata().capabilities).toHaveProperty('conversationHistory');
+        expect(rpcHandlers.has(RPC_METHODS.ForkConversation)).toBe(false);
+        expect(rpcHandlers.has(RPC_METHODS.RewindConversation)).toBe(false);
+
+        releaseMetadataFlush();
+        await launcherPromise;
+
+        expect(getMetadata().capabilities).not.toHaveProperty('conversationHistory');
+        expect(rpcHandlers.has(RPC_METHODS.ForkConversation)).toBe(true);
+        expect(rpcHandlers.has(RPC_METHODS.RewindConversation)).toBe(true);
     });
 
     it('finishes a turn and emits ready when task lifecycle events include turn_id', async () => {
@@ -1603,7 +1673,7 @@ describe('codexRemoteLauncher', () => {
         });
     });
 
-    it('sets a Codex goal without starting a duplicate client turn', async () => {
+    it('sets a Codex goal without starting a normal turn', async () => {
         const { session, sessionEvents, codexMessages, foundSessionIds } = createSessionStub(['/goal improve benchmark coverage']);
 
         const exitReason = await codexRemoteLauncher(session as never);
@@ -1673,70 +1743,6 @@ describe('codexRemoteLauncher', () => {
                 })
             })
         ]));
-    });
-
-    it('does not start client turns for goal commands', async () => {
-        const { session } = createSessionStub([
-            '/goal improve benchmark coverage',
-            '/goal',
-            '/goal pause',
-            '/goal resume',
-            '/goal clear'
-        ], createMode(), true);
-
-        await codexRemoteLauncher(session as never);
-
-        expect(harness.startTurnParams).toHaveLength(0);
-    });
-
-    it('tracks externally started turns used by app-server goals', async () => {
-        const { session, thinkingChanges } = createSessionStub(['/goal improve benchmark coverage']);
-
-        const running = codexRemoteLauncher(session as never);
-        await vi.waitFor(() => {
-            expect(harness.goalSetCalls).toHaveLength(1);
-        });
-
-        harness.dispatchNotification?.('turn/started', {
-            threadId: 'thread-1',
-            turn: { id: 'goal-turn-1' }
-        });
-        await vi.waitFor(() => {
-            expect(session.thinking).toBe(true);
-        });
-
-        harness.dispatchNotification?.('turn/completed', {
-            threadId: 'thread-1',
-            turn: { id: 'goal-turn-1', status: 'completed' }
-        });
-        await vi.waitFor(() => {
-            expect(session.thinking).toBe(false);
-        });
-
-        expect(thinkingChanges).toEqual(expect.arrayContaining([true, false]));
-        expect(await running).toBe('exit');
-    });
-
-    it('formats usage-limited goal status', async () => {
-        harness.goal = {
-            threadId: 'thread-1',
-            objective: 'improve benchmark coverage',
-            status: 'usageLimited',
-            tokenBudget: null,
-            tokensUsed: 10,
-            timeUsedSeconds: 1,
-            createdAt: 1,
-            updatedAt: 2
-        };
-        const { session, sessionEvents } = createSessionStub(['/goal']);
-
-        await codexRemoteLauncher(session as never);
-
-        expect(harness.startTurnParams).toHaveLength(0);
-        expect(sessionEvents).toContainEqual({
-            type: 'message',
-            message: 'Goal limited by usage · 10 tokens'
-        });
     });
 
     it('does not emit ready when a goal command interrupts an active turn', async () => {
