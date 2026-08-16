@@ -235,7 +235,7 @@ export async function stageScratchlistAttachmentsForComposeSend(
                 size: attachment.size,
                 ...(upload.path ? { path: upload.path } : {}),
                 ...(upload.attachmentId ? { attachmentId: upload.attachmentId } : {}),
-                previewUrl
+                ...(!upload.attachmentId && previewUrl ? { previewUrl } : {})
             })
         }
         return staged

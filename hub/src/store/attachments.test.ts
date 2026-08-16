@@ -82,6 +82,38 @@ describe('AttachmentStore', () => {
         store.close()
     })
 
+    it('keeps failed bulk-cleanup rows discoverable while deleting other blobs', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
+        const first = await store.attachments.create({
+            namespace: 'namespace-a',
+            sessionId: 'session-a',
+            filename: 'first.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('first')
+        })
+        const second = await store.attachments.create({
+            namespace: 'namespace-a',
+            sessionId: 'session-a',
+            filename: 'second.png',
+            mimeType: 'image/png',
+            original: Buffer.from('second'),
+            thumbnail: Buffer.from('thumbnail'),
+            thumbnailMimeType: 'image/webp'
+        })
+        if (!second.thumbnailPath) throw new Error('expected thumbnail path')
+        rmSync(second.thumbnailPath)
+        mkdirSync(second.thumbnailPath)
+
+        await expect(store.attachments.deleteAllForSession('namespace-a', 'session-a')).rejects.toBeTruthy()
+        expect(store.attachments.getForSession(first.id, 'namespace-a', 'session-a')).toBeNull()
+        expect(existsSync(first.originalPath)).toBe(false)
+        expect(store.attachments.getForSession(second.id, 'namespace-a', 'session-a')).not.toBeNull()
+        expect(existsSync(second.thumbnailPath)).toBe(true)
+        store.close()
+    })
+
     it('keeps a valid original when the optional thumbnail is rejected', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
@@ -129,7 +161,7 @@ describe('AttachmentStore', () => {
         expect(store.attachments.getForSession(created.id, 'namespace-a', 'session-b')).not.toBeNull()
         expect(store.attachments.getForSession(otherNamespace.id, 'namespace-b', 'session-a')).not.toBeNull()
 
-        expect(store.attachments.deleteAllForSession('namespace-a', 'session-b')).toBe(1)
+        expect(await store.attachments.deleteAllForSession('namespace-a', 'session-b')).toBe(1)
         expect(store.attachments.getForSession(created.id, 'namespace-a', 'session-b')).toBeNull()
         expect(existsSync(created.originalPath)).toBe(false)
         expect(created.thumbnailPath && existsSync(created.thumbnailPath)).toBe(false)

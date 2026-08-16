@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -65,6 +65,57 @@ describe('SyncEngine.deleteAttachment', () => {
             expect(store.attachments.getForSession(attachment.id, 'default', session.id)).not.toBeNull()
             expect(existsSync(attachment.originalPath)).toBe(true)
         } finally {
+            engine.stop()
+            store.close()
+        }
+    })
+
+    it('hides an attachment and rejects sends while deletion is in progress', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-delete-'))
+        tempDirs.push(root)
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const engine = createEngine(store)
+        let releaseDelete!: () => void
+        const deleteStarted = new Promise<void>((resolve) => {
+            const originalDelete = store.attachments.deleteForSession.bind(store.attachments)
+            spyOn(store.attachments, 'deleteForSession').mockImplementation(async (...args) => {
+                resolve()
+                await new Promise<void>((release) => { releaseDelete = release })
+                return await originalDelete(...args)
+            })
+        })
+        try {
+            const session = engine.getOrCreateSession(
+                'attachment-delete-race',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const attachment = await store.attachments.create({
+                namespace: 'default',
+                sessionId: session.id,
+                filename: 'photo.png',
+                mimeType: 'image/png',
+                original: Buffer.from('original')
+            })
+            const metadata = {
+                id: 'message-attachment',
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                size: attachment.size,
+                attachmentId: attachment.id
+            }
+
+            const deletion = engine.deleteAttachment(session.id, 'default', attachment.id)
+            await deleteStarted
+            expect(engine.hasAttachment(session.id, 'default', attachment.id)).toBe(false)
+            await expect(engine.sendMessage(session.id, { text: 'race', attachments: [metadata] }))
+                .rejects.toThrow('Attachment deletion in progress')
+
+            releaseDelete()
+            await expect(deletion).resolves.toEqual({ success: true })
+        } finally {
+            releaseDelete?.()
             engine.stop()
             store.close()
         }

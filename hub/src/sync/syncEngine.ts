@@ -190,6 +190,7 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
 export class SyncEngine {
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
+    private readonly deletingAttachmentKeys = new Set<string>()
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly titleSuggestionService: TitleSuggestionService
@@ -1031,6 +1032,17 @@ export class SyncEngine {
     ): Promise<void> {
         if (this.historyActionsInFlight.has(sessionId)) {
             throw new Error('Conversation history action already in progress')
+        }
+        const session = this.getSession(sessionId)
+        if (session && payload.attachments?.some((attachment) => (
+            attachment.attachmentId
+            && this.deletingAttachmentKeys.has(this.attachmentKey(
+                session.namespace,
+                sessionId,
+                attachment.attachmentId
+            ))
+        ))) {
+            throw new Error('Attachment deletion in progress')
         }
         const { actualSessionId, createdAt: activeTurnStartedAt } = await this.messageService.sendMessage(sessionId, payload)
         this.sessionCache.markMessageQueued(actualSessionId, Date.now(), activeTurnStartedAt)
@@ -3931,16 +3943,25 @@ export class SyncEngine {
         if (!access.ok) {
             return { success: false, error: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found' }
         }
+        const key = this.attachmentKey(namespace, access.sessionId, attachmentId)
+        if (this.deletingAttachmentKeys.has(key)) {
+            return { success: false, error: 'Attachment deletion in progress' }
+        }
         if (!this.store.attachments.getForSession(attachmentId, namespace, access.sessionId)) {
             return { success: false, error: 'Attachment not found' }
         }
-        const referenced = this.store.messages.getAllMessages(access.sessionId)
-            .some((message) => messageReferencesAttachment(message.content, attachmentId))
-        if (referenced) {
-            return { success: false, error: 'Attachment is already referenced by a message' }
+        this.deletingAttachmentKeys.add(key)
+        try {
+            const referenced = this.store.messages.getAllMessages(access.sessionId)
+                .some((message) => messageReferencesAttachment(message.content, attachmentId))
+            if (referenced) {
+                return { success: false, error: 'Attachment is already referenced by a message' }
+            }
+            const deleted = await this.store.attachments.deleteForSession(attachmentId, namespace, access.sessionId)
+            return deleted ? { success: true } : { success: false, error: 'Attachment not found' }
+        } finally {
+            this.deletingAttachmentKeys.delete(key)
         }
-        const deleted = await this.store.attachments.deleteForSession(attachmentId, namespace, access.sessionId)
-        return deleted ? { success: true } : { success: false, error: 'Attachment not found' }
     }
 
     async readAttachment(
@@ -3956,7 +3977,13 @@ export class SyncEngine {
 
     hasAttachment(sessionId: string, namespace: string, attachmentId: string): boolean {
         const access = this.resolveSessionAccess(sessionId, namespace)
-        return access.ok && Boolean(this.store.attachments.getForSession(attachmentId, namespace, access.sessionId))
+        return access.ok
+            && !this.deletingAttachmentKeys.has(this.attachmentKey(namespace, access.sessionId, attachmentId))
+            && Boolean(this.store.attachments.getForSession(attachmentId, namespace, access.sessionId))
+    }
+
+    private attachmentKey(namespace: string, sessionId: string, attachmentId: string): string {
+        return `${namespace}:${sessionId}:${attachmentId}`
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {

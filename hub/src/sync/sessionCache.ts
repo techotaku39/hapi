@@ -1070,7 +1070,7 @@ export class SessionCache {
         // deletion fails, retaining the attachment keeps surviving messages
         // from pointing at missing originals.
         try {
-            this.store.attachments.deleteAllForSession(session.namespace, sessionId)
+            await this.store.attachments.deleteAllForSession(session.namespace, sessionId)
         } catch (error) {
             // The session row is already gone, so still finalize the in-memory
             // lifecycle. The leftover bytes/metadata can be reclaimed by a

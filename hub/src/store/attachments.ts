@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { rmSync } from 'node:fs'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -287,7 +286,7 @@ export class AttachmentStore {
         return Number(result.changes)
     }
 
-    deleteAllForSession(namespace: string, sessionId: string): number {
+    async deleteAllForSession(namespace: string, sessionId: string): Promise<number> {
         const attachments = this.db.prepare(`
             SELECT id, namespace, session_id, filename, mime_type, size,
                    sha256, original_path, thumbnail_path, thumbnail_mime_type,
@@ -297,14 +296,19 @@ export class AttachmentStore {
         `).all(namespace, sessionId) as AttachmentRow[]
         if (attachments.length === 0) return 0
 
-        const result = this.db.prepare(
-            'DELETE FROM attachments WHERE namespace = ? AND session_id = ?'
-        ).run(namespace, sessionId)
+        let deleted = 0
+        let firstError: unknown
         for (const row of attachments) {
-            rmSync(row.original_path, { force: true })
-            if (row.thumbnail_path) rmSync(row.thumbnail_path, { force: true })
+            try {
+                if (await this.deleteForSession(row.id, namespace, sessionId)) {
+                    deleted += 1
+                }
+            } catch (error) {
+                firstError ??= error
+            }
         }
-        return Number(result.changes)
+        if (firstError) throw firstError
+        return deleted
     }
 
     private async writeAtomically(target: string, data: Buffer): Promise<void> {

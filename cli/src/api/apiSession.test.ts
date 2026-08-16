@@ -855,6 +855,63 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('materializes multiple attachments in one prompt sequentially', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const first = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const second = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const response = (text: string) => ({
+            data: Buffer.from(text),
+            headers: {
+                'content-length': String(text.length),
+                'x-hapi-attachment-size': String(text.length)
+            }
+        })
+        axiosHarness.get.mockImplementation((url: string) => (
+            url.includes('first-attachment') ? first.promise : second.promise
+        ))
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'multi-attachment-message',
+            seq: 1,
+            text: 'two attachments',
+            sentFrom: 'webapp',
+            attachments: [
+                {
+                    id: 'att-1',
+                    filename: 'first.txt',
+                    mimeType: 'text/plain',
+                    size: 5,
+                    attachmentId: 'first-attachment'
+                },
+                {
+                    id: 'att-2',
+                    filename: 'second.txt',
+                    mimeType: 'text/plain',
+                    size: 6,
+                    attachmentId: 'second-attachment'
+                }
+            ]
+        })
+
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledTimes(1))
+        expect(onUserMessage).not.toHaveBeenCalled()
+
+        first.resolve(response('first'))
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledTimes(2))
+        expect(onUserMessage).not.toHaveBeenCalled()
+
+        second.resolve(response('second'))
+        await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce())
+        expect(onUserMessage.mock.calls[0]?.[0].content.attachments).toHaveLength(2)
+        client.close()
+    })
+
     it('acknowledges cancellation during attachment materialization without enqueueing the prompt', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()

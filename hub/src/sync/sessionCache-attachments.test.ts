@@ -111,7 +111,7 @@ describe('durable attachment session lifecycle', () => {
         const { oldSession } = makeSessions(cache)
         const cached = cache.getSession(oldSession.id)
         if (cached) cached.active = false
-        const cleanup = spyOn(store.attachments, 'deleteAllForSession').mockImplementation(() => {
+        const cleanup = spyOn(store.attachments, 'deleteAllForSession').mockImplementation(async () => {
             throw new Error('unlink failed')
         })
         const warning = spyOn(console, 'warn').mockImplementation(() => {})

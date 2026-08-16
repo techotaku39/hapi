@@ -42,6 +42,8 @@ import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { AttachmentMaterializer, type MaterializedAttachmentIdentity } from './attachmentMaterializer'
 
+type UserAttachment = NonNullable<UserMessage['content']['attachments']>[number]
+
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
  * These are internal bookkeeping, not text the human actually typed.
@@ -784,25 +786,27 @@ export class ApiSessionClient extends EventEmitter {
                 this.deliverIncomingMessage(message, null)
                 return
             }
-            const materializationResults = userResult.data.content.attachments
-                ? await Promise.all(userResult.data.content.attachments.map(async (attachment) => {
+            let materializationResults: Array<{ attachment: UserAttachment; failure: string | null }> | undefined
+            if (userResult.data.content.attachments) {
+                materializationResults = []
+                for (const attachment of userResult.data.content.attachments) {
                     try {
-                        return {
+                        materializationResults.push({
                             attachment: await this.attachmentMaterializer.materialize(attachment),
                             failure: null
-                        }
+                        })
                     } catch (error) {
                         logger.debug('[API] Failed to materialize one attachment', {
                             attachmentId: attachment.attachmentId,
                             error
                         })
-                        return {
+                        materializationResults.push({
                             attachment,
                             failure: `Attachment unavailable: ${attachment.filename}`
-                        }
+                        })
                     }
-                }))
-                : undefined
+                }
+            }
             const materializedAttachments = materializationResults?.map((result) => result.attachment)
             const materializationFailures = materializationResults
                 ?.flatMap((result) => result.failure ? [result.failure] : []) ?? []
@@ -922,13 +926,16 @@ export class ApiSessionClient extends EventEmitter {
                 })
                 await Promise.all(pending)
 
-                const observedSeq = this.incomingFilter.cursorSeq() ?? maxSeq
-                const nextCursor = Math.max(maxSeq, observedSeq)
+                // Only advance the HTTP cursor by the page that this request
+                // actually fetched. A live socket message may have advanced
+                // the incoming filter while this page was materializing; using
+                // that live seq here could skip rows from a later page.
+                const nextCursor = maxSeq
                 if (nextCursor <= cursor) {
                     logger.debug('[API] Backfill stopped due to non-advancing cursor', {
                         cursor,
                         maxSeq,
-                        observedSeq
+                        nextCursor
                     })
                     break
                 }
