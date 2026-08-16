@@ -555,7 +555,14 @@ export class SyncEngine {
         if (before?.metadata?.opencodeClearOperation?.state === 'reserved' && payload.reason !== 'cleared') {
             const operation = before.metadata.opencodeClearOperation
             if (this.transitionClearOperation(payload.sid, before.namespace, operation, 'abort-needed')) {
-                this.abortOpenCodeClearSession(payload.sid, before.namespace, operation.replacementSessionId, 'abort-needed')
+                void this.abortOpenCodeClearSession(
+                    payload.sid,
+                    before.namespace,
+                    operation.replacementSessionId,
+                    'abort-needed'
+                ).catch((error) => {
+                    console.warn('[opencode] Failed to abort clear after session end', { sessionId: payload.sid, error })
+                })
             }
         }
         const ownsPiAttempt = before?.metadata?.piResumeAttempt !== undefined
@@ -950,7 +957,7 @@ export class SyncEngine {
             if (session.active || !operation) continue
             if (operation.state === 'reserved') continue
             if (operation.state === 'abort-needed') {
-                this.abortOpenCodeClearSession(session.id, session.namespace, operation.replacementSessionId, 'abort-needed')
+                await this.abortOpenCodeClearSession(session.id, session.namespace, operation.replacementSessionId, 'abort-needed')
                 continue
             }
             if (!['cleanup-confirmed', 'finalizing', 'pending', 'failed'].includes(operation.state)) continue
@@ -1466,10 +1473,10 @@ export class SyncEngine {
             // Native fork keeps agent context, but the new HAPI row starts empty.
             // Hydrate the transcript prefix so web navigation is not a blank thread.
             const clonedAttachments = new Map<string, StoredAttachment>()
-            this.store.messages.copyMessagesToSession(
-                childId,
-                prefix.map((message) => ({
-                    content: this.store.attachments.cloneMessageAttachments(
+            const copiedPrefix = []
+            for (const message of prefix) {
+                copiedPrefix.push({
+                    content: await this.store.attachments.cloneMessageAttachments(
                         namespace,
                         sessionId,
                         childId,
@@ -1480,7 +1487,11 @@ export class SyncEngine {
                     localId: message.localId,
                     invokedAt: message.invokedAt,
                     scheduledAt: message.scheduledAt
-                }))
+                })
+            }
+            this.store.messages.copyMessagesToSession(
+                childId,
+                copiedPrefix
             )
             this.sessionCache.rebuildTodosFromTranscript(childId)
             this.sessionCache.refreshSession(childId)
@@ -2018,13 +2029,13 @@ export class SyncEngine {
         return { type: 'success', sessionId: operation.replacementSessionId }
     }
 
-    abortOpenCodeClearSession(
+    async abortOpenCodeClearSession(
         sessionId: string,
         namespace: string,
         replacementSessionId: string,
         expectedState: 'reserved' | 'abort-needed' = 'reserved',
         requireInactive: boolean = false
-    ): ClearOpencodeSessionResult {
+    ): Promise<ClearOpencodeSessionResult> {
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) return { type: 'error', message: 'Session not found', code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found' }
         const operation = access.session.metadata?.opencodeClearOperation
@@ -2046,7 +2057,7 @@ export class SyncEngine {
             if ((required.requireInactive && latest.active)
                 || current.replacementSessionId !== required.replacementSessionId
                 || current.state !== required.state) break
-            const result = this.store.abortOpenCodeClearOperation(sessionId, current.replacementSessionId, {
+            const result = await this.store.abortOpenCodeClearOperation(sessionId, current.replacementSessionId, {
                 ...latest.metadata,
                 opencodeClearOperation: { ...current, state: 'aborted', updatedAt: Date.now(), error: undefined }
             }, latest.metadataVersion, namespace, required)
@@ -2189,7 +2200,7 @@ export class SyncEngine {
         // A previous request can have spawned the target but lost the source
         // link acknowledgement. Do not ask the runner again in that case.
         if (replacement.active) {
-            return this.finishOpenCodeClear(sessionId, namespace, operation.replacementSessionId, operation)
+            return await this.finishOpenCodeClear(sessionId, namespace, operation.replacementSessionId, operation)
         }
 
         // Do not supply a native OpenCode resume id. existingSessionId is only
@@ -2220,15 +2231,15 @@ export class SyncEngine {
             return { type: 'error', message, code: 'spawn_failed' }
         }
 
-        return this.finishOpenCodeClear(sessionId, namespace, operation.replacementSessionId, operation)
+        return await this.finishOpenCodeClear(sessionId, namespace, operation.replacementSessionId, operation)
     }
 
-    private finishOpenCodeClear(
+    private async finishOpenCodeClear(
         sessionId: string,
         namespace: string,
         replacementSessionId: string,
         operation: NonNullable<Session['metadata']>['opencodeClearOperation']
-    ): ClearOpencodeSessionResult {
+    ): Promise<ClearOpencodeSessionResult> {
         if (!operation) {
             return {
                 type: 'error',
@@ -2237,7 +2248,7 @@ export class SyncEngine {
             }
         }
         try {
-            const moved = this.store.moveUninvokedMessages(namespace, sessionId, replacementSessionId)
+            const moved = await this.store.moveUninvokedMessages(namespace, sessionId, replacementSessionId)
             if (moved > 0) {
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId })
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId: replacementSessionId })
@@ -2768,9 +2779,9 @@ export class SyncEngine {
         try {
             const status = await this.rpcGateway.stopRunnerSession(machineId, session.id)
             if (status === 'still_alive') return false
-            return this.abortOpenCodeClearSession(
+            return (await this.abortOpenCodeClearSession(
                 session.id, namespace, operation.replacementSessionId, 'reserved', true
-            ).type === 'success'
+            )).type === 'success'
         } catch {
             return false
         }
@@ -3884,7 +3895,7 @@ export class SyncEngine {
         }
         const original = decodeBase64Attachment(content)
         const thumbnail = thumbnailContent ? decodeBase64Attachment(thumbnailContent) : undefined
-        const stored = this.store.attachments.create({
+        const stored = await this.store.attachments.create({
             namespace,
             sessionId: access.sessionId,
             filename,

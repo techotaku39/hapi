@@ -21,7 +21,7 @@ describe('AttachmentStore', () => {
         const original = Buffer.from('original bytes')
         const thumbnail = Buffer.from('thumbnail bytes')
 
-        const created = store.attachments.create({
+        const created = await store.attachments.create({
             namespace: 'namespace-a',
             sessionId: 'session-a',
             filename: '../photo.png',
@@ -38,8 +38,8 @@ describe('AttachmentStore', () => {
         expect(store.attachments.getForSession(created.id, 'namespace-b', 'session-a')).toBeNull()
         expect(store.attachments.getForSession(created.id, 'namespace-a', 'session-b')).toBeNull()
 
-        const originalBlob = store.attachments.readForSession(created.id, 'namespace-a', 'session-a', 'original')
-        const thumbnailBlob = store.attachments.readForSession(created.id, 'namespace-a', 'session-a', 'thumbnail')
+        const originalBlob = await store.attachments.readForSessionAsync(created.id, 'namespace-a', 'session-a', 'original')
+        const thumbnailBlob = await store.attachments.readForSessionAsync(created.id, 'namespace-a', 'session-a', 'thumbnail')
         expect(originalBlob?.data).toEqual(original)
         expect(originalBlob?.sha256).toBe(created.sha256)
         expect(thumbnailBlob?.data).toEqual(thumbnail)
@@ -54,15 +54,15 @@ describe('AttachmentStore', () => {
         expect(store.attachments.deleteForSession(created.id, 'namespace-b', 'session-a')).toBe(false)
         expect(store.attachments.deleteForSession(created.id, 'namespace-a', 'session-a')).toBe(true)
         expect(existsSync(created.originalPath)).toBe(false)
-        expect(store.attachments.readForSession(created.id, 'namespace-a', 'session-a', 'original')).toBeNull()
+        expect(await store.attachments.readForSessionAsync(created.id, 'namespace-a', 'session-a', 'original')).toBeNull()
         store.close()
     })
 
-    it('keeps a valid original when the optional thumbnail is rejected', () => {
+    it('keeps a valid original when the optional thumbnail is rejected', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
         const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
-        const created = store.attachments.create({
+        const created = await store.attachments.create({
             namespace: 'namespace-a',
             sessionId: 'session-a',
             filename: 'document.txt',
@@ -73,17 +73,17 @@ describe('AttachmentStore', () => {
         })
 
         expect(created.thumbnailPath).toBeNull()
-        expect(store.attachments.readForSession(created.id, 'namespace-a', 'session-a', 'original')?.data)
+        expect((await store.attachments.readForSessionAsync(created.id, 'namespace-a', 'session-a', 'original'))?.data)
             .toEqual(Buffer.from('content'))
-        expect(store.attachments.readForSession(created.id, 'namespace-a', 'session-a', 'thumbnail')).toBeNull()
+        expect(await store.attachments.readForSessionAsync(created.id, 'namespace-a', 'session-a', 'thumbnail')).toBeNull()
         store.close()
     })
 
-    it('transfers and deletes all attachments by session without crossing namespaces', () => {
+    it('transfers and deletes all attachments by session without crossing namespaces', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
         const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
-        const created = store.attachments.create({
+        const created = await store.attachments.create({
             namespace: 'namespace-a',
             sessionId: 'session-a',
             filename: 'photo.png',
@@ -92,7 +92,7 @@ describe('AttachmentStore', () => {
             thumbnail: Buffer.from('thumb'),
             thumbnailMimeType: 'image/webp'
         })
-        const otherNamespace = store.attachments.create({
+        const otherNamespace = await store.attachments.create({
             namespace: 'namespace-b',
             sessionId: 'session-a',
             filename: 'other.png',
@@ -113,11 +113,11 @@ describe('AttachmentStore', () => {
         store.close()
     })
 
-    it('clones durable message attachments for a fork without changing the source', () => {
+    it('clones durable message attachments for a fork without changing the source', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
         const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
-        const source = store.attachments.create({
+        const source = await store.attachments.create({
             namespace: 'namespace-a',
             sessionId: 'session-a',
             filename: 'photo.png',
@@ -142,25 +142,26 @@ describe('AttachmentStore', () => {
             }
         }
 
-        const cloned = store.attachments.cloneMessageAttachments(
+        const cloned = await store.attachments.cloneMessageAttachments(
             'namespace-a',
             'session-a',
             'session-b',
             content
         ) as typeof content
-        const clonedId = cloned.content.attachments[0]?.attachmentId
+        const clonedContent = cloned as typeof content
+        const clonedId = clonedContent.content.attachments[0]?.attachmentId
         expect(clonedId).toBeDefined()
         expect(clonedId).not.toBe(source.id)
-        expect(cloned.content.attachments[0]?.path).toBeUndefined()
-        expect(store.attachments.readForSession(clonedId!, 'namespace-a', 'session-b', 'original')?.data)
+        expect(clonedContent.content.attachments[0]?.path).toBeUndefined()
+        expect((await store.attachments.readForSessionAsync(clonedId!, 'namespace-a', 'session-b', 'original'))?.data)
             .toEqual(Buffer.from('original'))
-        expect(store.attachments.readForSession(clonedId!, 'namespace-a', 'session-b', 'thumbnail')?.data)
+        expect((await store.attachments.readForSessionAsync(clonedId!, 'namespace-a', 'session-b', 'thumbnail'))?.data)
             .toEqual(Buffer.from('thumbnail'))
         expect(store.attachments.getForSession(source.id, 'namespace-a', 'session-a')).not.toBeNull()
         store.close()
     })
 
-    it('rewrites durable attachment ids when queued messages change session ownership', () => {
+    it('rewrites durable attachment ids when queued messages change session ownership', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
         const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
@@ -196,14 +197,14 @@ describe('AttachmentStore', () => {
             return content.content.attachments[0]!.attachmentId
         }
 
-        const redirectedAttachment = store.attachments.create({
+        const redirectedAttachment = await store.attachments.create({
             namespace: 'default',
             sessionId: source.id,
             filename: 'redirected.txt',
             mimeType: 'text/plain',
             original: Buffer.from('redirected')
         })
-        const redirected = store.addMessageForCurrentSession(
+        const redirected = await store.addMessageForCurrentSession(
             source.id,
             makeContent(redirectedAttachment),
             'redirected-local'
@@ -211,14 +212,14 @@ describe('AttachmentStore', () => {
         const redirectedId = getAttachmentId(redirected.message)
         expect(redirected.sessionId).toBe(target.id)
         expect(redirectedId).not.toBe(redirectedAttachment.id)
-        expect(store.attachments.readForSession(redirectedId, 'default', target.id, 'original')?.data)
+        expect((await store.attachments.readForSessionAsync(redirectedId, 'default', target.id, 'original'))?.data)
             .toEqual(Buffer.from('redirected'))
         expect(store.attachments.getForSession(redirectedAttachment.id, 'default', source.id)).not.toBeNull()
 
         const queuedSource = store.sessions.getOrCreateSession(
             'queued-source', { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }, null, 'default'
         )
-        const queuedAttachment = store.attachments.create({
+        const queuedAttachment = await store.attachments.create({
             namespace: 'default',
             sessionId: queuedSource.id,
             filename: 'queued.txt',
@@ -227,11 +228,11 @@ describe('AttachmentStore', () => {
         })
         store.messages.addMessage(queuedSource.id, makeContent(queuedAttachment), 'queued-local')
 
-        expect(store.moveUninvokedMessages('default', queuedSource.id, target.id)).toBe(1)
+        expect(await store.moveUninvokedMessages('default', queuedSource.id, target.id)).toBe(1)
         const moved = store.messages.getAllMessages(target.id).find((message) => message.localId === 'queued-local')
         const movedId = getAttachmentId(moved)
         expect(movedId).not.toBe(queuedAttachment.id)
-        expect(store.attachments.readForSession(movedId, 'default', target.id, 'original')?.data)
+        expect((await store.attachments.readForSessionAsync(movedId, 'default', target.id, 'original'))?.data)
             .toEqual(Buffer.from('queued'))
 
         const abortSource = store.sessions.getOrCreateSession(
@@ -240,7 +241,7 @@ describe('AttachmentStore', () => {
         const abortTarget = store.sessions.getOrCreateSession(
             'abort-target', { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }, null, 'default'
         )
-        const replacementAttachment = store.attachments.create({
+        const replacementAttachment = await store.attachments.create({
             namespace: 'default',
             sessionId: abortTarget.id,
             filename: 'restored.txt',
@@ -249,16 +250,16 @@ describe('AttachmentStore', () => {
         })
         store.messages.addMessage(abortTarget.id, makeContent(replacementAttachment), 'restored-local')
 
-        expect(store.moveUninvokedMessages('default', abortTarget.id, abortSource.id)).toBe(1)
+        expect(await store.moveUninvokedMessages('default', abortTarget.id, abortSource.id)).toBe(1)
         const restored = store.messages.getAllMessages(abortSource.id).find((message) => message.localId === 'restored-local')
         const restoredId = getAttachmentId(restored)
         expect(restoredId).not.toBe(replacementAttachment.id)
-        expect(store.attachments.readForSession(restoredId, 'default', abortSource.id, 'original')?.data)
+        expect((await store.attachments.readForSessionAsync(restoredId, 'default', abortSource.id, 'original'))?.data)
             .toEqual(Buffer.from('restored'))
         store.close()
     })
 
-    it('expands tilde-based attachment roots before resolving them', () => {
+    it('expands tilde-based attachment roots before resolving them', async () => {
         const previousHome = process.env.HAPI_HOME
         const previousRoot = process.env.HAPI_ATTACHMENTS_ROOT
         const homeSuffix = `.hapi-attachments-home-${randomUUID()}`
@@ -269,7 +270,7 @@ describe('AttachmentStore', () => {
             process.env.HAPI_HOME = `~/${homeSuffix}`
             delete process.env.HAPI_ATTACHMENTS_ROOT
             const homeStore = new Store(':memory:')
-            const homeAttachment = homeStore.attachments.create({
+            const homeAttachment = await homeStore.attachments.create({
                 namespace: 'namespace-a',
                 sessionId: 'session-a',
                 filename: 'home.txt',
@@ -281,7 +282,7 @@ describe('AttachmentStore', () => {
 
             process.env.HAPI_ATTACHMENTS_ROOT = `~/${rootSuffix}`
             const overrideStore = new Store(':memory:')
-            const overrideAttachment = overrideStore.attachments.create({
+            const overrideAttachment = await overrideStore.attachments.create({
                 namespace: 'namespace-a',
                 sessionId: 'session-a',
                 filename: 'override.txt',

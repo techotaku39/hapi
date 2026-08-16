@@ -42,6 +42,11 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
+type PreparedMessageAttachmentClones = {
+    rewrittenContents: Map<string, unknown>
+    clonedAttachments: Map<string, StoredAttachment>
+}
+
 const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
@@ -161,93 +166,87 @@ export class Store {
         })()
     }
 
-    /** Resolve a durable OpenCode clear reservation and insert in one SQLite transaction. */
-    addMessageForCurrentSession(
+    /** Clone redirected attachments before the short SQLite insert transaction. */
+    async addMessageForCurrentSession(
         sessionId: string,
         content: unknown,
         localId?: string,
         scheduledAt?: number | null
-    ): { sessionId: string; message: StoredMessage; inserted: boolean } {
-        return this.db.transaction(() => {
-            const row = this.db.prepare('SELECT namespace, metadata FROM sessions WHERE id = ?').get(sessionId) as { namespace: string; metadata: string | null } | undefined
-            if (!row) throw new Error('Message source session not found')
-            let targetSessionId = sessionId
-            if (row?.metadata) {
-                const metadata = JSON.parse(row.metadata) as { opencodeClearOperation?: { replacementSessionId?: string; state?: string }, supersededBySessionId?: string }
-                targetSessionId = metadata.supersededBySessionId
-                    ?? (metadata.opencodeClearOperation?.state !== 'aborted'
-                        ? metadata.opencodeClearOperation?.replacementSessionId
-                        : undefined)
-                    ?? sessionId
+    ): Promise<{ sessionId: string; message: StoredMessage; inserted: boolean }> {
+        const initialRoute = this.resolveCurrentMessageTarget(sessionId)
+        const initialAlreadyExists = localId
+            ? Boolean(this.db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
+                .get(initialRoute.targetSessionId, localId))
+            : false
+        const clonedAttachments = new Map<string, StoredAttachment>()
+        let messageContent = content
+
+        try {
+            if (initialRoute.targetSessionId !== sessionId && !initialAlreadyExists) {
+                messageContent = await this.attachments.cloneMessageAttachments(
+                    initialRoute.namespace,
+                    sessionId,
+                    initialRoute.targetSessionId,
+                    content,
+                    clonedAttachments
+                )
             }
-            if (targetSessionId !== sessionId) {
-                const target = this.db.prepare('SELECT 1 FROM sessions WHERE id = ? AND namespace = ?')
-                    .get(targetSessionId, row.namespace)
-                if (!target) throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
-            }
-            const alreadyExists = localId
-                ? Boolean(this.db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
-                    .get(targetSessionId, localId))
-                : false
-            const clonedAttachments = new Map<string, StoredAttachment>()
-            let messageContent = content
-            try {
-                if (targetSessionId !== sessionId && !alreadyExists) {
-                    messageContent = this.attachments.cloneMessageAttachments(
-                        row.namespace,
-                        sessionId,
-                        targetSessionId,
-                        content,
-                        clonedAttachments
-                    )
+
+            const result = this.db.transaction(() => {
+                const latestRoute = this.resolveCurrentMessageTarget(sessionId)
+                if (latestRoute.namespace !== initialRoute.namespace
+                    || latestRoute.targetSessionId !== initialRoute.targetSessionId) {
+                    throw new Error('OpenCode clear redirect changed while the message attachment was being cloned')
                 }
+                const latestAlreadyExists = localId
+                    ? Boolean(this.db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
+                        .get(latestRoute.targetSessionId, localId))
+                    : false
+                if (!latestAlreadyExists
+                    && initialAlreadyExists
+                    && latestRoute.targetSessionId !== sessionId) {
+                    throw new Error('OpenCode clear redirect duplicate disappeared while the message was being prepared')
+                }
+                const persistedContent = latestAlreadyExists
+                    ? content
+                    : latestRoute.targetSessionId !== sessionId
+                        ? messageContent
+                        : content
                 return {
-                    sessionId: targetSessionId,
-                    message: addMessage(this.db, targetSessionId, messageContent, localId, scheduledAt),
-                    inserted: !alreadyExists
+                    sessionId: latestRoute.targetSessionId,
+                    message: addMessage(this.db, latestRoute.targetSessionId, persistedContent, localId, scheduledAt),
+                    inserted: !latestAlreadyExists
                 }
-            } catch (error) {
-                for (const attachment of clonedAttachments.values()) {
-                    this.attachments.deleteForSession(attachment.id, row.namespace, targetSessionId)
-                }
-                throw error
-            }
-        })()
+            })()
+            if (!result.inserted) this.cleanupClonedAttachments(clonedAttachments, initialRoute.namespace, initialRoute.targetSessionId)
+            return result
+        } catch (error) {
+            this.cleanupClonedAttachments(clonedAttachments, initialRoute.namespace, initialRoute.targetSessionId)
+            throw error
+        }
     }
 
     /** Move queued messages between OpenCode clear sessions with readable attachments. */
-    moveUninvokedMessages(namespace: string, fromSessionId: string, toSessionId: string): number {
+    async moveUninvokedMessages(namespace: string, fromSessionId: string, toSessionId: string): Promise<number> {
         if (fromSessionId === toSessionId) return 0
-        return this.db.transaction(() => {
-            const targetLocalIds = new Set(
-                this.messages.getAllMessages(toSessionId)
-                    .map((message) => message.localId)
-                    .filter((localId): localId is string => localId !== null)
-            )
-            const clonedAttachments = new Map<string, StoredAttachment>()
-            try {
-                for (const message of this.messages.getAllMessages(fromSessionId)) {
-                    if (message.invokedAt !== null) continue
-                    if (message.localId !== null && targetLocalIds.has(message.localId)) continue
-                    const rewritten = this.attachments.cloneMessageAttachments(
-                        namespace,
-                        fromSessionId,
-                        toSessionId,
-                        message.content,
-                        clonedAttachments
-                    )
-                    if (rewritten !== message.content && !this.messages.updateMessageContent(message.id, rewritten)) {
-                        throw new Error(`Failed to rewrite queued message ${message.id}`)
+        const prepared = await this.prepareUninvokedMessageAttachmentClones(
+            namespace,
+            fromSessionId,
+            toSessionId
+        )
+        try {
+            return this.db.transaction(() => {
+                for (const [messageId, content] of prepared.rewrittenContents) {
+                    if (!this.messages.updateMessageContent(messageId, content)) {
+                        throw new Error(`Failed to rewrite queued message ${messageId}`)
                     }
                 }
                 return this.messages.moveUninvokedMessages(fromSessionId, toSessionId)
-            } catch (error) {
-                for (const attachment of clonedAttachments.values()) {
-                    this.attachments.deleteForSession(attachment.id, namespace, toSessionId)
-                }
-                throw error
-            }
-        })()
+            })()
+        } catch (error) {
+            this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, toSessionId)
+            throw error
+        }
     }
 
     /** Durable delivery gate for a preallocated replacement owned by an unfinished clear. */
@@ -271,7 +270,7 @@ export class Store {
         })
     }
 
-    abortOpenCodeClearOperation(
+    async abortOpenCodeClearOperation(
         sessionId: string,
         replacementSessionId: string,
         metadata: unknown,
@@ -279,21 +278,109 @@ export class Store {
         namespace: string,
         expected?: { replacementSessionId: string; state: string; requireInactive?: boolean }
     ) {
-        return this.db.transaction(() => {
-            const current = this.sessions.getSessionByNamespace(sessionId, namespace)
-            const operation = current?.metadata && typeof current.metadata === 'object'
-                ? (current.metadata as { opencodeClearOperation?: { replacementSessionId?: string; state?: string } }).opencodeClearOperation
-                : undefined
-            if (expected && (!current
-                || (expected.requireInactive === true && current.active)
-                || operation?.replacementSessionId !== expected.replacementSessionId
-                || operation.state !== expected.state)) {
-                return { result: 'version-mismatch' as const }
+        const prepared = await this.prepareUninvokedMessageAttachmentClones(
+            namespace,
+            replacementSessionId,
+            sessionId
+        )
+        try {
+            const result = this.db.transaction(() => {
+                const current = this.sessions.getSessionByNamespace(sessionId, namespace)
+                const operation = current?.metadata && typeof current.metadata === 'object'
+                    ? (current.metadata as { opencodeClearOperation?: { replacementSessionId?: string; state?: string } }).opencodeClearOperation
+                    : undefined
+                if (expected && (!current
+                    || (expected.requireInactive === true && current.active)
+                    || operation?.replacementSessionId !== expected.replacementSessionId
+                    || operation.state !== expected.state)) {
+                    return { result: 'version-mismatch' as const }
+                }
+                const result = this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
+                if (result.result === 'success') {
+                    for (const [messageId, content] of prepared.rewrittenContents) {
+                        if (!this.messages.updateMessageContent(messageId, content)) {
+                            throw new Error(`Failed to rewrite queued message ${messageId}`)
+                        }
+                    }
+                    this.messages.moveUninvokedMessages(replacementSessionId, sessionId)
+                }
+                return result
+            })()
+            if (result.result !== 'success') {
+                this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, sessionId)
             }
-            const result = this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
-            if (result.result === 'success') this.moveUninvokedMessages(namespace, replacementSessionId, sessionId)
             return result
-        })()
+        } catch (error) {
+            this.cleanupClonedAttachments(prepared.clonedAttachments, namespace, sessionId)
+            throw error
+        }
+    }
+
+    private resolveCurrentMessageTarget(sessionId: string): { namespace: string; targetSessionId: string } {
+        const row = this.db.prepare('SELECT namespace, metadata FROM sessions WHERE id = ?')
+            .get(sessionId) as { namespace: string; metadata: string | null } | undefined
+        if (!row) throw new Error('Message source session not found')
+
+        let targetSessionId = sessionId
+        if (row.metadata) {
+            const metadata = JSON.parse(row.metadata) as {
+                opencodeClearOperation?: { replacementSessionId?: string; state?: string }
+                supersededBySessionId?: string
+            }
+            targetSessionId = metadata.supersededBySessionId
+                ?? (metadata.opencodeClearOperation?.state !== 'aborted'
+                    ? metadata.opencodeClearOperation?.replacementSessionId
+                    : undefined)
+                ?? sessionId
+        }
+        if (targetSessionId !== sessionId) {
+            const target = this.db.prepare('SELECT 1 FROM sessions WHERE id = ? AND namespace = ?')
+                .get(targetSessionId, row.namespace)
+            if (!target) throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
+        }
+        return { namespace: row.namespace, targetSessionId }
+    }
+
+    private async prepareUninvokedMessageAttachmentClones(
+        namespace: string,
+        fromSessionId: string,
+        toSessionId: string
+    ): Promise<PreparedMessageAttachmentClones> {
+        const targetLocalIds = new Set(
+            this.messages.getAllMessages(toSessionId)
+                .map((message) => message.localId)
+                .filter((localId): localId is string => localId !== null)
+        )
+        const clonedAttachments = new Map<string, StoredAttachment>()
+        const rewrittenContents = new Map<string, unknown>()
+        try {
+            for (const message of this.messages.getAllMessages(fromSessionId)) {
+                if (message.invokedAt !== null) continue
+                if (message.localId !== null && targetLocalIds.has(message.localId)) continue
+                const rewritten = await this.attachments.cloneMessageAttachments(
+                    namespace,
+                    fromSessionId,
+                    toSessionId,
+                    message.content,
+                    clonedAttachments
+                )
+                if (rewritten !== message.content) rewrittenContents.set(message.id, rewritten)
+            }
+            return { rewrittenContents, clonedAttachments }
+        } catch (error) {
+            this.cleanupClonedAttachments(clonedAttachments, namespace, toSessionId)
+            throw error
+        }
+    }
+
+    private cleanupClonedAttachments(
+        clonedAttachments: Map<string, StoredAttachment>,
+        namespace: string,
+        sessionId: string
+    ): void {
+        for (const attachment of clonedAttachments.values()) {
+            this.attachments.deleteForSession(attachment.id, namespace, sessionId)
+        }
     }
 
     transitionOpenCodeClearOperation(

@@ -77,7 +77,7 @@ describe('Pi conversation-history hub integration', () => {
                 conversationHistoryEntryIds: { local1: 'entry-1', local2: 'entry-2' },
             }, null, 'default', 'source-model', 'high')
             engine.handleSessionAlive({ sid: source.id, time: Date.now(), mode: 'remote' })
-            const sourceAttachment = store.attachments.create({
+            const sourceAttachment = await store.attachments.create({
                 namespace: 'default',
                 sessionId: source.id,
                 filename: 'photo.png',
@@ -160,7 +160,7 @@ describe('Pi conversation-history hub integration', () => {
             const copiedAttachmentId = ((copiedMessage?.content as any)?.content?.attachments?.[0] as any)?.attachmentId
             expect(copiedAttachmentId).toBeDefined()
             expect(copiedAttachmentId).not.toBe(sourceAttachment.id)
-            expect(store.attachments.readForSession(copiedAttachmentId, 'default', result.sessionId, 'original')?.data)
+            expect((await store.attachments.readForSessionAsync(copiedAttachmentId, 'default', result.sessionId, 'original'))?.data)
                 .toEqual(Buffer.from('fork original'))
             expect(store.attachments.getForSession(sourceAttachment.id, 'default', source.id)).not.toBeNull()
             expect(exactBinds).toEqual([[result.sessionId, 'pi-clone-native', 'piSessionId', true]])

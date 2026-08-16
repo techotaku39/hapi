@@ -48,7 +48,7 @@ describe('durable attachment session lifecycle', () => {
     it('moves attachments with merged message history before deleting the old session', async () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)
-        const attachment = store.attachments.create({
+        const attachment = await store.attachments.create({
             namespace: 'default',
             sessionId: oldSession.id,
             filename: 'photo.png',
@@ -69,7 +69,7 @@ describe('durable attachment session lifecycle', () => {
     it('removes durable attachment metadata and files when a session is deleted', async () => {
         const { store, cache } = setup()
         const { oldSession } = makeSessions(cache)
-        const attachment = store.attachments.create({
+        const attachment = await store.attachments.create({
             namespace: 'default',
             sessionId: oldSession.id,
             filename: 'document.txt',
@@ -88,7 +88,7 @@ describe('durable attachment session lifecycle', () => {
     it('preserves durable attachments when deleting the session row fails', async () => {
         const { store, cache } = setup()
         const { oldSession } = makeSessions(cache)
-        const attachment = store.attachments.create({
+        const attachment = await store.attachments.create({
             namespace: 'default',
             sessionId: oldSession.id,
             filename: 'document.txt',

@@ -1,14 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import {
-    chmodSync,
-    existsSync,
-    mkdirSync,
-    readFileSync,
-    renameSync,
-    rmSync,
-    writeFileSync
-} from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { rmSync } from 'node:fs'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Database } from 'bun:sqlite'
@@ -94,7 +86,7 @@ export class AttachmentStore {
         this.root = resolve(root)
     }
 
-    create(input: CreateAttachmentInput): StoredAttachment {
+    async create(input: CreateAttachmentInput): Promise<StoredAttachment> {
         if (input.original.length === 0 || input.original.length > MAX_ATTACHMENT_BYTES) {
             throw new Error('Attachment exceeds the maximum allowed size')
         }
@@ -116,16 +108,16 @@ export class AttachmentStore {
             thumbnailSize = input.thumbnail.length
         }
 
-        mkdirSync(this.root, { recursive: true, mode: 0o700 })
+        await mkdir(this.root, { recursive: true, mode: 0o700 })
         try {
-            chmodSync(this.root, 0o700)
+            await chmod(this.root, 0o700)
         } catch {
         }
 
         try {
-            this.writeAtomically(originalPath, input.original)
+            await this.writeAtomically(originalPath, input.original)
             if (thumbnailPath && input.thumbnail) {
-                this.writeAtomically(thumbnailPath, input.thumbnail)
+                await this.writeAtomically(thumbnailPath, input.thumbnail)
             }
 
             this.db.prepare(`
@@ -149,8 +141,8 @@ export class AttachmentStore {
                 createdAt
             )
         } catch (error) {
-            rmSync(originalPath, { force: true })
-            if (thumbnailPath) rmSync(thumbnailPath, { force: true })
+            await this.removeFile(originalPath)
+            if (thumbnailPath) await this.removeFile(thumbnailPath)
             throw error
         }
 
@@ -181,29 +173,6 @@ export class AttachmentStore {
         return row ? this.toStoredAttachment(row) : null
     }
 
-    readForSession(
-        id: string,
-        namespace: string,
-        sessionId: string,
-        variant: 'original' | 'thumbnail'
-    ): AttachmentBlob | null {
-        const attachment = this.getForSession(id, namespace, sessionId)
-        if (!attachment) return null
-        const path = variant === 'original' ? attachment.originalPath : attachment.thumbnailPath
-        if (!path || !existsSync(path)) return null
-        const data = readFileSync(path)
-        return {
-            attachment,
-            variant,
-            data,
-            mimeType: variant === 'original'
-                ? attachment.mimeType
-                : (attachment.thumbnailMimeType || attachment.mimeType),
-            size: data.length,
-            sha256: variant === 'original' ? attachment.sha256 : hashBytes(data)
-        }
-    }
-
     async readForSessionAsync(
         id: string,
         namespace: string,
@@ -213,7 +182,7 @@ export class AttachmentStore {
         const attachment = this.getForSession(id, namespace, sessionId)
         if (!attachment) return null
         const path = variant === 'original' ? attachment.originalPath : attachment.thumbnailPath
-        if (!path || !existsSync(path)) return null
+        if (!path) return null
 
         let data: Buffer
         try {
@@ -245,15 +214,17 @@ export class AttachmentStore {
         return true
     }
 
-    cloneForSession(
+    async cloneForSession(
         id: string,
         namespace: string,
         sourceSessionId: string,
         targetSessionId: string
-    ): StoredAttachment {
-        const original = this.readForSession(id, namespace, sourceSessionId, 'original')
+    ): Promise<StoredAttachment> {
+        const [original, thumbnail] = await Promise.all([
+            this.readForSessionAsync(id, namespace, sourceSessionId, 'original'),
+            this.readForSessionAsync(id, namespace, sourceSessionId, 'thumbnail')
+        ])
         if (!original) throw new Error(`Attachment ${id} is unavailable`)
-        const thumbnail = this.readForSession(id, namespace, sourceSessionId, 'thumbnail')
         return this.create({
             namespace,
             sessionId: targetSessionId,
@@ -266,25 +237,27 @@ export class AttachmentStore {
         })
     }
 
-    cloneMessageAttachments(
+    async cloneMessageAttachments(
         namespace: string,
         sourceSessionId: string,
         targetSessionId: string,
         content: unknown,
         clonedAttachments = new Map<string, StoredAttachment>()
-    ): unknown {
+    ): Promise<unknown> {
         if (!isRecord(content) || content.role !== 'user') return content
         const messageContent = content.content
         if (!isRecord(messageContent) || !Array.isArray(messageContent.attachments)) return content
 
-        const attachments = messageContent.attachments.map((attachment) => {
+        const attachments = []
+        for (const attachment of messageContent.attachments) {
             if (!isRecord(attachment) || typeof attachment.attachmentId !== 'string') {
-                return attachment
+                attachments.push(attachment)
+                continue
             }
             const sourceAttachmentId = attachment.attachmentId
             let cloned = clonedAttachments.get(sourceAttachmentId)
             if (!cloned) {
-                cloned = this.cloneForSession(
+                cloned = await this.cloneForSession(
                     sourceAttachmentId,
                     namespace,
                     sourceSessionId,
@@ -293,8 +266,8 @@ export class AttachmentStore {
                 clonedAttachments.set(sourceAttachmentId, cloned)
             }
             const { path: _legacyPath, ...metadata } = attachment
-            return { ...metadata, attachmentId: cloned.id }
-        })
+            attachments.push({ ...metadata, attachmentId: cloned.id })
+        }
 
         return {
             ...content,
@@ -332,13 +305,20 @@ export class AttachmentStore {
         return Number(result.changes)
     }
 
-    private writeAtomically(target: string, data: Buffer): void {
+    private async writeAtomically(target: string, data: Buffer): Promise<void> {
         const temp = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
         try {
-            writeFileSync(temp, data, { mode: 0o600, flag: 'wx' })
-            renameSync(temp, target)
+            await writeFile(temp, data, { mode: 0o600, flag: 'wx' })
+            await rename(temp, target)
         } finally {
-            rmSync(temp, { force: true })
+            await this.removeFile(temp)
+        }
+    }
+
+    private async removeFile(path: string): Promise<void> {
+        try {
+            await rm(path, { force: true })
+        } catch {
         }
     }
 
