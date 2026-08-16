@@ -69,6 +69,10 @@ function createApp(session: Session, opts?: {
     rewindConversation?: SyncEngine['rewindConversation']
     suggestSessionTitle?: SyncEngine['suggestSessionTitle']
     updateSessionSummary?: SyncEngine['updateSessionSummary']
+    createAttachment?: SyncEngine['createAttachment']
+    deleteAttachment?: SyncEngine['deleteAttachment']
+    deleteUploadFile?: SyncEngine['deleteUploadFile']
+    readAttachment?: SyncEngine['readAttachment']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
     setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
 }) {
@@ -164,7 +168,11 @@ function createApp(session: Session, opts?: {
         forkConversation: opts?.forkConversation ?? (async () => ({ type: 'success', sessionId: 'child-1' })),
         rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
         suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
-        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {})
+        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {}),
+        createAttachment: opts?.createAttachment ?? (async () => ({ success: false, error: 'not configured' })),
+        deleteAttachment: opts?.deleteAttachment ?? (async () => ({ success: false, error: 'not configured' })),
+        deleteUploadFile: opts?.deleteUploadFile ?? (async () => ({ success: false, error: 'not configured' })),
+        readAttachment: opts?.readAttachment ?? (() => null)
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -1518,4 +1526,103 @@ describe('sessions routes', () => {
         expect(body.sessions.map((s) => s.id)).toEqual(['new-inactive'])
     })
 
+})
+
+describe('durable attachment routes', () => {
+    it('passes the original and optional thumbnail to the hub attachment store', async () => {
+        const calls: unknown[][] = []
+        const { app } = createApp(createSession(), {
+            createAttachment: async (...args) => {
+                calls.push(args)
+                return {
+                    success: true,
+                    attachmentId: 'attachment-1',
+                    filename: 'photo.png',
+                    mimeType: 'image/png',
+                    size: 3,
+                    thumbnailAvailable: true
+                }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/upload', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                filename: 'photo.png',
+                content: 'AQID',
+                mimeType: 'image/png',
+                thumbnailContent: 'BAUG',
+                thumbnailMimeType: 'image/webp'
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: true,
+            attachmentId: 'attachment-1',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            size: 3,
+            thumbnailAvailable: true
+        })
+        expect(calls).toEqual([[
+            'session-1',
+            'default',
+            'photo.png',
+            'AQID',
+            'image/png',
+            'BAUG',
+            'image/webp'
+        ]])
+    })
+
+    it('returns durable attachment bytes with integrity headers', async () => {
+        const { app } = createApp(createSession(), {
+            readAttachment: () => ({
+                attachment: {} as never,
+                variant: 'thumbnail' as const,
+                data: Buffer.from([7, 8, 9]),
+                mimeType: 'image/webp',
+                size: 3,
+                sha256: 'hash-1'
+            })
+        })
+
+        const response = await app.request('/api/sessions/session-1/attachments/attachment-1/thumbnail')
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toBe('image/webp')
+        expect(response.headers.get('content-length')).toBe('3')
+        expect(response.headers.get('cache-control')).toContain('immutable')
+        expect(response.headers.get('etag')).toBe('"hash-1"')
+        expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+        expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([7, 8, 9])
+    })
+
+    it('deletes a durable attachment by opaque id without invoking the legacy path RPC', async () => {
+        const durableCalls: string[][] = []
+        const legacyCalls: string[][] = []
+        const { app } = createApp(createSession(), {
+            deleteAttachment: async (...args) => {
+                durableCalls.push(args)
+                return { success: true }
+            },
+            deleteUploadFile: async (...args) => {
+                legacyCalls.push(args)
+                return { success: true }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/upload/delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ attachmentId: 'attachment-1' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: true })
+        expect(durableCalls).toEqual([['session-1', 'default', 'attachment-1']])
+        expect(legacyCalls).toEqual([])
+    })
 })

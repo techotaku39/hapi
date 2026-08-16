@@ -13,6 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { AttachmentStore } from './attachments'
 
 export type {
     StoredMachine,
@@ -24,6 +25,7 @@ export type {
     StoredUser,
     VersionedUpdateResult
 } from './types'
+export type { StoredAttachment } from './attachments'
 export type { CancelQueuedMessageResult, LookupQueuedMessageResult } from './messages'
 export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
@@ -40,7 +42,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 23
+const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -53,7 +55,8 @@ const REQUIRED_TABLES = [
     'usage_events',
     'usage_scan_state',
     'events',
-    'event_links'
+    'event_links',
+    'attachments'
 ] as const
 
 export class Store {
@@ -70,6 +73,7 @@ export class Store {
     readonly scratchlist: ScratchlistStore
     readonly usage: UsageStore
     readonly workGraph: WorkGraphStore
+    readonly attachments: AttachmentStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -80,7 +84,7 @@ export class Store {
         return this._dbPath
     }
 
-    constructor(dbPath: string) {
+    constructor(dbPath: string, options?: { attachmentsRoot?: string }) {
         this._dbPath = dbPath
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             const dir = dirname(dbPath)
@@ -124,6 +128,7 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+        this.attachments = new AttachmentStore(this.db, options?.attachmentsRoot)
     }
 
     /**
@@ -302,6 +307,7 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
         })
 
         if (currentVersion === 0) {
@@ -544,6 +550,23 @@ export class Store {
                 ON event_links(namespace, from_event_id);
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
+
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                thumbnail_path TEXT,
+                thumbnail_mime_type TEXT,
+                thumbnail_size INTEGER,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachments_namespace_session
+                ON attachments(namespace, session_id, created_at);
         `)
     }
 
@@ -969,6 +992,28 @@ export class Store {
                 ON event_links(namespace, from_event_id);
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
+        `)
+    }
+
+    /** PR1 durable attachment metadata. Bytes are stored outside SQLite. */
+    private migrateFromV23ToV24(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                thumbnail_path TEXT,
+                thumbnail_mime_type TEXT,
+                thumbnail_size INTEGER,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachments_namespace_session
+                ON attachments(namespace, session_id, created_at);
         `)
     }
 

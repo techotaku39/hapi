@@ -12,7 +12,7 @@ import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
 } from '@hapi/protocol/runnerCapabilities'
-import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
+import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, SlashCommandsResponse, UploadFileResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
@@ -127,6 +127,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function normalizeUserMessageText(value: string): string | undefined {
     const text = value.trim().replace(/\s+/g, ' ')
     return text.length > 0 ? text : undefined
+}
+
+function decodeBase64Attachment(value: string): Buffer {
+    const payload = value.includes(',') ? value.slice(value.indexOf(',') + 1) : value
+    if (!payload || !/^[A-Za-z0-9+/\s]+={0,2}$/.test(payload)) {
+        throw new Error('Invalid attachment content')
+    }
+    return Buffer.from(payload, 'base64')
 }
 
 function extractUserMessageText(content: unknown): string | undefined {
@@ -996,14 +1004,7 @@ export class SyncEngine {
         payload: {
             text: string
             localId?: string | null
-            attachments?: Array<{
-                id: string
-                filename: string
-                mimeType: string
-                size: number
-                path: string
-                previewUrl?: string
-            }>
+            attachments?: import('@hapi/protocol').AttachmentMetadata[]
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
@@ -3858,6 +3859,66 @@ export class SyncEngine {
 
     async statFiles(sessionId: string, paths: string[]): Promise<RpcStatFilesResponse> {
         return await this.rpcGateway.statFiles(sessionId, paths)
+    }
+
+    /** Store a user upload durably on the hub; the CLI-local upload RPC remains a legacy fallback. */
+    async createAttachment(
+        sessionId: string,
+        namespace: string,
+        filename: string,
+        content: string,
+        mimeType: string,
+        thumbnailContent?: string,
+        thumbnailMimeType?: string
+    ): Promise<UploadFileResponse> {
+        const access = this.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            throw new Error(access.reason === 'access-denied' ? 'Session access denied' : 'Session not found')
+        }
+        const original = decodeBase64Attachment(content)
+        const thumbnail = thumbnailContent ? decodeBase64Attachment(thumbnailContent) : undefined
+        const stored = this.store.attachments.create({
+            namespace,
+            sessionId: access.sessionId,
+            filename,
+            mimeType,
+            original,
+            thumbnail,
+            thumbnailMimeType
+        })
+        return {
+            success: true,
+            attachmentId: stored.id,
+            filename: stored.filename,
+            mimeType: stored.mimeType,
+            size: stored.size,
+            thumbnailAvailable: Boolean(stored.thumbnailPath)
+        }
+    }
+
+    async deleteAttachment(sessionId: string, namespace: string, attachmentId: string): Promise<{ success: boolean; error?: string }> {
+        const access = this.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            return { success: false, error: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found' }
+        }
+        const deleted = this.store.attachments.deleteForSession(attachmentId, namespace, access.sessionId)
+        return deleted ? { success: true } : { success: false, error: 'Attachment not found' }
+    }
+
+    readAttachment(
+        sessionId: string,
+        namespace: string,
+        attachmentId: string,
+        variant: 'original' | 'thumbnail'
+    ) {
+        const access = this.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) return null
+        return this.store.attachments.readForSession(attachmentId, namespace, access.sessionId, variant)
+    }
+
+    hasAttachment(sessionId: string, namespace: string, attachmentId: string): boolean {
+        const access = this.resolveSessionAccess(sessionId, namespace)
+        return access.ok && Boolean(this.store.attachments.getForSession(attachmentId, namespace, access.sessionId))
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {

@@ -289,3 +289,49 @@ describe('cli lazy session creation', () => {
         expect(response.status).toBe(409)
     })
 })
+
+describe('cli durable attachment delivery', () => {
+    it('serves an owned original through the authenticated CLI endpoint', async () => {
+        const readAttachment = mock(() => ({
+            attachment: {} as never,
+            variant: 'original' as const,
+            data: Buffer.from([1, 2, 3, 4]),
+            mimeType: 'application/pdf',
+            size: 4,
+            sha256: 'hash-2'
+        }))
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId: 'session-1',
+                session: {} as never
+            }),
+            readAttachment
+        } as never)
+
+        const response = await app.request('/cli/sessions/session-1/attachments/attachment-1/original', {
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(200)
+        expect(readAttachment).toHaveBeenCalledWith('session-1', 'default', 'attachment-1', 'original')
+        expect(response.headers.get('content-type')).toBe('application/pdf')
+        expect(response.headers.get('content-length')).toBe('4')
+        expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3, 4])
+    })
+
+    it('does not expose an attachment when the session is outside the CLI namespace', async () => {
+        const readAttachment = mock(() => null)
+        const app = createApp({
+            resolveSessionAccess: () => ({ ok: false as const, reason: 'access-denied' as const }),
+            readAttachment
+        } as never)
+
+        const response = await app.request('/cli/sessions/session-1/attachments/attachment-1/original', {
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(403)
+        expect(readAttachment).not.toHaveBeenCalled()
+    })
+})

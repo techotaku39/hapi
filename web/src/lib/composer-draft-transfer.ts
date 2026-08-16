@@ -90,7 +90,7 @@ export function updateComposerDraftTextSnapshot(sessionId: string, text: string)
 /** Stable membership/metadata key for attachment-only persist effects. */
 export function attachmentDraftRevision(attachments: readonly AttachmentDraftInput[]): string {
     return attachments
-        .map(({ id, path, uploadSessionId }) => `${id}:${path ?? ''}:${uploadSessionId ?? ''}`)
+        .map(({ id, path, attachmentId, uploadSessionId }) => `${id}:${path ?? ''}:${attachmentId ?? ''}:${uploadSessionId ?? ''}`)
         .join('\0')
 }
 
@@ -121,6 +121,7 @@ function stripSessionScopedUploadFields(attachment: AttachmentDraftInput): Attac
     return {
         ...attachment,
         path: undefined,
+        attachmentId: undefined,
         previewUrl: undefined,
         uploadSessionId: undefined,
     }
@@ -150,6 +151,7 @@ async function loadPersistedAttachments(
             id: metadata?.id ?? `transferred-${index}-${file.name}`,
             file,
             path: metadata?.path,
+            attachmentId: metadata?.attachmentId,
             previewUrl: metadata?.previewUrl,
             uploadSessionId: metadata?.uploadSessionId,
         }

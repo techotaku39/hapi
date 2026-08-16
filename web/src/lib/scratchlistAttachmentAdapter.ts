@@ -18,6 +18,7 @@ const HUB_ATTACHMENT_ID_PREFIX_RE =
 type PendingScratchlistAttachment = PendingAttachment & {
     /** Mirrors chat upload adapter — HappyComposer treats requires-action + path as ready. */
     path?: string
+    attachmentId?: string
     hubAttachment?: ScratchlistAttachmentMetadata
     previewUrl?: string
 }
@@ -74,9 +75,11 @@ export function createScratchlistAttachmentAdapter(
         async *add({ file }): AsyncGenerator<PendingAttachment> {
             const contentType = file.type || 'application/octet-stream'
             const restored = getRestoredUploadMetadata(file)
-            if (restored?.path) {
-                const hubAttachment = hubAttachmentFromRestoredDraft(restored.path, file, contentType)
-                if (hubAttachment) {
+            if (restored?.path || restored?.attachmentId) {
+                const hubAttachment = restored.path
+                    ? hubAttachmentFromRestoredDraft(restored.path, file, contentType)
+                    : null
+                if (hubAttachment || restored.attachmentId) {
                     yield {
                         id: restored.id,
                         type: 'file',
@@ -85,6 +88,7 @@ export function createScratchlistAttachmentAdapter(
                         file,
                         status: { type: 'requires-action', reason: 'composer-send' },
                         path: restored.path,
+                        attachmentId: restored.attachmentId,
                         hubAttachment,
                         previewUrl: restored.previewUrl,
                     } as PendingScratchlistAttachment
@@ -206,6 +210,7 @@ export function createScratchlistAttachmentAdapter(
             let hubAttachment = pending.hubAttachment
             let previewUrl = pending.previewUrl
             let migratedFromPath: string | undefined
+            let migratedFromAttachmentId: string | undefined
 
             // Attach-before-mode: composer still holds a chat-path pending from
             // the normal upload adapter. Migrate into hub scratchlist storage
@@ -242,6 +247,7 @@ export function createScratchlistAttachmentAdapter(
                 ) {
                     migratedFromPath = pending.path
                 }
+                migratedFromAttachmentId = pending.attachmentId
                 if (!previewUrl && isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES) {
                     previewUrl = await fileToDataUrl(file)
                 }
@@ -260,6 +266,7 @@ export function createScratchlistAttachmentAdapter(
                             ...hubAttachment,
                             previewUrl,
                             ...(migratedFromPath ? { migratedFromPath } : {}),
+                            ...(migratedFromAttachmentId ? { migratedFromAttachmentId } : {}),
                         }
                     })
                 }]

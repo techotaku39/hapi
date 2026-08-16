@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from 'react'
 import type { AttachmentMetadata } from '@/types/api'
+import type { ApiClient } from '@/api/client'
 import { FileIcon } from '@/components/FileIcon'
 import { isImageMimeType } from '@/lib/fileAttachments'
 import { ImagePreview } from '@/components/ImagePreview'
@@ -9,13 +11,68 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function ImageAttachment(props: { attachment: AttachmentMetadata }) {
+function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient; sessionId: string }) {
     const { attachment } = props
+    const [thumbnailUrl, setThumbnailUrl] = useState(attachment.previewUrl ?? '')
+    const thumbnailUrlRef = useRef<string | undefined>(undefined)
+    const originalUrlRef = useRef<string | undefined>(undefined)
+
+    useEffect(() => {
+        let cancelled = false
+        setThumbnailUrl(attachment.previewUrl ?? '')
+        if (attachment.attachmentId && !attachment.previewUrl) {
+            void (async () => {
+                let blob: Blob
+                let isOriginal = false
+                try {
+                    blob = await props.api.fetchAttachmentBlob(props.sessionId, attachment.attachmentId!, 'thumbnail')
+                } catch {
+                    blob = await props.api.fetchAttachmentBlob(props.sessionId, attachment.attachmentId!, 'original')
+                    isOriginal = true
+                }
+                if (cancelled) return
+                const url = URL.createObjectURL(blob)
+                thumbnailUrlRef.current = url
+                if (isOriginal) originalUrlRef.current = url
+                setThumbnailUrl(url)
+            })().catch(() => {})
+        }
+        return () => {
+            cancelled = true
+            if (thumbnailUrlRef.current) URL.revokeObjectURL(thumbnailUrlRef.current)
+            if (originalUrlRef.current) URL.revokeObjectURL(originalUrlRef.current)
+            thumbnailUrlRef.current = undefined
+            originalUrlRef.current = undefined
+        }
+    }, [attachment.attachmentId, attachment.previewUrl, props.api, props.sessionId])
+
+    const openOriginal = async (): Promise<string | undefined> => {
+        if (!attachment.attachmentId) return undefined
+        if (originalUrlRef.current) return originalUrlRef.current
+        try {
+            const blob = await props.api.fetchAttachmentBlob(props.sessionId, attachment.attachmentId, 'original')
+            const url = URL.createObjectURL(blob)
+            originalUrlRef.current = url
+            return url
+        } catch {
+            return undefined
+        }
+    }
+
+    if (!thumbnailUrl) {
+        return (
+            <div className="flex h-32 w-48 items-center justify-center rounded-lg bg-[var(--app-bg)] text-xs text-[var(--app-hint)]">
+                Loading preview…
+            </div>
+        )
+    }
+
     return (
         <ImagePreview
-            src={attachment.previewUrl ?? ''}
+            src={thumbnailUrl}
             fileName={attachment.filename}
             label={attachment.filename}
+            onOpen={attachment.attachmentId ? openOriginal : undefined}
             buttonClassName="relative overflow-hidden rounded-lg text-left cursor-zoom-in"
             imageClassName="max-h-48 max-w-full object-contain"
             caption={(
@@ -46,12 +103,12 @@ function FileAttachment(props: { attachment: AttachmentMetadata }) {
     )
 }
 
-export function MessageAttachments(props: { attachments: AttachmentMetadata[] }) {
-    const { attachments } = props
+export function MessageAttachments(props: { attachments: AttachmentMetadata[]; api: ApiClient; sessionId: string }) {
+    const { attachments, api, sessionId } = props
     if (!attachments || attachments.length === 0) return null
 
-    const images = attachments.filter(a => isImageMimeType(a.mimeType) && a.previewUrl)
-    const files = attachments.filter(a => !isImageMimeType(a.mimeType) || !a.previewUrl)
+    const images = attachments.filter(a => isImageMimeType(a.mimeType) && (a.previewUrl || a.attachmentId))
+    const files = attachments.filter(a => !isImageMimeType(a.mimeType) || (!a.previewUrl && !a.attachmentId))
 
     return (
         <div className="mt-2 flex flex-col gap-2">
@@ -61,7 +118,7 @@ export function MessageAttachments(props: { attachments: AttachmentMetadata[] })
                     data-hapi-image-count={images.length}
                 >
                     {images.map(attachment => (
-                        <ImageAttachment key={attachment.id} attachment={attachment} />
+                        <ImageAttachment key={attachment.id} attachment={attachment} api={api} sessionId={sessionId} />
                     ))}
                 </div>
             )}

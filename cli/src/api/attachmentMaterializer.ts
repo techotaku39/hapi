@@ -1,0 +1,96 @@
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
+import { extname, join } from 'node:path'
+import axios from 'axios'
+import type { AttachmentMetadata } from '@hapi/protocol'
+import { configuration } from '@/configuration'
+import { getHapiBlobsDir } from '@/constants/uploadPaths'
+import { buildHubRequestHeaders } from './hubExtraHeaders'
+
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
+
+function safeExtension(filename: string): string {
+    const extension = extname(filename).replace(/[^a-zA-Z0-9.]/g, '')
+    return extension.length <= 16 ? extension : ''
+}
+
+function safeSegment(value: string): string {
+    const segment = value.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return segment.length > 0 ? segment : 'attachment'
+}
+
+function sha256(data: Buffer): string {
+    return createHash('sha256').update(data).digest('hex')
+}
+
+/** Downloads a hub attachment into a session-scoped temporary path for Agent input. */
+export class AttachmentMaterializer {
+    private readonly paths = new Map<string, string>()
+    private directory: string | null = null
+
+    constructor(
+        private readonly sessionId: string,
+        private readonly token: string
+    ) {}
+
+    async materialize(attachment: AttachmentMetadata): Promise<AttachmentMetadata> {
+        if (attachment.path || !attachment.attachmentId) return attachment
+        const cached = this.paths.get(attachment.attachmentId)
+        if (cached) return { ...attachment, path: cached }
+
+        const directory = await this.getDirectory()
+        const response = await axios.get(
+            `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/attachments/${encodeURIComponent(attachment.attachmentId)}/original`,
+            {
+                headers: buildHubRequestHeaders({
+                    Authorization: `Bearer ${this.token}`,
+                    Accept: attachment.mimeType || '*/*'
+                }),
+                responseType: 'arraybuffer',
+                timeout: 30_000,
+                maxContentLength: MAX_ATTACHMENT_BYTES,
+                maxBodyLength: MAX_ATTACHMENT_BYTES
+            }
+        )
+        const data = Buffer.from(response.data)
+        if (data.length === 0 || data.length > MAX_ATTACHMENT_BYTES) {
+            throw new Error('Hub attachment has an invalid size')
+        }
+
+        const declaredSize = Number(response.headers['x-hapi-attachment-size'] ?? response.headers['content-length'])
+        if (Number.isFinite(declaredSize) && declaredSize !== data.length) {
+            throw new Error('Hub attachment size validation failed')
+        }
+        const digest = sha256(data)
+        const declaredHash = response.headers['x-hapi-attachment-sha256']
+        if (typeof declaredHash === 'string' && declaredHash.length > 0 && declaredHash !== digest) {
+            throw new Error('Hub attachment integrity validation failed')
+        }
+
+        const target = join(directory, `${safeSegment(attachment.attachmentId)}${safeExtension(attachment.filename)}`)
+        const temporary = `${target}.${randomUUID()}.tmp`
+        await writeFile(temporary, data, { mode: 0o600, flag: 'wx' })
+        try {
+            await rename(temporary, target)
+        } finally {
+            await rm(temporary, { force: true }).catch(() => {})
+        }
+        this.paths.set(attachment.attachmentId, target)
+        return { ...attachment, path: target }
+    }
+
+    async close(): Promise<void> {
+        this.paths.clear()
+        const directory = this.directory
+        this.directory = null
+        if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})
+    }
+
+    private async getDirectory(): Promise<string> {
+        if (this.directory) return this.directory
+        const root = getHapiBlobsDir()
+        await mkdir(root, { recursive: true, mode: 0o700 })
+        this.directory = await mkdtemp(join(root, `attachment-${safeSegment(this.sessionId)}-`))
+        return this.directory
+    }
+}

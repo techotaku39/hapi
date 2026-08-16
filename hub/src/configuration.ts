@@ -21,6 +21,7 @@
  * - VAPID_SUBJECT: Contact email or URL for Web Push (defaults to mailto:admin@hapi.run)
  * - HAPI_HOME: Data directory (default: ~/.hapi)
  * - DB_PATH: SQLite database path (default: {HAPI_HOME}/hapi.db)
+ * - HAPI_ATTACHMENTS_ROOT: Durable attachment blob directory (default: {HAPI_HOME}/attachments)
  */
 
 import { existsSync, mkdirSync } from 'node:fs'

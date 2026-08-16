@@ -40,6 +40,7 @@ import { cleanupUploadDir } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { AttachmentMaterializer } from './attachmentMaterializer'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -241,6 +242,8 @@ export class ApiSessionClient extends EventEmitter {
     private pendingMessages: { message: UserMessage; localId?: string }[] = []
     private pendingHubPromptEchoes: { text: string; localIds: string[] }[] = []
     private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
+    private incomingMessageTail: Promise<void> = Promise.resolve()
+    private incomingMessageBusy = false
     private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
     private backfillInFlight: Promise<void> | null = null
@@ -277,11 +280,13 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateChangedDuringAttempt = false
     private readonly pendingOutboundEvents: PendingOutboundEvent[] = []
     private didWarnPendingQueueFull = false
+    private readonly attachmentMaterializer: AttachmentMaterializer
 
     constructor(token: string, session: Session, options: ApiSessionClientOptions = {}) {
         super()
         this.token = token
         this.sessionId = session.id
+        this.attachmentMaterializer = new AttachmentMaterializer(this.sessionId, token)
         this.metadata = session.metadata
         this.metadataVersion = session.metadataVersion
         this.agentState = session.agentState
@@ -426,7 +431,9 @@ export class ApiSessionClient extends EventEmitter {
                 if (!data.body) return
 
                 if (data.body.t === 'new-message') {
-                    this.handleIncomingMessage(data.body.message)
+                    void this.handleIncomingMessage(data.body.message).catch((error) => {
+                        logger.debug('[API] Failed to materialize incoming attachment', { error })
+                    })
                     return
                 }
 
@@ -733,23 +740,67 @@ export class ApiSessionClient extends EventEmitter {
         return true
     }
 
-    private handleIncomingMessage(message: { id?: string; seq?: number; localId?: string | null; content: unknown }): void {
+    private handleIncomingMessage(message: { id?: string; seq?: number; localId?: string | null; content: unknown }): Promise<void> {
+        const parsed = UserMessageSchema.safeParse(message.content)
+        const needsMaterialization = parsed.success
+            && (parsed.data.content.attachments?.some((attachment) => Boolean(attachment.attachmentId && !attachment.path)) ?? false)
+
+        // Preserve the existing synchronous delivery contract for ordinary
+        // messages. Only hub attachment references need an async download.
+        if (!this.incomingMessageBusy && !needsMaterialization) {
+            this.deliverIncomingMessage(message, parsed.success ? parsed.data : null)
+            return Promise.resolve()
+        }
+
+        this.incomingMessageBusy = true
+        const run = this.incomingMessageTail.then(async () => {
+            const userResult = UserMessageSchema.safeParse(message.content)
+            if (!userResult.success) {
+                this.deliverIncomingMessage(message, null)
+                return
+            }
+            const materializedAttachments = userResult.data.content.attachments
+                ? await Promise.all(userResult.data.content.attachments.map(async (attachment) => {
+                    try {
+                        return await this.attachmentMaterializer.materialize(attachment)
+                    } catch (error) {
+                        // Keep the user turn deliverable even when one blob is
+                        // unavailable. Agent-specific formatters can report or
+                        // skip the unresolved reference without dropping text.
+                        logger.debug('[API] Failed to materialize one attachment', {
+                            attachmentId: attachment.attachmentId,
+                            error
+                        })
+                        return attachment
+                    }
+                }))
+                : undefined
+            const materializedUser = materializedAttachments
+                ? { ...userResult.data, content: { ...userResult.data.content, attachments: materializedAttachments } }
+                : userResult.data
+            this.deliverIncomingMessage(message, materializedUser)
+        }).finally(() => {
+            this.incomingMessageBusy = false
+        })
+        this.incomingMessageTail = run.catch(() => {})
+        return run
+    }
+
+    private deliverIncomingMessage(
+        message: { id?: string; seq?: number; localId?: string | null; content: unknown },
+        userMessage: UserMessage | null
+    ): void {
         if (!this.incomingFilter.accept({ id: message.id, seq: message.seq })) {
             return
         }
-
-        const userResult = UserMessageSchema.safeParse(message.content)
-        if (userResult.success) {
+        if (userMessage) {
             // User messages mirrored from a local agent transcript are history,
             // not new remote input. Keep them in the incoming filter above so
             // reconnect backfill still advances and deduplicates correctly.
-            if (userResult.data.meta?.sentFrom === 'cli') {
-                return
-            }
-            this.enqueueUserMessage(userResult.data, message.localId ?? undefined)
+            if (userMessage.meta?.sentFrom === 'cli') return
+            this.enqueueUserMessage(userMessage, message.localId ?? undefined)
             return
         }
-
         this.emit('message', message.content)
     }
 
@@ -811,7 +862,7 @@ export class ApiSessionClient extends EventEmitter {
                             maxSeq = message.seq
                         }
                     }
-                    this.handleIncomingMessage(message)
+                    await this.handleIncomingMessage(message)
                 }
 
                 const observedSeq = this.incomingFilter.cursorSeq() ?? maxSeq
@@ -1196,6 +1247,7 @@ export class ApiSessionClient extends EventEmitter {
         if (this.state === 'active') {
             void cleanupUploadDir(this.sessionId)
         }
+        void this.attachmentMaterializer.close()
         this.emitOrQueue(() => {
             this.socket.emit('session-end', { sid: this.sessionId, time: Date.now(), reason })
         })
@@ -1449,6 +1501,7 @@ export class ApiSessionClient extends EventEmitter {
         this.materializationRetryAbortController = null
         this.awaitingMaterializedConnection = false
         this.pendingOutboundEvents.length = 0
+        void this.attachmentMaterializer.close()
         this.rpcHandlerManager.onSocketDisconnect()
         this.terminalManager.closeAll()
         this.socket.disconnect()

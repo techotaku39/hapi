@@ -139,6 +139,13 @@ function triggerIncomingUserMessage(
         seq: number
         text: string
         sentFrom: 'cli' | 'webapp' | 'telegram-bot'
+        attachments?: Array<{
+            id: string
+            filename: string
+            mimeType: string
+            size: number
+            attachmentId: string
+        }>
     }
 ): void {
     socket.trigger('update', {
@@ -152,7 +159,8 @@ function triggerIncomingUserMessage(
                     role: 'user',
                     content: {
                         type: 'text',
-                        text: message.text
+                        text: message.text,
+                        ...(message.attachments ? { attachments: message.attachments } : {})
                     },
                     meta: {
                         sentFrom: message.sentFrom
@@ -573,6 +581,85 @@ describe('ApiSessionClient incoming user messages', () => {
             client.close()
         }
     )
+
+    it('materializes hub-resident attachments before delivering the prompt', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        axiosHarness.get.mockResolvedValue({
+            data: Buffer.from('hello'),
+            headers: {
+                'content-length': '5',
+                'x-hapi-attachment-size': '5',
+                'x-hapi-attachment-sha256': '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+            }
+        })
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'attachment-message',
+            seq: 1,
+            text: 'inspect this file',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'hello.txt',
+                mimeType: 'text/plain',
+                size: 5,
+                attachmentId: 'attachment-1'
+            }]
+        })
+
+        await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce())
+        const message = onUserMessage.mock.calls[0]?.[0]
+        expect(message.content.attachments).toHaveLength(1)
+        expect(message.content.attachments[0]).toEqual(expect.objectContaining({
+            attachmentId: 'attachment-1',
+            path: expect.stringContaining('attachment-')
+        }))
+        expect(axiosHarness.get).toHaveBeenCalledWith(
+            expect.stringContaining('/cli/sessions/11111111-1111-4111-8111-111111111111/attachments/attachment-1/original'),
+            expect.objectContaining({ responseType: 'arraybuffer' })
+        )
+        client.close()
+    })
+
+    it('delivers the text turn when an attachment cannot be materialized', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        axiosHarness.get.mockRejectedValue(new Error('attachment unavailable'))
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'attachment-failure-message',
+            seq: 1,
+            text: 'keep this prompt',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'missing.txt',
+                mimeType: 'text/plain',
+                size: 5,
+                attachmentId: 'missing-attachment'
+            }]
+        })
+
+        await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce())
+        expect(onUserMessage.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+            content: expect.objectContaining({ text: 'keep this prompt' })
+        }))
+        expect(onUserMessage.mock.calls[0]?.[0].content.attachments[0]).toEqual(expect.objectContaining({
+            attachmentId: 'missing-attachment'
+        }))
+        client.close()
+    })
 })
 
 describe('isExternalUserMessage', () => {

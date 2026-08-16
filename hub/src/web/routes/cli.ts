@@ -285,6 +285,38 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return c.json({ messages })
     })
 
+    app.get('/sessions/:id/attachments/:attachmentId/original', (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, c.req.param('id'), namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        const attachment = engine.readAttachment(
+            resolved.sessionId,
+            namespace,
+            c.req.param('attachmentId'),
+            'original'
+        )
+        if (!attachment) {
+            return c.json({ error: 'Attachment not found' }, 404)
+        }
+        return new Response(new Uint8Array(attachment.data), {
+            headers: {
+                'Content-Type': attachment.mimeType,
+                'Content-Length': String(attachment.size),
+                'Cache-Control': 'private, max-age=31536000, immutable',
+                'ETag': `"${attachment.sha256}"`,
+                'X-Hapi-Attachment-Sha256': attachment.sha256,
+                'X-Hapi-Attachment-Size': String(attachment.size),
+                'X-Content-Type-Options': 'nosniff'
+            }
+        })
+    })
+
     app.post('/sessions/:id/migrate-to-acp', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {

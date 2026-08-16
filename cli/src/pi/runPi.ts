@@ -118,8 +118,8 @@ function formatPiFileNotice(path: string): string {
 function formatPiTextAttachments(attachments: AttachmentMetadata[] | undefined): string {
     if (!attachments) return '';
     return attachments
-        .filter((attachment) => !attachment.mimeType.toLowerCase().startsWith('image/'))
-        .map((attachment) => formatPiFileNotice(attachment.path))
+        .filter((attachment) => !attachment.mimeType.toLowerCase().startsWith('image/') && typeof attachment.path === 'string')
+        .map((attachment) => formatPiFileNotice(attachment.path!))
         .join('\n');
 }
 
@@ -158,6 +158,9 @@ export async function preparePiUserMessage(
         if (!attachment.mimeType.toLowerCase().startsWith('image/')) continue;
         try {
             const uploadPath = attachment.path;
+            if (!uploadPath) {
+                throw new Error('attachment was not materialized')
+            }
             if (!options.authorizeImagePath(uploadPath)) {
                 throw new Error('invalid upload path');
             }
