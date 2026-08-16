@@ -80,7 +80,9 @@ export function useVisibilityReporter(options: {
                     return
                 }
                 lastStateRef.current = desired
-                pendingStateRef.current = null
+                if (pendingStateRef.current === desired) {
+                    pendingStateRef.current = null
+                }
                 clearRetry()
             }).catch((error) => {
                 if (lastSubscriptionRef.current !== activeSubscription) {
