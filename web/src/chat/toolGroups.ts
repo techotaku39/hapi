@@ -62,38 +62,102 @@ type ToolGroupingOptions = {
 }
 
 const PLAN_TOOL_NAMES = new Set([
-    'TodoWrite',
-    'update_plan',
-    'ExitPlanMode',
-    'exit_plan_mode',
-    'CodexReasoning'
+    'todowrite',
+    'updateplan',
+    'exitplanmode',
+    'codexreasoning'
 ])
 
 const MILESTONE_TOOL_NAMES = new Set([
-    'Task',
-    'Agent',
-    'CodexAgent',
-    'TeamCreate',
-    'TeamDelete',
-    'SendMessage',
+    'task',
+    'agent',
+    'codexagent',
+    'teamcreate',
+    'teamdelete',
+    'sendmessage',
     // agy's transitional task-log chip — keep it standalone (like SendMessage)
     // so it reads as a thin marker instead of being folded into a tool group.
-    'AgyTaskLog',
-    'Skill',
-    'spawn_agent',
-    'send_input',
-    'send_message',
-    'resume_agent',
-    'followup_task',
-    'wait_agent',
-    'close_agent',
-    'interrupt_agent',
-    'list_agents'
+    'agytasklog',
+    'agyasynctask',
+    'agyerror',
+    'skill',
+    'spawnagent',
+    'sendinput',
+    'resumeagent',
+    'followuptask',
+    'waitagent',
+    'closeagent',
+    'interruptagent',
+    'listagents'
 ])
 
 const INTERACTIVE_TOOL_NAMES = new Set([
-    'CodexPermission'
+    'codexpermission'
 ])
+
+const READ_TOOL_NAMES = new Set([
+    'read',
+    'notebookread',
+    'readfile',
+    'viewfile',
+    'fileread'
+])
+
+const SEARCH_TOOL_NAMES = new Set([
+    'search',
+    'grep',
+    'glob',
+    'ls',
+    'listdir',
+    'listfiles',
+    'searchfiles',
+    'grepsearch',
+    'contentsearch'
+])
+
+const COMMAND_TOOL_NAMES = new Set([
+    'bash',
+    'codexbash',
+    'shell',
+    'shellcommand',
+    'runshellcommand',
+    'runcommand',
+    'executecommand',
+    'terminal'
+])
+
+const MUTATION_TOOL_NAMES = new Set([
+    'edit',
+    'multiedit',
+    'write',
+    'notebookedit',
+    'codexpatch',
+    'codexdiff',
+    'editfile',
+    'writefile',
+    'replacefilecontent',
+    'writetofile',
+    'applypatch',
+    'patch'
+])
+
+const WEB_TOOL_NAMES = new Set([
+    'webfetch',
+    'websearch',
+    'fetchurl',
+    'openurl',
+    'urlfetch'
+])
+
+const READ_NATIVE_KINDS = new Set(['read', 'readfile', 'fileread', 'view', 'viewfile'])
+const SEARCH_NATIVE_KINDS = new Set(['search', 'grep', 'find', 'glob'])
+const COMMAND_NATIVE_KINDS = new Set(['execute', 'shell', 'bash', 'run', 'runshell', 'runshellcommand', 'cmd', 'terminal', 'command'])
+const MUTATION_NATIVE_KINDS = new Set(['edit', 'write', 'writefile', 'replace', 'fileedit', 'modify', 'patch'])
+const WEB_NATIVE_KINDS = new Set(['web', 'fetch', 'webfetch', 'websearch', 'openurl'])
+
+function normalizeToolIdentifier(value: string | null | undefined): string {
+    return value?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '') ?? ''
+}
 
 function pushUnique(target: string[], value: string | null): void {
     if (!value) return
@@ -114,15 +178,26 @@ function normalizeCommandInput(input: unknown): string | null {
 }
 
 export function getToolGroupActionKind(block: ToolCallBlock): ToolGroupActionKind {
-    const name = block.tool.name
-
-    if (name === 'Read' || name === 'NotebookRead') return 'read'
-    if (name === 'Grep' || name === 'Glob' || name === 'LS') return 'search'
-    if (name === 'Bash' || name === 'CodexBash' || name === 'shell_command' || name === 'run_shell_command') return 'command'
-    if (name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit' || name === 'CodexPatch' || name === 'CodexDiff') {
-        return 'mutation'
+    const codexActions = getCodexCommandActions(block)
+    if (codexActions.length > 0) {
+        if (codexActions.some((action) => action.type === 'unknown')) return 'command'
+        if (codexActions.some((action) => action.type === 'search')) return 'search'
+        return 'read'
     }
-    if (name === 'WebFetch' || name === 'WebSearch') return 'web'
+
+    const name = normalizeToolIdentifier(block.tool.name)
+    if (WEB_TOOL_NAMES.has(name)) return 'web'
+    if (READ_TOOL_NAMES.has(name)) return 'read'
+    if (SEARCH_TOOL_NAMES.has(name)) return 'search'
+    if (COMMAND_TOOL_NAMES.has(name)) return 'command'
+    if (MUTATION_TOOL_NAMES.has(name)) return 'mutation'
+
+    const nativeKind = normalizeToolIdentifier(block.tool.nativeKind)
+    if (WEB_NATIVE_KINDS.has(nativeKind)) return 'web'
+    if (READ_NATIVE_KINDS.has(nativeKind)) return 'read'
+    if (SEARCH_NATIVE_KINDS.has(nativeKind)) return 'search'
+    if (COMMAND_NATIVE_KINDS.has(nativeKind)) return 'command'
+    if (MUTATION_NATIVE_KINDS.has(nativeKind)) return 'mutation'
     return 'other'
 }
 
@@ -218,16 +293,17 @@ function summarizeToolGroup(tools: ToolCallBlock[]): ToolGroupSummary {
 }
 
 function isInteractiveToolBlock(block: ToolCallBlock): boolean {
-    return INTERACTIVE_TOOL_NAMES.has(block.tool.name)
+    return INTERACTIVE_TOOL_NAMES.has(normalizeToolIdentifier(block.tool.name))
         || block.tool.permission?.status === 'pending'
         || isAskUserQuestionToolName(block.tool.name)
         || isRequestUserInputToolName(block.tool.name)
 }
 
 export function isEligibleForToolGrouping(block: ToolCallBlock, groupingMode: ToolGroupingMode = 'classified'): boolean {
+    const normalizedName = normalizeToolIdentifier(block.tool.name)
     if (isSubagentToolName(block.tool.name)) return false
-    if (PLAN_TOOL_NAMES.has(block.tool.name)) return false
-    if (MILESTONE_TOOL_NAMES.has(block.tool.name)) return false
+    if (PLAN_TOOL_NAMES.has(normalizedName)) return false
+    if (MILESTONE_TOOL_NAMES.has(normalizedName)) return false
     if (isInteractiveToolBlock(block)) return false
     if (groupingMode === 'classified' && block.tool.name === 'CodexBash' && getCodexCommandActions(block).length > 0) {
         return isCodexExplorationTool(block)
@@ -237,7 +313,8 @@ export function isEligibleForToolGrouping(block: ToolCallBlock, groupingMode: To
 
 function getGroupingFamily(block: ToolCallBlock, groupingMode: ToolGroupingMode): 'default' | 'codex-exploration' | null {
     if (!isEligibleForToolGrouping(block, groupingMode)) return null
-    return groupingMode === 'classified' && isCodexExplorationTool(block) ? 'codex-exploration' : 'default'
+    if (groupingMode === 'grouped') return 'default'
+    return isCodexExplorationTool(block) ? 'codex-exploration' : null
 }
 
 function createToolGroupId(
@@ -262,6 +339,38 @@ export function isToolGroupBlock(block: VisibleChatBlock | ChatBlock): block is 
     return block.kind === 'tool-group'
 }
 
+function appendToolGroup(
+    visibleBlocks: VisibleChatBlock[],
+    tools: ToolCallBlock[],
+    groupingFamily: 'default' | 'codex-exploration',
+    options: ToolGroupingOptions,
+    previousGroups: ToolGroupBlock[]
+): void {
+    const startsAtOldestVisibleBoundary = visibleBlocks.length === 0
+    const needsOlderHistory = options.hasMoreMessages && startsAtOldestVisibleBoundary
+    const previousBlock = visibleBlocks.at(-1)
+    const activityTitle = previousBlock?.kind === 'tool-call'
+        && previousBlock.tool.name === 'CodexReasoning'
+        ? getInputStringAny(previousBlock.tool.input, ['title'])
+        : null
+
+    visibleBlocks.push({
+        kind: 'tool-group',
+        id: createToolGroupId(tools, needsOlderHistory, previousGroups),
+        createdAt: tools[0].createdAt,
+        invokedAt: tools[0].invokedAt,
+        firstToolId: tools[0].id,
+        lastToolId: tools[tools.length - 1].id,
+        tools,
+        defaultOpen: groupingFamily === 'codex-exploration' && options.codexExplorationCollapsed === false,
+        historyState: needsOlderHistory ? 'needs-older-history' : 'complete',
+        needsOlderHistory,
+        activityTitle,
+        presentationMode: groupingFamily,
+        summary: summarizeToolGroup(tools)
+    })
+}
+
 export function buildVisibleChatBlocks(
     blocks: ChatBlock[],
     options: ToolGroupingOptions
@@ -274,6 +383,38 @@ export function buildVisibleChatBlocks(
 
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]
+
+        if (groupingMode === 'grouped' && visibleBlockRole(block) === 'assistant') {
+            let responseEnd = index + 1
+            while (responseEnd < blocks.length && visibleBlockRole(blocks[responseEnd]) === 'assistant') {
+                responseEnd += 1
+            }
+
+            const responseBlocks = blocks.slice(index, responseEnd)
+            const tools = responseBlocks.filter((candidate): candidate is ToolCallBlock => (
+                candidate.kind === 'tool-call' && isEligibleForToolGrouping(candidate, groupingMode)
+            ))
+
+            if (tools.length >= 2) {
+                const firstTool = tools[0]
+                for (const candidate of responseBlocks) {
+                    if (candidate === firstTool) {
+                        appendToolGroup(visibleBlocks, tools, 'default', options, previousGroups)
+                        continue
+                    }
+                    if (candidate.kind === 'tool-call' && isEligibleForToolGrouping(candidate, groupingMode)) {
+                        continue
+                    }
+                    visibleBlocks.push(candidate)
+                }
+            } else {
+                visibleBlocks.push(...responseBlocks)
+            }
+
+            index = responseEnd - 1
+            continue
+        }
+
         if (block.kind !== 'tool-call') {
             visibleBlocks.push(block)
             continue
@@ -300,28 +441,7 @@ export function buildVisibleChatBlocks(
             continue
         }
 
-        const startsAtOldestVisibleBoundary = visibleBlocks.length === 0
-        const needsOlderHistory = options.hasMoreMessages && startsAtOldestVisibleBoundary
-        const previousBlock = visibleBlocks.at(-1)
-        const activityTitle = previousBlock?.kind === 'tool-call'
-            && previousBlock.tool.name === 'CodexReasoning'
-            ? getInputStringAny(previousBlock.tool.input, ['title'])
-            : null
-        visibleBlocks.push({
-            kind: 'tool-group',
-            id: createToolGroupId(tools, needsOlderHistory, previousGroups),
-            createdAt: tools[0].createdAt,
-            invokedAt: tools[0].invokedAt,
-            firstToolId: tools[0].id,
-            lastToolId: tools[tools.length - 1].id,
-            tools,
-            defaultOpen: groupingFamily === 'codex-exploration' && options.codexExplorationCollapsed === false,
-            historyState: needsOlderHistory ? 'needs-older-history' : 'complete',
-            needsOlderHistory,
-            activityTitle,
-            presentationMode: groupingFamily,
-            summary: summarizeToolGroup(tools)
-        })
+        appendToolGroup(visibleBlocks, tools, groupingFamily, options, previousGroups)
         index = cursor - 1
     }
 

@@ -18,7 +18,7 @@ import { getToolResultViewComponent } from '@/components/ToolCard/views/_results
 import { formatTaskChildLabel, TaskStateIcon } from '@/components/ToolCard/helpers'
 import { toolDurationMs } from '@/components/ToolCard/toolDuration'
 import { formatDuration, formatMessageTimestampTitle } from '@/chat/presentation'
-import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
+import type { TerminalToolDisplayMode } from '@/hooks/useToolCardDisplayMode'
 import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
 import { cn } from '@/lib/utils'

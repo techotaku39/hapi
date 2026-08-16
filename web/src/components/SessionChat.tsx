@@ -82,7 +82,7 @@ import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
 import { usePlatform } from '@/hooks/usePlatform'
-import { useToolGroupingMode } from '@/hooks/useToolGroupingMode'
+import { getToolCardDisplayPresentation, useToolCardDisplayMode } from '@/hooks/useToolCardDisplayMode'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useCursorModels } from '@/hooks/queries/useCursorModels'
@@ -471,7 +471,8 @@ function SessionChatInner(props: SessionChatProps) {
     const { t } = useTranslation()
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
     const navigate = useNavigate()
-    const { toolGroupingMode } = useToolGroupingMode()
+    const { toolCardDisplayMode } = useToolCardDisplayMode()
+    const { groupingMode: toolGroupingMode } = getToolCardDisplayPresentation(toolCardDisplayMode)
     const [historyActionPending, setHistoryActionPending] = useState(false)
 
     const onForkConversation = useCallback(async (messageLocalId?: string) => {

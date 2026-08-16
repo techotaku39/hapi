@@ -43,6 +43,16 @@ function makeTextBlock(id: string, text = 'note'): ChatBlock {
     }
 }
 
+function makeUserTextBlock(id: string, text = 'question'): ChatBlock {
+    return {
+        kind: 'user-text',
+        id,
+        localId: null,
+        createdAt: 1,
+        text,
+    }
+}
+
 describe('getToolGroupActionKind', () => {
     it('classifies common execution tools', () => {
         expect(getToolGroupActionKind(makeToolBlock('read-1', 'Read'))).toBe('read')
@@ -50,6 +60,49 @@ describe('getToolGroupActionKind', () => {
         expect(getToolGroupActionKind(makeToolBlock('bash-1', 'Bash'))).toBe('command')
         expect(getToolGroupActionKind(makeToolBlock('shell-1', 'run_shell_command'))).toBe('command')
         expect(getToolGroupActionKind(makeToolBlock('edit-1', 'Edit'))).toBe('mutation')
+    })
+
+    it('normalizes aliases used by non-Claude agents', () => {
+        expect(getToolGroupActionKind(makeToolBlock('read-1', 'read_file'))).toBe('read')
+        expect(getToolGroupActionKind(makeToolBlock('search-1', 'grep_search'))).toBe('search')
+        expect(getToolGroupActionKind(makeToolBlock('shell-1', 'Shell'))).toBe('command')
+        expect(getToolGroupActionKind(makeToolBlock('edit-1', 'replace_file_content'))).toBe('mutation')
+        expect(getToolGroupActionKind(makeToolBlock('web-1', 'FetchURL'))).toBe('web')
+    })
+
+    it('uses native kinds when an ACP agent exposes a title as the tool name', () => {
+        const read = makeToolBlock('native-read', 'src/grok.ts')
+        read.tool.nativeKind = 'read'
+        const execute = makeToolBlock('native-execute', 'bun test grok')
+        execute.tool.nativeKind = 'execute'
+        const edit = makeToolBlock('native-edit', 'Writing to src/grok.ts')
+        edit.tool.nativeKind = 'edit'
+
+        expect(getToolGroupActionKind(read)).toBe('read')
+        expect(getToolGroupActionKind(execute)).toBe('command')
+        expect(getToolGroupActionKind(edit)).toBe('mutation')
+    })
+
+    it('classifies structured Codex exploration commands by their actions', () => {
+        const read = makeToolBlock('codex-read', 'CodexBash', {
+            command: 'cat package.json',
+            command_actions: [{ type: 'read', command: 'cat package.json', name: 'package.json', path: '/repo/package.json' }]
+        })
+        const search = makeToolBlock('codex-search', 'CodexBash', {
+            command: 'rg toolGroups web/src',
+            command_actions: [{ type: 'search', command: 'rg toolGroups web/src', query: 'toolGroups', path: 'web/src' }]
+        })
+        const mixed = makeToolBlock('codex-mixed', 'CodexBash', {
+            command: 'cat package.json && bun test',
+            command_actions: [
+                { type: 'read', command: 'cat package.json', name: 'package.json', path: '/repo/package.json' },
+                { type: 'unknown', command: 'bun test' }
+            ]
+        })
+
+        expect(getToolGroupActionKind(read)).toBe('read')
+        expect(getToolGroupActionKind(search)).toBe('search')
+        expect(getToolGroupActionKind(mixed)).toBe('command')
     })
 })
 
@@ -77,6 +130,18 @@ describe('isEligibleForToolGrouping', () => {
                 }
             }
         }))).toBe(false)
+    })
+
+    it('excludes lowercase OpenCode plan and subagent aliases', () => {
+        expect(isEligibleForToolGrouping(makeToolBlock('task-1', 'task'))).toBe(false)
+        expect(isEligibleForToolGrouping(makeToolBlock('task-2', 'task:explore'))).toBe(false)
+        expect(isEligibleForToolGrouping(makeToolBlock('todo-1', 'todowrite'))).toBe(false)
+    })
+
+    it('keeps Antigravity lifecycle markers standalone', () => {
+        expect(isEligibleForToolGrouping(makeToolBlock('log-1', 'AgyTaskLog'))).toBe(false)
+        expect(isEligibleForToolGrouping(makeToolBlock('task-1', 'AgyAsyncTask'))).toBe(false)
+        expect(isEligibleForToolGrouping(makeToolBlock('error-1', 'AgyError'))).toBe(false)
     })
 
     it('keeps completed permissioned execution cards eligible for grouping', () => {
@@ -149,7 +214,7 @@ describe('Codex activity headings', () => {
             reasoning,
             makeToolBlock('read-1', 'Read', { file_path: 'auth.ts' }),
             makeToolBlock('read-2', 'Read', { file_path: 'session.ts' }),
-        ], { hasMoreMessages: false })
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
         expect(visible).toHaveLength(2)
         expect(isToolGroupBlock(visible[1])).toBe(true)
@@ -162,7 +227,7 @@ describe('Codex activity headings', () => {
             makeTextBlock('text-boundary'),
             makeToolBlock('read-1', 'Read', { file_path: 'auth.ts' }),
             makeToolBlock('read-2', 'Read', { file_path: 'session.ts' }),
-        ], { hasMoreMessages: false })
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
         const group = visible.find(isToolGroupBlock)
         expect(group?.activityTitle).toBeNull()
@@ -170,6 +235,41 @@ describe('Codex activity headings', () => {
 })
 
 describe('buildVisibleChatBlocks', () => {
+    it.each([
+        ['canonical tools', [
+            makeToolBlock('read-1', 'Read'),
+            makeToolBlock('search-1', 'Grep'),
+            makeToolBlock('command-1', 'Bash'),
+            makeToolBlock('edit-1', 'Edit'),
+        ]],
+        ['lowercase and snake-case tools', [
+            makeToolBlock('read-1', 'read_file'),
+            makeToolBlock('search-1', 'grep_search'),
+            makeToolBlock('command-1', 'bash'),
+            makeToolBlock('edit-1', 'edit_file'),
+            makeToolBlock('web-1', 'web_search'),
+        ]],
+        ['ACP title-as-name tools', (() => {
+            const read = makeToolBlock('read-1', 'src/agent.ts')
+            read.tool.nativeKind = 'read'
+            const search = makeToolBlock('search-1', 'tool grouping')
+            search.tool.nativeKind = 'search'
+            const command = makeToolBlock('command-1', 'bun test')
+            command.tool.nativeKind = 'execute'
+            const edit = makeToolBlock('edit-1', 'Writing to src/agent.ts')
+            edit.tool.nativeKind = 'edit'
+            return [read, search, command, edit]
+        })()],
+    ])('keeps every %s card standalone in classified mode', (_label, tools) => {
+        const visible = buildVisibleChatBlocks(tools, {
+            hasMoreMessages: false,
+            groupingMode: 'classified'
+        })
+
+        expect(visible).toEqual(tools)
+        expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
+    })
+
     it('renders one or more structured Codex exploration commands as a collapsed exploration group', () => {
         const read = makeToolBlock('codex-read', 'CodexBash', {
             command: 'cat package.json',
@@ -315,12 +415,12 @@ describe('buildVisibleChatBlocks', () => {
         expect(new Set(classifiedGroups.map((group) => group.id)).size).toBe(2)
     })
 
-    it('groups contiguous eligible root tool cards', () => {
+    it('groups contiguous eligible root tool cards in grouped mode', () => {
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
             makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
-        ], { hasMoreMessages: false })
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
         expect(visible).toHaveLength(1)
         expect(isToolGroupBlock(visible[0])).toBe(true)
@@ -333,19 +433,59 @@ describe('buildVisibleChatBlocks', () => {
         expect(visible[0].summary.commandTargets).toEqual(['bun test'])
     })
 
-    it('splits groups on assistant text boundaries', () => {
-        const visible = buildVisibleChatBlocks([
+    it('keeps classified ordinary tools standalone across assistant text', () => {
+        const blocks = [
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
             makeTextBlock('text-1', 'located the issue'),
             makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
             makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
-        ], { hasMoreMessages: false })
+        ]
+        const visible = buildVisibleChatBlocks(blocks, {
+            hasMoreMessages: false,
+            groupingMode: 'classified'
+        })
+
+        expect(visible).toEqual(blocks)
+        expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
+    })
+
+    it('groups ordinary tools across assistant text in grouped mode', () => {
+        const visible = buildVisibleChatBlocks([
+            makeToolBlock('read-1', 'read_file', { path: 'src/a.ts' }),
+            makeTextBlock('text-1', 'located the issue'),
+            makeToolBlock('edit-1', 'edit_file', { path: 'src/a.ts' }),
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
+
+        expect(visible).toHaveLength(2)
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual(['read-1', 'edit-1'])
+        expect(visible[1].kind).toBe('agent-text')
+    })
+
+    it('groups ordinary tools across standalone milestones in grouped mode', () => {
+        const question = makeToolBlock('ask-1', 'request_user_input')
+        const visible = buildVisibleChatBlocks([
+            makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
+            question,
+            makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
+
+        expect(visible).toHaveLength(2)
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual(['read-1', 'edit-1'])
+        expect(visible[1]).toBe(question)
+    })
+
+    it('does not group ordinary tools across user response boundaries', () => {
+        const visible = buildVisibleChatBlocks([
+            makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
+            makeUserTextBlock('user-1'),
+            makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
         expect(visible).toHaveLength(3)
-        expect(isToolGroupBlock(visible[0])).toBe(true)
-        expect(visible[1].kind).toBe('agent-text')
-        expect(isToolGroupBlock(visible[2])).toBe(true)
+        expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
     })
 
     it('keeps single eligible tool cards standalone', () => {
@@ -359,7 +499,7 @@ describe('buildVisibleChatBlocks', () => {
         expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
     })
 
-    it('keeps interactive cards standalone and uses them as hard boundaries', () => {
+    it('keeps interactive cards standalone while grouped ordinary tools span them', () => {
         const interactive = makeToolBlock('ask-1', 'request_user_input')
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
@@ -367,15 +507,20 @@ describe('buildVisibleChatBlocks', () => {
             interactive,
             makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
             makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
-        ], { hasMoreMessages: false })
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
-        expect(visible).toHaveLength(3)
+        expect(visible).toHaveLength(2)
         expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual([
+            'read-1',
+            'bash-1',
+            'edit-1',
+            'write-1'
+        ])
         expect(visible[1]).toBe(interactive)
-        expect(isToolGroupBlock(visible[2])).toBe(true)
     })
 
-    it('keeps completed Codex permission cards as standalone grouping boundaries', () => {
+    it('keeps completed Codex permission cards standalone in grouped mode', () => {
         const permission = makeToolBlock('perm-1', 'CodexPermission', { tool: 'shell_command' }, {
             tool: {
                 id: 'perm-1',
@@ -402,22 +547,27 @@ describe('buildVisibleChatBlocks', () => {
             permission,
             makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
             makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
-        ], { hasMoreMessages: false })
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
-        expect(visible).toHaveLength(3)
+        expect(visible).toHaveLength(2)
         expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(isToolGroupBlock(visible[0]) ? visible[0].tools.map((tool) => tool.id) : []).toEqual([
+            'read-1',
+            'bash-1',
+            'edit-1',
+            'write-1'
+        ])
         expect(visible[1]).toBe(permission)
-        expect(isToolGroupBlock(visible[2])).toBe(true)
     })
 
     it('marks only the oldest visible grouped run as needing older history', () => {
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
-            makeTextBlock('text-1'),
+            makeUserTextBlock('user-1'),
             makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
             makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
-        ], { hasMoreMessages: true })
+        ], { hasMoreMessages: true, groupingMode: 'grouped' })
 
         expect(isToolGroupBlock(visible[0]) && visible[0].needsOlderHistory).toBe(true)
         expect(isToolGroupBlock(visible[2]) && visible[2].needsOlderHistory).toBe(false)
@@ -428,26 +578,22 @@ describe('buildVisibleChatBlocks', () => {
             makeTextBlock('text-1', 'prepended assistant note'),
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
-            makeTextBlock('text-2', 'next section'),
-            makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
-            makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
-        ], { hasMoreMessages: true })
+        ], { hasMoreMessages: true, groupingMode: 'grouped' })
 
         expect(visible[0].kind).toBe('agent-text')
         expect(isToolGroupBlock(visible[1]) && visible[1].needsOlderHistory).toBe(false)
-        expect(isToolGroupBlock(visible[3]) && visible[3].needsOlderHistory).toBe(false)
     })
 
     it('does not mark groups after a leading standalone tool as needing older history', () => {
         const visible = buildVisibleChatBlocks([
             makeToolBlock('single-1', 'Read', { file_path: 'src/solo.ts' }),
-            makeTextBlock('text-1', 'boundary'),
+            makeUserTextBlock('user-1', 'boundary'),
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
-        ], { hasMoreMessages: true })
+        ], { hasMoreMessages: true, groupingMode: 'grouped' })
 
         expect(visible[0].kind).toBe('tool-call')
-        expect(visible[1].kind).toBe('agent-text')
+        expect(visible[1].kind).toBe('user-text')
         expect(isToolGroupBlock(visible[2]) && visible[2].needsOlderHistory).toBe(false)
     })
 
@@ -475,7 +621,7 @@ describe('buildVisibleChatBlocks', () => {
             permission,
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
-        ], { hasMoreMessages: true })
+        ], { hasMoreMessages: true, groupingMode: 'grouped' })
 
         expect(visible[0]).toBe(permission)
         expect(isToolGroupBlock(visible[1]) && visible[1].needsOlderHistory).toBe(false)
@@ -485,7 +631,7 @@ describe('buildVisibleChatBlocks', () => {
         const previous = buildVisibleChatBlocks([
             makeToolBlock('read-2', 'Read', { file_path: 'src/b.ts' }),
             makeToolBlock('bash-2', 'Bash', { command: 'bun test' }),
-        ], { hasMoreMessages: true })
+        ], { hasMoreMessages: true, groupingMode: 'grouped' })
 
         const next = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
@@ -493,6 +639,7 @@ describe('buildVisibleChatBlocks', () => {
             makeToolBlock('bash-2', 'Bash', { command: 'bun test' }),
         ], {
             hasMoreMessages: false,
+            groupingMode: 'grouped',
             previousGroups: previous.filter(isToolGroupBlock)
         })
 
@@ -503,7 +650,7 @@ describe('buildVisibleChatBlocks', () => {
         const previous = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
-        ], { hasMoreMessages: false })
+        ], { hasMoreMessages: false, groupingMode: 'grouped' })
 
         const next = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
@@ -511,6 +658,7 @@ describe('buildVisibleChatBlocks', () => {
             makeToolBlock('edit-1', 'Edit', { file_path: 'src/a.ts' }),
         ], {
             hasMoreMessages: false,
+            groupingMode: 'grouped',
             previousGroups: previous.filter(isToolGroupBlock)
         })
 
