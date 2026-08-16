@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
-import { extname, join } from 'node:path'
+import { mkdir, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { extname, join, resolve } from 'node:path'
 import axios from 'axios'
 import type { AttachmentMetadata } from '@hapi/protocol'
 import { configuration } from '@/configuration'
@@ -8,6 +8,8 @@ import { getHapiBlobsDir } from '@/constants/uploadPaths'
 import { buildHubRequestHeaders } from './hubExtraHeaders'
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
+
+export type MaterializedAttachmentIdentity = { dev: number; ino: number }
 
 function safeExtension(filename: string): string {
     const extension = extname(filename).replace(/[^a-zA-Z0-9.]/g, '')
@@ -26,6 +28,7 @@ function sha256(data: Buffer): string {
 /** Downloads a hub attachment into a session-scoped temporary path for Agent input. */
 export class AttachmentMaterializer {
     private readonly paths = new Map<string, string>()
+    private readonly identities = new Map<string, string>()
     private directory: string | null = null
 
     constructor(
@@ -75,12 +78,23 @@ export class AttachmentMaterializer {
         } finally {
             await rm(temporary, { force: true }).catch(() => {})
         }
+        const identity = await stat(target)
         this.paths.set(attachment.attachmentId, target)
+        this.identities.set(resolve(target), `${identity.dev}:${identity.ino}`)
         return { ...attachment, path: target }
+    }
+
+    isAuthorizedPath(path: string): boolean {
+        return this.identities.has(resolve(path))
+    }
+
+    isAuthorizedFile(path: string, identity: MaterializedAttachmentIdentity): boolean {
+        return this.identities.get(resolve(path)) === `${identity.dev}:${identity.ino}`
     }
 
     async close(): Promise<void> {
         this.paths.clear()
+        this.identities.clear()
         const directory = this.directory
         this.directory = null
         if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})

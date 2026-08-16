@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename } from 'node:path'
 
 const axiosGet = vi.hoisted(() => vi.fn())
@@ -43,11 +43,15 @@ describe('AttachmentMaterializer', () => {
         expect(first.path).toBe(second.path)
         expect(first.path).toBeTruthy()
         expect(readFileSync(first.path!)).toEqual(data)
+        expect(materializer.isAuthorizedPath(first.path!)).toBe(true)
+        expect(materializer.isAuthorizedFile(first.path!, statSync(first.path!))).toBe(true)
+        expect(materializer.isAuthorizedFile(first.path!, { dev: 0, ino: 0 })).toBe(false)
         expect(axiosGet).toHaveBeenCalledTimes(1)
 
         const path = first.path!
         await materializer.close()
         expect(existsSync(path)).toBe(false)
+        expect(materializer.isAuthorizedPath(path)).toBe(false)
     })
 
     it('rejects a hash mismatch without returning a local path', async () => {

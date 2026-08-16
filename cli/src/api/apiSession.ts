@@ -40,7 +40,7 @@ import { cleanupUploadDir } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
-import { AttachmentMaterializer } from './attachmentMaterializer'
+import { AttachmentMaterializer, type MaterializedAttachmentIdentity } from './attachmentMaterializer'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -495,6 +495,14 @@ export class ApiSessionClient extends EventEmitter {
         return this.state === 'pending' || this.state === 'materializing'
     }
 
+    isMaterializedAttachmentPath(path: string): boolean {
+        return this.attachmentMaterializer.isAuthorizedPath(path)
+    }
+
+    isAuthorizedMaterializedAttachment(path: string, identity: MaterializedAttachmentIdentity): boolean {
+        return this.attachmentMaterializer.isAuthorizedFile(path, identity)
+    }
+
     private isClosed(): boolean {
         return this.state === 'closed'
     }
@@ -759,24 +767,40 @@ export class ApiSessionClient extends EventEmitter {
                 this.deliverIncomingMessage(message, null)
                 return
             }
-            const materializedAttachments = userResult.data.content.attachments
+            const materializationResults = userResult.data.content.attachments
                 ? await Promise.all(userResult.data.content.attachments.map(async (attachment) => {
                     try {
-                        return await this.attachmentMaterializer.materialize(attachment)
+                        return {
+                            attachment: await this.attachmentMaterializer.materialize(attachment),
+                            failure: null
+                        }
                     } catch (error) {
-                        // Keep the user turn deliverable even when one blob is
-                        // unavailable. Agent-specific formatters can report or
-                        // skip the unresolved reference without dropping text.
                         logger.debug('[API] Failed to materialize one attachment', {
                             attachmentId: attachment.attachmentId,
                             error
                         })
-                        return attachment
+                        return {
+                            attachment,
+                            failure: `Attachment unavailable: ${attachment.filename}`
+                        }
                     }
                 }))
                 : undefined
+            const materializedAttachments = materializationResults?.map((result) => result.attachment)
+            const materializationFailures = materializationResults
+                ?.flatMap((result) => result.failure ? [result.failure] : []) ?? []
+            const materializedText = materializationFailures.length > 0
+                ? [userResult.data.content.text, ...materializationFailures].filter(Boolean).join('\n\n')
+                : userResult.data.content.text
             const materializedUser = materializedAttachments
-                ? { ...userResult.data, content: { ...userResult.data.content, attachments: materializedAttachments } }
+                ? {
+                    ...userResult.data,
+                    content: {
+                        ...userResult.data.content,
+                        text: materializedText,
+                        attachments: materializedAttachments
+                    }
+                }
                 : userResult.data
             this.deliverIncomingMessage(message, materializedUser)
         }).finally(() => {

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { Store } from './index'
 
 const tempDirs: string[] = []
@@ -104,5 +105,95 @@ describe('AttachmentStore', () => {
         expect(created.thumbnailPath && existsSync(created.thumbnailPath)).toBe(false)
         expect(existsSync(otherNamespace.originalPath)).toBe(true)
         store.close()
+    })
+
+    it('clones durable message attachments for a fork without changing the source', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const store = new Store(':memory:', { attachmentsRoot: join(dir, 'attachments') })
+        const source = store.attachments.create({
+            namespace: 'namespace-a',
+            sessionId: 'session-a',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            original: Buffer.from('original'),
+            thumbnail: Buffer.from('thumbnail'),
+            thumbnailMimeType: 'image/webp'
+        })
+        const content = {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'inspect this',
+                attachments: [{
+                    id: 'message-attachment',
+                    filename: source.filename,
+                    mimeType: source.mimeType,
+                    size: source.size,
+                    attachmentId: source.id,
+                    path: '/legacy/path-that-must-not-survive'
+                }]
+            }
+        }
+
+        const cloned = store.attachments.cloneMessageAttachments(
+            'namespace-a',
+            'session-a',
+            'session-b',
+            content
+        ) as typeof content
+        const clonedId = cloned.content.attachments[0]?.attachmentId
+        expect(clonedId).toBeDefined()
+        expect(clonedId).not.toBe(source.id)
+        expect(cloned.content.attachments[0]?.path).toBeUndefined()
+        expect(store.attachments.readForSession(clonedId!, 'namespace-a', 'session-b', 'original')?.data)
+            .toEqual(Buffer.from('original'))
+        expect(store.attachments.readForSession(clonedId!, 'namespace-a', 'session-b', 'thumbnail')?.data)
+            .toEqual(Buffer.from('thumbnail'))
+        expect(store.attachments.getForSession(source.id, 'namespace-a', 'session-a')).not.toBeNull()
+        store.close()
+    })
+
+    it('expands tilde-based attachment roots before resolving them', () => {
+        const previousHome = process.env.HAPI_HOME
+        const previousRoot = process.env.HAPI_ATTACHMENTS_ROOT
+        const homeSuffix = `.hapi-attachments-home-${randomUUID()}`
+        const rootSuffix = `.hapi-attachments-root-${randomUUID()}`
+        const expectedHomeRoot = join(homedir(), homeSuffix, 'attachments')
+        const expectedOverrideRoot = join(homedir(), rootSuffix)
+        try {
+            process.env.HAPI_HOME = `~/${homeSuffix}`
+            delete process.env.HAPI_ATTACHMENTS_ROOT
+            const homeStore = new Store(':memory:')
+            const homeAttachment = homeStore.attachments.create({
+                namespace: 'namespace-a',
+                sessionId: 'session-a',
+                filename: 'home.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('home')
+            })
+            expect(homeAttachment.originalPath).toBe(join(expectedHomeRoot, `${homeAttachment.id}.original`))
+            homeStore.close()
+
+            process.env.HAPI_ATTACHMENTS_ROOT = `~/${rootSuffix}`
+            const overrideStore = new Store(':memory:')
+            const overrideAttachment = overrideStore.attachments.create({
+                namespace: 'namespace-a',
+                sessionId: 'session-a',
+                filename: 'override.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('override')
+            })
+            expect(overrideAttachment.originalPath)
+                .toBe(join(expectedOverrideRoot, `${overrideAttachment.id}.original`))
+            overrideStore.close()
+        } finally {
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            if (previousRoot === undefined) delete process.env.HAPI_ATTACHMENTS_ROOT
+            else process.env.HAPI_ATTACHMENTS_ROOT = previousRoot
+            rmSync(join(homedir(), homeSuffix), { recursive: true, force: true })
+            rmSync(expectedOverrideRoot, { recursive: true, force: true })
+        }
     })
 })

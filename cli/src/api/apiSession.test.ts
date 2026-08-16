@@ -653,11 +653,41 @@ describe('ApiSessionClient incoming user messages', () => {
 
         await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce())
         expect(onUserMessage.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-            content: expect.objectContaining({ text: 'keep this prompt' })
+            content: expect.objectContaining({ text: 'keep this prompt\n\nAttachment unavailable: missing.txt' })
         }))
         expect(onUserMessage.mock.calls[0]?.[0].content.attachments[0]).toEqual(expect.objectContaining({
             attachmentId: 'missing-attachment'
         }))
+        client.close()
+    })
+
+    it('keeps an attachment-only turn visible when materialization fails', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        axiosHarness.get.mockRejectedValue(new Error('attachment unavailable'))
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'attachment-only-failure-message',
+            seq: 1,
+            text: '',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'missing.png',
+                mimeType: 'image/png',
+                size: 5,
+                attachmentId: 'missing-image'
+            }]
+        })
+
+        await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce())
+        expect(onUserMessage.mock.calls[0]?.[0].content.text)
+            .toBe('Attachment unavailable: missing.png')
         client.close()
     })
 

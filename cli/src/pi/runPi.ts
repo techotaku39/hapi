@@ -1152,8 +1152,10 @@ export async function runPi(opts: {
                 message.content.attachments,
                 piSession.cachedPiCommands,
                 {
-                    authorizeImagePath: (path) => isPathWithinUploadDir(path, apiSession.sessionId),
-                    authorizeOpenedImage: (path, identity) => isAuthorizedUploadFile(path, apiSession.sessionId, identity),
+                    authorizeImagePath: (path) => isPathWithinUploadDir(path, apiSession.sessionId)
+                        || apiSession.isMaterializedAttachmentPath(path),
+                    authorizeOpenedImage: (path, identity) => isAuthorizedUploadFile(path, apiSession.sessionId, identity)
+                        || apiSession.isAuthorizedMaterializedAttachment(path, identity),
                 },
             );
             if (localId) {

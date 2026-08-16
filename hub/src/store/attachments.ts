@@ -73,9 +73,17 @@ const sanitizeFilename = (filename: string): string => {
 
 const hashBytes = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
 
+const expandHome = (value: string): string => {
+    if (value === '~') return homedir()
+    if (value.startsWith('~/') || value.startsWith('~\\')) {
+        return join(homedir(), value.slice(2))
+    }
+    return value
+}
+
 const defaultAttachmentRoot = (): string => {
-    const hapiHome = process.env.HAPI_HOME || join(homedir(), '.hapi')
-    return process.env.HAPI_ATTACHMENTS_ROOT || join(hapiHome, 'attachments')
+    const hapiHome = expandHome(process.env.HAPI_HOME || join(homedir(), '.hapi'))
+    return expandHome(process.env.HAPI_ATTACHMENTS_ROOT || join(hapiHome, 'attachments'))
 }
 
 export class AttachmentStore {
@@ -204,6 +212,63 @@ export class AttachmentStore {
         return true
     }
 
+    cloneForSession(
+        id: string,
+        namespace: string,
+        sourceSessionId: string,
+        targetSessionId: string
+    ): StoredAttachment {
+        const original = this.readForSession(id, namespace, sourceSessionId, 'original')
+        if (!original) throw new Error(`Attachment ${id} is unavailable`)
+        const thumbnail = this.readForSession(id, namespace, sourceSessionId, 'thumbnail')
+        return this.create({
+            namespace,
+            sessionId: targetSessionId,
+            filename: original.attachment.filename,
+            mimeType: original.attachment.mimeType,
+            original: original.data,
+            ...(thumbnail
+                ? { thumbnail: thumbnail.data, thumbnailMimeType: thumbnail.mimeType }
+                : {})
+        })
+    }
+
+    cloneMessageAttachments(
+        namespace: string,
+        sourceSessionId: string,
+        targetSessionId: string,
+        content: unknown,
+        clonedAttachments = new Map<string, StoredAttachment>()
+    ): unknown {
+        if (!isRecord(content) || content.role !== 'user') return content
+        const messageContent = content.content
+        if (!isRecord(messageContent) || !Array.isArray(messageContent.attachments)) return content
+
+        const attachments = messageContent.attachments.map((attachment) => {
+            if (!isRecord(attachment) || typeof attachment.attachmentId !== 'string') {
+                return attachment
+            }
+            const sourceAttachmentId = attachment.attachmentId
+            let cloned = clonedAttachments.get(sourceAttachmentId)
+            if (!cloned) {
+                cloned = this.cloneForSession(
+                    sourceAttachmentId,
+                    namespace,
+                    sourceSessionId,
+                    targetSessionId
+                )
+                clonedAttachments.set(sourceAttachmentId, cloned)
+            }
+            const { path: _legacyPath, ...metadata } = attachment
+            return { ...metadata, attachmentId: cloned.id }
+        })
+
+        return {
+            ...content,
+            content: { ...messageContent, attachments }
+        }
+    }
+
     transferSession(namespace: string, fromSessionId: string, toSessionId: string): number {
         if (fromSessionId === toSessionId) return 0
         const result = this.db.prepare(`
@@ -260,4 +325,8 @@ export class AttachmentStore {
             createdAt: row.created_at
         }
     }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

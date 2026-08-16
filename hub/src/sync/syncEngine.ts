@@ -18,7 +18,7 @@ import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMe
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
-import type { Store, CancelQueuedMessageResult } from '../store'
+import type { Store, CancelQueuedMessageResult, StoredAttachment } from '../store'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import { clearAgentTerminalBuffer } from '../socket/agentTerminalBuffer'
@@ -1465,10 +1465,17 @@ export class SyncEngine {
 
             // Native fork keeps agent context, but the new HAPI row starts empty.
             // Hydrate the transcript prefix so web navigation is not a blank thread.
+            const clonedAttachments = new Map<string, StoredAttachment>()
             this.store.messages.copyMessagesToSession(
                 childId,
                 prefix.map((message) => ({
-                    content: message.content,
+                    content: this.store.attachments.cloneMessageAttachments(
+                        namespace,
+                        sessionId,
+                        childId,
+                        message.content,
+                        clonedAttachments
+                    ),
                     createdAt: message.createdAt,
                     localId: message.localId,
                     invokedAt: message.invokedAt,
