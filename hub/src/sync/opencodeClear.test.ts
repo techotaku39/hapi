@@ -585,6 +585,100 @@ describe('SyncEngine.clearOpenCodeSession', () => {
         } finally { engine.stop() }
     })
 
+    it('retries an abort when a redirected attachment prompt arrives during cloning', async () => {
+        const { store, engine } = createEngine()
+        let releaseClone: (() => void) | undefined
+        try {
+            const source = engine.getOrCreateSession('abort-attachment-race', {
+                path: '/tmp/project', host: 'host', machineId: 'machine-1', flavor: 'opencode', startedBy: 'runner'
+            }, null, 'default')
+            engine.handleSessionAlive({ sid: source.id, time: Date.now() })
+            const reserved = engine.reserveOpenCodeClearSession(source.id, 'default')
+            if (reserved.type !== 'success') throw new Error('reservation failed')
+
+            const first = await store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'first.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('first')
+            })
+            const toMessageAttachment = (attachment: typeof first) => ({
+                id: `message-${attachment.filename}`,
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                size: attachment.size,
+                attachmentId: attachment.id
+            })
+            await engine.sendMessage(source.id, {
+                text: 'first',
+                localId: 'first-attachment-message',
+                attachments: [toMessageAttachment(first)]
+            })
+
+            let cloneStarted!: () => void
+            const cloneStartedPromise = new Promise<void>((resolve) => { cloneStarted = resolve })
+            const cloneGate = new Promise<void>((resolve) => { releaseClone = resolve })
+            const originalClone = store.attachments.cloneMessageAttachments.bind(store.attachments)
+            let paused = false
+            store.attachments.cloneMessageAttachments = (async (...args: Parameters<typeof originalClone>) => {
+                if (!paused && args[1] === reserved.sessionId && args[2] === source.id) {
+                    paused = true
+                    cloneStarted()
+                    await cloneGate
+                }
+                return originalClone(...args)
+            }) as typeof store.attachments.cloneMessageAttachments
+
+            const aborting = engine.abortOpenCodeClearSession(source.id, 'default', reserved.sessionId)
+            await cloneStartedPromise
+
+            const second = await store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'second.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('second')
+            })
+            await engine.sendMessage(source.id, {
+                text: 'second',
+                localId: 'second-attachment-message',
+                attachments: [toMessageAttachment(second)]
+            })
+
+            releaseClone?.()
+            await expect(aborting).resolves.toEqual({ type: 'success', sessionId: source.id })
+
+            const restored = store.messages.getAllMessages(source.id)
+            expect(new Set(restored.map((message) => message.localId))).toEqual(new Set([
+                'first-attachment-message',
+                'second-attachment-message'
+            ]))
+            for (const [localId, expectedBytes] of [
+                ['first-attachment-message', Buffer.from('first')],
+                ['second-attachment-message', Buffer.from('second')]
+            ] as const) {
+                const message = restored.find((candidate) => candidate.localId === localId)
+                if (!message) throw new Error(`missing restored message ${localId}`)
+                const content = message.content as { content: { attachments: Array<{ attachmentId: string }> } }
+                const attachmentId = content.content.attachments[0]?.attachmentId
+                if (!attachmentId) throw new Error(`missing attachment for ${localId}`)
+                expect((await store.attachments.readForSessionAsync(
+                    attachmentId,
+                    'default',
+                    source.id,
+                    'original'
+                ))?.data).toEqual(expectedBytes)
+            }
+        } finally {
+            releaseClone?.()
+            for (const session of store.sessions.getSessionsByNamespace('default')) {
+                await store.attachments.deleteAllForSession('default', session.id).catch(() => {})
+            }
+            engine.stop()
+        }
+    })
+
     it('durably retries an explicit-exit abort after a metadata write failure', async () => {
         const { store, engine } = createEngine()
         try {

@@ -43,8 +43,17 @@ export {
 } from './workGraph'
 
 type PreparedMessageAttachmentClones = {
+    messageIds: Set<string>
     rewrittenContents: Map<string, unknown>
     clonedAttachments: Map<string, StoredAttachment>
+}
+
+function sameMessageIds(left: Set<string>, right: Set<string>): boolean {
+    if (left.size !== right.size) return false
+    for (const id of left) {
+        if (!right.has(id)) return false
+    }
+    return true
 }
 
 const SCHEMA_VERSION: number = 24
@@ -297,6 +306,14 @@ export class Store {
                     || operation.state !== expected.state)) {
                     return { result: 'version-mismatch' as const }
                 }
+                const currentMessageIds = new Set(
+                    this.messages.getAllMessages(replacementSessionId)
+                        .filter((message) => message.invokedAt === null)
+                        .map((message) => message.id)
+                )
+                if (!sameMessageIds(currentMessageIds, prepared.messageIds)) {
+                    return { result: 'version-mismatch' as const }
+                }
                 const result = this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
                 if (result.result === 'success') {
                     for (const [messageId, content] of prepared.rewrittenContents) {
@@ -348,6 +365,12 @@ export class Store {
         fromSessionId: string,
         toSessionId: string
     ): Promise<PreparedMessageAttachmentClones> {
+        const sourceMessages = this.messages.getAllMessages(fromSessionId)
+        const messageIds = new Set(
+            sourceMessages
+                .filter((message) => message.invokedAt === null)
+                .map((message) => message.id)
+        )
         const targetLocalIds = new Set(
             this.messages.getAllMessages(toSessionId)
                 .map((message) => message.localId)
@@ -356,7 +379,7 @@ export class Store {
         const clonedAttachments = new Map<string, StoredAttachment>()
         const rewrittenContents = new Map<string, unknown>()
         try {
-            for (const message of this.messages.getAllMessages(fromSessionId)) {
+            for (const message of sourceMessages) {
                 if (message.invokedAt !== null) continue
                 if (message.localId !== null && targetLocalIds.has(message.localId)) continue
                 const rewritten = await this.attachments.cloneMessageAttachments(
@@ -368,7 +391,7 @@ export class Store {
                 )
                 if (rewritten !== message.content) rewrittenContents.set(message.id, rewritten)
             }
-            return { rewrittenContents, clonedAttachments }
+            return { messageIds, rewrittenContents, clonedAttachments }
         } catch (error) {
             await this.cleanupClonedAttachments(clonedAttachments, namespace, toSessionId)
             throw error
