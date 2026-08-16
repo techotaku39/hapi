@@ -209,4 +209,48 @@ describe('SyncEngine scratchlist mutations emit session-updated patches', () => 
         expect(matching).toHaveLength(0)
         engine.stop()
     })
+
+    it('reorderScratchlistEntries persists the ordered ids and emits one patch', () => {
+        const { engine, engineEvents } = setup()
+        const session = engine.getOrCreateSession(
+            'tag-reorder',
+            { path: '/tmp', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        engine.createScratchlistEntry(session.id, 'first', { entryId: 'e1' })
+        engine.createScratchlistEntry(session.id, 'second', { entryId: 'e2' })
+        engine.createScratchlistEntry(session.id, 'third', { entryId: 'e3' })
+        engineEvents.length = 0
+
+        const reordered = engine.reorderScratchlistEntries(session.id, ['e1', 'e3', 'e2'])
+        expect(reordered?.map((entry) => entry.entryId)).toEqual(['e1', 'e3', 'e2'])
+        expect(reordered?.map((entry) => entry.position)).toEqual([0, 1, 2])
+        expect(engine.listScratchlistEntries(session.id).map((entry) => entry.entryId))
+            .toEqual(['e1', 'e3', 'e2'])
+
+        const matching = engineEvents.filter(
+            (e) => e.type === 'session-updated' && (e.data as Record<string, unknown>).scratchlistUpdatedAt !== undefined
+        )
+        expect(matching).toHaveLength(1)
+        engine.stop()
+    })
+
+    it('rejects a reorder payload that does not cover the full list', () => {
+        const { engine, engineEvents } = setup()
+        const session = engine.getOrCreateSession(
+            'tag-reorder-invalid',
+            { path: '/tmp', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        engine.createScratchlistEntry(session.id, 'note', { entryId: 'e1' })
+        engineEvents.length = 0
+
+        expect(engine.reorderScratchlistEntries(session.id, [])).toBeNull()
+        expect(engineEvents.filter(
+            (e) => e.type === 'session-updated' && (e.data as Record<string, unknown>).scratchlistUpdatedAt !== undefined
+        )).toHaveLength(0)
+        engine.stop()
+    })
 })

@@ -74,6 +74,20 @@ describe('mergeSessions (deleteOldSession=true) - scratchlist transfer', () => {
         expect(store.scratchlist.list(oldSession.id)).toEqual([])
     })
 
+    it('preserves the old session scratchlist order during transfer', async () => {
+        const { store, cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+
+        store.scratchlist.create(oldSession.id, 'first', { entryId: 'first' })
+        store.scratchlist.create(oldSession.id, 'second', { entryId: 'second' })
+        store.scratchlist.reorder(oldSession.id, ['first', 'second'])
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        expect(store.scratchlist.list(newSession.id).map((entry) => entry.entryId))
+            .toEqual(['first', 'second'])
+    })
+
     it('re-keys hub attachment paths when rows move to the new session id', async () => {
         const { mkdtempSync, rmSync } = await import('node:fs')
         const { join } = await import('node:path')

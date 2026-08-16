@@ -40,7 +40,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 23
+const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -302,6 +302,7 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
         })
 
         if (currentVersion === 0) {
@@ -458,12 +459,15 @@ export class Store {
                 text TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
                 attachments TEXT DEFAULT NULL,
                 PRIMARY KEY (session_id, entry_id),
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
+                ON session_scratchlist(session_id, position);
 
             CREATE TABLE IF NOT EXISTS usage_events (
                 session_id TEXT NOT NULL,
@@ -751,8 +755,8 @@ export class Store {
      *
      * Idempotent via `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT
      * EXISTS`. Cascade-delete from `sessions(id)` handles delete-session
-     * cleanup. No data backfill: the web client's first-run migration
-     * pushes any existing `localStorage` entries up via REST.
+     * cleanup. Existing localStorage rows are backfilled by the web client's
+     * first-run migration via REST.
      *
      * Rollback: `DROP TABLE session_scratchlist; PRAGMA user_version = 11;`
      */
@@ -805,6 +809,39 @@ export class Store {
         if (!columns.some((col) => col.name === 'attachments')) {
             this.db.exec(`ALTER TABLE session_scratchlist ADD COLUMN attachments TEXT DEFAULT NULL`)
         }
+    }
+
+    /**
+     * Persist scratchlist display order (tiann/hapi#893 follow-up).
+     * Existing rows retain the previous newest-first order while receiving a
+     * dense per-session position that subsequent reorder mutations can update.
+     */
+    private migrateFromV23ToV24(): void {
+        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
+        if (!columns.some((col) => col.name === 'position')) {
+            this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
+        }
+
+        const sessionRows = this.db.prepare(
+            'SELECT DISTINCT session_id FROM session_scratchlist'
+        ).all() as Array<{ session_id: string }>
+        const rowsForSession = this.db.prepare(
+            `SELECT entry_id FROM session_scratchlist
+             WHERE session_id = ?
+             ORDER BY created_at DESC, entry_id DESC`
+        )
+        const updatePosition = this.db.prepare(
+            'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
+        )
+        for (const { session_id } of sessionRows) {
+            const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
+            rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
+        }
+
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
+                ON session_scratchlist(session_id, position)
+        `)
     }
 
     /**

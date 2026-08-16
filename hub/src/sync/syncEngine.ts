@@ -14,7 +14,7 @@ import {
 } from '@hapi/protocol/runnerCapabilities'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
-import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { AgentFlavor, AttachmentMetadata, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
@@ -208,11 +208,23 @@ export class SyncEngine {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
         this.machineCache = new MachineCache(store, this.eventPublisher)
+        this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.messageService = new MessageService(
             store,
             io,
             this.eventPublisher,
-            (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
+            (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt),
+            {
+                validateScheduledAttachments: (sessionId, attachments) =>
+                    this.validateScheduledAttachments(sessionId, attachments),
+                materializeScheduledAttachments: (sessionId, attachments) =>
+                    this.materializeScheduledAttachments(sessionId, attachments),
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    const { deleteScratchlistAttachmentFiles, getHapiHomeDir } =
+                        await import('../scratchlistAttachments/storage')
+                    await deleteScratchlistAttachmentFiles(getHapiHomeDir(), attachments)
+                },
+            }
         )
         this.titleSuggestionService = createTitleSuggestionService(store)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
@@ -413,6 +425,13 @@ export class SyncEngine {
     }
 
     handleRealtimeEvent(event: SyncEvent): void {
+        if (event.type === 'messages-consumed') {
+            void this.messageService
+                .releaseConsumedScheduledAttachments(event.sessionId, event.localIds)
+                .catch((error) => {
+                    console.error('[Scratchlist] failed to release scheduled attachments', error)
+                })
+        }
         if (event.type === 'session-updated' && event.sessionId) {
             // Closes the second half of #884: when a CLI handler emits a
             // structured patch (todos / teamState / metadata / agentState),
@@ -543,6 +562,7 @@ export class SyncEngine {
     }
 
     handleSessionEnd(payload: { sid: string; time: number; reason?: SessionEndReason }): void {
+        this.messageService.clearScheduledAttachmentDeliveryCache(payload.sid)
         const before = this.sessionCache.getSession(payload.sid)
         if (before?.metadata?.opencodeClearOperation?.state === 'reserved' && payload.reason !== 'cleared') {
             const operation = before.metadata.opencodeClearOperation
@@ -613,6 +633,7 @@ export class SyncEngine {
         text: string
         createdAt: number
         updatedAt: number
+        position: number
         attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
     }> {
         return this.store.scratchlist.list(sessionId).map((row) => ({
@@ -620,6 +641,7 @@ export class SyncEngine {
             text: row.text,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
+            position: row.position,
             attachments: row.attachments,
         }))
     }
@@ -647,6 +669,7 @@ export class SyncEngine {
         text: string
         createdAt: number
         updatedAt: number
+        position: number
         attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
     } | null {
         const row = this.store.scratchlist.get(sessionId, entryId)
@@ -656,6 +679,7 @@ export class SyncEngine {
             text: row.text,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
+            position: row.position,
             attachments: row.attachments,
         }
     }
@@ -678,6 +702,7 @@ export class SyncEngine {
         options?: {
             entryId?: string
             createdAt?: number
+            position?: number
             attachments?: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
         }
     ): {
@@ -687,6 +712,7 @@ export class SyncEngine {
             text: string
             createdAt: number
             updatedAt: number
+            position: number
             attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
         }
     } | { outcome: 'session-not-found' } {
@@ -704,6 +730,7 @@ export class SyncEngine {
                 text: result.entry.text,
                 createdAt: result.entry.createdAt,
                 updatedAt: result.entry.updatedAt,
+                position: result.entry.position,
                 attachments: result.entry.attachments,
             }
         }
@@ -721,6 +748,7 @@ export class SyncEngine {
         text: string
         createdAt: number
         updatedAt: number
+        position: number
         attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
     } | null {
         const updated = this.store.scratchlist.update(sessionId, entryId, patch)
@@ -731,8 +759,33 @@ export class SyncEngine {
             text: updated.text,
             createdAt: updated.createdAt,
             updatedAt: updated.updatedAt,
+            position: updated.position,
             attachments: updated.attachments,
         }
+    }
+
+    reorderScratchlistEntries(
+        sessionId: string,
+        entryIds: string[]
+    ): Array<{
+        entryId: string
+        text: string
+        createdAt: number
+        updatedAt: number
+        position: number
+        attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+    }> | null {
+        const rows = this.store.scratchlist.reorder(sessionId, entryIds)
+        if (!rows) return null
+        this.sessionCache.emitScratchlistChanged(sessionId, Date.now())
+        return rows.map((row) => ({
+            entryId: row.entryId,
+            text: row.text,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+            position: row.position,
+            attachments: row.attachments,
+        }))
     }
 
     deleteScratchlistEntry(sessionId: string, entryId: string): boolean {
@@ -747,9 +800,12 @@ export class SyncEngine {
                     .flatMap((entry) => entry.attachments.map((att) => att.id))
             )
             const orphaned = existing.attachments.filter((att) => !remainingIds.has(att.id))
-            if (orphaned.length > 0) {
+            const deletable = orphaned.filter(
+                (att) => !this.store.messages.hasUninvokedAttachmentReference(sessionId, att.path)
+            )
+            if (deletable.length > 0) {
                 void import('../scratchlistAttachments/storage').then(({ deleteScratchlistAttachmentFiles, getHapiHomeDir }) =>
-                    deleteScratchlistAttachmentFiles(getHapiHomeDir(), orphaned)
+                    deleteScratchlistAttachmentFiles(getHapiHomeDir(), deletable)
                 )
             }
             this.sessionCache.emitScratchlistChanged(sessionId, Date.now())
@@ -878,6 +934,62 @@ export class SyncEngine {
         return { buffer: read.buffer, mimeType: 'application/octet-stream', filename: 'attachment' }
     }
 
+    private async validateScheduledAttachments(
+        sessionId: string,
+        attachments: AttachmentMetadata[],
+    ): Promise<void> {
+        const session = this.store.sessions.getSession(sessionId)
+        if (!session) throw new Error('Session not found')
+        const checked = await this.resolveScratchlistAttachmentsForSession(
+            sessionId,
+            session.namespace,
+            attachments,
+        )
+        if (!checked.ok) {
+            throw new Error(`Invalid scheduled attachment: ${checked.error}`)
+        }
+    }
+
+    /**
+     * Scheduled scratchlist files live on the hub, while the agent reads its
+     * normal upload directory on the CLI host.  Copy each file across the RPC
+     * boundary only when the scheduled row matures, so a disconnected CLI or
+     * session cleanup cannot delete the source before delivery.
+     */
+    private async materializeScheduledAttachments(
+        sessionId: string,
+        attachments: AttachmentMetadata[],
+    ): Promise<AttachmentMetadata[]> {
+        const session = this.store.sessions.getSession(sessionId)
+        if (!session) throw new Error('Session not found')
+        const checked = await this.resolveScratchlistAttachmentsForSession(
+            sessionId,
+            session.namespace,
+            attachments,
+        )
+        if (!checked.ok) {
+            throw new Error(`Invalid scheduled attachment: ${checked.error}`)
+        }
+
+        const { getHapiHomeDir, readScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
+        const materialized: AttachmentMetadata[] = []
+        for (const attachment of checked.attachments) {
+            const read = await readScratchlistAttachmentFile(getHapiHomeDir(), attachment.path)
+            if (!read) throw new Error(`Scheduled attachment file missing: ${attachment.filename}`)
+            const uploaded = await this.rpcGateway.uploadFile(
+                sessionId,
+                attachment.filename,
+                read.buffer.toString('base64'),
+                attachment.mimeType,
+            )
+            if (!uploaded.success || !uploaded.path) {
+                throw new Error(uploaded.error ?? `Failed to stage scheduled attachment: ${attachment.filename}`)
+            }
+            materialized.push({ ...attachment, path: uploaded.path })
+        }
+        return materialized
+    }
+
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
     }
@@ -932,7 +1044,7 @@ export class SyncEngine {
         this.machineCache.expireInactive?.()
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
-        this.messageService.releaseMatureScheduledMessages(Date.now(), this.historyActionsInFlight)
+        void this.messageService.releaseMatureScheduledMessages(Date.now(), this.historyActionsInFlight)
         void this.reconcileOpenCodeClears()
     }
 

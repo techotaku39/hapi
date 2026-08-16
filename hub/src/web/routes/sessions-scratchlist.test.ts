@@ -8,11 +8,12 @@ import { createSessionsRoutes } from './sessions'
  * Tests for the scratchlist v2 (tiann/hapi#893) REST routes:
  *   GET    /api/sessions/:id/scratchlist
  *   POST   /api/sessions/:id/scratchlist
+ *   PUT    /api/sessions/:id/scratchlist/reorder
  *   PUT    /api/sessions/:id/scratchlist/:entryId
  *   DELETE /api/sessions/:id/scratchlist/:entryId
  *
  * The routes call into a small surface on `SyncEngine` (list/create/
- * update/delete + count). We mock that surface here so the assertions
+ * reorder/update/delete + count). We mock that surface here so the assertions
  * focus on:
  *   - happy-path response shapes
  *   - auth + namespace gating via `requireSessionFromParam`
@@ -64,8 +65,10 @@ type EngineOverrides = Partial<{
     countScratchlistEntries: SyncEngine['countScratchlistEntries']
     getScratchlistEntry: SyncEngine['getScratchlistEntry']
     createScratchlistEntry: SyncEngine['createScratchlistEntry']
+    reorderScratchlistEntries: SyncEngine['reorderScratchlistEntries']
     updateScratchlistEntry: SyncEngine['updateScratchlistEntry']
     deleteScratchlistEntry: SyncEngine['deleteScratchlistEntry']
+    readScratchlistAttachment: SyncEngine['readScratchlistAttachment']
     sessionAccess: 'ok' | 'not-found' | 'wrong-namespace'
     callerNamespace: string
 }>
@@ -82,6 +85,7 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
             return { ok: true, sessionId: session.id, session }
         },
         listScratchlistEntries: overrides.listScratchlistEntries ?? (() => []),
+        reorderScratchlistEntries: overrides.reorderScratchlistEntries ?? (() => []),
         countScratchlistEntries: overrides.countScratchlistEntries ?? (() => 0),
         sumScratchlistAttachmentBytes: () => 0,
         getScratchlistEntry: overrides.getScratchlistEntry ?? (() => null),
@@ -93,6 +97,7 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
                     text,
                     createdAt: 1000,
                     updatedAt: 1000,
+                    position: 0,
                     attachments: [],
                 }
             })),
@@ -102,9 +107,11 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
                 text: patch.text ?? '',
                 createdAt: 1000,
                 updatedAt: 2000,
+                position: 0,
                 attachments: [],
             })),
         deleteScratchlistEntry: overrides.deleteScratchlistEntry ?? (() => true),
+        readScratchlistAttachment: overrides.readScratchlistAttachment ?? (async () => null),
         resolveScratchlistAttachmentsForSession: async (
             _sessionId: string,
             _namespace: string,
@@ -112,7 +119,7 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
         ) => ({ ok: true as const, attachments: claimed }),
         sumScratchlistAttachmentBytesOnDisk: async () => 0,
         deleteScratchlistAttachmentById: async () => true,
-    } as unknown as SyncEngine
+        } as unknown as SyncEngine
 
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
@@ -128,8 +135,8 @@ describe('GET /api/sessions/:id/scratchlist', () => {
         const session = createSession()
         const app = createApp(session, {
             listScratchlistEntries: () => [
-                { entryId: 'a', text: 'note A', createdAt: 1000, updatedAt: 1000, attachments: [] },
-                { entryId: 'b', text: 'note B', createdAt: 2000, updatedAt: 2500, attachments: [] }
+                { entryId: 'a', text: 'note A', createdAt: 1000, updatedAt: 1000, position: 0, attachments: [] },
+                { entryId: 'b', text: 'note B', createdAt: 2000, updatedAt: 2500, position: 1, attachments: [] }
             ]
         })
         const res = await app.request('/api/sessions/session-1/scratchlist')
@@ -153,13 +160,52 @@ describe('GET /api/sessions/:id/scratchlist', () => {
     })
 })
 
+describe('GET /api/sessions/:id/scratchlist/attachments/:attachmentId', () => {
+    it('serves non-ASCII filenames with an RFC 5987-safe content disposition', async () => {
+        const session = createSession()
+        const attachment = {
+            id: '11111111-1111-4111-8111-111111111111',
+            filename: '截图.png',
+            mimeType: 'image/png',
+            size: 3,
+            path: 'hapi-hub:scratchlist/default/session-1/11111111-1111-4111-8111-111111111111-截图.png',
+        }
+        const app = createApp(session, {
+            listScratchlistEntries: () => [{
+                entryId: 'entry-1',
+                text: '',
+                createdAt: 1000,
+                updatedAt: 1000,
+                position: 0,
+                attachments: [attachment],
+            }],
+            readScratchlistAttachment: async () => ({
+                buffer: Buffer.from([1, 2, 3]),
+                mimeType: 'image/png',
+                filename: attachment.filename,
+            }),
+        })
+
+        const res = await app.request(
+            `/api/sessions/session-1/scratchlist/attachments/${attachment.id}`,
+        )
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get('content-type')).toContain('image/png')
+        expect(res.headers.get('content-disposition')).toBe(
+            `inline; filename="__.png"; filename*=UTF-8''%E6%88%AA%E5%9B%BE.png`,
+        )
+        expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([1, 2, 3])
+    })
+})
+
 describe('POST /api/sessions/:id/scratchlist', () => {
     it('creates an entry and returns 201 with the canonical row', async () => {
         const session = createSession()
-        const calls: Array<{ sessionId: string; text: string; entryId?: string; createdAt?: number }> = []
+        const calls: Array<{ sessionId: string; text: string; entryId?: string; createdAt?: number; position?: number }> = []
         const app = createApp(session, {
             createScratchlistEntry: (sessionId, text, options) => {
-                calls.push({ sessionId, text, entryId: options?.entryId, createdAt: options?.createdAt })
+                calls.push({ sessionId, text, entryId: options?.entryId, createdAt: options?.createdAt, position: options?.position })
                 return {
                     outcome: 'created' as const,
                     entry: {
@@ -167,6 +213,7 @@ describe('POST /api/sessions/:id/scratchlist', () => {
                         text,
                         createdAt: options?.createdAt ?? 1000,
                         updatedAt: 1000,
+                        position: options?.position ?? 0,
                         attachments: options?.attachments ?? [],
                     }
                 }
@@ -175,13 +222,14 @@ describe('POST /api/sessions/:id/scratchlist', () => {
         const res = await app.request('/api/sessions/session-1/scratchlist', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 'first thought' })
+            body: JSON.stringify({ text: 'first thought', position: 3 })
         })
         expect(res.status).toBe(201)
         const body = await res.json() as { entry: { text: string; entryId: string } }
         expect(body.entry.text).toBe('first thought')
         expect(calls).toHaveLength(1)
         expect(calls[0]?.sessionId).toBe('session-1')
+        expect(calls[0]?.position).toBe(3)
     })
 
     it('returns 200 with the existing row on duplicate (migration idempotency path)', async () => {
@@ -189,7 +237,7 @@ describe('POST /api/sessions/:id/scratchlist', () => {
         const app = createApp(session, {
             createScratchlistEntry: () => ({
                 outcome: 'duplicate' as const,
-                entry: { entryId: 'dup', text: 'pre-existing', createdAt: 100, updatedAt: 100, attachments: [] }
+                entry: { entryId: 'dup', text: 'pre-existing', createdAt: 100, updatedAt: 100, position: 0, attachments: [] }
             })
         })
         const res = await app.request('/api/sessions/session-1/scratchlist', {
@@ -256,6 +304,7 @@ describe('POST /api/sessions/:id/scratchlist', () => {
                         text: 'already there',
                         createdAt: 100,
                         updatedAt: 100,
+                        position: 0,
                         attachments: [],
                     }
                 }
@@ -265,7 +314,7 @@ describe('POST /api/sessions/:id/scratchlist', () => {
                 createCalls.push(1)
                 return {
                     outcome: 'created' as const,
-                    entry: { entryId: 'should-not-fire', text: 'noop', createdAt: 0, updatedAt: 0, attachments: [] }
+                    entry: { entryId: 'should-not-fire', text: 'noop', createdAt: 0, updatedAt: 0, position: 0, attachments: [] }
                 }
             }
         })
@@ -343,6 +392,47 @@ describe('POST /api/sessions/:id/scratchlist', () => {
     })
 })
 
+describe('PUT /api/sessions/:id/scratchlist/reorder', () => {
+    it('returns the canonical order from the engine', async () => {
+        const session = createSession()
+        const calls: string[][] = []
+        const app = createApp(session, {
+            reorderScratchlistEntries: (_sessionId, entryIds) => {
+                calls.push(entryIds)
+                return entryIds.map((entryId, position) => ({
+                    entryId,
+                    text: entryId,
+                    createdAt: 1000,
+                    updatedAt: 1000,
+                    position,
+                    attachments: [],
+                }))
+            }
+        })
+        const res = await app.request('/api/sessions/session-1/scratchlist/reorder', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ entryIds: ['b', 'a'] })
+        })
+        expect(res.status).toBe(200)
+        expect(calls).toEqual([['b', 'a']])
+        const body = await res.json() as { entries: Array<{ entryId: string; position: number }> }
+        expect(body.entries.map((entry) => entry.entryId)).toEqual(['b', 'a'])
+        expect(body.entries.map((entry) => entry.position)).toEqual([0, 1])
+    })
+
+    it('rejects a reorder payload with duplicate ids', async () => {
+        const session = createSession()
+        const app = createApp(session)
+        const res = await app.request('/api/sessions/session-1/scratchlist/reorder', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ entryIds: ['a', 'a'] })
+        })
+        expect(res.status).toBe(400)
+    })
+})
+
 describe('PUT /api/sessions/:id/scratchlist/:entryId', () => {
     it('returns the updated entry on success', async () => {
         const session = createSession()
@@ -352,6 +442,7 @@ describe('PUT /api/sessions/:id/scratchlist/:entryId', () => {
                 text: 'before',
                 createdAt: 1000,
                 updatedAt: 1000,
+                position: 0,
                 attachments: [],
             }),
             updateScratchlistEntry: (_sessionId, entryId, patch) => ({
@@ -359,6 +450,7 @@ describe('PUT /api/sessions/:id/scratchlist/:entryId', () => {
                 text: patch.text ?? 'before',
                 createdAt: 1000,
                 updatedAt: 5000,
+                position: 0,
                 attachments: patch.attachments ?? [],
             })
         })
@@ -406,6 +498,7 @@ describe('PUT /api/sessions/:id/scratchlist/:entryId', () => {
                 text: '',
                 createdAt: 1000,
                 updatedAt: 1000,
+                position: 0,
                 attachments: [{
                     id: '11111111-1111-4111-8111-111111111111',
                     filename: 'a.png',

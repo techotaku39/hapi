@@ -89,6 +89,40 @@ function toStoredMessage(row: DbMessageRow): StoredMessage {
     }
 }
 
+function messageReferencesAttachment(content: unknown, path: string): boolean {
+    if (content === null || typeof content !== 'object' || Array.isArray(content)) return false
+    const record = content as { content?: unknown }
+    if (record.content === null || typeof record.content !== 'object' || Array.isArray(record.content)) {
+        return false
+    }
+    const messageContent = record.content as { attachments?: unknown }
+    if (!Array.isArray(messageContent.attachments)) return false
+    return messageContent.attachments.some((attachment) => {
+        if (attachment === null || typeof attachment !== 'object' || Array.isArray(attachment)) return false
+        return (attachment as { path?: unknown }).path === path
+    })
+}
+
+/**
+ * Scheduled scratchlist attachments outlive their draft row.  Keep the hub
+ * blob while any uninvoked message still references it, even if the draft is
+ * deleted immediately after the schedule is accepted.
+ */
+export function hasUninvokedAttachmentReference(
+    db: Database,
+    sessionId: string,
+    path: string
+): boolean {
+    const rows = db.prepare(`
+        SELECT content
+        FROM messages
+        WHERE session_id = ?
+          AND invoked_at IS NULL
+          AND scheduled_at IS NOT NULL
+    `).all(sessionId) as Array<{ content: string | Uint8Array }>
+    return rows.some((row) => messageReferencesAttachment(decodeMessageContent(row.content), path))
+}
+
 export type CopyStoredMessageInput = Pick<
     StoredMessage,
     'content' | 'createdAt' | 'localId' | 'invokedAt' | 'scheduledAt'
@@ -511,6 +545,22 @@ export function getLocalMessageStates(
         localId: row.local_id,
         invokedAt: row.invoked_at
     }))
+}
+
+export function getMessagesByLocalIds(
+    db: Database,
+    sessionId: string,
+    localIds: string[],
+): StoredMessage[] {
+    if (localIds.length === 0) return []
+    const placeholders = localIds.map(() => '?').join(', ')
+    const rows = db.prepare(`
+        SELECT *
+        FROM messages
+        WHERE session_id = ? AND local_id IN (${placeholders})
+        ORDER BY seq ASC
+    `).all(sessionId, ...localIds) as DbMessageRow[]
+    return rows.map(toStoredMessage)
 }
 
 /** Returns scheduled messages across all sessions whose scheduled_at <= beforeTime

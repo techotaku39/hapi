@@ -4,6 +4,7 @@ import {
     type HapiSessionExportResult
 } from '@hapi/protocol/sessionExport'
 import type { AttachmentMetadata, DecryptedMessage, Session } from '@hapi/protocol/types'
+import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
 import {
     isClaudeChatVisibleMessage,
     isRedundantGoalStatusEventContent,
@@ -114,16 +115,80 @@ function contentForDeferredDelivery(content: unknown): unknown {
     }
 }
 
+function getUserMessageAttachments(content: unknown): AttachmentMetadata[] {
+    if (!isObject(content) || content.role !== 'user' || !isObject(content.content)) {
+        return []
+    }
+    return Array.isArray(content.content.attachments)
+        ? content.content.attachments as AttachmentMetadata[]
+        : []
+}
+
+function replaceUserMessageAttachments(content: unknown, attachments: AttachmentMetadata[]): unknown {
+    if (!isObject(content) || !isObject(content.content)) return content
+    return {
+        ...content,
+        content: {
+            ...content.content,
+            attachments,
+        }
+    }
+}
+
+type MessageServiceOptions = {
+    validateScheduledAttachments?: (
+        sessionId: string,
+        attachments: AttachmentMetadata[],
+    ) => Promise<void>
+    materializeScheduledAttachments?: (
+        sessionId: string,
+        attachments: AttachmentMetadata[],
+    ) => Promise<AttachmentMetadata[]>
+    deleteScheduledAttachments?: (
+        sessionId: string,
+        attachments: AttachmentMetadata[],
+    ) => Promise<void>
+}
+
 export class MessageService {
     /** One scheduled-matured SSE per localId per hub process (cleared on cancel/consume paths here). */
     private readonly scheduledMatureNotifiedLocalIds = new Set<string>()
+    /** CLI upload paths are session-scoped; reuse them until the CLI session ends. */
+    private readonly scheduledAttachmentDeliveryCache = new Map<string, AttachmentMetadata[]>()
+    private matureReleaseInFlight = false
 
     constructor(
         private readonly store: Store,
         private readonly io: Server,
         private readonly publisher: EventPublisher,
-        private readonly onSessionActivity?: (sessionId: string, updatedAt: number) => void
+        private readonly onSessionActivity?: (sessionId: string, updatedAt: number) => void,
+        private readonly options: MessageServiceOptions = {},
     ) {
+    }
+
+    clearScheduledAttachmentDeliveryCache(sessionId: string): void {
+        for (const messageId of this.scheduledAttachmentDeliveryCache.keys()) {
+            if (messageId.startsWith(`${sessionId}:`)) {
+                this.scheduledAttachmentDeliveryCache.delete(messageId)
+            }
+        }
+    }
+
+    async releaseConsumedScheduledAttachments(sessionId: string, localIds: string[]): Promise<void> {
+        if (!this.options.deleteScheduledAttachments || localIds.length === 0) return
+        const messages = this.store.messages.getMessagesByLocalIds(sessionId, localIds)
+        for (const message of messages) {
+            this.scheduledAttachmentDeliveryCache.delete(`${sessionId}:${message.id}`)
+        }
+        const attachments = messages
+            .flatMap((message) => getUserMessageAttachments(message.content))
+            .filter((attachment) => isHubScratchlistAttachmentPath(attachment.path))
+        const unique = new Map(attachments.map((attachment) => [attachment.path, attachment]))
+        const deletable = [...unique.values()].filter(
+            (attachment) => !this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)
+        )
+        if (deletable.length === 0) return
+        await this.options.deleteScheduledAttachments(sessionId, deletable)
     }
 
     private forgetScheduledMatureNotified(localIds: Iterable<string>): void {
@@ -183,6 +248,7 @@ export class MessageService {
                 text: row.text,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
+                position: row.position,
                 attachments: row.attachments
             }))
 
@@ -610,16 +676,20 @@ export class MessageService {
             deliveryMode?: MessageDeliveryMode
         }
     ): Promise<{ actualSessionId: string; createdAt: number }> {
-        // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
-        // internal callers).  Attachment paths live under the CLI session's
-        // upload directory which `cleanupUploadDir` purges on session end; a
-        // mature scheduled emit after the CLI exits would dereference deleted
-        // files via the @path attachment formatter.  REST already rejects this
-        // combination at the Zod layer, but enforcing it here keeps the rule in
-        // one structural place — same pattern as `addMessage`'s scheduledAt +
-        // !localId throw.
-        if (payload.scheduledAt != null && (payload.attachments?.length ?? 0) > 0) {
-            throw new Error('sendMessage: scheduled messages with attachments are not supported')
+        // Normal CLI upload paths are deleted when a session ends, so a future
+        // scheduled message can only safely carry durable hub scratchlist
+        // paths.  Those files are copied to the CLI upload directory at
+        // maturity, immediately before the message is emitted.
+        const attachments = payload.attachments ?? []
+        if (
+            payload.scheduledAt != null
+            && attachments.length > 0
+            && !attachments.every((attachment) => isHubScratchlistAttachmentPath(attachment.path))
+        ) {
+            throw new Error('sendMessage: scheduled messages with attachments must use scratchlist attachments')
+        }
+        if (payload.scheduledAt != null && attachments.length > 0) {
+            await this.options.validateScheduledAttachments?.(sessionId, attachments)
         }
 
         const sentFrom = payload.sentFrom ?? 'webapp'
@@ -787,6 +857,32 @@ export class MessageService {
         return queued.length
     }
 
+    private hasCliSessionConnection(sessionId: string): boolean {
+        const namespace = this.io.of('/cli') as unknown as {
+            adapter?: { rooms?: { get?: (room: string) => Set<unknown> | undefined } }
+        }
+        // Test doubles may not expose a Socket.IO adapter.  Keep the old
+        // emit behavior there; real namespaces always have one.
+        if (!namespace.adapter?.rooms?.get) return true
+        return (namespace.adapter.rooms.get(`session:${sessionId}`)?.size ?? 0) > 0
+    }
+
+    private async getScheduledDeliveryContent(msg: StoredMessageForDelivery): Promise<unknown | null> {
+        const attachments = getUserMessageAttachments(msg.content)
+        if (attachments.length === 0) return contentForDeferredDelivery(msg.content)
+
+        const cacheKey = `${msg.sessionId}:${msg.id}`
+        let deliveryAttachments = this.scheduledAttachmentDeliveryCache.get(cacheKey)
+        if (!deliveryAttachments) {
+            if (!this.options.materializeScheduledAttachments) return null
+            deliveryAttachments = await this.options.materializeScheduledAttachments(msg.sessionId, attachments)
+            this.scheduledAttachmentDeliveryCache.set(cacheKey, deliveryAttachments)
+        }
+        return contentForDeferredDelivery(
+            replaceUserMessageAttachments(msg.content, deliveryAttachments)
+        )
+    }
+
     /** Called by the hub 5-second tick (syncEngine.expireInactive).
      *
      * Finds all scheduled messages whose scheduled_at <= now and emits them to
@@ -802,46 +898,73 @@ export class MessageService {
      * preserved).  Web client surfaces this as 'sent' in the thread.
      * See messageService.test.ts "cancel × mature race" for the documented
      * expected behaviour. */
-    releaseMatureScheduledMessages(now: number, skipSessionIds?: ReadonlySet<string>): void {
-        const mature = this.store.messages.getMatureScheduledMessages(now)
-        const maturedSessionIds = new Set<string>()
-        const deliveryGateBySession = new Map<string, boolean>()
-        for (const msg of mature) {
-            let deliveryGated = deliveryGateBySession.get(msg.sessionId)
-            if (deliveryGated === undefined) {
-                deliveryGated = this.store.isOpenCodeClearDeliveryGated(msg.sessionId)
-                deliveryGateBySession.set(msg.sessionId, deliveryGated)
-            }
-            if (skipSessionIds?.has(msg.sessionId) || deliveryGated) {
-                continue
-            }
-            const localId = msg.localId
-            if (typeof localId === 'string' && !this.scheduledMatureNotifiedLocalIds.has(localId)) {
-                this.scheduledMatureNotifiedLocalIds.add(localId)
-                maturedSessionIds.add(msg.sessionId)
-            }
-            const update = {
-                id: msg.id,
-                seq: msg.seq,
-                createdAt: msg.createdAt,
-                body: {
-                    t: 'new-message' as const,
-                    sid: msg.sessionId,
-                    message: {
-                        id: msg.id,
-                        seq: msg.seq,
-                        createdAt: msg.createdAt,
-                        localId: msg.localId,
-                        content: contentForDeferredDelivery(msg.content)
+    async releaseMatureScheduledMessages(now: number, skipSessionIds?: ReadonlySet<string>): Promise<void> {
+        if (this.matureReleaseInFlight) return
+        this.matureReleaseInFlight = true
+        try {
+            const mature = this.store.messages.getMatureScheduledMessages(now)
+            const maturedSessionIds = new Set<string>()
+            const deliveryGateBySession = new Map<string, boolean>()
+            for (const msg of mature) {
+                let deliveryGated = deliveryGateBySession.get(msg.sessionId)
+                if (deliveryGated === undefined) {
+                    deliveryGated = this.store.isOpenCodeClearDeliveryGated(msg.sessionId)
+                    deliveryGateBySession.set(msg.sessionId, deliveryGated)
+                }
+                if (skipSessionIds?.has(msg.sessionId) || deliveryGated) {
+                    continue
+                }
+
+                // A hub-resident attachment must be transferred to the CLI
+                // host before emitting.  Wait for a live socket instead of
+                // creating an upload that cleanup would immediately orphan.
+                const hasAttachments = getUserMessageAttachments(msg.content).length > 0
+                if (hasAttachments && !this.hasCliSessionConnection(msg.sessionId)) {
+                    continue
+                }
+
+                let deliveryContent: unknown = contentForDeferredDelivery(msg.content)
+                if (hasAttachments) {
+                    try {
+                        deliveryContent = await this.getScheduledDeliveryContent(msg)
+                    } catch {
+                        // Keep the row uninvoked. The next tick retries after the
+                        // file or CLI connection becomes available.
+                        continue
+                    }
+                    if (deliveryContent === null) continue
+                }
+
+                const localId = msg.localId
+                if (typeof localId === 'string' && !this.scheduledMatureNotifiedLocalIds.has(localId)) {
+                    this.scheduledMatureNotifiedLocalIds.add(localId)
+                    maturedSessionIds.add(msg.sessionId)
+                }
+                const update = {
+                    id: msg.id,
+                    seq: msg.seq,
+                    createdAt: msg.createdAt,
+                    body: {
+                        t: 'new-message' as const,
+                        sid: msg.sessionId,
+                        message: {
+                            id: msg.id,
+                            seq: msg.seq,
+                            createdAt: msg.createdAt,
+                            localId: msg.localId,
+                            content: deliveryContent
+                        }
                     }
                 }
+                this.io.of('/cli').to(`session:${msg.sessionId}`).emit('update', update)
+                // NOTE: do NOT call markMessagesInvoked here (pitfall #2).
+                // CLI ack (messages-consumed) will handle invoked_at stamping.
             }
-            this.io.of('/cli').to(`session:${msg.sessionId}`).emit('update', update)
-            // NOTE: do NOT call markMessagesInvoked here (pitfall #2).
-            // CLI ack (messages-consumed) will handle invoked_at stamping.
-        }
-        for (const sessionId of maturedSessionIds) {
-            this.publisher.emit({ type: 'scheduled-matured', sessionId })
+            for (const sessionId of maturedSessionIds) {
+                this.publisher.emit({ type: 'scheduled-matured', sessionId })
+            }
+        } finally {
+            this.matureReleaseInFlight = false
         }
     }
 }

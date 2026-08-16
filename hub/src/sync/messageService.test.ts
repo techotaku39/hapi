@@ -225,6 +225,7 @@ describe('MessageService goal status filtering', () => {
                 text: 'Park this idea',
                 createdAt: 1_000,
                 updatedAt: expect.any(Number),
+                position: 1,
                 attachments: [{
                     id: 'att-1',
                     filename: 'note.png',
@@ -238,6 +239,7 @@ describe('MessageService goal status filtering', () => {
                 text: 'Follow up tomorrow',
                 createdAt: 2_000,
                 updatedAt: expect.any(Number),
+                position: 0,
                 attachments: []
             }
         ])
@@ -1055,12 +1057,9 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect(cliEmitted).toHaveLength(1)
     })
 
-    // Defence-in-depth: REST already rejects scheduledAt + attachments at the
-    // Zod layer, but non-REST callers (Telegram bot, MCP, internal) reach
-    // sendMessage directly and must hit the same invariant — otherwise the CLI
-    // session's upload directory could be purged before the mature emit lands,
-    // leaving @path attachment references pointing at deleted files.
-    it('rejects sendMessage when scheduledAt is set and attachments are non-empty', async () => {
+    // Defence-in-depth: only durable hub scratchlist paths can survive until
+    // maturity; transient CLI upload paths may be purged before delivery.
+    it('rejects sendMessage when scheduledAt uses a transient attachment path', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-with-attachments')
         const publisher = makePublisher()
@@ -1103,6 +1102,102 @@ describe('MessageService.sendMessage with scheduledAt', () => {
 
         const msgs = store.messages.getUninvokedLocalMessages(session.id)
         expect(msgs).toHaveLength(1)
+    })
+
+    it('materializes a hub attachment only when a scheduled row matures', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-hub-attachment')
+        const publisher = makePublisher()
+        const cliEmitted: unknown[] = []
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    }
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } }
+            })
+        } as unknown as Server
+        const service = new MessageService(
+            store,
+            io,
+            publisher as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) =>
+                    attachments.map((attachment) => ({ ...attachment, path: '/tmp/materialized.png' }))
+            }
+        )
+        const futureMs = Date.now() + 60_000
+        const message = store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'image later',
+                    attachments: [{
+                        id: 'att-hub',
+                        filename: 'image.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path: 'hapi-hub:scratchlist/default/session/att-hub-image.png'
+                    }]
+                }
+            },
+            'local-hub-attachment',
+            futureMs
+        )
+
+        await service.releaseMatureScheduledMessages(futureMs)
+
+        expect(cliEmitted).toHaveLength(1)
+        expect((cliEmitted[0] as any).body.message.id).toBe(message.id)
+        expect((cliEmitted[0] as any).body.message.content.content.attachments[0].path)
+            .toBe('/tmp/materialized.png')
+    })
+
+    it('releases a hub attachment after the scheduled message is acknowledged', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cleanup')
+        const deleted: string[] = []
+        const service = new MessageService(
+            store,
+            makeIo(() => {}),
+            makePublisher() as any,
+            undefined,
+            {
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deleted.push(...attachments.map((attachment) => attachment.path))
+                }
+            }
+        )
+        const path = 'hapi-hub:scratchlist/default/sched-cleanup/att-image.png'
+        store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'clean me',
+                    attachments: [{
+                        id: 'att-cleanup',
+                        filename: 'image.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path,
+                    }]
+                }
+            },
+            'local-cleanup',
+            Date.now() - 1_000,
+        )
+        store.messages.markMessagesInvoked(session.id, ['local-cleanup'], Date.now())
+
+        await service.releaseConsumedScheduledAttachments(session.id, ['local-cleanup'])
+
+        expect(deleted).toEqual([path])
     })
 })
 
@@ -1488,7 +1583,7 @@ describe('MessageService.releaseMatureScheduledMessages', () => {
 
     // #10: true cold-start restart simulation — new Store + new MessageService
     // share the same SQLite file, replicating what hub restart actually does.
-    it('#10 hub cold-start restart: mature message is re-emitted by new Store+Service (true restart sim)', () => {
+    it('#10 hub cold-start restart: mature message is re-emitted by new Store+Service (true restart sim)', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-restart-test-'))
         const dbPath = join(dir, 'test.db')
         let store1: Store | undefined
@@ -1524,7 +1619,7 @@ describe('MessageService.releaseMatureScheduledMessages', () => {
 
             const service2 = new MessageService(store2, io2, publisher2 as any)
             // After cold start, first tick should discover and emit the mature message
-            service2.releaseMatureScheduledMessages(now + 5_000)
+            await service2.releaseMatureScheduledMessages(now + 5_000)
 
             expect(cliEmitted).toHaveLength(1)
 
@@ -1535,7 +1630,16 @@ describe('MessageService.releaseMatureScheduledMessages', () => {
         } finally {
             store2?.close()
             store1?.close()
-            rmSync(dir, { recursive: true, force: true })
+            Bun.gc(true)
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+                try {
+                    rmSync(dir, { recursive: true, force: true })
+                    break
+                } catch (error) {
+                    if (attempt === 4) throw error
+                    await Bun.sleep(25)
+                }
+            }
         }
     })
 })

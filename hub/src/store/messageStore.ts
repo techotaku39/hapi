@@ -16,6 +16,7 @@ import {
     getMessageEpoch,
     bumpMessageEpoch,
     getLocalMessageStates,
+    getMessagesByLocalIds,
     getUninvokedLocalMessages,
     getMatureScheduledMessages,
     getImmediateQueuedLocalMessages,
@@ -33,6 +34,7 @@ import {
     getAllMessages,
     getMessagesAfterSeq,
     getMessageSeqById,
+    hasUninvokedAttachmentReference,
     truncateMessagesFromLocalId,
     type CancelQueuedMessageResult,
     type LookupQueuedMessageResult,
@@ -82,6 +84,10 @@ export class MessageStore {
         return getMessageSeqById(this.db, sessionId, messageId)
     }
 
+    hasUninvokedAttachmentReference(sessionId: string, path: string): boolean {
+        return hasUninvokedAttachmentReference(this.db, sessionId, path)
+    }
+
     getMessages(sessionId: string, limit: number = 200): StoredMessage[] {
         return getMessages(this.db, sessionId, limit)
     }
@@ -121,6 +127,10 @@ export class MessageStore {
 
     getLocalMessageStates(sessionId: string, localIds: string[]): LocalMessageState[] {
         return getLocalMessageStates(this.db, sessionId, localIds)
+    }
+
+    getMessagesByLocalIds(sessionId: string, localIds: string[]): StoredMessage[] {
+        return getMessagesByLocalIds(this.db, sessionId, localIds)
     }
 
     getUninvokedLocalMessages(sessionId: string): StoredMessage[] {

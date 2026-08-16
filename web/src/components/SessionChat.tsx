@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
-import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
+import { AssistantRuntimeProvider, useAuiState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
 import type { ApiClient } from '@/api/client'
 import type {
@@ -51,7 +50,7 @@ import {
     resolveMessageDeliveryMode,
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
-import type { MessageDeliveryMode } from '@hapi/protocol'
+import { isHubScratchlistAttachmentPath, stripPreviewUrls, type MessageDeliveryMode } from '@hapi/protocol'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { ShareSeedConsumer } from '@/components/ShareSeedConsumer'
@@ -63,17 +62,15 @@ import {
     attachmentsNeedScratchlistMigration,
     finalizeMigratedScratchlistParkCleanup,
     prepareScratchlistParkAttachments,
-    rehydrateScratchlistAttachmentsToComposer,
     stageScratchlistAttachmentsForComposeSend,
     type PendingParkAttachment,
     type ScratchlistParkResult,
 } from '@/lib/scratchlistAttachmentFlow'
-import type { ScratchlistEntry } from '@/lib/scratchlist'
-import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
 import {
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
+import type { ScratchlistEntry } from '@/lib/scratchlist'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
@@ -310,62 +307,23 @@ export function ScratchlistDrawerHost(props: {
     sessionId: string
     api: ApiClient
     entries: ReturnType<typeof useHubScratchlist>['entries']
-    onMove: ReturnType<typeof useHubScratchlist>['move']
+    onUpdate: ReturnType<typeof useHubScratchlist>['update']
+    onReorder: ReturnType<typeof useHubScratchlist>['reorder']
     onDelete: ReturnType<typeof useHubScratchlist>['remove']
-    onSend: (
-        text: string,
-        attachments?: AttachmentMetadata[],
-        scheduledAt?: number | null,
-        deliveryMode?: MessageDeliveryMode,
-    ) => Promise<boolean | SendMessageAcceptance>
-    onExitScratchlistMode: () => void
+    onSend?: (entry: ScratchlistEntry) => Promise<boolean>
+    onSchedule?: (entry: ScratchlistEntry, pending: PendingSchedule) => Promise<boolean>
     disabled?: boolean
 }) {
-    const assistantApi = useAui()
-    const handlePromoteToComposer = useCallback(async (entry: ScratchlistEntry) => {
-        if (props.disabled) return
-        assistantApi.composer().setText(entry.text)
-        // Exit scratchlist mode before rehydrating attachments so addAttachment
-        // uses the normal chat upload adapter (not the scratchlist hub adapter).
-        flushSync(() => {
-            props.onExitScratchlistMode()
-        })
-        if (entry.attachments && entry.attachments.length > 0) {
-            await rehydrateScratchlistAttachmentsToComposer(
-                props.api,
-                props.sessionId,
-                entry.attachments,
-                assistantApi.composer()
-            )
-        }
-    }, [assistantApi, props.api, props.disabled, props.onExitScratchlistMode, props.sessionId])
-    const handlePromoteToQueue = useCallback(async (entry: ScratchlistEntry) => {
-        if (props.disabled) return false
-        let attachments: AttachmentMetadata[] | undefined
-        if (entry.attachments && entry.attachments.length > 0) {
-            attachments = await stageScratchlistAttachmentsForComposeSend(
-                props.api,
-                props.sessionId,
-                entry.attachments
-            )
-        }
-        // This action is explicitly labelled “Send to queue”. It must retain
-        // that contract even when the Pi session is actively thinking.
-        const accepted = await props.onSend(entry.text, attachments, undefined, 'queue')
-        if (accepted) {
-            props.onExitScratchlistMode()
-        }
-        return Boolean(accepted)
-    }, [props.api, props.disabled, props.onSend, props.onExitScratchlistMode, props.sessionId])
     return (
         <ScratchlistDrawer
             entries={props.entries}
             sessionId={props.sessionId}
             api={props.api}
-            onMove={props.onMove}
+            onUpdate={props.onUpdate}
+            onReorder={props.onReorder}
             onDelete={props.onDelete}
-            onPromoteToComposer={handlePromoteToComposer}
-            onPromoteToQueue={handlePromoteToQueue}
+            onSend={props.onSend}
+            onSchedule={props.onSchedule}
             disabled={props.disabled}
         />
     )
@@ -742,6 +700,63 @@ function SessionChatInner(props: SessionChatProps) {
         },
         [props.onSend, props.api, props.session.id, scratchlist, scratchlistMode],
     )
+
+    const sendScratchlistEntry = useCallback(async (
+        entry: ScratchlistEntry,
+        scheduledAt: number | null,
+    ): Promise<boolean> => {
+        const attachments = stripPreviewUrls(entry.attachments ?? [])
+        const hubItems = attachments.filter((attachment) => isHubScratchlistAttachmentPath(attachment.path))
+        let sendAttachments = attachments
+        if (hubItems.length > 0 && scheduledAt == null) {
+            const normalItems = attachments.filter((attachment) => !isHubScratchlistAttachmentPath(attachment.path))
+            let staged: AttachmentMetadata[]
+            try {
+                staged = await stageScratchlistAttachmentsForComposeSend(
+                    props.api,
+                    props.session.id,
+                    hubItems,
+                )
+            } catch {
+                return false
+            }
+            sendAttachments = [...normalItems, ...staged]
+        }
+
+        const accepted = await props.onSend(
+            entry.text,
+            sendAttachments.length > 0 ? sendAttachments : undefined,
+            scheduledAt,
+            'queue',
+        )
+        if (!accepted) return false
+
+        // Immediate sends copy hub blobs into the CLI upload directory and can
+        // release the scratchlist file right away. Scheduled sends retain the
+        // hub path so the hub can materialize it when the message matures;
+        // deleting the draft is safe because the hub protects pending-message
+        // references from attachment cleanup.
+        if (hubItems.length > 0 && scheduledAt == null) {
+            await Promise.allSettled(
+                hubItems.map((attachment) => props.api.deleteScratchlistAttachment(props.session.id, attachment.id))
+            )
+        }
+        await scratchlist.remove(entry.id)
+        return true
+    }, [props.api, props.onSend, props.session.id, scratchlist])
+
+    const handleSendScratchlistEntry = useCallback(
+        (entry: ScratchlistEntry) => sendScratchlistEntry(entry, null),
+        [sendScratchlistEntry],
+    )
+
+    const handleScheduleScratchlistEntry = useCallback(
+        (entry: ScratchlistEntry, pending: PendingSchedule) => (
+            sendScratchlistEntry(entry, resolvePendingSchedule(pending, Date.now()))
+        ),
+        [sendScratchlistEntry],
+    )
+
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
@@ -1714,10 +1729,11 @@ function SessionChatInner(props: SessionChatProps) {
                                     sessionId={props.session.id}
                                     api={props.api}
                                     entries={scratchlist.entries}
-                                    onMove={scratchlist.move}
+                                    onUpdate={scratchlist.update}
+                                    onReorder={scratchlist.reorder}
                                     onDelete={scratchlist.remove}
-                                    onSend={props.onSend}
-                                    onExitScratchlistMode={() => setScratchlistMode(false)}
+                                    onSend={handleSendScratchlistEntry}
+                                    onSchedule={handleScheduleScratchlistEntry}
                                     disabled={props.isSending || isScratchlistParking}
                                 />
                             ) : null}

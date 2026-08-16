@@ -10,6 +10,7 @@ import {
     RewindConversationRequestSchema,
     SCRATCHLIST_MAX_ENTRIES,
     ScratchlistEntryCreateRequestSchema,
+    ScratchlistReorderRequestSchema,
     ScratchlistEntryUpdateRequestSchema,
     SessionCollaborationModeRequestSchema,
     SessionCopilotAgentModeRequestSchema,
@@ -898,8 +899,8 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
     /*
      * Scratchlist v2 (tiann/hapi#893).
      *
-     * Operator-private notes attached to a session. All four routes use
-     * the existing `requireSessionFromParam` guard so the same auth /
+     * Operator-private notes attached to a session. All session-scoped
+     * routes use the existing `requireSessionFromParam` guard so the same auth /
      * namespace check applies as every other session-scoped route -
      * scratchlist contents must NOT leak across namespaces, and a 403 /
      * 404 is returned for sessions the caller cannot access.
@@ -966,25 +967,44 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Missing attachmentId' }, 400)
         }
 
-        const entries = engine.listScratchlistEntries(sessionResult.sessionId)
-        const match = entries
-            .flatMap((entry) => entry.attachments)
-            .find((att) => att.id === attachmentId)
-        if (!match) {
-            return c.json({ error: 'Attachment not found' }, 404)
-        }
+        try {
+            const entries = engine.listScratchlistEntries(sessionResult.sessionId)
+            const match = entries
+                .flatMap((entry) => entry.attachments)
+                .find((att) => att.id === attachmentId)
+            if (!match) {
+                return c.json({ error: 'Attachment not found' }, 404)
+            }
 
-        const file = await engine.readScratchlistAttachment(match.path)
-        if (!file) {
-            return c.json({ error: 'Attachment file missing' }, 404)
+            const file = await engine.readScratchlistAttachment(match.path)
+            if (!file) {
+                return c.json({ error: 'Attachment file missing' }, 404)
+            }
+            const safeFilename = match.filename
+                .replace(/[\r\n\0"\\]/g, '_')
+                .replace(/[\u0000-\u001f\u007f]/g, '_') || 'attachment'
+            const asciiFilename = safeFilename.replace(/[^\x20-\x7e]/g, '_')
+            const encodedFilename = encodeURIComponent(safeFilename).replace(
+                /['()*]/g,
+                (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+            )
+            return new Response(file.buffer, {
+                headers: {
+                    'Content-Type': match.mimeType,
+                    // Keep the legacy ASCII filename fallback valid for Bun's
+                    // Headers implementation while preserving the real UTF-8
+                    // name for browsers that support RFC 5987.
+                    'Content-Disposition': `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
+                },
+            })
+        } catch (error) {
+            console.error('[Scratchlist] failed to read attachment', {
+                sessionId: sessionResult.sessionId,
+                attachmentId,
+                error: error instanceof Error ? error.stack ?? error.message : String(error),
+            })
+            return c.json({ error: 'Failed to read scratchlist attachment' }, 500)
         }
-        return new Response(file.buffer, {
-            headers: {
-                'Content-Type': match.mimeType,
-                // Defense in depth: metadata may predate resolve-time canonicalize.
-                'Content-Disposition': `inline; filename="${match.filename.replace(/[\r\n\0"\\]/g, '_')}"`,
-            },
-        })
     })
 
     app.get('/sessions/:id/scratchlist', (c) => {
@@ -1075,6 +1095,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             {
                 entryId: parsed.data.entryId,
                 createdAt: parsed.data.createdAt,
+                position: parsed.data.position,
                 attachments: checked.attachments,
             }
         )
@@ -1085,6 +1106,32 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         // canonical row so the migration path can retry idempotently.
         // The web client treats 200-with-existing as success either way.
         return c.json({ entry: result.entry }, result.outcome === 'created' ? 201 : 200)
+    })
+
+    app.put('/sessions/:id/scratchlist/reorder', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = ScratchlistReorderRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
+        }
+
+        const entries = engine.reorderScratchlistEntries(
+            sessionResult.sessionId,
+            parsed.data.entryIds
+        )
+        if (!entries) {
+            return c.json({ error: 'Entry ids must match the session scratchlist exactly' }, 400)
+        }
+        return c.json({ entries })
     })
 
     app.put('/sessions/:id/scratchlist/:entryId', async (c) => {

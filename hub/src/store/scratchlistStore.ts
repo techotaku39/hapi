@@ -7,6 +7,7 @@ import {
     deleteScratchlistEntry,
     getScratchlistEntry,
     listScratchlistEntries,
+    reorderScratchlistEntries,
     sumScratchlistAttachmentBytesForSession,
     transferScratchlistEntries,
     updateScratchlistEntry,
@@ -38,6 +39,7 @@ export class ScratchlistStore {
         options?: {
             entryId?: string
             createdAt?: number
+            position?: number
             attachments?: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
         }
     ): CreateScratchlistResult {
@@ -61,6 +63,10 @@ export class ScratchlistStore {
 
     delete(sessionId: string, entryId: string): boolean {
         return deleteScratchlistEntry(this.db, sessionId, entryId)
+    }
+
+    reorder(sessionId: string, entryIds: string[]): StoredScratchlistEntry[] | null {
+        return reorderScratchlistEntries(this.db, sessionId, entryIds)
     }
 
     /**
