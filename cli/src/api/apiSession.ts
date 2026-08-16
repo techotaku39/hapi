@@ -257,6 +257,7 @@ export class ApiSessionClient extends EventEmitter {
         content: unknown
     }> = []
     private backfillInFlight: Promise<void> | null = null
+    private backfillRetryTimer: ReturnType<typeof setTimeout> | null = null
     private needsBackfill = false
     private hasConnectedOnce = false
     readonly rpcHandlerManager: RpcHandlerManager
@@ -468,8 +469,12 @@ export class ApiSessionClient extends EventEmitter {
                         // it after the Hub has already acknowledged cancellation.
                         this.cancelledMaterializingLocalIds.add(localId)
                         removed = true
-                    } else if (!removed && localId && this.cancelQueuedMessageCallback) {
-                        removed = this.cancelQueuedMessageCallback(localId)
+                    }
+                    if (localId && this.cancelQueuedMessageCallback) {
+                        // A reconnect overlap can leave the same localId in both
+                        // the materialization path and the agent queue. Cancel both
+                        // copies instead of short-circuiting after the first one.
+                        removed = this.cancelQueuedMessageCallback(localId) || removed
                     }
                     ack?.({ removed })
                     return
@@ -889,10 +894,32 @@ export class ApiSessionClient extends EventEmitter {
         try {
             await this.backfillMessages()
             this.needsBackfill = false
+            this.clearBackfillRetry()
         } catch (error) {
             logger.debug('[API] Backfill failed', error)
             this.needsBackfill = true
+            this.scheduleBackfillRetry()
         }
+    }
+
+    private clearBackfillRetry(): void {
+        if (!this.backfillRetryTimer) {
+            return
+        }
+        clearTimeout(this.backfillRetryTimer)
+        this.backfillRetryTimer = null
+    }
+
+    private scheduleBackfillRetry(): void {
+        if (this.backfillRetryTimer || !this.socket.connected || this.isClosed()) {
+            return
+        }
+        this.backfillRetryTimer = setTimeout(() => {
+            this.backfillRetryTimer = null
+            if (this.needsBackfill && this.socket.connected && !this.isClosed()) {
+                void this.backfillIfNeeded()
+            }
+        }, 1_000)
     }
 
     private async backfillMessages(): Promise<void> {
@@ -1605,6 +1632,7 @@ export class ApiSessionClient extends EventEmitter {
         this.materializationRetryAbortController?.abort()
         this.materializationRetryAbortController = null
         this.awaitingMaterializedConnection = false
+        this.clearBackfillRetry()
         this.pendingOutboundEvents.length = 0
         this.materializingLocalIdCounts.clear()
         this.cancelledMaterializingLocalIds.clear()

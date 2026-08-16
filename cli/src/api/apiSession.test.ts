@@ -739,7 +739,7 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
-    it('keeps live messages deferred when a reconnect backfill page fails', async () => {
+    it('automatically retries a failed reconnect backfill while the socket remains connected', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()
         const pageTwoFailure = deferred<{ data: { messages: unknown[] } }>()
@@ -805,12 +805,8 @@ describe('ApiSessionClient incoming user messages', () => {
 
         pageTwoFailure.reject(new Error('temporary backfill failure'))
         await vi.waitFor(() => expect(receivedTexts).toHaveLength(201))
-        await new Promise((resolve) => setTimeout(resolve, 0))
-
-        socket.connected = false
-        socket.trigger('disconnect', 'transport close')
-        socket.triggerConnect()
-        await vi.waitFor(() => expect(pageTwoAttempts).toBe(2))
+        expect(socket.connected).toBe(true)
+        await vi.waitFor(() => expect(pageTwoAttempts).toBe(2), { timeout: 3_000 })
         await vi.waitFor(() => expect(receivedTexts).toHaveLength(203))
         expect(receivedTexts.slice(-3)).toEqual([
             'backfill page one 200',
@@ -1325,6 +1321,82 @@ describe('ApiSessionClient incoming user messages', () => {
         })
         await new Promise((resolve) => setTimeout(resolve, 0))
         expect(onUserMessage).not.toHaveBeenCalled()
+        client.close()
+    })
+
+    it('cancels a prompt present in both deferred and agent-queue paths', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const download = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        const backfill = deferred<{ data: { messages: unknown[] } }>()
+        axiosHarness.get.mockImplementation((url: string) => (
+            url.includes('/messages') ? backfill.promise : download.promise
+        ))
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+        const cancelQueuedMessage = vi.fn(() => true)
+        client.onCancelQueuedMessage(cancelQueuedMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'cursor-message',
+            seq: 1,
+            text: 'establish backfill cursor',
+            sentFrom: 'webapp'
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'materializing-message',
+            localId: 'overlapping-local-id',
+            seq: 2,
+            text: 'do not deliver this materializing prompt',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'slow.txt',
+                mimeType: 'text/plain',
+                size: 4,
+                attachmentId: 'slow-attachment'
+            }]
+        })
+
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledOnce())
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+        await vi.waitFor(() => expect(
+            axiosHarness.get.mock.calls.some(([url]) => String(url).includes('/messages'))
+        ).toBe(true))
+
+        triggerIncomingUserMessage(socket, {
+            id: 'deferred-overlap-message',
+            localId: 'overlapping-local-id',
+            seq: 3,
+            text: 'do not deliver this deferred duplicate',
+            sentFrom: 'webapp'
+        })
+        const ack = vi.fn()
+        socket.trigger('update', {
+            body: {
+                t: 'cancel-queued-message',
+                localId: 'overlapping-local-id'
+            }
+        }, ack)
+        expect(cancelQueuedMessage).toHaveBeenCalledWith('overlapping-local-id')
+        expect(ack).toHaveBeenCalledWith({ removed: true })
+
+        backfill.resolve({ data: { messages: [] } })
+        download.resolve({
+            data: Buffer.from('slow'),
+            headers: {
+                'content-length': '4',
+                'x-hapi-attachment-size': '4'
+            }
+        })
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(onUserMessage).toHaveBeenCalledOnce()
+        expect(onUserMessage.mock.calls[0]?.[0].content.text).toBe('establish backfill cursor')
         client.close()
     })
 })
