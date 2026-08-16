@@ -25,13 +25,14 @@ function renderAttachments(fetchAttachmentBlob: ApiClient['fetchAttachmentBlob']
 }
 
 describe('MessageAttachments', () => {
-    it('falls back to a file card when thumbnail and original fetches fail', async () => {
+    it('does not eagerly fetch the original when the optional thumbnail is unavailable', async () => {
         const fetchAttachmentBlob = vi.fn().mockRejectedValue(new Error('attachment unavailable'))
 
         renderAttachments(fetchAttachmentBlob)
 
         expect(screen.getByText('Loading preview…')).toBeInTheDocument()
-        await waitFor(() => expect(fetchAttachmentBlob).toHaveBeenCalledTimes(2))
+        await waitFor(() => expect(fetchAttachmentBlob).toHaveBeenCalledTimes(1))
+        expect(fetchAttachmentBlob).toHaveBeenCalledWith('session-1', 'attachment-1', 'thumbnail')
         expect(screen.getByText('photo.png')).toBeInTheDocument()
         expect(screen.getByText('2.0 MB')).toBeInTheDocument()
         expect(screen.queryByText('Loading preview…')).not.toBeInTheDocument()

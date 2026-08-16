@@ -110,6 +110,7 @@ describe('SyncEngine.deleteAttachment', () => {
             const deletion = engine.deleteAttachment(session.id, 'default', attachment.id)
             await deleteStarted
             expect(engine.hasAttachment(session.id, 'default', attachment.id)).toBe(false)
+            await expect(engine.readAttachment(session.id, 'default', attachment.id, 'original')).resolves.toBeNull()
             await expect(engine.sendMessage(session.id, { text: 'race', attachments: [metadata] }))
                 .rejects.toThrow('Attachment deletion in progress')
 

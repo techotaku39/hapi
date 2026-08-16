@@ -26,18 +26,10 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
         if (attachmentId && !attachment.previewUrl) {
             void (async () => {
                 try {
-                    let blob: Blob
-                    let isOriginal = false
-                    try {
-                        blob = await props.api.fetchAttachmentBlob(props.sessionId, attachmentId, 'thumbnail')
-                    } catch {
-                        blob = await props.api.fetchAttachmentBlob(props.sessionId, attachmentId, 'original')
-                        isOriginal = true
-                    }
+                    const blob = await props.api.fetchAttachmentBlob(props.sessionId, attachmentId, 'thumbnail')
                     if (cancelled) return
                     const url = URL.createObjectURL(blob)
                     thumbnailUrlRef.current = url
-                    if (isOriginal) originalUrlRef.current = url
                     setThumbnailUrl(url)
                 } catch {
                     if (!cancelled) setPreviewFailed(true)

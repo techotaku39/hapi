@@ -3968,6 +3968,7 @@ export class SyncEngine {
     ) {
         const access = this.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) return null
+        if (this.deletingAttachmentKeys.has(this.attachmentKey(namespace, attachmentId))) return null
         return await this.store.attachments.readForSessionAsync(attachmentId, namespace, access.sessionId, variant)
     }
 
