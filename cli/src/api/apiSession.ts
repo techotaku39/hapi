@@ -441,7 +441,7 @@ export class ApiSessionClient extends EventEmitter {
                 if (!data.body) return
 
                 if (data.body.t === 'new-message') {
-                    if (this.backfillInFlight) {
+                    if (this.backfillInFlight || this.needsBackfill) {
                         this.deferredLiveMessages.push(data.body.message)
                         return
                     }
@@ -900,6 +900,7 @@ export class ApiSessionClient extends EventEmitter {
         }
 
         const limit = 200
+        let backfillSucceeded = false
         const run = async () => {
             try {
                 let cursor = startSeq
@@ -961,17 +962,20 @@ export class ApiSessionClient extends EventEmitter {
                         break
                     }
                 }
+                backfillSucceeded = true
             } finally {
-                // Keep live socket messages behind every fetched backfill page.
-                // Drain repeatedly because another socket event can arrive while
-                // a deferred attachment is materializing.
-                while (this.deferredLiveMessages.length > 0) {
-                    const deferred = this.deferredLiveMessages.splice(0)
-                    await Promise.all(deferred.map((message) => (
-                        this.handleIncomingMessage(message).catch((error) => {
-                            logger.debug('[API] Failed to materialize deferred live attachment', { error })
-                        })
-                    )))
+                if (backfillSucceeded) {
+                    // Keep live socket messages behind every fetched backfill page.
+                    // Drain repeatedly because another socket event can arrive while
+                    // a deferred attachment is materializing.
+                    while (this.deferredLiveMessages.length > 0) {
+                        const deferred = this.deferredLiveMessages.splice(0)
+                        await Promise.all(deferred.map((message) => (
+                            this.handleIncomingMessage(message).catch((error) => {
+                                logger.debug('[API] Failed to materialize deferred live attachment', { error })
+                            })
+                        )))
+                    }
                 }
             }
         }

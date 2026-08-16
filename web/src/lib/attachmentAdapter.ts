@@ -155,7 +155,7 @@ export function createAttachmentAdapter(
                 const content = previewUrl
                     ? base64FromDataUrl(previewUrl)
                     : await fileToBase64(file)
-                const thumbnail = isImageMimeType(contentType)
+                const thumbnail = isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES
                     ? await createThumbnailDataUrl(`data:${contentType};base64,${content}`)
                     : undefined
 

@@ -739,6 +739,87 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('keeps live messages deferred when a reconnect backfill page fails', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const pageTwoFailure = deferred<{ data: { messages: unknown[] } }>()
+        const makeBackfillMessage = (seq: number, text: string) => ({
+            id: `backfilled-${seq}`,
+            seq,
+            createdAt: seq,
+            localId: null,
+            content: {
+                role: 'user',
+                content: { type: 'text', text },
+                meta: { sentFrom: 'webapp' }
+            }
+        })
+        const firstPage = Array.from({ length: 200 }, (_, index) => (
+            makeBackfillMessage(index + 2, `backfill page one ${index + 1}`)
+        ))
+        let pageTwoAttempts = 0
+        axiosHarness.get.mockImplementation((url: string, options?: { params?: { afterSeq?: number } }) => {
+            if (!url.includes('/messages')) {
+                return Promise.resolve({ data: Buffer.from('unused'), headers: {} })
+            }
+            const afterSeq = options?.params?.afterSeq
+            if (afterSeq === 1) {
+                return Promise.resolve({ data: { messages: firstPage } })
+            }
+            if (afterSeq === 201) {
+                pageTwoAttempts += 1
+                if (pageTwoAttempts === 1) return pageTwoFailure.promise
+                return Promise.resolve({
+                    data: { messages: [makeBackfillMessage(202, 'backfill page two')] }
+                })
+            }
+            return Promise.resolve({ data: { messages: [] } })
+        })
+
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const receivedTexts: string[] = []
+        client.onUserMessage((message) => {
+            receivedTexts.push(message.content.text)
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'initial-message',
+            seq: 1,
+            text: 'initial prompt',
+            sentFrom: 'webapp'
+        })
+
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+        await vi.waitFor(() => expect(pageTwoAttempts).toBe(1))
+
+        triggerIncomingUserMessage(socket, {
+            id: 'live-message-after-failed-backfill',
+            seq: 203,
+            text: 'live prompt after failed backfill',
+            sentFrom: 'webapp'
+        })
+        expect(receivedTexts).not.toContain('live prompt after failed backfill')
+
+        pageTwoFailure.reject(new Error('temporary backfill failure'))
+        await vi.waitFor(() => expect(receivedTexts).toHaveLength(201))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+        await vi.waitFor(() => expect(pageTwoAttempts).toBe(2))
+        await vi.waitFor(() => expect(receivedTexts).toHaveLength(203))
+        expect(receivedTexts.slice(-3)).toEqual([
+            'backfill page one 200',
+            'backfill page two',
+            'live prompt after failed backfill'
+        ])
+        client.close()
+    })
+
     it.each(['webapp', 'telegram-bot'] as const)(
         'delivers %s-originated user messages',
         (sentFrom) => {
