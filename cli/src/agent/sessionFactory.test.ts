@@ -236,6 +236,49 @@ describe('bootstrapExistingSession', () => {
         )
     })
 
+    it('clears stale history capabilities before reporting a Codex session as started', async () => {
+        const session = createSession()
+        const existingMetadata = session.metadata
+        if (!existingMetadata) throw new Error('expected test session metadata')
+
+        session.metadata = {
+            ...existingMetadata,
+            capabilities: {
+                terminal: true,
+                conversationHistory: { forkCurrent: true }
+            }
+        }
+        const sessionClient = {
+            updateMetadata: vi.fn()
+        }
+        getSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue(sessionClient)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+
+        const result = await bootstrapExistingSession({
+            sessionId: 'hapi-session-1',
+            flavor: 'codex',
+            workingDirectory: '/tmp/project',
+            metadataOverrides: {
+                capabilities: {
+                    terminal: true,
+                    conversationHistory: undefined
+                }
+            }
+        })
+
+        expect(result.metadata.capabilities).toEqual({ terminal: true })
+        const updateHandler = sessionClient.updateMetadata.mock.calls[0][0]
+        expect(updateHandler(session.metadata).capabilities).toEqual({ terminal: true })
+        expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
+            'hapi-session-1',
+            expect.objectContaining({
+                capabilities: { terminal: true }
+            })
+        )
+    })
+
     it('advertises remote terminal capability in session metadata', () => {
         const metadata = buildSessionMetadata({
             flavor: 'codex',
