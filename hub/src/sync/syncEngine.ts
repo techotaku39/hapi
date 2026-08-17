@@ -604,7 +604,6 @@ export class SyncEngine {
     }
 
     handleSessionReady(payload: { sid: string; time: number }): void {
-        this.handleSessionConnected(payload.sid)
         this.sessionReadyIds.add(payload.sid)
         const session = this.sessionCache.getSession(payload.sid)
         if (session?.metadata?.piResumeAttempt) {

@@ -254,3 +254,30 @@ describe('SyncEngine scratchlist mutations emit session-updated patches', () => 
         engine.stop()
     })
 })
+
+describe('SyncEngine session connection generations', () => {
+    it('does not clear scheduled attachment cache again on session-ready', () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+        const clearCalls: string[] = []
+        const messageService = (engine as unknown as {
+            messageService: {
+                clearScheduledAttachmentDeliveryCache: (sessionId: string) => void
+            }
+        }).messageService
+        messageService.clearScheduledAttachmentDeliveryCache = (sessionId) => {
+            clearCalls.push(sessionId)
+        }
+
+        engine.handleSessionConnected('generation-session')
+        engine.handleSessionReady({ sid: 'generation-session', time: Date.now() })
+
+        expect(clearCalls).toEqual(['generation-session'])
+        engine.stop()
+    })
+})
