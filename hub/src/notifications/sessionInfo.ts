@@ -16,3 +16,12 @@ export function getAgentName(session: Session): string {
     if (!flavor || !isKnownFlavor(flavor)) return 'Agent'
     return getFlavorLabel(flavor)
 }
+
+export function buildSessionUrl(baseUrl: string, sessionId: string): string {
+    try {
+        return new URL(`/sessions/${sessionId}`, baseUrl).toString()
+    } catch {
+        const normalized = baseUrl.replace(/\/+$/, '')
+        return `${normalized}/sessions/${sessionId}`
+    }
+}
