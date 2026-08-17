@@ -408,9 +408,11 @@ describe('SyncEngine session connection generations', () => {
                 reconcileConsumedScheduledAttachments: (sessionId: string) => Promise<void>
             }
         }).messageService
+        let releaseAttempts = 0
         const release = spyOn(messageService, 'releaseConsumedScheduledAttachments')
             .mockImplementation(async () => {
-                throw new Error('temporary cleanup failure')
+                releaseAttempts += 1
+                if (releaseAttempts === 1) throw new Error('temporary cleanup failure')
             })
         const reconcile = spyOn(messageService, 'reconcileConsumedScheduledAttachments')
             .mockResolvedValue(undefined)
@@ -424,10 +426,18 @@ describe('SyncEngine session connection generations', () => {
             })
             await new Promise<void>((resolve) => setTimeout(resolve, 0))
 
+            engine.handleRealtimeEvent({
+                type: 'messages-consumed',
+                sessionId: 'cleanup-retry-session',
+                localIds: [],
+                invokedAt: Date.now(),
+            })
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
             ;(engine as unknown as { expireInactive(): void }).expireInactive()
             await new Promise<void>((resolve) => setTimeout(resolve, 0))
 
-            expect(release).toHaveBeenCalledWith('cleanup-retry-session', [])
+            expect(release).toHaveBeenCalledTimes(2)
             expect(reconcile).toHaveBeenCalledTimes(1)
             expect(reconcile).toHaveBeenCalledWith('cleanup-retry-session')
         } finally {

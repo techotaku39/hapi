@@ -491,9 +491,6 @@ export class SyncEngine {
         if (event.type === 'messages-consumed') {
             void this.messageService
                 .releaseConsumedScheduledAttachments(event.sessionId, event.localIds)
-                .then(() => {
-                    this.consumedAttachmentCleanupRetries.delete(event.sessionId)
-                })
                 .catch((error) => {
                     this.consumedAttachmentCleanupRetries.add(event.sessionId)
                     console.error('[Scratchlist] failed to release scheduled attachments', error)
