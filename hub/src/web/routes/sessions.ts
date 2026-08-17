@@ -1211,12 +1211,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Scratchlist entry not found' }, 404)
         }
         if (removedAttachments.length > 0) {
-            const remainingIds = new Set(
-                engine
-                    .listScratchlistEntries(sessionResult.sessionId)
-                    .flatMap((entry) => entry.attachments.map((att) => att.id))
+            const orphaned = removedAttachments.filter((att) =>
+                engine.canDeleteScratchlistAttachment(sessionResult.sessionId, att)
             )
-            const orphaned = removedAttachments.filter((att) => !remainingIds.has(att.id))
             if (orphaned.length > 0) {
                 void import('../../scratchlistAttachments/storage').then(({ deleteScratchlistAttachmentFiles, getHapiHomeDir }) =>
                     deleteScratchlistAttachmentFiles(getHapiHomeDir(), orphaned)
@@ -1248,6 +1245,12 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({
                 error: 'Attachment is still referenced by a scratchlist entry',
                 code: 'scratchlist_attachment_in_use',
+            }, 409)
+        }
+        if (!engine.canDeleteScratchlistAttachment(sessionResult.sessionId, { id: attachmentId })) {
+            return c.json({
+                error: 'Attachment is still referenced by a scheduled message',
+                code: 'scratchlist_attachment_scheduled',
             }, 409)
         }
 

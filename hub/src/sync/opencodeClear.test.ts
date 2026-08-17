@@ -51,7 +51,7 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             }, null, 'default')
             engine.handleSessionAlive({ sid: source.id, time: Date.now() })
             expect(engine.reserveOpenCodeClearSession(source.id, 'default')).toMatchObject({ type: 'success' })
-            expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).toMatchObject({ type: 'success' })
+            await expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).resolves.toMatchObject({ type: 'success' })
             const abortedMetadata = engine.getSessionByNamespace(source.id, 'default')!.metadata!
             engine.handleSessionEnd({ sid: source.id, time: Date.now(), reason: 'error' })
             const ended = store.sessions.getSessionByNamespace(source.id, 'default')!
@@ -149,6 +149,119 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', source.id)).toBe(0)
             expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', reserved.sessionId))
                 .toBe('scheduled-image'.length)
+        } finally {
+            engine.stop()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
+    it('retries clear-abort attachment re-homing after a failed filesystem move', async () => {
+        const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-clear-abort-retry-'))
+        const badHome = join(tmpdir(), `hapi-clear-abort-not-a-directory-${Date.now()}`)
+        writeFileSync(badHome, 'not a directory')
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const { store, engine } = createEngine()
+        try {
+            const source = engine.getOrCreateSession('clear-abort-rehome-retry', {
+                path: '/tmp/project', host: 'host', machineId: 'machine-1', flavor: 'opencode', startedBy: 'runner'
+            }, null, 'default')
+            engine.handleSessionAlive({ sid: source.id, time: Date.now() })
+            const reserved = engine.reserveOpenCodeClearSession(source.id, 'default')
+            if (reserved.type !== 'success') throw new Error('reservation failed')
+
+            const { writeScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                source.id,
+                'retry.png',
+                'image/png',
+                Buffer.from('retry-image')
+            )
+            await engine.sendMessage(source.id, {
+                text: 're-home after abort',
+                localId: 'clear-abort-rehome-retry',
+                scheduledAt: Date.now() + 60_000,
+                attachments: [attachment]
+            })
+
+            process.env.HAPI_HOME = badHome
+            const first = await engine.abortOpenCodeClearSession(source.id, 'default', reserved.sessionId)
+            expect(first).toMatchObject({ type: 'error', code: 'replacement_link_failed' })
+
+            process.env.HAPI_HOME = hapiHome
+            const second = await engine.abortOpenCodeClearSession(source.id, 'default', reserved.sessionId)
+            expect(second).toEqual({ type: 'success', sessionId: source.id })
+            const restored = store.messages.getAllMessages(source.id)[0]
+            const restoredAttachment = (restored?.content as {
+                content?: { attachments?: Array<{ path: string }> }
+            }).content?.attachments?.[0]
+            expect(restoredAttachment?.path).toContain(`/${source.id}/`)
+        } finally {
+            engine.stop()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+            rmSync(badHome, { force: true })
+        }
+    })
+
+    it('cleans staged uploads when a later scheduled attachment fails', async () => {
+        const { mkdtempSync, rmSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-scheduled-materialize-cleanup-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const { engine } = createEngine()
+        try {
+            const session = engine.getOrCreateSession('scheduled-materialize-cleanup', {
+                path: '/tmp/project', host: 'host', machineId: 'machine-1', flavor: 'opencode'
+            }, null, 'default')
+            const { writeScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
+            const first = await writeScratchlistAttachmentFile(
+                hapiHome, 'default', session.id, 'first.png', 'image/png', Buffer.from('first')
+            )
+            const second = await writeScratchlistAttachmentFile(
+                hapiHome, 'default', session.id, 'second.png', 'image/png', Buffer.from('second')
+            )
+            const deletedPaths: string[] = []
+            let uploadCount = 0
+            const rpcGateway = (engine as unknown as {
+                rpcGateway: {
+                    uploadFile: (sessionId: string, filename: string, content: string, mimeType: string) => Promise<{
+                        success: boolean
+                        path?: string
+                        error?: string
+                    }>
+                    deleteUploadFile: (sessionId: string, path: string) => Promise<{ success: boolean; error?: string }>
+                }
+            }).rpcGateway
+            rpcGateway.uploadFile = async () => {
+                uploadCount += 1
+                return uploadCount === 1
+                    ? { success: true, path: '/cli/first-staged.png' }
+                    : { success: false, error: 'second upload failed' }
+            }
+            rpcGateway.deleteUploadFile = async (_sessionId, path) => {
+                deletedPaths.push(path)
+                return { success: true }
+            }
+            const materialize = (engine as unknown as {
+                materializeScheduledAttachments: (
+                    sessionId: string,
+                    attachments: Array<typeof first>,
+                ) => Promise<Array<typeof first>>
+            }).materializeScheduledAttachments.bind(engine)
+
+            await expect(materialize(session.id, [first, second])).rejects.toThrow('second upload failed')
+            expect(deletedPaths).toEqual(['/cli/first-staged.png'])
         } finally {
             engine.stop()
             if (previousHome === undefined) delete process.env.HAPI_HOME
@@ -441,7 +554,7 @@ describe('SyncEngine.clearOpenCodeSession', () => {
         } finally { engine.stop() }
     })
 
-    it('rejects a delayed cleanup-failure abort after cleanup confirmation', () => {
+    it('rejects a delayed cleanup-failure abort after cleanup confirmation', async () => {
         const { engine } = createEngine()
         try {
             const source = engine.getOrCreateSession('abort-after-confirm', {
@@ -450,7 +563,7 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             engine.handleSessionAlive({ sid: source.id, time: Date.now() })
             expect(engine.reserveOpenCodeClearSession(source.id, 'default')).toMatchObject({ type: 'success' })
             expect(engine.confirmOpenCodeClearCleanup(source.id, 'default', currentReplacementId(engine, source.id))).toMatchObject({ type: 'success' })
-            expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).toMatchObject({ type: 'error' })
+            await expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).resolves.toMatchObject({ type: 'error' })
             expect(engine.getSessionByNamespace(source.id, 'default')?.metadata?.opencodeClearOperation?.state).toBe('cleanup-confirmed')
         } finally { engine.stop() }
     })
@@ -523,15 +636,15 @@ describe('SyncEngine.clearOpenCodeSession', () => {
                 }
                 return result
             }) as typeof store.abortOpenCodeClearOperation
-            expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).toEqual({ type: 'success', sessionId: source.id })
-            expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).toEqual({ type: 'success', sessionId: source.id })
+            await expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).resolves.toEqual({ type: 'success', sessionId: source.id })
+            await expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).resolves.toEqual({ type: 'success', sessionId: source.id })
             expect(store.messages.getAllMessages(source.id)).toEqual([
                 expect.objectContaining({ localId: 'restore-once', invokedAt: null })
             ])
         } finally { engine.stop() }
     })
 
-    it.each(['confirm', 'abort'] as const)('does not let delayed reservation A %s mutate reservation B', (callback) => {
+    it.each(['confirm', 'abort'] as const)('does not let delayed reservation A %s mutate reservation B', async (callback) => {
         const { engine } = createEngine()
         try {
             const source = engine.getOrCreateSession(`stale-a-${callback}`, {
@@ -540,12 +653,12 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             engine.handleSessionAlive({ sid: source.id, time: Date.now() })
             const first = engine.reserveOpenCodeClearSession(source.id, 'default')
             if (first.type !== 'success') throw new Error('first reservation failed')
-            expect(engine.abortOpenCodeClearSession(source.id, 'default', first.sessionId)).toMatchObject({ type: 'success' })
+            await expect(engine.abortOpenCodeClearSession(source.id, 'default', first.sessionId)).resolves.toMatchObject({ type: 'success' })
             const second = engine.reserveOpenCodeClearSession(source.id, 'default')
             if (second.type !== 'success') throw new Error('second reservation failed')
             const result = callback === 'confirm'
                 ? engine.confirmOpenCodeClearCleanup(source.id, 'default', first.sessionId)
-                : engine.abortOpenCodeClearSession(source.id, 'default', first.sessionId)
+                : await engine.abortOpenCodeClearSession(source.id, 'default', first.sessionId)
             expect(result).toMatchObject({ type: 'error' })
             expect(engine.getSessionByNamespace(source.id, 'default')?.metadata?.opencodeClearOperation).toMatchObject({
                 replacementSessionId: second.sessionId,
@@ -566,7 +679,7 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             await engine.sendMessage(source.id, { text: 'held', localId: 'held' })
             expect(store.messages.getAllMessages(reserved.sessionId)).toHaveLength(1)
             expect(store.isOpenCodeClearDeliveryGated(reserved.sessionId)).toBe(true)
-            expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).toEqual({ type: 'success', sessionId: source.id })
+            await expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).resolves.toEqual({ type: 'success', sessionId: source.id })
             expect(store.isOpenCodeClearDeliveryGated(reserved.sessionId)).toBe(false)
             expect(store.messages.getAllMessages(source.id).map((m) => m.localId)).toEqual(['held'])
             expect(engine.getSessionByNamespace(source.id, 'default')?.metadata?.opencodeClearOperation?.state).toBe('aborted')
@@ -605,7 +718,7 @@ describe('SyncEngine.clearOpenCodeSession', () => {
         } finally { engine.stop() }
     })
 
-    it('re-reserves an aborted operation with a fresh durable identity', () => {
+    it('re-reserves an aborted operation with a fresh durable identity', async () => {
         const { engine } = createEngine()
         try {
             const source = engine.getOrCreateSession('retry-clear-source', {
@@ -614,7 +727,7 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             engine.handleSessionAlive({ sid: source.id, time: Date.now() })
             const first = engine.reserveOpenCodeClearSession(source.id, 'default')
             if (first.type !== 'success') throw new Error('reservation failed')
-            expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).toMatchObject({ type: 'success' })
+            await expect(engine.abortOpenCodeClearSession(source.id, 'default', currentReplacementId(engine, source.id))).resolves.toMatchObject({ type: 'success' })
             const second = engine.reserveOpenCodeClearSession(source.id, 'default')
             expect(second).toMatchObject({ type: 'success', sessionId: expect.any(String) })
             if (second.type !== 'success') throw new Error('re-reservation failed')

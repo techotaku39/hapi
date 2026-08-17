@@ -65,6 +65,23 @@ import { rehomeMessageAttachments } from './messageAttachmentTransfer'
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
 
+function messageReferencesScratchlistAttachment(
+    content: unknown,
+    attachment: Pick<AttachmentMetadata, 'id'> & Partial<Pick<AttachmentMetadata, 'path'>>,
+): boolean {
+    if (content === null || typeof content !== 'object' || Array.isArray(content)) return false
+    const nested = (content as { content?: unknown }).content
+    if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) return false
+    const attachments = (nested as { attachments?: unknown }).attachments
+    if (!Array.isArray(attachments)) return false
+    return attachments.some((candidate) => {
+        if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return false
+        const value = candidate as { id?: unknown; path?: unknown }
+        return value.id === attachment.id
+            || (attachment.path !== undefined && value.path === attachment.path)
+    })
+}
+
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
 export type { SyncEventListener } from './eventPublisher'
@@ -584,7 +601,7 @@ export class SyncEngine {
         if (before?.metadata?.opencodeClearOperation?.state === 'reserved' && payload.reason !== 'cleared') {
             const operation = before.metadata.opencodeClearOperation
             if (this.transitionClearOperation(payload.sid, before.namespace, operation, 'abort-needed')) {
-                this.abortOpenCodeClearSession(payload.sid, before.namespace, operation.replacementSessionId, 'abort-needed')
+                void this.abortOpenCodeClearSession(payload.sid, before.namespace, operation.replacementSessionId, 'abort-needed')
             }
         }
         const ownsPiAttempt = before?.metadata?.piResumeAttempt !== undefined
@@ -805,6 +822,26 @@ export class SyncEngine {
         }))
     }
 
+    canDeleteScratchlistAttachment(
+        sessionId: string,
+        attachment: Pick<AttachmentMetadata, 'id'> & Partial<Pick<AttachmentMetadata, 'path'>>,
+    ): boolean {
+        const stillInScratchlist = this.store.scratchlist.list(sessionId).some((entry) =>
+            entry.attachments.some((candidate) =>
+                candidate.id === attachment.id || candidate.path === attachment.path
+            )
+        )
+        if (stillInScratchlist) return false
+        if (attachment.path !== undefined
+            && this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)) {
+            return false
+        }
+        return !this.store.messages.getAllMessages(sessionId).some((message) => (
+            message.invokedAt === null
+            && messageReferencesScratchlistAttachment(message.content, attachment)
+        ))
+    }
+
     deleteScratchlistEntry(sessionId: string, entryId: string): boolean {
         const existing = this.store.scratchlist.get(sessionId, entryId)
         const removed = this.store.scratchlist.delete(sessionId, entryId)
@@ -817,9 +854,7 @@ export class SyncEngine {
                     .flatMap((entry) => entry.attachments.map((att) => att.id))
             )
             const orphaned = existing.attachments.filter((att) => !remainingIds.has(att.id))
-            const deletable = orphaned.filter(
-                (att) => !this.store.messages.hasUninvokedAttachmentReference(sessionId, att.path)
-            )
+            const deletable = orphaned.filter((att) => this.canDeleteScratchlistAttachment(sessionId, att))
             if (deletable.length > 0) {
                 void import('../scratchlistAttachments/storage').then(({ deleteScratchlistAttachmentFiles, getHapiHomeDir }) =>
                     deleteScratchlistAttachmentFiles(getHapiHomeDir(), deletable)
@@ -935,6 +970,7 @@ export class SyncEngine {
         namespace: string,
         attachmentId: string
     ): Promise<boolean> {
+        if (!this.canDeleteScratchlistAttachment(sessionId, { id: attachmentId })) return false
         const {
             deleteScratchlistAttachmentById: deleteById,
             getHapiHomeDir,
@@ -990,21 +1026,37 @@ export class SyncEngine {
 
         const { getHapiHomeDir, readScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
         const materialized: AttachmentMetadata[] = []
-        for (const attachment of checked.attachments) {
-            const read = await readScratchlistAttachmentFile(getHapiHomeDir(), attachment.path)
-            if (!read) throw new Error(`Scheduled attachment file missing: ${attachment.filename}`)
-            const uploaded = await this.rpcGateway.uploadFile(
-                sessionId,
-                attachment.filename,
-                read.buffer.toString('base64'),
-                attachment.mimeType,
-            )
-            if (!uploaded.success || !uploaded.path) {
-                throw new Error(uploaded.error ?? `Failed to stage scheduled attachment: ${attachment.filename}`)
+        const stagedPaths: string[] = []
+        try {
+            for (const attachment of checked.attachments) {
+                const read = await readScratchlistAttachmentFile(getHapiHomeDir(), attachment.path)
+                if (!read) throw new Error(`Scheduled attachment file missing: ${attachment.filename}`)
+                const uploaded = await this.rpcGateway.uploadFile(
+                    sessionId,
+                    attachment.filename,
+                    read.buffer.toString('base64'),
+                    attachment.mimeType,
+                )
+                if (!uploaded.success || !uploaded.path) {
+                    throw new Error(uploaded.error ?? `Failed to stage scheduled attachment: ${attachment.filename}`)
+                }
+                stagedPaths.push(uploaded.path)
+                materialized.push({ ...attachment, path: uploaded.path })
             }
-            materialized.push({ ...attachment, path: uploaded.path })
+            return materialized
+        } catch (error) {
+            await Promise.allSettled(stagedPaths.map(async (path) => {
+                try {
+                    const deleted = await this.rpcGateway.deleteUploadFile(sessionId, path)
+                    if (!deleted.success) {
+                        console.error(`[Scratchlist] failed to clean staged attachment ${path}: ${deleted.error ?? 'unknown error'}`)
+                    }
+                } catch (cleanupError) {
+                    console.error(`[Scratchlist] failed to clean staged attachment ${path}`, cleanupError)
+                }
+            }))
+            throw error
         }
-        return materialized
     }
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
@@ -1071,7 +1123,7 @@ export class SyncEngine {
             if (session.active || !operation) continue
             if (operation.state === 'reserved') continue
             if (operation.state === 'abort-needed') {
-                this.abortOpenCodeClearSession(session.id, session.namespace, operation.replacementSessionId, 'abort-needed')
+                await this.abortOpenCodeClearSession(session.id, session.namespace, operation.replacementSessionId, 'abort-needed')
                 continue
             }
             if (!['cleanup-confirmed', 'finalizing', 'pending', 'failed'].includes(operation.state)) continue
@@ -2139,21 +2191,35 @@ export class SyncEngine {
         return { type: 'success', sessionId: operation.replacementSessionId }
     }
 
-    abortOpenCodeClearSession(
+    async abortOpenCodeClearSession(
         sessionId: string,
         namespace: string,
         replacementSessionId: string,
         expectedState: 'reserved' | 'abort-needed' = 'reserved',
         requireInactive: boolean = false
-    ): ClearOpencodeSessionResult {
+    ): Promise<ClearOpencodeSessionResult> {
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) return { type: 'error', message: 'Session not found', code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found' }
         const operation = access.session.metadata?.opencodeClearOperation
         if (!operation) return { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
         if (operation.state === 'aborted') {
-            return replacementSessionId === operation.replacementSessionId
-                ? { type: 'success', sessionId }
-                : { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
+            if (replacementSessionId !== operation.replacementSessionId) {
+                return { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
+            }
+            try {
+                // A previous attempt may have committed the database move
+                // before the filesystem re-home failed. Retry that re-home
+                // even though the durable operation is already aborted.
+                await rehomeMessageAttachments(
+                    this.store,
+                    namespace,
+                    operation.replacementSessionId,
+                    sessionId,
+                )
+                return { type: 'success', sessionId }
+            } catch {
+                return { type: 'error', message: 'Could not restore clear attachments', code: 'replacement_link_failed' }
+            }
         }
         const required = { replacementSessionId, state: expectedState, requireInactive }
         for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2162,7 +2228,17 @@ export class SyncEngine {
             const current = latest.metadata.opencodeClearOperation
             if (!current) break
             if (current.replacementSessionId === required.replacementSessionId && current.state === 'aborted') {
-                return { type: 'success', sessionId }
+                try {
+                    await rehomeMessageAttachments(
+                        this.store,
+                        namespace,
+                        current.replacementSessionId,
+                        sessionId,
+                    )
+                    return { type: 'success', sessionId }
+                } catch {
+                    return { type: 'error', message: 'Could not restore clear attachments', code: 'replacement_link_failed' }
+                }
             }
             if ((required.requireInactive && latest.active)
                 || current.replacementSessionId !== required.replacementSessionId
@@ -2174,16 +2250,18 @@ export class SyncEngine {
             }, latest.metadataVersion, namespace, required)
             if (result.result === 'success') {
                 this.sessionCache.refreshSession(sessionId)
-                void rehomeMessageAttachments(
-                    this.store,
-                    namespace,
-                    current.replacementSessionId,
-                    sessionId,
-                    sourceMessages,
-                ).catch((error) => {
-                    console.error('[Scratchlist] failed to rehome clear-abort attachments', error)
-                })
-                return { type: 'success', sessionId }
+                try {
+                    await rehomeMessageAttachments(
+                        this.store,
+                        namespace,
+                        current.replacementSessionId,
+                        sessionId,
+                        sourceMessages,
+                    )
+                    return { type: 'success', sessionId }
+                } catch {
+                    return { type: 'error', message: 'Could not restore clear attachments', code: 'replacement_link_failed' }
+                }
             }
             if (result.result !== 'version-mismatch') break
             this.sessionCache.refreshSession(sessionId)
@@ -2907,9 +2985,9 @@ export class SyncEngine {
         try {
             const status = await this.rpcGateway.stopRunnerSession(machineId, session.id)
             if (status === 'still_alive') return false
-            return this.abortOpenCodeClearSession(
+            return (await this.abortOpenCodeClearSession(
                 session.id, namespace, operation.replacementSessionId, 'reserved', true
-            ).type === 'success'
+            )).type === 'success'
         } catch {
             return false
         }

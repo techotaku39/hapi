@@ -68,7 +68,9 @@ type EngineOverrides = Partial<{
     reorderScratchlistEntries: SyncEngine['reorderScratchlistEntries']
     updateScratchlistEntry: SyncEngine['updateScratchlistEntry']
     deleteScratchlistEntry: SyncEngine['deleteScratchlistEntry']
+    deleteScratchlistAttachmentById: SyncEngine['deleteScratchlistAttachmentById']
     readScratchlistAttachment: SyncEngine['readScratchlistAttachment']
+    canDeleteScratchlistAttachment: SyncEngine['canDeleteScratchlistAttachment']
     sessionAccess: 'ok' | 'not-found' | 'wrong-namespace'
     callerNamespace: string
 }>
@@ -112,13 +114,14 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
             })),
         deleteScratchlistEntry: overrides.deleteScratchlistEntry ?? (() => true),
         readScratchlistAttachment: overrides.readScratchlistAttachment ?? (async () => null),
+        canDeleteScratchlistAttachment: overrides.canDeleteScratchlistAttachment ?? (() => true),
         resolveScratchlistAttachmentsForSession: async (
             _sessionId: string,
             _namespace: string,
             claimed: Array<{ id: string; filename: string; mimeType: string; size: number; path: string }>
         ) => ({ ok: true as const, attachments: claimed }),
         sumScratchlistAttachmentBytesOnDisk: async () => 0,
-        deleteScratchlistAttachmentById: async () => true,
+        deleteScratchlistAttachmentById: overrides.deleteScratchlistAttachmentById ?? (async () => true),
         } as unknown as SyncEngine
 
     const app = new Hono<WebAppEnv>()
@@ -527,6 +530,27 @@ describe('PUT /api/sessions/:id/scratchlist/:entryId', () => {
             body: JSON.stringify({ text: 'cross-ns' })
         })
         expect(res.status).toBe(403)
+    })
+})
+
+describe('DELETE /api/sessions/:id/scratchlist/attachments/:attachmentId', () => {
+    it('returns 409 when an uninvoked scheduled message still references the attachment', async () => {
+        const session = createSession()
+        let deleteCalled = false
+        const app = createApp(session, {
+            canDeleteScratchlistAttachment: () => false,
+            deleteScratchlistAttachmentById: async () => {
+                deleteCalled = true
+                return true
+            },
+        })
+        const res = await app.request(
+            '/api/sessions/session-1/scratchlist/attachments/11111111-1111-4111-8111-111111111111',
+            { method: 'DELETE' },
+        )
+        expect(res.status).toBe(409)
+        expect(await res.json()).toMatchObject({ code: 'scratchlist_attachment_scheduled' })
+        expect(deleteCalled).toBe(false)
     })
 })
 
