@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
@@ -312,6 +315,57 @@ describe('SyncEngine scratchlist mutations emit session-updated patches', () => 
 })
 
 describe('SyncEngine session connection generations', () => {
+    it('reconciles consumed scheduled Hub attachments when the engine starts', async () => {
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-reconcile-consumed-startup-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const store = new Store(':memory:')
+        let engine: SyncEngine | undefined
+        try {
+            const session = store.sessions.getOrCreateSession(
+                'reconcile-consumed-startup',
+                { path: '/tmp', host: 'localhost', flavor: 'codex' },
+                null,
+                'default',
+            )
+            const { sumScratchlistAttachmentBytesOnDisk, writeScratchlistAttachmentFile } =
+                await import('../scratchlistAttachments/storage')
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                session.id,
+                'consumed.png',
+                'image/png',
+                Buffer.from('consumed'),
+            )
+            const message = store.messages.addMessage(
+                session.id,
+                { role: 'user', content: { type: 'text', text: 'consumed', attachments: [attachment] } },
+                'reconcile-consumed-startup',
+                Date.now() - 1_000,
+            )
+            store.messages.markMessagesInvoked(session.id, [message.localId!], Date.now())
+
+            engine = new SyncEngine(
+                store,
+                {} as never,
+                new RpcRegistry(),
+                { broadcast() {} } as never,
+            )
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+                if (await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', session.id) === 0) break
+                await new Promise<void>((resolve) => setTimeout(resolve, 10))
+            }
+            expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', session.id)).toBe(0)
+        } finally {
+            engine?.stop()
+            store.close()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
     it('does not clear scheduled attachment cache again on session-ready', () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(

@@ -168,6 +168,8 @@ export class MessageService {
     private readonly scheduledMatureNotifiedLocalIds = new Set<string>()
     /** CLI upload paths are session-scoped; reuse them until the CLI session ends. */
     private readonly scheduledAttachmentDeliveryCache = new Map<string, AttachmentMetadata[]>()
+    /** In-flight materialization results from a previous CLI connection are stale after reconnect. */
+    private readonly scheduledAttachmentDeliveryGenerations = new Map<string, number>()
     /** A deferred materialization has not emitted its row to the CLI yet. */
     private readonly materializingScheduledMessageKeys = new Set<string>()
     /** Keep mature delivery FIFO per session without blocking unrelated sessions. */
@@ -187,10 +189,26 @@ export class MessageService {
     }
 
     clearScheduledAttachmentDeliveryCache(sessionId: string): void {
+        this.scheduledAttachmentDeliveryGenerations.set(
+            sessionId,
+            (this.scheduledAttachmentDeliveryGenerations.get(sessionId) ?? 0) + 1,
+        )
         for (const messageId of this.scheduledAttachmentDeliveryCache.keys()) {
             if (messageId.startsWith(`${sessionId}:`)) {
                 this.scheduledAttachmentDeliveryCache.delete(messageId)
             }
+        }
+    }
+
+    private async cleanupMaterializedScheduledAttachments(
+        sessionId: string,
+        attachments: AttachmentMetadata[],
+    ): Promise<void> {
+        if (!this.options.deleteMaterializedScheduledAttachments || attachments.length === 0) return
+        try {
+            await this.options.deleteMaterializedScheduledAttachments(sessionId, attachments)
+        } catch (error) {
+            console.error('[Scratchlist] failed to clean cancelled scheduled uploads', error)
         }
     }
 
@@ -230,6 +248,12 @@ export class MessageService {
     async releaseConsumedScheduledAttachments(sessionId: string, localIds: string[]): Promise<void> {
         if (localIds.length === 0) return
         const messages = this.store.messages.getMessagesByLocalIds(sessionId, localIds)
+        await this.releaseScheduledAttachments(sessionId, messages)
+    }
+
+    async reconcileConsumedScheduledAttachments(sessionId: string): Promise<void> {
+        const messages = this.store.messages.getAllMessages(sessionId)
+            .filter((message) => message.scheduledAt !== null && message.invokedAt !== null)
         await this.releaseScheduledAttachments(sessionId, messages)
     }
 
@@ -980,7 +1004,13 @@ export class MessageService {
         let deliveryAttachments = this.scheduledAttachmentDeliveryCache.get(cacheKey)
         if (!deliveryAttachments) {
             if (!this.options.materializeScheduledAttachments) return null
-            deliveryAttachments = await this.options.materializeScheduledAttachments(msg.sessionId, attachments)
+            const generation = this.scheduledAttachmentDeliveryGenerations.get(msg.sessionId) ?? 0
+            const materialized = await this.options.materializeScheduledAttachments(msg.sessionId, attachments)
+            if ((this.scheduledAttachmentDeliveryGenerations.get(msg.sessionId) ?? 0) !== generation) {
+                await this.cleanupMaterializedScheduledAttachments(msg.sessionId, materialized)
+                return null
+            }
+            deliveryAttachments = materialized
             this.scheduledAttachmentDeliveryCache.set(cacheKey, deliveryAttachments)
         }
         return contentForDeferredDelivery(
@@ -1075,13 +1105,7 @@ export class MessageService {
                     if (current.status !== 'queued') {
                         const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
                         this.scheduledAttachmentDeliveryCache.delete(materializingKey)
-                        if (staged && this.options.deleteMaterializedScheduledAttachments) {
-                            try {
-                                await this.options.deleteMaterializedScheduledAttachments(sessionId, staged)
-                            } catch (error) {
-                                console.error('[Scratchlist] failed to clean cancelled scheduled uploads', error)
-                            }
-                        }
+                        if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
                         continue
                     }
                 } finally {

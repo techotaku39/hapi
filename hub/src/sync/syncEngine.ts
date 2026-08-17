@@ -210,6 +210,8 @@ export class SyncEngine {
     private readonly piUnexpectedTempOriginalIds = new Map<string, string>()
     /** Serialize scratchlist uploads per session so disk-byte caps cannot race. */
     private readonly scratchlistUploadTails = new Map<string, Promise<unknown>>()
+    /** Prevent overlapping startup/periodic scheduled-attachment reconciliation scans. */
+    private consumedAttachmentReconciliationInFlight = false
     /** Coalesce duplicate clear requests so retries cannot spawn two fresh sessions. */
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
@@ -282,6 +284,7 @@ export class SyncEngine {
         this.titleSuggestionService = createTitleSuggestionService(store)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.reloadAll()
+        this.reconcileConsumedScheduledAttachments()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
 
@@ -1281,7 +1284,24 @@ export class SyncEngine {
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         void this.messageService.releaseMatureScheduledMessages(Date.now(), this.historyActionsInFlight)
+        this.reconcileConsumedScheduledAttachments()
         void this.reconcileOpenCodeClears()
+    }
+
+    private reconcileConsumedScheduledAttachments(): void {
+        if (this.consumedAttachmentReconciliationInFlight) return
+        this.consumedAttachmentReconciliationInFlight = true
+        void (async () => {
+            try {
+                for (const session of this.store.sessions.getSessions()) {
+                    await this.messageService.reconcileConsumedScheduledAttachments(session.id)
+                }
+            } catch (error) {
+                console.error('[Scratchlist] failed to reconcile consumed scheduled attachments', error)
+            } finally {
+                this.consumedAttachmentReconciliationInFlight = false
+            }
+        })()
     }
 
     private async reconcileOpenCodeClears(): Promise<void> {

@@ -1284,6 +1284,105 @@ describe('MessageService.sendMessage with scheduledAt', () => {
             .toEqual(['/tmp/materialized-1.png', '/tmp/materialized-2.png'])
     })
 
+    it('discards materialization that completes after a reconnect generation reset', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-reconnect-inflight')
+        const cliEmitted: unknown[] = []
+        const deletedPaths: string[] = []
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    }
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } }
+            })
+        } as unknown as Server
+        let materializeStarted!: () => void
+        const started = new Promise<void>((resolve) => { materializeStarted = resolve })
+        let resolveMaterialization!: (attachments: AttachmentMetadata[]) => void
+        const materialized = new Promise<AttachmentMetadata[]>((resolve) => {
+            resolveMaterialization = resolve
+        })
+        const service = new MessageService(
+            store,
+            io,
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => {
+                    materializeStarted()
+                    await materialized
+                    return attachments.map((attachment) => ({
+                        ...attachment,
+                        path: '/tmp/stale-generation.png',
+                    }))
+                },
+                deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedPaths.push(...attachments.map((attachment) => attachment.path))
+                },
+            },
+        )
+        store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'reconnect while uploading',
+                    attachments: [{
+                        id: 'att-reconnect-inflight',
+                        filename: 'image.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path: 'hapi-hub:scratchlist/default/sched-reconnect-inflight/att.png'
+                    }]
+                }
+            },
+            'local-reconnect-inflight',
+            Date.now() - 1_000,
+        )
+
+        const release = service.releaseMatureScheduledMessages(Date.now())
+        await started
+        service.clearScheduledAttachmentDeliveryCache(session.id)
+        resolveMaterialization([])
+        await release
+
+        expect(cliEmitted).toHaveLength(0)
+        expect(deletedPaths).toEqual(['/tmp/stale-generation.png'])
+    })
+
+    it('reconciles consumed scheduled attachments without relying on a localId event', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-reconcile-consumed')
+        const attachment = makeHubScratchlistAttachment(session.id, 'reconcile-consumed')
+        const message = store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'reconcile me', attachments: [attachment] } },
+            'local-reconcile-consumed',
+            Date.now() - 1_000,
+        )
+        store.messages.markMessagesInvoked(session.id, [message.localId!], Date.now())
+        const deletedPaths: string[] = []
+        const service = new MessageService(
+            store,
+            makeIo(() => {}),
+            makePublisher() as any,
+            undefined,
+            {
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedPaths.push(...attachments.map((candidate) => candidate.path))
+                },
+            },
+        )
+
+        await service.reconcileConsumedScheduledAttachments(session.id)
+
+        expect(deletedPaths).toEqual([attachment.path])
+    })
+
     it('keeps later mature messages behind a failed attachment materialization', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-fifo-materialize')
