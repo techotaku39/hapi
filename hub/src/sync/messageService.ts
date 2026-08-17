@@ -174,21 +174,44 @@ export class MessageService {
         }
     }
 
-    async releaseConsumedScheduledAttachments(sessionId: string, localIds: string[]): Promise<void> {
-        if (!this.options.deleteScheduledAttachments || localIds.length === 0) return
-        const messages = this.store.messages.getMessagesByLocalIds(sessionId, localIds)
+    private async releaseScheduledAttachments(
+        sessionId: string,
+        messages: StoredMessageForDelivery[],
+    ): Promise<void> {
+        if (!this.options.deleteScheduledAttachments || messages.length === 0) return
         for (const message of messages) {
             this.scheduledAttachmentDeliveryCache.delete(`${sessionId}:${message.id}`)
         }
         const attachments = messages
+            .filter((message) => message.scheduledAt !== null)
             .flatMap((message) => getUserMessageAttachments(message.content))
             .filter((attachment) => isHubScratchlistAttachmentPath(attachment.path))
         const unique = new Map(attachments.map((attachment) => [attachment.path, attachment]))
+        const scratchlistPaths = new Set(
+            this.store.scratchlist
+                .list(sessionId)
+                .flatMap((entry) => entry.attachments.map((attachment) => attachment.path))
+        )
         const deletable = [...unique.values()].filter(
             (attachment) => !this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)
+                && !scratchlistPaths.has(attachment.path)
         )
         if (deletable.length === 0) return
         await this.options.deleteScheduledAttachments(sessionId, deletable)
+    }
+
+    async releaseConsumedScheduledAttachments(sessionId: string, localIds: string[]): Promise<void> {
+        if (localIds.length === 0) return
+        const messages = this.store.messages.getMessagesByLocalIds(sessionId, localIds)
+        await this.releaseScheduledAttachments(sessionId, messages)
+    }
+
+    private async releaseCancelledScheduledAttachment(
+        sessionId: string,
+        message: StoredMessageForDelivery,
+    ): Promise<void> {
+        if (message.scheduledAt === null) return
+        await this.releaseScheduledAttachments(sessionId, [message])
     }
 
     private forgetScheduledMatureNotified(localIds: Iterable<string>): void {
@@ -449,8 +472,8 @@ export class MessageService {
         }
     }
 
-    /** CLI reconnect backfill — excludes future-scheduled rows so the runner does
-     *  not consume them ahead of their scheduled_at.  See messages.ts:getDeliverableMessagesAfter. */
+    /** CLI reconnect backfill — excludes every scheduled row so the mature scan
+     *  remains the sole scheduled delivery path. */
     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {
         const stored = this.store.messages.getDeliverableMessagesAfter(
             sessionId,
@@ -491,11 +514,12 @@ export class MessageService {
 
         // Phase 2: row is still queued.  Ask the CLI whether it already shifted the item
         // (race window between collectBatch() shift and messages-consumed ack).
-        const { localId, resolvedId, scheduledAt } = lookup
+        const { localId, resolvedId, scheduledAt, message } = lookup
 
         if (!localId) {
             // No localId — row exists but has no cancel path; treat as cancelled.
-            this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+            const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+            if (deleted) await this.releaseCancelledScheduledAttachment(sessionId, message)
             this.publisher.emit({ type: 'message-cancelled', sessionId, messageId })
             return { status: 'cancelled', localId: null }
         }
@@ -513,7 +537,8 @@ export class MessageService {
         // markInvoked between the lookup and the delete.
         const now = Date.now()
         if (scheduledAt !== null && scheduledAt > now) {
-            this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+            const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+            if (deleted) await this.releaseCancelledScheduledAttachment(sessionId, message)
             this.forgetScheduledMatureNotified([localId])
             this.publisher.emit({
                 type: 'message-cancelled',
@@ -553,6 +578,7 @@ export class MessageService {
                 return recheck
             }
             // Row is gone (absent) — clean cancel.
+            await this.releaseCancelledScheduledAttachment(sessionId, message)
             this.forgetScheduledMatureNotified([localId])
             this.publisher.emit({
                 type: 'message-cancelled',
@@ -603,7 +629,8 @@ export class MessageService {
         }
 
         // Phase 3: CLI confirmed removal.  Now DELETE the DB row and broadcast SSE.
-        this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+        const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+        if (deleted) await this.releaseCancelledScheduledAttachment(sessionId, message)
         this.forgetScheduledMatureNotified([localId])
         this.publisher.emit({
             type: 'message-cancelled',
@@ -729,14 +756,10 @@ export class MessageService {
             : contentForDeferredDelivery(msg.content)
         this.onSessionActivity?.(actualSessionId, msg.createdAt)
 
-        // Only emit to CLI if the message is not scheduled for the future.
-        // Mature or non-scheduled messages go through immediately; future scheduled
-        // messages wait for the 5-second tick in releaseMatureScheduledMessages.
-        // Re-measure Date.now() after addMessage to avoid a TOCTOU window where
-        // the pre-insert `now` capture could misclassify a borderline scheduledAt
-        // as future when it has already become past by the time we check.
-        const isFutureScheduled = msg.scheduledAt !== null && msg.scheduledAt > Date.now()
-        if (!isFutureScheduled && !this.store.isOpenCodeClearDeliveryGated(actualSessionId)) {
+        // Scheduled rows always wait for the 5-second mature scan. This keeps
+        // every scheduled attachment delivery on the materialization path and
+        // prevents a reconnect/send race from handing Hub paths to the CLI.
+        if (msg.scheduledAt === null && !this.store.isOpenCodeClearDeliveryGated(actualSessionId)) {
             const update = {
                 id: msg.id,
                 seq: msg.seq,
@@ -832,9 +855,10 @@ export class MessageService {
 
     /** Release a completed clear handoff in finalized seq order. */
     releaseDeliverableQueuedMessages(sessionId: string, now: number = Date.now()): number {
+        void now
         if (this.store.isOpenCodeClearDeliveryGated(sessionId)) return 0
         const queued = this.store.messages.getUninvokedLocalMessages(sessionId)
-            .filter((msg) => msg.scheduledAt === null || msg.scheduledAt <= now)
+            .filter((msg) => msg.scheduledAt === null)
         for (const msg of queued) {
             const update = {
                 id: msg.id,

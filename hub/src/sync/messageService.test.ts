@@ -993,7 +993,7 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect(msgs[0].scheduledAt).toBeNull()
     })
 
-    it('past scheduledAt (already mature): emits to /cli immediately', async () => {
+    it('past scheduledAt waits for the mature scan before emitting to /cli', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-past')
         const publisher = makePublisher()
@@ -1020,13 +1020,12 @@ describe('MessageService.sendMessage with scheduledAt', () => {
             scheduledAt: pastMs
         })
 
-        // Past scheduled_at is already mature → emit to CLI immediately
+        expect(cliEmitted).toHaveLength(0)
+        await service.releaseMatureScheduledMessages(Date.now())
         expect(cliEmitted).toHaveLength(1)
     })
 
-    // #11 TOCTOU: isFutureScheduled must use Date.now() at check time, not the
-    // pre-addMessage `now` capture, to avoid a double-emit race window.
-    it('#11 TOCTOU: scheduledAt exactly equal to Date.now() is treated as mature (not future)', async () => {
+    it('scheduledAt at the current time still waits for the mature scan', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-toctou')
         const publisher = makePublisher()
@@ -1044,9 +1043,8 @@ describe('MessageService.sendMessage with scheduledAt', () => {
             })
         } as unknown as Server
 
-        // Use a scheduledAt in the past to simulate TOCTOU: addMessage inserts
-        // a row, then the post-insert check should use a fresh Date.now() which
-        // is >= scheduledAt, treating it as mature and emitting to CLI.
+        // Use a scheduledAt in the past to represent a row that is already
+        // mature at insertion time. The mature scan remains its sole emit path.
         const scheduledAt = Date.now() - 1
         const service = new MessageService(store, io, publisher as any)
         await service.sendMessage(session.id, {
@@ -1055,7 +1053,8 @@ describe('MessageService.sendMessage with scheduledAt', () => {
             scheduledAt
         })
 
-        // scheduledAt is in the past at emit-check time → must emit to CLI
+        expect(cliEmitted).toHaveLength(0)
+        await service.releaseMatureScheduledMessages(Date.now())
         expect(cliEmitted).toHaveLength(1)
     })
 
@@ -1200,6 +1199,87 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         await service.releaseConsumedScheduledAttachments(session.id, ['local-cleanup'])
 
         expect(deleted).toEqual([path])
+    })
+
+    it('releases a hub attachment when a future scheduled message is cancelled', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cancel-cleanup')
+        const deleted: string[] = []
+        const service = new MessageService(
+            store,
+            makeIo((ack) => ack(null, [{ removed: true }])),
+            makePublisher() as any,
+            undefined,
+            {
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deleted.push(...attachments.map((attachment) => attachment.path))
+                }
+            }
+        )
+        const path = 'hapi-hub:scratchlist/default/sched-cancel-cleanup/att-image.png'
+        const message = store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'cancel me',
+                    attachments: [{
+                        id: 'att-cancel',
+                        filename: 'image.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path,
+                    }]
+                }
+            },
+            'local-cancel-cleanup',
+            Date.now() + 60_000,
+        )
+
+        const result = await service.cancelQueuedMessage(session.id, message.id)
+
+        expect(result).toMatchObject({ status: 'cancelled', localId: 'local-cancel-cleanup' })
+        expect(deleted).toEqual([path])
+    })
+
+    it('keeps a cancelled attachment that is still referenced by a scratchlist entry', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cancel-draft-ref')
+        const deleted: string[] = []
+        const service = new MessageService(
+            store,
+            makeIo((ack) => ack(null, [{ removed: true }])),
+            makePublisher() as any,
+            undefined,
+            {
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deleted.push(...attachments.map((attachment) => attachment.path))
+                }
+            }
+        )
+        const path = 'hapi-hub:scratchlist/default/sched-cancel-draft-ref/att-image.png'
+        const attachment = {
+            id: 'att-draft-ref',
+            filename: 'image.png',
+            mimeType: 'image/png',
+            size: 10,
+            path,
+        }
+        store.scratchlist.create(session.id, 'keep this draft', {
+            entryId: 'draft-ref',
+            attachments: [attachment],
+        })
+        const message = store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'cancel me', attachments: [attachment] } },
+            'local-cancel-draft-ref',
+            Date.now() + 60_000,
+        )
+
+        await service.cancelQueuedMessage(session.id, message.id)
+
+        expect(deleted).toEqual([])
     })
 })
 

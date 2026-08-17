@@ -12,6 +12,7 @@ type CachedPreview = {
 }
 
 const previews = new Map<string, CachedPreview>()
+const MAX_CACHED_PREVIEWS = 64
 
 function signature(attachment: ScratchlistAttachmentMetadata): string {
     return [
@@ -48,7 +49,15 @@ function putPreview(
         return current.src
     }
     revokeIfOwned(current)
+    previews.delete(attachment.id)
     previews.set(attachment.id, next)
+    while (previews.size > MAX_CACHED_PREVIEWS) {
+        const oldest = previews.entries().next().value as [string, CachedPreview] | undefined
+        if (!oldest) break
+        const [oldestId, oldestPreview] = oldest
+        revokeIfOwned(oldestPreview)
+        previews.delete(oldestId)
+    }
     return next.src
 }
 
@@ -67,7 +76,11 @@ export function getScratchlistAttachmentPreview(
 ): string | undefined {
     if (attachment.previewUrl) return attachment.previewUrl
     const cached = previews.get(attachment.id)
-    return cached?.signature === signature(attachment) ? cached.src : undefined
+    if (!cached || cached.signature !== signature(attachment)) return undefined
+    // Refresh the entry's LRU position whenever a thumbnail is reused.
+    previews.delete(attachment.id)
+    previews.set(attachment.id, cached)
+    return cached.src
 }
 
 /** Cache a blob URL downloaded for a thumbnail and prefer an existing data URL. */
@@ -84,6 +97,14 @@ export function rememberScratchlistAttachmentObjectUrl(
         if (cached.src === objectUrl) return cached.src
     }
     return putPreview(attachment, objectUrl, 'object-url')
+}
+
+/** Release a preview when its attachment is removed from the scratchlist. */
+export function releaseScratchlistAttachmentPreview(attachmentId: string): void {
+    const cached = previews.get(attachmentId)
+    if (!cached) return
+    revokeIfOwned(cached)
+    previews.delete(attachmentId)
 }
 
 /** Test/lifecycle hook; also releases cached blob URLs when a page is discarded. */

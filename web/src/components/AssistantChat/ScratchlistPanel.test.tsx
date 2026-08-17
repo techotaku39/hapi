@@ -520,6 +520,44 @@ describe('ScratchlistPanel', () => {
 })
 
 describe('ScratchlistDrawer disabled operations', () => {
+    it('allows clearing text while keeping an attachment on the draft', async () => {
+        const { ScratchlistDrawer } = await import('./ScratchlistPanel')
+        const entry = makeEntry({
+            id: 'clear-text-with-attachment',
+            text: 'remove this text',
+            attachments: [{
+                id: 'clear-text-attachment',
+                filename: 'photo.png',
+                mimeType: 'image/png',
+                size: 4,
+                path: 'hapi-hub:scratchlist/default/session-test/clear-text-attachment.png',
+                previewUrl: 'data:image/png;base64,cGhvdG8=',
+            }],
+        })
+        const onUpdate = vi.fn()
+
+        render(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[entry]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={onUpdate}
+                    onReorder={vi.fn()}
+                    onDelete={vi.fn()}
+                />
+            </I18nProvider>,
+        )
+
+        fireEvent.click(screen.getByTestId('scratchlist-entry-text'))
+        const editor = screen.getByRole('textbox', { name: 'Edit scratchlist entry' })
+        fireEvent.change(editor, { target: { value: '' } })
+        fireEvent.blur(editor)
+
+        expect(onUpdate).toHaveBeenCalledWith(entry.id, '')
+        expect(onUpdate).not.toHaveBeenCalledWith(entry.id, 'remove this text')
+    })
+
     it('removes one attachment without confirmation while keeping the rest of the draft', async () => {
         const { ScratchlistDrawer } = await import('./ScratchlistPanel')
         const attachment = {

@@ -194,6 +194,15 @@ function sessionStoragePrefix(namespace: string, sessionId: string): string {
     return `${sanitizeSegment(namespace)}/${sanitizeSegment(sessionId)}/`
 }
 
+export function isScratchlistAttachmentPathForSession(
+    hubPath: string,
+    namespace: string,
+    sessionId: string,
+): boolean {
+    const storageKey = parseHubScratchlistAttachmentPath(hubPath)
+    return storageKey?.startsWith(sessionStoragePrefix(namespace, sessionId)) ?? false
+}
+
 /**
  * Sum bytes of all files already written under the session's scratchlist
  * attachment directory (includes pending uploads not yet referenced by an entry).

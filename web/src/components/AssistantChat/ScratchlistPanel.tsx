@@ -36,6 +36,7 @@ import { CheckIcon } from '@/components/icons'
 import { ScheduleTimePicker, type PendingSchedule } from './ScheduleTimePicker'
 import {
     getScratchlistAttachmentPreview,
+    releaseScratchlistAttachmentPreview,
     rememberScratchlistAttachmentObjectUrl,
     rememberScratchlistAttachmentPreview,
 } from '@/lib/scratchlistAttachmentPreview'
@@ -314,6 +315,7 @@ function ScratchlistAttachmentThumbnails(props: {
                         onClick={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
+                            releaseScratchlistAttachmentPreview(item.id)
                             props.onRemove(item.id)
                         }}
                         className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white transition-colors hover:bg-black/85 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white"
@@ -918,6 +920,7 @@ function ScratchlistInventory({
         const attachments = entry.attachments ?? []
         const nextAttachments = attachments.filter((attachment) => attachment.id !== attachmentId)
         if (nextAttachments.length === attachments.length) return
+        releaseScratchlistAttachmentPreview(attachmentId)
         if (entry.text.trim().length === 0 && nextAttachments.length === 0) {
             onDelete(entry)
             return
@@ -943,7 +946,8 @@ function ScratchlistInventory({
         const nextText = editingText.trim()
         setEditingEntryId(null)
         setEditingText('')
-        if (nextText.length > 0 && nextText !== entry.text) {
+        const hasAttachments = (entry.attachments?.length ?? 0) > 0
+        if (nextText !== entry.text && (nextText.length > 0 || hasAttachments)) {
             void onUpdate(entry, nextText)
         }
     }, [editingText, onUpdate])
@@ -1135,6 +1139,9 @@ export function ScratchlistDrawer({
 
     const handleDelete = useCallback((entry: ScratchlistEntry) => {
         if (disabled) return
+        for (const attachment of entry.attachments ?? []) {
+            releaseScratchlistAttachmentPreview(attachment.id)
+        }
         onDelete(entry.id)
     }, [disabled, onDelete])
 

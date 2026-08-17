@@ -5,6 +5,7 @@ import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
 import { extractBackgroundTaskDelta } from './backgroundTasks'
+import { rehomeMessageAttachments } from './messageAttachmentTransfer'
 
 const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // tiann/hapi#919: metadata writers (renameSession, clearSessionArchiveMetadata,
@@ -1117,7 +1118,15 @@ export class SessionCache {
             throw new Error('Session not found for merge')
         }
 
+        const sourceMessages = this.store.messages.getAllMessages(oldSessionId)
         const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
+        await rehomeMessageAttachments(
+            this.store,
+            namespace,
+            oldSessionId,
+            newSessionId,
+            sourceMessages,
+        )
         // mergeSessions deletes the source. mergeSessionHistory keeps it alive
         // with the original socket, so its notify chain must stay on that id.
         if (options.deleteOldSession) {

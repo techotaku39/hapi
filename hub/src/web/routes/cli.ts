@@ -273,8 +273,8 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         }
 
         const limit = parsed.data.limit ?? 200
-        // Future-scheduled rows are excluded from CLI backfill — see
-        // messages.ts:getDeliverableMessagesAfter for the rationale.  The
+        // All scheduled rows are excluded from CLI backfill — see
+        // messages.ts:getDeliverableMessagesAfter for the rationale. The
         // mature-scan path (releaseMatureScheduledMessages) is the sole
         // emit channel for scheduled rows.
         const messages = engine.getDeliverableMessagesAfter(resolved.sessionId, {

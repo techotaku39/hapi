@@ -35,11 +35,13 @@ import {
     getMessagesAfterSeq,
     getMessageSeqById,
     hasUninvokedAttachmentReference,
+    rewriteMessageAttachments,
     truncateMessagesFromLocalId,
     type CancelQueuedMessageResult,
     type LookupQueuedMessageResult,
     type LocalMessageState,
     type MessagePosition,
+    type MessageAttachmentRewrite,
 } from './messages'
 
 export class MessageStore {
@@ -86,6 +88,10 @@ export class MessageStore {
 
     hasUninvokedAttachmentReference(sessionId: string, path: string): boolean {
         return hasUninvokedAttachmentReference(this.db, sessionId, path)
+    }
+
+    rewriteMessageAttachments(sessionId: string, rewrites: MessageAttachmentRewrite[]): number {
+        return rewriteMessageAttachments(this.db, sessionId, rewrites)
     }
 
     getMessages(sessionId: string, limit: number = 200): StoredMessage[] {

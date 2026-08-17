@@ -329,8 +329,8 @@ describe('addMessage: scheduledAt invariants', () => {
     })
 })
 
-describe('getDeliverableMessagesAfter: CLI backfill excludes future-scheduled rows', () => {
-    it('omits rows whose scheduled_at > now (would otherwise be replayed early on reconnect)', () => {
+describe('getDeliverableMessagesAfter: CLI backfill excludes all scheduled rows', () => {
+    it('leaves mature and future scheduled rows for the mature-scan path', () => {
         const store = makeStore()
         const session = makeSession(store, 'backfill-future-sched')
         const now = Date.now()
@@ -358,13 +358,14 @@ describe('getDeliverableMessagesAfter: CLI backfill excludes future-scheduled ro
         const delivered = store.messages.getDeliverableMessagesAfter(session.id, 0, now)
         const ids = delivered.map((m) => m.id)
         expect(ids).toContain(immediate.id)
-        expect(ids).toContain(matureSched.id)
+        expect(ids).not.toContain(matureSched.id)
         expect(ids).not.toContain('lid-future')
         const localIds = delivered.map((m) => m.localId)
+        expect(localIds).not.toContain('lid-mature')
         expect(localIds).not.toContain('lid-future')
     })
 
-    it('returns the row once now advances past scheduled_at (release boundary)', () => {
+    it('does not return a scheduled row when its deadline has passed', () => {
         const store = makeStore()
         const session = makeSession(store, 'backfill-release-boundary')
         const fireAt = Date.now() - 60_000
@@ -380,7 +381,7 @@ describe('getDeliverableMessagesAfter: CLI backfill excludes future-scheduled ro
         expect(before.find((m) => m.localId === 'lid-bnd')).toBeUndefined()
 
         const exact = store.messages.getDeliverableMessagesAfter(session.id, 0, fireAt)
-        expect(exact.find((m) => m.localId === 'lid-bnd')).toBeDefined()
+        expect(exact.find((m) => m.localId === 'lid-bnd')).toBeUndefined()
     })
 
     it('respects afterSeq alongside the scheduled_at filter (2-axis interaction)', () => {

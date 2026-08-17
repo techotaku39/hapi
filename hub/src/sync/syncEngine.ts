@@ -60,6 +60,7 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+import { rehomeMessageAttachments } from './messageAttachmentTransfer'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -2153,12 +2154,22 @@ export class SyncEngine {
             if ((required.requireInactive && latest.active)
                 || current.replacementSessionId !== required.replacementSessionId
                 || current.state !== required.state) break
+            const sourceMessages = this.store.messages.getAllMessages(current.replacementSessionId)
             const result = this.store.abortOpenCodeClearOperation(sessionId, current.replacementSessionId, {
                 ...latest.metadata,
                 opencodeClearOperation: { ...current, state: 'aborted', updatedAt: Date.now(), error: undefined }
             }, latest.metadataVersion, namespace, required)
             if (result.result === 'success') {
                 this.sessionCache.refreshSession(sessionId)
+                void rehomeMessageAttachments(
+                    this.store,
+                    namespace,
+                    current.replacementSessionId,
+                    sessionId,
+                    sourceMessages,
+                ).catch((error) => {
+                    console.error('[Scratchlist] failed to rehome clear-abort attachments', error)
+                })
                 return { type: 'success', sessionId }
             }
             if (result.result !== 'version-mismatch') break
@@ -2330,12 +2341,12 @@ export class SyncEngine {
         return this.finishOpenCodeClear(sessionId, namespace, operation.replacementSessionId, operation)
     }
 
-    private finishOpenCodeClear(
+    private async finishOpenCodeClear(
         sessionId: string,
         namespace: string,
         replacementSessionId: string,
         operation: NonNullable<Session['metadata']>['opencodeClearOperation']
-    ): ClearOpencodeSessionResult {
+    ): Promise<ClearOpencodeSessionResult> {
         if (!operation) {
             return {
                 type: 'error',
@@ -2344,7 +2355,15 @@ export class SyncEngine {
             }
         }
         try {
+            const sourceMessages = this.store.messages.getAllMessages(sessionId)
             const moved = this.store.messages.moveUninvokedMessages(sessionId, replacementSessionId)
+            await rehomeMessageAttachments(
+                this.store,
+                namespace,
+                sessionId,
+                replacementSessionId,
+                sourceMessages,
+            )
             if (moved > 0) {
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId })
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId: replacementSessionId })

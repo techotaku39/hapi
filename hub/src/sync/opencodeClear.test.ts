@@ -158,13 +158,15 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             expect(store.isOpenCodeClearDeliveryGated(reserved.sessionId)).toBe(true)
             engine.handleSessionAlive({ sid: reserved.sessionId, time: Date.now() })
             engine.handleSessionAlive({ sid: reserved.sessionId, time: Date.now() + 1 })
-            ;(engine as unknown as { messageService: { releaseMatureScheduledMessages(now: number): void } })
+            await (engine as unknown as { messageService: { releaseMatureScheduledMessages(now: number): Promise<void> } })
                 .messageService.releaseMatureScheduledMessages(Date.now())
             expect(emitted.filter((update) => update.body?.message)).toEqual([])
 
             releaseSpawn()
             await reconcile
             expect(store.isOpenCodeClearDeliveryGated(reserved.sessionId)).toBe(false)
+            await (engine as unknown as { messageService: { releaseMatureScheduledMessages(now: number): Promise<void> } })
+                .messageService.releaseMatureScheduledMessages(Date.now())
             expect(emitted.filter((update) => update.body?.message).map((update) => update.body?.message?.localId)).toEqual([
                 'gated-a', 'gated-b', 'gated-scheduled'
             ])

@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 
+import type { AttachmentMetadata } from '@hapi/protocol/types'
 import type { StoredMessage } from './types'
 import { decodeMessageContent, encodeMessageContent, truncateOversizedMessageContent } from './contentCodec'
 
@@ -104,7 +105,7 @@ function messageReferencesAttachment(content: unknown, path: string): boolean {
 }
 
 /**
- * Scheduled scratchlist attachments outlive their draft row.  Keep the hub
+ * Scheduled scratchlist attachments outlive their draft row. Keep the hub
  * blob while any uninvoked message still references it, even if the draft is
  * deleted immediately after the schedule is accepted.
  */
@@ -118,7 +119,6 @@ export function hasUninvokedAttachmentReference(
         FROM messages
         WHERE session_id = ?
           AND invoked_at IS NULL
-          AND scheduled_at IS NOT NULL
     `).all(sessionId) as Array<{ content: string | Uint8Array }>
     return rows.some((row) => messageReferencesAttachment(decodeMessageContent(row.content), path))
 }
@@ -342,6 +342,59 @@ export function getAllMessages(
     return rows.map(toStoredMessage)
 }
 
+export type MessageAttachmentRewrite = {
+    messageId: string
+    attachments: AttachmentMetadata[]
+}
+
+function replaceUserMessageAttachments(content: unknown, attachments: AttachmentMetadata[]): unknown {
+    if (content === null || typeof content !== 'object' || Array.isArray(content)) return content
+    const record = content as { content?: unknown }
+    if (record.content === null || typeof record.content !== 'object' || Array.isArray(record.content)) {
+        return content
+    }
+    return {
+        ...record,
+        content: {
+            ...(record.content as Record<string, unknown>),
+            attachments,
+        },
+    }
+}
+
+/** Rewrite attachment paths after a message row changes its session owner. */
+export function rewriteMessageAttachments(
+    db: Database,
+    sessionId: string,
+    rewrites: MessageAttachmentRewrite[],
+): number {
+    if (rewrites.length === 0) return 0
+    return db.transaction(() => {
+        let changed = 0
+        const select = db.prepare(
+            'SELECT content FROM messages WHERE session_id = ? AND id = ?'
+        )
+        const update = db.prepare(
+            'UPDATE messages SET content = ? WHERE session_id = ? AND id = ?'
+        )
+        for (const rewrite of rewrites) {
+            const row = select.get(sessionId, rewrite.messageId) as { content: string | Uint8Array } | undefined
+            if (!row) continue
+            const current = decodeMessageContent(row.content)
+            const next = replaceUserMessageAttachments(current, rewrite.attachments)
+            if (isDeepStrictEqual(current, next)) continue
+            update.run(
+                encodeMessageContent(truncateOversizedMessageContent(next)),
+                sessionId,
+                rewrite.messageId,
+            )
+            changed += 1
+        }
+        if (changed > 0) bumpMessageEpoch(db, sessionId)
+        return changed
+    })()
+}
+
 export function getMessagesAfterSeq(
     db: Database,
     sessionId: string,
@@ -381,10 +434,9 @@ export function getFirstMessages(
 }
 
 /** CLI reconnect backfill: returns messages above the seq cursor that are
- *  deliverable now, i.e. excludes future-scheduled rows (scheduled_at > now).
- *  Without this filter, a CLI reconnect between schedule time and release time
- *  would replay future-scheduled rows via the normal message stream and the
- *  runner would consume them immediately, bypassing the mature-scan path.
+ *  deliverable through the ordinary CLI backfill path. Scheduled rows are
+ *  deliberately excluded even after their deadline: the mature-scan path is
+ *  the only route that materializes Hub-resident attachments before delivery.
  *  Only the CLI backfill route should use this; the Web thread API still calls
  *  byPosition / getMessages and needs the full set so scheduled rows surface in
  *  the queued floating bar. */
@@ -402,10 +454,10 @@ export function getDeliverableMessagesAfter(
         SELECT * FROM messages
         WHERE session_id = ?
           AND seq > ?
-          AND (scheduled_at IS NULL OR scheduled_at <= ?)
+          AND scheduled_at IS NULL
         ORDER BY seq ASC
         LIMIT ?
-    `).all(sessionId, safeAfterSeq, now, safeLimit) as DbMessageRow[]
+    `).all(sessionId, safeAfterSeq, safeLimit) as DbMessageRow[]
 
     return rows.map(toStoredMessage)
 }
@@ -763,7 +815,13 @@ export function cancelQueuedMessage(
 export type LookupQueuedMessageResult =
     | { status: 'absent' }
     | { status: 'invoked'; message: StoredMessage }
-    | { status: 'queued'; localId: string | null; resolvedId: string; scheduledAt: number | null }
+    | {
+        status: 'queued'
+        localId: string | null
+        resolvedId: string
+        scheduledAt: number | null
+        message: StoredMessage
+    }
 
 /** Look up a queued message without deleting it.
  *
@@ -793,7 +851,13 @@ export function lookupQueuedMessage(
         return { status: 'invoked' as const, message: toStoredMessage(row) }
     }
 
-    return { status: 'queued' as const, localId: row.local_id, resolvedId: row.id, scheduledAt: row.scheduled_at }
+    return {
+        status: 'queued' as const,
+        localId: row.local_id,
+        resolvedId: row.id,
+        scheduledAt: row.scheduled_at,
+        message: toStoredMessage(row),
+    }
 }
 
 /** Delete a queued (invoked_at IS NULL) message by id or local_id.
