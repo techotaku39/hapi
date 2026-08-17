@@ -8,6 +8,8 @@ import {
     type NotificationClickClients
 } from './notificationClick'
 
+const APP_SCOPE = 'https://hapi.test/'
+
 function createClient(
     url: string,
     overrides: Partial<NotificationClickClient> = {}
@@ -40,7 +42,7 @@ describe('focusOrOpenNotificationClient', () => {
         })
         const clients = createClients([existing])
 
-        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1')
+        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1', APP_SCOPE)
 
         expect(clients.matchAll).toHaveBeenCalledWith({ type: 'window', includeUncontrolled: true })
         expect(existing.postMessage).toHaveBeenCalledWith(
@@ -63,8 +65,8 @@ describe('focusOrOpenNotificationClient', () => {
         })
         const clients = createClients([existing])
 
-        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1')
-        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-2')
+        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1', APP_SCOPE)
+        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-2', APP_SCOPE)
 
         expect(existing.postMessage).toHaveBeenCalledTimes(2)
         expect(existing.navigate).not.toHaveBeenCalled()
@@ -76,7 +78,7 @@ describe('focusOrOpenNotificationClient', () => {
         const existing = createClient('https://hapi.test/sessions/session-1')
         const clients = createClients([existing])
 
-        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1')
+        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1', APP_SCOPE)
 
         expect(existing.focus).toHaveBeenCalledOnce()
         expect(existing.navigate).not.toHaveBeenCalled()
@@ -87,7 +89,7 @@ describe('focusOrOpenNotificationClient', () => {
         const opened = createClient('https://hapi.test/')
         const clients = createClients([], opened)
 
-        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1')
+        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1', APP_SCOPE)
 
         expect(clients.openWindow).toHaveBeenCalledWith('https://hapi.test/sessions/session-1')
         expect(opened.focus).toHaveBeenCalledOnce()
@@ -99,7 +101,7 @@ describe('focusOrOpenNotificationClient', () => {
         })
         const clients = createClients([existing])
 
-        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1')
+        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1', APP_SCOPE)
 
         expect(existing.navigate).toHaveBeenCalledWith('https://hapi.test/sessions/session-1')
         expect(existing.focus).toHaveBeenCalledOnce()
@@ -114,11 +116,32 @@ describe('focusOrOpenNotificationClient', () => {
         })
         const clients = createClients([existing])
 
-        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1')
+        await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1', APP_SCOPE)
 
         expect(existing.navigate).toHaveBeenCalledWith('https://hapi.test/sessions/session-1')
         expect(existing.focus).toHaveBeenCalledOnce()
         expect(clients.openWindow).not.toHaveBeenCalled()
+    })
+
+    it('does not reuse an uncontrolled same-origin window outside the app scope', async () => {
+        const unrelated = createClient('https://hapi.test/other/', {
+            focused: true,
+            postMessage: vi.fn()
+        })
+        const opened = createClient('https://hapi.test/app/')
+        const clients = createClients([unrelated], opened)
+
+        await focusOrOpenNotificationClient(
+            clients,
+            'https://hapi.test/app/sessions/session-1',
+            'https://hapi.test/app/'
+        )
+
+        expect(unrelated.postMessage).not.toHaveBeenCalled()
+        expect(unrelated.navigate).not.toHaveBeenCalled()
+        expect(unrelated.focus).not.toHaveBeenCalled()
+        expect(clients.openWindow).toHaveBeenCalledWith('https://hapi.test/app/sessions/session-1')
+        expect(opened.focus).toHaveBeenCalledOnce()
     })
 })
 

@@ -103,23 +103,30 @@ async function deliverNotificationClickMessage(
 
 export async function focusOrOpenNotificationClient(
     clients: NotificationClickClients,
-    targetUrl: string
+    targetUrl: string,
+    appScope: string
 ): Promise<void> {
     const windowClients = await clients.matchAll({
         type: 'window',
         includeUncontrolled: true
     })
+    const scopeUrl = new URL(appScope)
+    const scopePath = scopeUrl.pathname.endsWith('/')
+        ? scopeUrl.pathname
+        : `${scopeUrl.pathname}/`
     const targetOrigin = new URL(targetUrl).origin
-    const sameOriginClients = windowClients.filter((client) => {
+    const appClients = windowClients.filter((client) => {
         try {
-            return new URL(client.url).origin === targetOrigin
+            const clientUrl = new URL(client.url)
+            return clientUrl.origin === targetOrigin
+                && (clientUrl.pathname === scopeUrl.pathname || clientUrl.pathname.startsWith(scopePath))
         } catch {
             return false
         }
     })
-    const targetClient = sameOriginClients.find((client) => client.url === targetUrl)
-        ?? sameOriginClients.find((client) => client.focused)
-        ?? sameOriginClients[0]
+    const targetClient = appClients.find((client) => client.url === targetUrl)
+        ?? appClients.find((client) => client.focused)
+        ?? appClients[0]
 
     if (targetClient) {
         if (targetClient.url === targetUrl) {

@@ -138,7 +138,7 @@ self.addEventListener('notificationclick', (event) => {
     event.notification.close()
     const data = event.notification.data as { url?: string } | undefined
     const url = new URL(data?.url ?? '/', self.location.origin).toString()
-    event.waitUntil(focusOrOpenNotificationClient(self.clients, url))
+    event.waitUntil(focusOrOpenNotificationClient(self.clients, url, self.registration.scope))
 })
 
 // Web Share Target — manifest declares POST /share, Android Chrome posts a
