@@ -228,6 +228,19 @@ export class SyncEngine {
                         await import('../scratchlistAttachments/storage')
                     await deleteScratchlistAttachmentFiles(getHapiHomeDir(), attachments)
                 },
+                rehomeScheduledMessageAttachments: async (sourceSessionId, targetSessionId, message) => {
+                    const sourceSession = this.store.sessions.getSession(sourceSessionId)
+                    if (!sourceSession) throw new Error('Session not found while re-homing scheduled attachments')
+                    await rehomeMessageAttachments(
+                        this.store,
+                        sourceSession.namespace,
+                        sourceSessionId,
+                        targetSessionId,
+                        [message],
+                    )
+                    return this.store.messages.getAllMessages(targetSessionId)
+                        .find((candidate) => candidate.id === message.id) ?? message
+                },
             }
         )
         this.titleSuggestionService = createTitleSuggestionService(store)

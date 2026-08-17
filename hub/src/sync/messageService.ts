@@ -148,6 +148,11 @@ type MessageServiceOptions = {
         sessionId: string,
         attachments: AttachmentMetadata[],
     ) => Promise<void>
+    rehomeScheduledMessageAttachments?: (
+        sourceSessionId: string,
+        targetSessionId: string,
+        message: StoredMessageForDelivery,
+    ) => Promise<StoredMessageForDelivery>
 }
 
 export class MessageService {
@@ -155,7 +160,10 @@ export class MessageService {
     private readonly scheduledMatureNotifiedLocalIds = new Set<string>()
     /** CLI upload paths are session-scoped; reuse them until the CLI session ends. */
     private readonly scheduledAttachmentDeliveryCache = new Map<string, AttachmentMetadata[]>()
-    private matureReleaseInFlight = false
+    /** A deferred materialization has not emitted its row to the CLI yet. */
+    private readonly materializingScheduledMessageKeys = new Set<string>()
+    /** Keep mature delivery FIFO per session without blocking unrelated sessions. */
+    private readonly matureReleaseInFlightSessions = new Set<string>()
 
     constructor(
         private readonly store: Store,
@@ -549,6 +557,30 @@ export class MessageService {
             return { status: 'cancelled', localId }
         }
 
+        // A mature attachment may currently be waiting for the Hub -> CLI
+        // upload RPC. It has not reached the CLI queue yet, so a not-found
+        // response from the CLI must not turn the row into an invoked message.
+        // Delete it directly and let the materializer's post-await state check
+        // suppress its stale snapshot when the RPC eventually resolves.
+        const materializingKey = `${sessionId}:${resolvedId}`
+        if (this.materializingScheduledMessageKeys.has(materializingKey)) {
+            const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+            if (deleted) {
+                await this.releaseCancelledScheduledAttachment(sessionId, message)
+                this.forgetScheduledMatureNotified([localId])
+                this.publisher.emit({
+                    type: 'message-cancelled',
+                    sessionId,
+                    messageId,
+                    localId,
+                })
+                return { status: 'cancelled', localId }
+            }
+            const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
+            if (recheck.status === 'invoked') return recheck
+            if (recheck.status === 'absent') return { status: 'cancelled', localId }
+        }
+
         // Phase 2a: if no CLI socket is currently in the session room, the CLI is
         // offline and there is nobody to ack with.  Delete the row immediately so a
         // later CLI reconnect cannot pick it up via seq-backfill and re-enqueue the
@@ -746,7 +778,18 @@ export class MessageService {
             payload.scheduledAt ?? null
         )
         const actualSessionId = inserted.sessionId
-        const msg = inserted.message
+        let msg = inserted.message
+        if (
+            actualSessionId !== sessionId
+            && msg.scheduledAt !== null
+            && getUserMessageAttachments(msg.content).length > 0
+        ) {
+            msg = await this.options.rehomeScheduledMessageAttachments?.(
+                sessionId,
+                actualSessionId,
+                msg,
+            ) ?? msg
+        }
         // A duplicate localId is an idempotent retry, not proof that the
         // original Pi turn still exists. Its stored row may retain steer
         // provenance from a POST whose response was lost, so deliver the
@@ -915,80 +958,116 @@ export class MessageService {
      * each tick until the CLI acks it, which is the correct behaviour for hub
      * restart scenarios (pitfall #2 guard).
      *
-     * Race window with cancel: this tick widens the cancel race to 5 s for
-     * scheduled messages (vs near-zero for immediate-queued ones).  If the CLI
-     * has already shift()-ed the row when cancel arrives, cancelQueuedMessage
-     * gets 'not-found' from the CLI ack and stamps invoked_at (PR #568 contract
-     * preserved).  Web client surfaces this as 'sent' in the thread.
+     * For rows already emitted, a cancel that arrives after the CLI has
+     * shift()-ed the row gets 'not-found' from the CLI ack and stamps
+     * invoked_at (PR #568 contract preserved).  A row still in attachment
+     * materialization has not reached the CLI queue and is deleted directly.
      * See messageService.test.ts "cancel × mature race" for the documented
      * expected behaviour. */
     async releaseMatureScheduledMessages(now: number, skipSessionIds?: ReadonlySet<string>): Promise<void> {
-        if (this.matureReleaseInFlight) return
-        this.matureReleaseInFlight = true
-        try {
-            const mature = this.store.messages.getMatureScheduledMessages(now)
-            const maturedSessionIds = new Set<string>()
-            const deliveryGateBySession = new Map<string, boolean>()
-            for (const msg of mature) {
-                let deliveryGated = deliveryGateBySession.get(msg.sessionId)
-                if (deliveryGated === undefined) {
-                    deliveryGated = this.store.isOpenCodeClearDeliveryGated(msg.sessionId)
-                    deliveryGateBySession.set(msg.sessionId, deliveryGated)
-                }
-                if (skipSessionIds?.has(msg.sessionId) || deliveryGated) {
-                    continue
-                }
+        const mature = this.store.messages.getMatureScheduledMessages(now)
+        const bySession = new Map<string, StoredMessageForDelivery[]>()
+        for (const message of mature) {
+            const messages = bySession.get(message.sessionId) ?? []
+            messages.push(message)
+            bySession.set(message.sessionId, messages)
+        }
 
-                // A hub-resident attachment must be transferred to the CLI
-                // host before emitting.  Wait for a live socket instead of
-                // creating an upload that cleanup would immediately orphan.
-                const hasAttachments = getUserMessageAttachments(msg.content).length > 0
-                if (hasAttachments && !this.hasCliSessionConnection(msg.sessionId)) {
-                    continue
-                }
+        await Promise.all([...bySession].map(async ([sessionId, messages]) => {
+            if (skipSessionIds?.has(sessionId)) {
+                return
+            }
+            // A text-only session has no asynchronous materialization work.
+            // Run it without holding the in-flight marker so two synchronous
+            // ticks retain the historical re-emit behavior.
+            const hasAttachments = messages.some((message) => getUserMessageAttachments(message.content).length > 0)
+            if (!hasAttachments) {
+                await this.releaseMatureScheduledMessagesForSession(messages)
+                return
+            }
+            if (this.matureReleaseInFlightSessions.has(sessionId)) return
+            this.matureReleaseInFlightSessions.add(sessionId)
+            try {
+                await this.releaseMatureScheduledMessagesForSession(messages)
+            } finally {
+                this.matureReleaseInFlightSessions.delete(sessionId)
+            }
+        }))
+    }
 
-                let deliveryContent: unknown = contentForDeferredDelivery(msg.content)
-                if (hasAttachments) {
+    private async releaseMatureScheduledMessagesForSession(
+        messages: StoredMessageForDelivery[],
+    ): Promise<void> {
+        const sessionId = messages[0]?.sessionId
+        if (!sessionId || this.store.isOpenCodeClearDeliveryGated(sessionId)) return
+        if (messages.some((message) => getUserMessageAttachments(message.content).length > 0)
+            && !this.hasCliSessionConnection(sessionId)) {
+            return
+        }
+
+        let emitted = false
+        for (const msg of messages) {
+            // A hub-resident attachment must be transferred to the CLI host
+            // before emitting. Keep the materializing key until the await
+            // completes so cancellation can delete the still-unemitted row.
+            const attachments = getUserMessageAttachments(msg.content)
+            const hasAttachments = attachments.length > 0
+            if (hasAttachments && !this.hasCliSessionConnection(sessionId)) continue
+
+            let deliveryContent: unknown = contentForDeferredDelivery(msg.content)
+            if (hasAttachments) {
+                const materializingKey = `${sessionId}:${msg.id}`
+                this.materializingScheduledMessageKeys.add(materializingKey)
+                try {
                     try {
                         deliveryContent = await this.getScheduledDeliveryContent(msg)
                     } catch {
-                        // Keep the row uninvoked. The next tick retries after the
-                        // file or CLI connection becomes available.
+                        // Keep the row uninvoked. The next tick retries after
+                        // the file or CLI connection becomes available.
                         continue
                     }
                     if (deliveryContent === null) continue
-                }
 
-                const localId = msg.localId
-                if (typeof localId === 'string' && !this.scheduledMatureNotifiedLocalIds.has(localId)) {
-                    this.scheduledMatureNotifiedLocalIds.add(localId)
-                    maturedSessionIds.add(msg.sessionId)
+                    // Cancellation or an acknowledgement may have won while
+                    // the attachment was being uploaded. Never emit the stale
+                    // snapshot after the row leaves the queued state.
+                    const current = this.store.messages.lookupQueuedMessage(sessionId, msg.id)
+                    if (current.status !== 'queued') {
+                        this.scheduledAttachmentDeliveryCache.delete(materializingKey)
+                        continue
+                    }
+                } finally {
+                    this.materializingScheduledMessageKeys.delete(materializingKey)
                 }
-                const update = {
-                    id: msg.id,
-                    seq: msg.seq,
-                    createdAt: msg.createdAt,
-                    body: {
-                        t: 'new-message' as const,
-                        sid: msg.sessionId,
-                        message: {
-                            id: msg.id,
-                            seq: msg.seq,
-                            createdAt: msg.createdAt,
-                            localId: msg.localId,
-                            content: deliveryContent
-                        }
+            }
+
+            const localId = msg.localId
+            if (typeof localId === 'string' && !this.scheduledMatureNotifiedLocalIds.has(localId)) {
+                this.scheduledMatureNotifiedLocalIds.add(localId)
+                emitted = true
+            }
+            const update = {
+                id: msg.id,
+                seq: msg.seq,
+                createdAt: msg.createdAt,
+                body: {
+                    t: 'new-message' as const,
+                    sid: sessionId,
+                    message: {
+                        id: msg.id,
+                        seq: msg.seq,
+                        createdAt: msg.createdAt,
+                        localId: msg.localId,
+                        content: deliveryContent
                     }
                 }
-                this.io.of('/cli').to(`session:${msg.sessionId}`).emit('update', update)
-                // NOTE: do NOT call markMessagesInvoked here (pitfall #2).
-                // CLI ack (messages-consumed) will handle invoked_at stamping.
             }
-            for (const sessionId of maturedSessionIds) {
-                this.publisher.emit({ type: 'scheduled-matured', sessionId })
-            }
-        } finally {
-            this.matureReleaseInFlight = false
+            this.io.of('/cli').to(`session:${sessionId}`).emit('update', update)
+            // NOTE: do NOT call markMessagesInvoked here (pitfall #2).
+            // CLI ack (messages-consumed) will handle invoked_at stamping.
+        }
+        if (emitted) {
+            this.publisher.emit({ type: 'scheduled-matured', sessionId })
         }
     }
 }

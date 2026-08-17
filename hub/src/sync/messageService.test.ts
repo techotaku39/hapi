@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { MessageService } from './messageService'
 import { Store } from '../store'
 import type { Server } from 'socket.io'
-import type { Session, SyncEvent } from '@hapi/protocol/types'
+import type { AttachmentMetadata, Session, SyncEvent } from '@hapi/protocol/types'
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1157,6 +1157,158 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect((cliEmitted[0] as any).body.message.id).toBe(message.id)
         expect((cliEmitted[0] as any).body.message.content.content.attachments[0].path)
             .toBe('/tmp/materialized.png')
+    })
+
+    it('cancels a scheduled attachment while materialization is pending without invoking it', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cancel-during-materialize')
+        const publisher = makePublisher()
+        const cliEmitted: unknown[] = []
+        let ackCalls = 0
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    },
+                    timeout: (_ms: number) => ({
+                        emit: (
+                            _event: string,
+                            _data: unknown,
+                            callback: (err: Error | null, responses: Array<{ removed: boolean }>) => void,
+                        ) => {
+                            ackCalls += 1
+                            callback(null, [{ removed: false }])
+                        }
+                    })
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } }
+            })
+        } as unknown as Server
+
+        let materializeStarted!: () => void
+        const started = new Promise<void>((resolve) => { materializeStarted = resolve })
+        let resolveMaterialization!: (attachments: AttachmentMetadata[]) => void
+        const materialized = new Promise<AttachmentMetadata[]>((resolve) => { resolveMaterialization = resolve })
+        const service = new MessageService(
+            store,
+            io,
+            publisher as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => {
+                    materializeStarted()
+                    return materialized.then(() => attachments.map((attachment) => ({
+                        ...attachment,
+                        path: '/tmp/materialized-after-cancel.png'
+                    })))
+                }
+            }
+        )
+        const message = store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'cancel while uploading',
+                    attachments: [{
+                        id: 'att-cancel-race',
+                        filename: 'image.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path: 'hapi-hub:scratchlist/default/sched-cancel-during-materialize/att.png'
+                    }]
+                }
+            },
+            'local-cancel-race',
+            Date.now() - 1_000,
+        )
+
+        const release = service.releaseMatureScheduledMessages(Date.now())
+        await started
+        await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({
+            status: 'cancelled',
+            localId: 'local-cancel-race'
+        })
+        resolveMaterialization([])
+        await release
+
+        expect(ackCalls).toBe(0)
+        expect(cliEmitted).toHaveLength(0)
+        expect(store.messages.lookupQueuedMessage(session.id, message.id)).toEqual({ status: 'absent' })
+    })
+
+    it('does not let a slow scheduled attachment block mature delivery in another session', async () => {
+        const store = makeStore()
+        const sessionA = makeSession(store, 'sched-slow-session-a')
+        const sessionB = makeSession(store, 'sched-fast-session-b')
+        const publisher = makePublisher()
+        const cliEmitted: unknown[] = []
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    }
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } }
+            })
+        } as unknown as Server
+        let slowMaterializeStarted!: () => void
+        const slowStarted = new Promise<void>((resolve) => { slowMaterializeStarted = resolve })
+        let resolveSlowMaterialization!: () => void
+        const slowMaterialization = new Promise<void>((resolve) => { resolveSlowMaterialization = resolve })
+        const service = new MessageService(
+            store,
+            io,
+            publisher as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (sessionId, attachments) => {
+                    if (sessionId === sessionA.id) {
+                        slowMaterializeStarted()
+                        await slowMaterialization
+                    }
+                    return attachments.map((attachment) => ({ ...attachment, path: `/tmp/${sessionId}.png` }))
+                }
+            }
+        )
+        const matureAt = Date.now() - 1_000
+        store.messages.addMessage(
+            sessionA.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'slow image',
+                    attachments: [{
+                        id: 'att-slow',
+                        filename: 'slow.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path: 'hapi-hub:scratchlist/default/sched-slow-session-a/att.png'
+                    }]
+                }
+            },
+            'local-slow',
+            matureAt,
+        )
+        store.messages.addMessage(
+            sessionB.id,
+            { role: 'user', content: { type: 'text', text: 'fast text' } },
+            'local-fast',
+            matureAt,
+        )
+
+        const release = service.releaseMatureScheduledMessages(Date.now())
+        await slowStarted
+        expect(cliEmitted).toHaveLength(1)
+        expect((cliEmitted[0] as any).body.message.localId).toBe('local-fast')
+
+        resolveSlowMaterialization()
+        await release
+        expect(cliEmitted.map((data: any) => data.body.message.localId)).toEqual(['local-fast', 'local-slow'])
     })
 
     it('releases a hub attachment after the scheduled message is acknowledged', async () => {

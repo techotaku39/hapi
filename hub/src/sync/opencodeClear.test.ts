@@ -106,6 +106,57 @@ describe('SyncEngine.clearOpenCodeSession', () => {
         } finally { engine.stop() }
     })
 
+    it('re-homes Hub attachments when a scheduled message is redirected to the replacement', async () => {
+        const { mkdtempSync, rmSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-clear-redirect-att-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const { store, engine } = createEngine()
+        try {
+            const source = engine.getOrCreateSession('active-clear-attachment-source', {
+                path: '/tmp/project', host: 'host', machineId: 'machine-1', flavor: 'opencode', startedBy: 'runner'
+            }, null, 'default')
+            engine.handleSessionAlive({ sid: source.id, time: Date.now() })
+            const reserved = engine.reserveOpenCodeClearSession(source.id, 'default')
+            if (reserved.type !== 'success') throw new Error('reservation failed')
+
+            const { writeScratchlistAttachmentFile, sumScratchlistAttachmentBytesOnDisk } =
+                await import('../scratchlistAttachments/storage')
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                source.id,
+                'scheduled.png',
+                'image/png',
+                Buffer.from('scheduled-image')
+            )
+
+            await engine.sendMessage(source.id, {
+                text: 'send this image later',
+                localId: 'redirected-scheduled-attachment',
+                scheduledAt: Date.now() + 60_000,
+                attachments: [attachment]
+            })
+
+            const moved = store.messages.getAllMessages(reserved.sessionId)
+            const movedAttachment = (moved[0]?.content as {
+                content?: { attachments?: Array<{ path: string }> }
+            }).content?.attachments?.[0]
+            expect(movedAttachment?.path).toContain(`/${reserved.sessionId}/`)
+            expect(movedAttachment?.path).not.toContain(`/${source.id}/`)
+            expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', source.id)).toBe(0)
+            expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', reserved.sessionId))
+                .toBe('scheduled-image'.length)
+        } finally {
+            engine.stop()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
     it('preserves FIFO from a source prompt before reservation to a redirected target prompt', async () => {
         const { store, engine } = createEngine()
         try {
