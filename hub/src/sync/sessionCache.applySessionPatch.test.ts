@@ -65,7 +65,7 @@ describe('SessionCache.applySessionPatch', () => {
         )
         store.messages.addMessage(session.id, {
             role: 'agent',
-            content: { type: 'codex', data: { type: 'message', message: 'historical answer' } }
+            content: { type: 'event', data: { type: 'message', message: 'historical event reply' } }
         }, undefined, undefined, 3_000)
 
         const db = (store as unknown as { db: import('bun:sqlite').Database }).db

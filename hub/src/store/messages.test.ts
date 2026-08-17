@@ -29,9 +29,15 @@ describe('assistant reply timestamp', () => {
 
         store.messages.addMessage(session.id, {
             role: 'agent',
+            content: { type: 'event', data: { type: 'message', message: 'event answer' } }
+        }, undefined, undefined, 3_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
             content: { type: 'codex', data: { type: 'message', message: 'older answer' } }
         }, undefined, undefined, 1_500)
-        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
         expect(store.sessions.getSession(session.id)?.updatedAt).toBe(activityAt)
         store.close()
     })

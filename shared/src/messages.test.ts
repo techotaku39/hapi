@@ -28,6 +28,17 @@ describe('extractAssistantPlainText', () => {
         expect(extractAssistantPlainText(content)).toBe('Hello there.')
     })
 
+    test('extracts event/message text', () => {
+        const content = {
+            type: 'event',
+            data: {
+                type: 'message',
+                message: 'Visible event reply.'
+            }
+        }
+        expect(extractAssistantPlainText(content)).toBe('Visible event reply.')
+    })
+
     test('returns null for codex/tool-call (no text)', () => {
         const content = {
             type: 'codex',
@@ -136,6 +147,16 @@ describe('isAssistantTextMessage', () => {
                 }
             }
         })).toBe(false)
+    })
+
+    test('accepts a role-wrapped visible event/message reply', () => {
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: {
+                type: 'event',
+                data: { type: 'message', message: 'Visible event reply.' }
+            }
+        })).toBe(true)
     })
 })
 
