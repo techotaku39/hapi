@@ -48,11 +48,22 @@ export function getEnvironmentInfo(): Record<string, any> {
 }
 
 export function redactSettingsForDisplay(settings: Record<string, unknown>): Record<string, unknown> {
-    return {
+    const displaySettings: Record<string, unknown> = {
         ...settings,
         cliApiToken: settings.cliApiToken ? '***' : undefined,
         extraHeaders: settings.extraHeaders === undefined ? undefined : '***'
     }
+
+    const titleProvider = settings.titleProvider
+    if (titleProvider && typeof titleProvider === 'object' && !Array.isArray(titleProvider)) {
+        const titleProviderSettings = titleProvider as Record<string, unknown>
+        displaySettings.titleProvider = {
+            ...titleProviderSettings,
+            apiKey: titleProviderSettings.apiKey ? '***' : undefined
+        }
+    }
+
+    return displaySettings
 }
 
 function getLogFiles(logDir: string): { file: string, path: string, modified: Date }[] {
