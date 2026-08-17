@@ -10,6 +10,11 @@ export type NotificationClickAck = {
     type: typeof NOTIFICATION_CLICK_ACK_TYPE
 }
 
+export function resolveNotificationTarget(rawUrl: string | undefined, appScope: string): string {
+    const route = (rawUrl ?? '/').replace(/^\/+/, '')
+    return new URL(route, appScope).toString()
+}
+
 export function getNotificationClickHref(message: unknown, origin: string): string | null {
     if (!message || typeof message !== 'object') {
         return null

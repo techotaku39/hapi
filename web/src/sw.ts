@@ -9,7 +9,7 @@ import {
     putShareTransfer,
 } from './lib/shareTransfer'
 import { shareTargetPathname } from './lib/sharePath'
-import { focusOrOpenNotificationClient } from './lib/notificationClick'
+import { focusOrOpenNotificationClient, resolveNotificationTarget } from './lib/notificationClick'
 
 const sharePath = shareTargetPathname()
 
@@ -137,7 +137,7 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
     event.notification.close()
     const data = event.notification.data as { url?: string } | undefined
-    const url = new URL(data?.url ?? '/', self.location.origin).toString()
+    const url = resolveNotificationTarget(data?.url, self.registration.scope)
     event.waitUntil(focusOrOpenNotificationClient(self.clients, url, self.registration.scope))
 })
 

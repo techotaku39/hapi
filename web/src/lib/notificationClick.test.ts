@@ -4,6 +4,7 @@ import {
     getNotificationClickHref,
     NOTIFICATION_CLICK_ACK_TYPE,
     NOTIFICATION_CLICK_MESSAGE_TYPE,
+    resolveNotificationTarget,
     type NotificationClickClient,
     type NotificationClickClients
 } from './notificationClick'
@@ -160,5 +161,12 @@ describe('getNotificationClickHref', () => {
             type: NOTIFICATION_CLICK_MESSAGE_TYPE,
             url: 'https://attacker.test/sessions/session-1'
         }, 'https://hapi.test')).toBeNull()
+    })
+})
+
+describe('resolveNotificationTarget', () => {
+    it('resolves root-relative routes inside a subpath service-worker scope', () => {
+        expect(resolveNotificationTarget('/sessions/session-1', 'https://hapi.test/app/'))
+            .toBe('https://hapi.test/app/sessions/session-1')
     })
 })
