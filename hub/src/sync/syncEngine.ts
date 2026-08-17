@@ -210,8 +210,10 @@ export class SyncEngine {
     private readonly piUnexpectedTempOriginalIds = new Map<string, string>()
     /** Serialize scratchlist uploads per session so disk-byte caps cannot race. */
     private readonly scratchlistUploadTails = new Map<string, Promise<unknown>>()
-    /** Prevent overlapping startup/periodic scheduled-attachment reconciliation scans. */
+    /** Prevent overlapping startup/retry scheduled-attachment reconciliation scans. */
     private consumedAttachmentReconciliationInFlight = false
+    /** Sessions whose consumed scheduled-attachment cleanup failed and needs retry. */
+    private readonly consumedAttachmentCleanupRetries = new Set<string>()
     /** Coalesce duplicate clear requests so retries cannot spawn two fresh sessions. */
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
@@ -247,9 +249,14 @@ export class SyncEngine {
                 materializeScheduledAttachments: (sessionId, attachments) =>
                     this.materializeScheduledAttachments(sessionId, attachments),
                 deleteScheduledAttachments: async (sessionId, attachments) => {
-                    const { deleteScratchlistAttachmentFiles, getHapiHomeDir } =
+                    const { deleteScratchlistAttachmentFile, getHapiHomeDir } =
                         await import('../scratchlistAttachments/storage')
-                    await deleteScratchlistAttachmentFiles(getHapiHomeDir(), attachments)
+                    await Promise.all(attachments.map(async (attachment) => {
+                        const deleted = await deleteScratchlistAttachmentFile(getHapiHomeDir(), attachment.path)
+                        if (!deleted) {
+                            throw new Error(`Failed to delete scheduled attachment ${attachment.path}`)
+                        }
+                    }))
                 },
                 deleteMaterializedScheduledAttachments: async (sessionId, attachments) => {
                     const namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default'
@@ -484,7 +491,11 @@ export class SyncEngine {
         if (event.type === 'messages-consumed') {
             void this.messageService
                 .releaseConsumedScheduledAttachments(event.sessionId, event.localIds)
+                .then(() => {
+                    this.consumedAttachmentCleanupRetries.delete(event.sessionId)
+                })
                 .catch((error) => {
+                    this.consumedAttachmentCleanupRetries.add(event.sessionId)
                     console.error('[Scratchlist] failed to release scheduled attachments', error)
                 })
         }
@@ -1284,20 +1295,38 @@ export class SyncEngine {
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         void this.messageService.releaseMatureScheduledMessages(Date.now(), this.historyActionsInFlight)
-        this.reconcileConsumedScheduledAttachments()
+        this.retryConsumedScheduledAttachmentCleanup()
         void this.reconcileOpenCodeClears()
     }
 
     private reconcileConsumedScheduledAttachments(): void {
+        this.startConsumedScheduledAttachmentReconciliation(
+            this.store.sessions.getSessions().map((session) => session.id),
+        )
+    }
+
+    private retryConsumedScheduledAttachmentCleanup(): void {
+        this.startConsumedScheduledAttachmentReconciliation([...this.consumedAttachmentCleanupRetries])
+    }
+
+    private startConsumedScheduledAttachmentReconciliation(sessionIds: string[]): void {
+        if (sessionIds.length === 0) return
         if (this.consumedAttachmentReconciliationInFlight) return
         this.consumedAttachmentReconciliationInFlight = true
         void (async () => {
             try {
-                for (const session of this.store.sessions.getSessions()) {
-                    await this.messageService.reconcileConsumedScheduledAttachments(session.id)
+                for (const sessionId of new Set(sessionIds)) {
+                    try {
+                        await this.messageService.reconcileConsumedScheduledAttachments(sessionId)
+                        this.consumedAttachmentCleanupRetries.delete(sessionId)
+                    } catch (error) {
+                        this.consumedAttachmentCleanupRetries.add(sessionId)
+                        console.error(
+                            `[Scratchlist] failed to reconcile consumed scheduled attachments for ${sessionId}`,
+                            error,
+                        )
+                    }
                 }
-            } catch (error) {
-                console.error('[Scratchlist] failed to reconcile consumed scheduled attachments', error)
             } finally {
                 this.consumedAttachmentReconciliationInFlight = false
             }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -363,6 +363,79 @@ describe('SyncEngine session connection generations', () => {
             if (previousHome === undefined) delete process.env.HAPI_HOME
             else process.env.HAPI_HOME = previousHome
             rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
+    it('does not rescan message history on inactivity ticks after startup reconciliation', async () => {
+        const store = new Store(':memory:')
+        store.sessions.getOrCreateSession(
+            'reconcile-no-periodic-rescan',
+            { path: '/tmp', host: 'localhost', flavor: 'codex' },
+            null,
+            'default',
+        )
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+        )
+        try {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+            const getAllMessages = spyOn(store.messages, 'getAllMessages')
+
+            ;(engine as unknown as { expireInactive(): void }).expireInactive()
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+            expect(getAllMessages).not.toHaveBeenCalled()
+        } finally {
+            engine.stop()
+            store.close()
+        }
+    })
+
+    it('retries only the session whose consumed attachment cleanup failed', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+        )
+        const messageService = (engine as unknown as {
+            messageService: {
+                releaseConsumedScheduledAttachments: (sessionId: string, localIds: string[]) => Promise<void>
+                reconcileConsumedScheduledAttachments: (sessionId: string) => Promise<void>
+            }
+        }).messageService
+        const release = spyOn(messageService, 'releaseConsumedScheduledAttachments')
+            .mockImplementation(async () => {
+                throw new Error('temporary cleanup failure')
+            })
+        const reconcile = spyOn(messageService, 'reconcileConsumedScheduledAttachments')
+            .mockResolvedValue(undefined)
+        const error = spyOn(console, 'error').mockImplementation(() => {})
+        try {
+            engine.handleRealtimeEvent({
+                type: 'messages-consumed',
+                sessionId: 'cleanup-retry-session',
+                localIds: [],
+                invokedAt: Date.now(),
+            })
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+            ;(engine as unknown as { expireInactive(): void }).expireInactive()
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+            expect(release).toHaveBeenCalledWith('cleanup-retry-session', [])
+            expect(reconcile).toHaveBeenCalledTimes(1)
+            expect(reconcile).toHaveBeenCalledWith('cleanup-retry-session')
+        } finally {
+            release.mockRestore()
+            reconcile.mockRestore()
+            error.mockRestore()
+            engine.stop()
+            store.close()
         }
     })
 
