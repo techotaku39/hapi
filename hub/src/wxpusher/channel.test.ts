@@ -70,6 +70,33 @@ describe('WxPusherChannel', () => {
         }
     })
 
+    it('uses the basename for a Windows path fallback', async () => {
+        const fetchMock = mock(async () => new Response(JSON.stringify({ code: 1000 }), { status: 200 }))
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = fetchMock as unknown as typeof fetch
+
+        try {
+            const channel = new WxPusherChannel('AT_TEST', ['UID_ONE'], [], 'https://hapi.example.com')
+            const session = createSession({
+                metadata: {
+                    path: 'F:\\develop\\code\\hapi',
+                    host: 'DESKTOP',
+                    name: ''
+                }
+            })
+
+            await channel.sendSessionCompletion(session, 'completed' satisfies SessionEndReason)
+
+            const call = fetchMock.mock.calls[0] as unknown[] | undefined
+            const init = call?.[1] as RequestInit | undefined
+            const message = JSON.parse(String(init?.body)) as { content?: string }
+            expect(message.content).toContain('Agent · hapi\n\n会话已结束。')
+            expect(message.content).not.toContain('F:\\develop\\code\\hapi')
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+    })
+
     it('does not send ready, permission, or task notifications', async () => {
         const fetchMock = mock(async () => new Response(JSON.stringify({ code: 1000 }), { status: 200 }))
         const originalFetch = globalThis.fetch
