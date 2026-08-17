@@ -262,7 +262,14 @@ export class MessageService {
         message: StoredMessageForDelivery,
     ): Promise<void> {
         if (message.scheduledAt === null) return
-        await this.releaseScheduledAttachments(sessionId, [message])
+        const cacheKey = `${sessionId}:${message.id}`
+        const staged = this.scheduledAttachmentDeliveryCache.get(cacheKey)
+        try {
+            await this.releaseScheduledAttachments(sessionId, [message])
+        } finally {
+            this.scheduledAttachmentDeliveryCache.delete(cacheKey)
+            if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
+        }
     }
 
     private forgetScheduledMatureNotified(localIds: Iterable<string>): void {

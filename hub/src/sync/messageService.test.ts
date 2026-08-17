@@ -1531,6 +1531,50 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect(store.messages.lookupQueuedMessage(session.id, message.id)).toEqual({ status: 'absent' })
     })
 
+    it('cleans the CLI upload when cancelling after scheduled attachment materialization', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cancel-after-materialize')
+        const deletedHubPaths: string[] = []
+        const deletedMaterializedPaths: string[] = []
+        const service = new MessageService(
+            store,
+            makeIo((ack) => ack(null, [{ removed: true }])),
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => attachments.map((attachment) => ({
+                    ...attachment,
+                    path: '/tmp/materialized-before-cancel.png',
+                })),
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedHubPaths.push(...attachments.map((attachment) => attachment.path))
+                },
+                deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedMaterializedPaths.push(...attachments.map((attachment) => attachment.path))
+                },
+            },
+        )
+        const attachment = makeHubScratchlistAttachment(session.id, 'cancel-after-materialize')
+        const message = store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: { type: 'text', text: 'cancel after upload', attachments: [attachment] },
+            },
+            'local-cancel-after-materialize',
+            Date.now() - 1_000,
+        )
+
+        await service.releaseMatureScheduledMessages(Date.now())
+        await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({
+            status: 'cancelled',
+            localId: 'local-cancel-after-materialize',
+        })
+
+        expect(deletedHubPaths).toEqual([attachment.path])
+        expect(deletedMaterializedPaths).toEqual(['/tmp/materialized-before-cancel.png'])
+    })
+
     it('does not let a slow scheduled attachment block mature delivery in another session', async () => {
         const store = makeStore()
         const sessionA = makeSession(store, 'sched-slow-session-a')
