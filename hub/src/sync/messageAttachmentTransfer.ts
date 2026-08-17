@@ -41,14 +41,14 @@ export async function rehomeMessageAttachments(
     }
 
     const hapiHome = getHapiHomeDir()
-    for (const [messageId, candidate] of candidates) {
+    for (const messageId of candidates.keys()) {
+        const persisted = targetById.get(messageId)
         // Consumed scheduled messages may still carry the original Hub path in
         // their history, but releaseConsumedScheduledAttachments deliberately
         // removes that source file once no pending row references it. Only
         // re-home attachments that can still be delivered or cancelled.
-        if (candidate.invokedAt !== null || candidate.scheduledAt === null) continue
-        if (!targetById.has(messageId)) continue
-        const attachments = getUserMessageAttachments(candidate.content)
+        if (!persisted || persisted.invokedAt !== null || persisted.scheduledAt === null) continue
+        const attachments = getUserMessageAttachments(persisted.content)
         if (!attachments.some((attachment) => isScratchlistAttachmentPathForSession(
             attachment.path,
             namespace,

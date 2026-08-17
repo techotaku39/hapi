@@ -158,4 +158,77 @@ describe('rehomeMessageAttachments', () => {
             rmSync(hapiHome, { recursive: true, force: true })
         }
     })
+
+    it('does not re-home a localId-collision loser after the merge force-invokes it', async () => {
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-message-rehome-collision-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const store = new Store(':memory:')
+        try {
+            const oldSession = store.sessions.getOrCreateSession(
+                'message-rehome-collision-old',
+                { path: '/tmp/old', host: 'localhost' },
+                null,
+                'default',
+            )
+            const newSession = store.sessions.getOrCreateSession(
+                'message-rehome-collision-new',
+                { path: '/tmp/new', host: 'localhost' },
+                null,
+                'default',
+            )
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                oldSession.id,
+                'collision.png',
+                'image/png',
+                Buffer.from('collision'),
+            )
+            store.messages.addMessage(
+                oldSession.id,
+                {
+                    role: 'user',
+                    content: { type: 'text', text: 'source', attachments: [attachment] },
+                },
+                'shared-local-id',
+                Date.now() + 60_000,
+            )
+            store.messages.addMessage(
+                newSession.id,
+                { role: 'user', content: { type: 'text', text: 'target' } },
+                'shared-local-id',
+            )
+
+            const sourceMessages = store.messages.getAllMessages(oldSession.id)
+            const sourceMessageId = sourceMessages[0]!.id
+            store.messages.mergeSessionMessages(oldSession.id, newSession.id)
+            const sourceAfter = store.messages.getAllMessages(newSession.id)
+                .find((message) => message.id === sourceMessageId)
+            expect(sourceAfter).toBeDefined()
+            expect(sourceAfter?.invokedAt).not.toBeNull()
+
+            await expect(
+                rehomeMessageAttachments(
+                    store,
+                    'default',
+                    oldSession.id,
+                    newSession.id,
+                    sourceMessages,
+                ),
+            ).resolves.toBeUndefined()
+
+            const mergedSource = store.messages.getAllMessages(newSession.id)
+                .find((message) => message.id === sourceMessageId)
+            const mergedAttachment = (mergedSource?.content as {
+                content?: { attachments?: Array<{ path: string }> }
+            }).content?.attachments?.[0]
+            expect(mergedAttachment?.path).toBe(attachment.path)
+        } finally {
+            store.close()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
 })
