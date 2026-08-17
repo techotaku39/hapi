@@ -6,6 +6,7 @@ import { buildSessionUrl, getAgentName, getSessionName } from '../notifications/
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 
 export const WXPUSHER_SEND_URL = 'https://wxpusher.zjiecode.com/api/send/message'
+export const WXPUSHER_REQUEST_TIMEOUT_MS = 10_000
 
 type WxPusherResponse = {
     code?: number
@@ -34,7 +35,8 @@ export class WxPusherChannel implements NotificationChannel {
         private readonly topicIds: number[],
         private readonly publicUrl: string,
         private readonly visibilityTracker: VisibilityTracker | null = null,
-        private readonly backgroundOnly = false
+        private readonly backgroundOnly = false,
+        private readonly requestTimeoutMs = WXPUSHER_REQUEST_TIMEOUT_MS
     ) {}
 
     async sendReady(_session: Session): Promise<void> {}
@@ -69,6 +71,7 @@ export class WxPusherChannel implements NotificationChannel {
                 'content-type': 'application/json',
             },
             body: JSON.stringify(message),
+            signal: AbortSignal.timeout(this.requestTimeoutMs),
         })
 
         const responseText = await response.text().catch(() => '')
