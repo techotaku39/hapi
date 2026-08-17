@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { RenameSessionDialog } from './RenameSessionDialog'
@@ -38,6 +39,47 @@ describe('session dialog title alignment', () => {
         )
 
         expectCenteredTitle('Rename Session')
+    })
+
+    it('places Generate before Cancel and Save', () => {
+        renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={async () => 'Generated title'}
+                onUpdateSummary={vi.fn(async () => {})}
+                isPending={false}
+            />
+        )
+
+        expect(within(screen.getByRole('dialog')).getAllByRole('button').map((button) => button.textContent)).toEqual([
+            'Generate',
+            'Cancel',
+            'Save',
+            ''
+        ])
+    })
+
+    it('explains how to configure an unavailable title provider', async () => {
+        renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={async () => {
+                    throw new ApiError('not configured', 503)
+                }}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+        await waitFor(() => expect(screen.getByText(/HAPI_TITLE_PROVIDER_BASE_URL/)).toBeInTheDocument())
+        expect(screen.getByText(/titleProvider\.baseUrl/)).toBeInTheDocument()
     })
 
     it('saves an untouched generated draft as metadata.summary.text', async () => {

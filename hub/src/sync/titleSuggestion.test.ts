@@ -93,6 +93,29 @@ describe('OpenAI-compatible title provider', () => {
         expect(await request.json()).toMatchObject({ model: 'small-model' })
     })
 
+    it('falls back to settings.json values and lets environment values override them per field', () => {
+        const settings = {
+            baseUrl: 'https://settings.example/v1',
+            apiKey: 'settings-secret',
+            model: 'settings-model'
+        }
+
+        expect(readTitleProviderConfig({}, settings)).toEqual({
+            baseUrl: 'https://settings.example/v1',
+            apiKey: 'settings-secret',
+            model: 'settings-model'
+        })
+        expect(readTitleProviderConfig({
+            HAPI_TITLE_PROVIDER_BASE_URL: 'https://env.example/v1',
+            HAPI_TITLE_PROVIDER_MODEL: 'env-model'
+        }, settings)).toEqual({
+            baseUrl: 'https://env.example/v1',
+            apiKey: 'settings-secret',
+            model: 'env-model'
+        })
+        expect(readTitleProviderConfig({}, { ...settings, apiKey: '   ' })).toBeNull()
+    })
+
     it('normalizes a one-line title and caps it for the metadata field', () => {
         expect(normalizeTitleSuggestion('Title: "A useful title"\nExtra text')).toBe('A useful title')
         expect(normalizeTitleSuggestion('   ')).toBeNull()

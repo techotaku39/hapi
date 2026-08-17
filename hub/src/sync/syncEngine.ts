@@ -28,7 +28,11 @@ import { CursorLegacyMigrator, type CursorLegacyMigratorOptions } from '../curso
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
 import { MessageService } from './messageService'
-import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
+import {
+    createTitleSuggestionService,
+    type OpenAICompatibleTitleProviderConfig,
+    type TitleSuggestionService
+} from './titleSuggestion'
 import { selectForkTranscriptPrefix } from './forkTranscript'
 import {
     RpcGateway,
@@ -207,6 +211,7 @@ export class SyncEngine {
         private readonly io: Server,
         rpcRegistry: RpcRegistry,
         sseManager: SSEManager,
+        titleProviderConfig?: OpenAICompatibleTitleProviderConfig | null,
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
@@ -217,7 +222,7 @@ export class SyncEngine {
             this.eventPublisher,
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
-        this.titleSuggestionService = createTitleSuggestionService(store)
+        this.titleSuggestionService = createTitleSuggestionService(store, titleProviderConfig)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
