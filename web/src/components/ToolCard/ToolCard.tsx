@@ -18,6 +18,7 @@ import { getToolResultViewComponent } from '@/components/ToolCard/views/_results
 import { formatTaskChildLabel, TaskStateIcon } from '@/components/ToolCard/helpers'
 import { toolDurationMs } from '@/components/ToolCard/toolDuration'
 import { formatDuration, formatMessageTimestampTitle } from '@/chat/presentation'
+import { getToolGroupActionKind } from '@/chat/toolGroups'
 import type { TerminalToolDisplayMode } from '@/hooks/useToolCardDisplayMode'
 import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
@@ -27,19 +28,34 @@ import { TraceSection } from '@/components/ToolCard/trace'
 import { isSubagentToolName } from '@/chat/subagentTool'
 
 const ELAPSED_INTERVAL_MS = 1000
-const TERMINAL_RELATED_TOOL_NAMES = new Set(['Bash', 'CodexBash', 'shell_command', 'run_shell_command'])
+const TERMINAL_RELATED_TOOL_NAMES = new Set([
+    'Bash',
+    'CodexBash',
+    'shell_command',
+    'run_shell_command',
+    'Shell',
+    'bash',
+    'run_command',
+    'execute_command',
+    'terminal',
+])
 
-export function shouldUseCompactTerminalToolCard(toolName: string, terminalToolDisplayMode: TerminalToolDisplayMode): boolean {
-    return TERMINAL_RELATED_TOOL_NAMES.has(toolName) && terminalToolDisplayMode === 'compact'
+export function shouldUseCompactTerminalToolCard(
+    toolName: string,
+    terminalToolDisplayMode: TerminalToolDisplayMode,
+    terminalTool = TERMINAL_RELATED_TOOL_NAMES.has(toolName)
+): boolean {
+    return terminalTool && terminalToolDisplayMode === 'compact'
 }
 
 export function shouldShowInlineToolCardBody(
     toolName: string,
     presentationMinimal: boolean,
-    terminalToolDisplayMode: TerminalToolDisplayMode
+    terminalToolDisplayMode: TerminalToolDisplayMode,
+    terminalTool = TERMINAL_RELATED_TOOL_NAMES.has(toolName)
 ): boolean {
     if (isSubagentToolName(toolName)) return false
-    if (TERMINAL_RELATED_TOOL_NAMES.has(toolName)) {
+    if (terminalTool) {
         return terminalToolDisplayMode === 'detailed'
     }
     return !presentationMinimal
@@ -433,8 +449,9 @@ function ToolCardInner(props: ToolCardProps) {
         ? getSubagentModel(props.block.children, getInputStringAny(props.block.tool.input, ['model']))
         : null
     const isCodexAgentCard = toolName === 'CodexAgent'
-    const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode)
-    const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode)
+    const isTerminalTool = getToolGroupActionKind(props.block) === 'command'
+    const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode, isTerminalTool)
+    const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode, isTerminalTool)
     const CompactToolView = showInline ? getToolViewComponent(toolName) : null
     const compactViewOwnsInteractions = toolName === 'CodexDiff'
     const ResultToolView = getToolResultViewComponent(toolName)
