@@ -284,14 +284,15 @@ export function useHubScratchlist(
                     const text = entry.text.length > SCRATCHLIST_MAX_TEXT_LENGTH
                         ? entry.text.slice(0, SCRATCHLIST_MAX_TEXT_LENGTH)
                         : entry.text
-                    if (text.trim().length === 0) continue
+                    const attachments = stripPreviewUrls(entry.attachments ?? [])
+                    if (text.trim().length === 0 && attachments.length === 0) continue
                     try {
                         await api.createScratchlistEntry(sessionId, {
                             text,
                             entryId: entry.id,
                             createdAt: entry.createdAt,
                             position: entry.position ?? position,
-                            attachments: entry.attachments ?? []
+                            attachments
                         })
                     } catch {
                         // Genuine rejection (cap, network, 5xx...). The

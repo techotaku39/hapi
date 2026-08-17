@@ -1105,6 +1105,45 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect(msgs).toHaveLength(1)
     })
 
+    it('skips attachment validation for a duplicate scheduled localId retry', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-duplicate-attachment')
+        const scheduledAt = Date.now() + 60_000
+        const attachment: AttachmentMetadata = {
+            id: 'duplicate-att',
+            filename: 'image.png',
+            mimeType: 'image/png',
+            size: 10,
+            path: 'hapi-hub:scratchlist/default/session/duplicate-att-image.png',
+        }
+        store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'first', attachments: [attachment] } },
+            'duplicate-scheduled',
+            scheduledAt,
+        )
+        let validationCalls = 0
+        const service = new MessageService(
+            store,
+            makeNoopIo(),
+            makePublisher() as any,
+            undefined,
+            {
+                validateScheduledAttachments: async () => { validationCalls += 1 },
+            },
+        )
+
+        await service.sendMessage(session.id, {
+            text: 'retry',
+            localId: 'duplicate-scheduled',
+            scheduledAt,
+            attachments: [attachment],
+        })
+
+        expect(validationCalls).toBe(0)
+        expect(store.messages.getUninvokedLocalMessages(session.id)).toHaveLength(1)
+    })
+
     it('materializes a hub attachment only when a scheduled row matures', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-hub-attachment')

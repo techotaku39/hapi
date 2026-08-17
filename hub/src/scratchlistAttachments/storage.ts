@@ -175,7 +175,7 @@ export async function moveScratchlistAttachmentFilesForSession(
         if (options.throwOnFailure) {
             // Defer target-wins source cleanup until every rename succeeds so a
             // later failure can leave all metadata pointing at valid old paths.
-            await Promise.all(completedMoves
+            await Promise.allSettled(completedMoves
                 .filter((move) => move.destinationExisted)
                 .map((move) => rm(move.oldPath, { force: true })))
         }

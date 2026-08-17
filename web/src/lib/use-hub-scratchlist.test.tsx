@@ -447,6 +447,60 @@ describe('useHubScratchlist - localStorage migration', () => {
         expect(localStorage.getItem(`hapi.scratchlist.v2.migrated.${sid}`)).toBe('1')
     })
 
+    it('migrates attachment-only localStorage entries', async () => {
+        const sid = makeSid()
+        localStorage.setItem(
+            `hapi.scratchlist.v1.${sid}`,
+            JSON.stringify([{
+                id: 'photo-only',
+                text: '',
+                createdAt: 100,
+                attachments: [{
+                    id: 'photo-1',
+                    filename: 'photo.png',
+                    mimeType: 'image/png',
+                    size: 12,
+                    path: 'hapi-hub:scratchlist/default/session/photo-1-photo.png',
+                    previewUrl: 'blob:stale-preview',
+                }]
+            }])
+        )
+        const create = vi.fn(async (_s: string, body: {
+            text: string
+            entryId?: string
+            createdAt?: number
+            attachments?: Array<Record<string, unknown>>
+        }) => ({
+            entry: {
+                entryId: body.entryId ?? 'photo-only',
+                text: body.text,
+                createdAt: body.createdAt ?? 100,
+                updatedAt: 100,
+                attachments: body.attachments ?? [],
+            }
+        }))
+        const api = createMockApi({
+            getScratchlist: async () => ({ entries: [] }),
+            createScratchlistEntry: create,
+        })
+        const { result } = renderHook(() => useHubScratchlist(sid, api), { wrapper: createWrapper() })
+
+        await waitFor(() => expect(result.current.migrationStatus).toBe('completed'))
+        expect(create).toHaveBeenCalledTimes(1)
+        const body = create.mock.calls[0]?.[1] as {
+            text: string
+            attachments: Array<Record<string, unknown>>
+        }
+        expect(body.text).toBe('')
+        expect(body.attachments).toEqual([{
+            id: 'photo-1',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            size: 12,
+            path: 'hapi-hub:scratchlist/default/session/photo-1-photo.png',
+        }])
+    })
+
     it('does not re-migrate on a mount where the migrated flag is already set', async () => {
         const sid = makeSid()
         seedV1Entries(sid)

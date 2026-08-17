@@ -245,12 +245,9 @@ export class SyncEngine {
                 materializeScheduledAttachments: (sessionId, attachments) =>
                     this.materializeScheduledAttachments(sessionId, attachments),
                 deleteScheduledAttachments: async (sessionId, attachments) => {
-                    const namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default'
-                    await this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
-                        const { deleteScratchlistAttachmentFiles, getHapiHomeDir } =
-                            await import('../scratchlistAttachments/storage')
-                        await deleteScratchlistAttachmentFiles(getHapiHomeDir(), attachments)
-                    })
+                    const { deleteScratchlistAttachmentFiles, getHapiHomeDir } =
+                        await import('../scratchlistAttachments/storage')
+                    await deleteScratchlistAttachmentFiles(getHapiHomeDir(), attachments)
                 },
                 deleteMaterializedScheduledAttachments: async (sessionId, attachments) => {
                     const namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default'

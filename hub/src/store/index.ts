@@ -192,6 +192,31 @@ export class Store {
         })()
     }
 
+    /** Look up a local-id retry in the same clear-redirect target as insertion. */
+    getMessageForCurrentSession(sessionId: string, localId: string): StoredMessage | null {
+        const row = this.db.prepare('SELECT namespace, metadata FROM sessions WHERE id = ?')
+            .get(sessionId) as { namespace: string; metadata: string | null } | undefined
+        if (!row) throw new Error('Message source session not found')
+        let targetSessionId = sessionId
+        if (row.metadata) {
+            const metadata = JSON.parse(row.metadata) as {
+                opencodeClearOperation?: { replacementSessionId?: string; state?: string }
+                supersededBySessionId?: string
+            }
+            targetSessionId = metadata.supersededBySessionId
+                ?? (metadata.opencodeClearOperation?.state !== 'aborted'
+                    ? metadata.opencodeClearOperation?.replacementSessionId
+                    : undefined)
+                ?? sessionId
+        }
+        if (targetSessionId !== sessionId) {
+            const target = this.db.prepare('SELECT 1 FROM sessions WHERE id = ? AND namespace = ?')
+                .get(targetSessionId, row.namespace)
+            if (!target) throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
+        }
+        return this.messages.getMessagesByLocalIds(targetSessionId, [localId])[0] ?? null
+    }
+
     /** Durable delivery gate for a preallocated replacement owned by an unfinished clear. */
     isOpenCodeClearDeliveryGated(sessionId: string): boolean {
         const target = this.db.prepare('SELECT namespace FROM sessions WHERE id = ?')

@@ -198,7 +198,8 @@ export class MessageService {
         sessionId: string,
         messages: StoredMessageForDelivery[],
     ): Promise<void> {
-        if (!this.options.deleteScheduledAttachments || messages.length === 0) return
+        const deleteScheduledAttachments = this.options.deleteScheduledAttachments
+        if (!deleteScheduledAttachments || messages.length === 0) return
         for (const message of messages) {
             this.scheduledAttachmentDeliveryCache.delete(`${sessionId}:${message.id}`)
         }
@@ -206,18 +207,24 @@ export class MessageService {
             .filter((message) => message.scheduledAt !== null)
             .flatMap((message) => getUserMessageAttachments(message.content))
             .filter((attachment) => isHubScratchlistAttachmentPath(attachment.path))
-        const unique = new Map(attachments.map((attachment) => [attachment.path, attachment]))
-        const scratchlistPaths = new Set(
-            this.store.scratchlist
-                .list(sessionId)
-                .flatMap((entry) => entry.attachments.map((attachment) => attachment.path))
-        )
-        const deletable = [...unique.values()].filter(
-            (attachment) => !this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)
-                && !scratchlistPaths.has(attachment.path)
-        )
-        if (deletable.length === 0) return
-        await this.options.deleteScheduledAttachments(sessionId, deletable)
+        await this.withScheduledAttachmentLock(sessionId, async () => {
+            // Re-read scratchlist references while holding the same lock as
+            // scheduled acceptance and explicit draft deletion. A snapshot
+            // taken before the lock could delete a blob for a newly accepted
+            // scheduled row.
+            const unique = new Map(attachments.map((attachment) => [attachment.path, attachment]))
+            const scratchlistPaths = new Set(
+                this.store.scratchlist
+                    .list(sessionId)
+                    .flatMap((entry) => entry.attachments.map((attachment) => attachment.path))
+            )
+            const deletable = [...unique.values()].filter(
+                (attachment) => !this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)
+                    && !scratchlistPaths.has(attachment.path)
+            )
+            if (deletable.length === 0) return
+            await deleteScheduledAttachments(sessionId, deletable)
+        })
     }
 
     async releaseConsumedScheduledAttachments(sessionId: string, localIds: string[]): Promise<void> {
@@ -780,7 +787,10 @@ export class MessageService {
         }
 
         const insertMessage = async () => {
-            if (payload.scheduledAt != null && attachments.length > 0) {
+            const duplicate = payload.localId
+                ? this.store.getMessageForCurrentSession(sessionId, payload.localId)
+                : null
+            if (!duplicate && payload.scheduledAt != null && attachments.length > 0) {
                 await this.options.validateScheduledAttachments?.(sessionId, attachments)
             }
             const inserted = this.store.addMessageForCurrentSession(
