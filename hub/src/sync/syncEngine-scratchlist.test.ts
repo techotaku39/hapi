@@ -153,6 +153,62 @@ describe('SyncEngine scratchlist mutations emit session-updated patches', () => 
         engine.stop()
     })
 
+    it('keeps attachment validation and mutation under the same lock as deletion', async () => {
+        const { engine } = setup()
+        const session = engine.getOrCreateSession(
+            'tag-update-atomic',
+            { path: '/tmp', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        engine.createScratchlistEntry(session.id, 'before', { entryId: 'e1' })
+
+        const attachment = {
+            id: '11111111-1111-4111-8111-111111111111',
+            filename: 'a.png',
+            mimeType: 'image/png',
+            size: 3,
+            path: `hapi-hub:scratchlist/default/${session.id}/a.png`,
+        }
+        let releaseValidation!: () => void
+        const validationStarted = new Promise<void>((resolve) => {
+            releaseValidation = resolve
+        })
+        let continueValidation!: () => void
+        const validationPaused = new Promise<void>((resolve) => {
+            continueValidation = resolve
+        })
+
+        engine.resolveScratchlistAttachmentsForSession = async () => {
+            releaseValidation()
+            await validationPaused
+            return { ok: true as const, attachments: [attachment] }
+        }
+        engine.sumScratchlistAttachmentBytesOnDisk = async () => 0
+
+        let deleteFinished = false
+        const updatePromise = engine.updateScratchlistEntryAtomic(
+            session.id,
+            'e1',
+            { text: 'after', attachments: [attachment] },
+        )
+        await validationStarted
+        const deletePromise = engine.deleteScratchlistEntry(session.id, 'e1').then((removed) => {
+            deleteFinished = true
+            return removed
+        })
+
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(deleteFinished).toBe(false)
+
+        continueValidation()
+        const updated = await updatePromise
+        expect(updated.outcome).toBe('updated')
+        expect(await deletePromise).toBe(true)
+        expect(engine.listScratchlistEntries(session.id)).toHaveLength(0)
+        engine.stop()
+    })
+
     it('deleteScratchlistEntry emits a session-updated patch on success', async () => {
         const { engine, engineEvents } = setup()
         const session = engine.getOrCreateSession(

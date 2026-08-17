@@ -596,7 +596,10 @@ export class MessageService {
                 return { status: 'cancelled', localId }
             }
             const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
-            if (recheck.status === 'invoked') return recheck
+            if (recheck.status === 'invoked') {
+                await this.releaseCancelledScheduledAttachment(sessionId, message)
+                return recheck
+            }
             if (recheck.status === 'absent') return { status: 'cancelled', localId }
         }
 
@@ -619,6 +622,7 @@ export class MessageService {
             const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
             if (recheck.status === 'invoked') {
                 // CLI beat us — treat identically to Race-B (ack returned not-found).
+                await this.releaseCancelledScheduledAttachment(sessionId, message)
                 this.forgetScheduledMatureNotified([localId])
                 this.publisher.emit({
                     type: 'messages-consumed',
@@ -655,6 +659,10 @@ export class MessageService {
                 // DB write failed — let the HTTP 500 surface to the caller.
                 throw err
             }
+            // The messages-consumed event below is local to this Hub process and
+            // does not pass through SyncEngine's normal consumed-message cleanup.
+            // Release any now-unreferenced Hub attachment explicitly.
+            await this.releaseCancelledScheduledAttachment(sessionId, message)
             this.forgetScheduledMatureNotified([localId])
             // Notify all SSE subscribers (other open tabs) that this queued row is now
             // invoked so they remove it from the floating bar.  Without this emit, only

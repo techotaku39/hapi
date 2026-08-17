@@ -88,6 +88,16 @@ function makePublisher() {
     }
 }
 
+function makeHubScratchlistAttachment(sessionId: string, suffix: string): AttachmentMetadata {
+    return {
+        id: `11111111-1111-4111-8111-${suffix.padStart(12, '0')}`,
+        filename: `${suffix}.png`,
+        mimeType: 'image/png',
+        size: 3,
+        path: `hapi-hub:scratchlist/default/${sessionId}/${suffix}.png`,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -548,10 +558,12 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
         it('returns invoked with message row when CLI says item was already consumed', async () => {
             const store = makeStore()
             const session = makeSession(store, 'race-b')
+            const attachment = makeHubScratchlistAttachment(session.id, 'race-b')
             const msg = store.messages.addMessage(
                 session.id,
-                { role: 'user', content: { type: 'text', text: 'hello' } },
-                'local-b'
+                { role: 'user', content: { type: 'text', text: 'hello', attachments: [attachment] } },
+                'local-b',
+                Date.now() - 1000
             )
 
             const publisher = makePublisher()
@@ -560,7 +572,12 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
                 callback(null, [{ removed: false }])
             })
 
-            const service = new MessageService(store, io, publisher as any)
+            const deletedPaths: string[] = []
+            const service = new MessageService(store, io, publisher as any, undefined, {
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedPaths.push(...attachments.map((candidate) => candidate.path))
+                },
+            })
             const result = await service.cancelQueuedMessage(session.id, msg.id)
 
             expect(result.status).toBe('invoked')
@@ -592,6 +609,7 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
             // messages-consumed must be emitted exactly once
             const consumedCount = publisher.events.filter(e => e.type === 'messages-consumed').length
             expect(consumedCount).toBe(1)
+            expect(deletedPaths).toEqual([attachment.path])
         })
     })
 
@@ -599,10 +617,12 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
         it('returns invoked with message row when CLI does not respond within timeout', async () => {
             const store = makeStore()
             const session = makeSession(store, 'race-c')
+            const attachment = makeHubScratchlistAttachment(session.id, 'race-c')
             const msg = store.messages.addMessage(
                 session.id,
-                { role: 'user', content: { type: 'text', text: 'hello' } },
-                'local-c'
+                { role: 'user', content: { type: 'text', text: 'hello', attachments: [attachment] } },
+                'local-c',
+                Date.now() - 1000
             )
 
             const publisher = makePublisher()
@@ -611,7 +631,12 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
                 callback(new Error('operation has timed out'), [])
             })
 
-            const service = new MessageService(store, io, publisher as any)
+            const deletedPaths: string[] = []
+            const service = new MessageService(store, io, publisher as any, undefined, {
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedPaths.push(...attachments.map((candidate) => candidate.path))
+                },
+            })
             const result = await service.cancelQueuedMessage(session.id, msg.id)
 
             expect(result.status).toBe('invoked')
@@ -642,6 +667,7 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
             // messages-consumed must be emitted exactly once
             const consumedCount = publisher.events.filter(e => e.type === 'messages-consumed').length
             expect(consumedCount).toBe(1)
+            expect(deletedPaths).toEqual([attachment.path])
         })
     })
 

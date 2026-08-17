@@ -67,6 +67,7 @@ type EngineOverrides = Partial<{
     createScratchlistEntry: SyncEngine['createScratchlistEntry']
     reorderScratchlistEntries: SyncEngine['reorderScratchlistEntries']
     updateScratchlistEntry: SyncEngine['updateScratchlistEntry']
+    updateScratchlistEntryAtomic: SyncEngine['updateScratchlistEntryAtomic']
     deleteScratchlistEntry: SyncEngine['deleteScratchlistEntry']
     deleteScratchlistAttachmentById: SyncEngine['deleteScratchlistAttachmentById']
     readScratchlistAttachment: SyncEngine['readScratchlistAttachment']
@@ -77,6 +78,15 @@ type EngineOverrides = Partial<{
 }>
 
 function createApp(session: Session, overrides: EngineOverrides = {}) {
+    const updateScratchlistEntry = overrides.updateScratchlistEntry
+        ?? (async (_sessionId: string, entryId: string, patch: { text?: string; attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; path: string }> }) => ({
+            entryId,
+            text: patch.text ?? '',
+            createdAt: 1000,
+            updatedAt: 2000,
+            position: 0,
+            attachments: patch.attachments ?? [],
+        }))
     const engine = {
         resolveSessionAccess: () => {
             if (overrides.sessionAccess === 'not-found') {
@@ -104,15 +114,30 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
                     attachments: [],
                 }
             })),
-        updateScratchlistEntry: overrides.updateScratchlistEntry
-            ?? ((sessionId: string, entryId: string, patch: { text?: string }) => ({
-                entryId,
-                text: patch.text ?? '',
-                createdAt: 1000,
-                updatedAt: 2000,
-                position: 0,
-                attachments: [],
-            })),
+        updateScratchlistEntry,
+        updateScratchlistEntryAtomic: overrides.updateScratchlistEntryAtomic
+            ?? (async (sessionId: string, entryId: string, patch: { text?: string; attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; path: string }> }, namespace: string) => {
+                const existing = (overrides.getScratchlistEntry ?? (() => null))(sessionId, entryId)
+                if (!existing) return { outcome: 'not-found' as const }
+                const text = patch.text !== undefined ? patch.text.trim() : existing.text
+                const attachments = patch.attachments ?? existing.attachments
+                if (text.length === 0 && attachments.length === 0) {
+                    return {
+                        outcome: 'invalid' as const,
+                        error: 'Scratchlist entry requires text or attachments',
+                        code: 'scratchlist_entry_empty',
+                    }
+                }
+                const updated = await updateScratchlistEntry(
+                    sessionId,
+                    entryId,
+                    { text, attachments },
+                    namespace,
+                )
+                return updated
+                    ? { outcome: 'updated' as const, entry: updated }
+                    : { outcome: 'not-found' as const }
+            }),
         deleteScratchlistEntry: overrides.deleteScratchlistEntry ?? (() => true),
         readScratchlistAttachment: overrides.readScratchlistAttachment ?? (async () => null),
         canDeleteScratchlistAttachment: overrides.canDeleteScratchlistAttachment ?? (() => true),

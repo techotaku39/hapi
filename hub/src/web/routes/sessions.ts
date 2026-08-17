@@ -31,7 +31,7 @@ import { Hono, type Context } from 'hono'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
-import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
+import { validateScratchlistAttachmentsForWrite } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
@@ -1157,63 +1157,23 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
         }
 
-        const existing = engine.getScratchlistEntry(sessionResult.sessionId, entryId)
-        if (!existing) {
-            return c.json({ error: 'Scratchlist entry not found' }, 404)
-        }
-
-        const nextText = parsed.data.text !== undefined ? parsed.data.text.trim() : existing.text
         const namespace = c.get('namespace')
-        let nextAttachments = existing.attachments
-        if (parsed.data.attachments !== undefined) {
-            const checked = await engine.resolveScratchlistAttachmentsForSession(
-                sessionResult.sessionId,
-                namespace,
-                parsed.data.attachments
-            )
-            if (!checked.ok) {
-                return c.json({ error: checked.error, code: 'scratchlist_attachment_invalid' }, 400)
-            }
-            nextAttachments = checked.attachments
-        }
-        if (nextText.trim().length === 0 && nextAttachments.length === 0) {
-            return c.json({
-                error: 'Scratchlist entry requires text or attachments',
-                code: 'scratchlist_entry_empty',
-            }, 400)
-        }
-        const limits = loadScratchlistAttachmentLimitsFromEnv()
-        const diskBytes = await engine.sumScratchlistAttachmentBytesOnDisk(sessionResult.sessionId, namespace)
-        const removedAttachments = existing.attachments.filter(
-            (old) => !nextAttachments.some((next) => next.id === old.id)
-        )
-        const sessionBytesBefore = scratchlistSessionBytesBeforeForPut(
-            diskBytes,
-            nextAttachments,
-            removedAttachments,
-        )
-        const attachmentValidation = validateScratchlistAttachmentsForWrite(
-            nextAttachments,
-            limits,
-            sessionBytesBefore
-        )
-        if (!attachmentValidation.ok) {
-            return c.json({ error: attachmentValidation.error, code: attachmentValidation.code }, 400)
-        }
-
-        const updated = await engine.updateScratchlistEntry(
+        const result = await engine.updateScratchlistEntryAtomic(
             sessionResult.sessionId,
             entryId,
             {
-                text: nextText,
-                attachments: nextAttachments,
+                text: parsed.data.text,
+                attachments: parsed.data.attachments,
             },
             namespace,
         )
-        if (!updated) {
+        if (result.outcome === 'not-found') {
             return c.json({ error: 'Scratchlist entry not found' }, 404)
         }
-        return c.json({ entry: updated })
+        if (result.outcome === 'invalid') {
+            return c.json({ error: result.error, code: result.code }, 400)
+        }
+        return c.json({ entry: result.entry })
     })
 
     app.delete('/sessions/:id/scratchlist/attachments/:attachmentId', async (c) => {

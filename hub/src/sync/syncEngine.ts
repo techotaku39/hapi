@@ -834,6 +834,117 @@ export class SyncEngine {
         })
     }
 
+    /**
+     * Validate and update a scratchlist row while holding the attachment lock.
+     * The route must not validate against a snapshot and acquire the lock only
+     * for the subsequent write: a concurrent cleanup could remove a validated
+     * blob in between those two operations.
+     */
+    async updateScratchlistEntryAtomic(
+        sessionId: string,
+        entryId: string,
+        patch: {
+            text?: string
+            attachments?: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+        },
+        namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default',
+    ): Promise<
+        | {
+            outcome: 'updated'
+            entry: {
+                entryId: string
+                text: string
+                createdAt: number
+                updatedAt: number
+                position: number
+                attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+            }
+        }
+        | { outcome: 'not-found' }
+        | { outcome: 'invalid'; error: string; code: string }
+    > {
+        return this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
+            const existing = this.store.scratchlist.get(sessionId, entryId)
+            if (!existing) return { outcome: 'not-found' }
+
+            const nextText = patch.text !== undefined ? patch.text.trim() : existing.text
+            let nextAttachments = existing.attachments
+            if (patch.attachments !== undefined) {
+                const checked = await this.resolveScratchlistAttachmentsForSession(
+                    sessionId,
+                    namespace,
+                    patch.attachments,
+                )
+                if (!checked.ok) {
+                    return {
+                        outcome: 'invalid',
+                        error: checked.error,
+                        code: 'scratchlist_attachment_invalid',
+                    }
+                }
+                nextAttachments = checked.attachments
+            }
+
+            if (nextText.length === 0 && nextAttachments.length === 0) {
+                return {
+                    outcome: 'invalid',
+                    error: 'Scratchlist entry requires text or attachments',
+                    code: 'scratchlist_entry_empty',
+                }
+            }
+
+            const { loadScratchlistAttachmentLimitsFromEnv } = await import('../config/scratchlistAttachmentLimits')
+            const { scratchlistSessionBytesBeforeForPut, validateScratchlistAttachmentsForWrite } =
+                await import('../scratchlistAttachments/validate')
+            const diskBytes = await this.sumScratchlistAttachmentBytesOnDisk(sessionId, namespace)
+            const removedAttachments = existing.attachments.filter(
+                (old) => !nextAttachments.some((next) => next.id === old.id)
+            )
+            const sessionBytesBefore = scratchlistSessionBytesBeforeForPut(
+                diskBytes,
+                nextAttachments,
+                removedAttachments,
+            )
+            const attachmentValidation = validateScratchlistAttachmentsForWrite(
+                nextAttachments,
+                loadScratchlistAttachmentLimitsFromEnv(),
+                sessionBytesBefore,
+            )
+            if (!attachmentValidation.ok) {
+                return {
+                    outcome: 'invalid',
+                    error: attachmentValidation.error,
+                    code: attachmentValidation.code,
+                }
+            }
+
+            const updated = this.store.scratchlist.update(sessionId, entryId, {
+                text: nextText,
+                attachments: nextAttachments,
+            })
+            if (!updated) return { outcome: 'not-found' }
+
+            const removed = patch.attachments !== undefined
+                ? existing.attachments.filter(
+                    (old) => !updated.attachments.some((next) => next.id === old.id)
+                )
+                : []
+            await this.deleteOrphanedScratchlistAttachmentsLocked(sessionId, removed)
+            this.sessionCache.emitScratchlistChanged(sessionId, updated.updatedAt)
+            return {
+                outcome: 'updated',
+                entry: {
+                    entryId: updated.entryId,
+                    text: updated.text,
+                    createdAt: updated.createdAt,
+                    updatedAt: updated.updatedAt,
+                    position: updated.position,
+                    attachments: updated.attachments,
+                },
+            }
+        })
+    }
+
     reorderScratchlistEntries(
         sessionId: string,
         entryIds: string[]
