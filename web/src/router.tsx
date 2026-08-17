@@ -18,7 +18,7 @@ import {
     PRESERVE_SESSION_SIDEBAR_SCROLL,
 } from '@/lib/sessionNavigation'
 import { App } from '@/App'
-import { SessionChat } from '@/components/SessionChat'
+import { SessionChat, usePendingScratchlistSendCleanup } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
@@ -653,6 +653,7 @@ function SessionPage() {
             // 'no-session' and 'pending' don't need toast - either invalid state or expected behavior
         }
     })
+    const trackScheduledScratchlistSend = usePendingScratchlistSendCleanup(api, sendSettlement)
 
     // Get agent type from session metadata for slash commands
     const agentType = session?.metadata?.flavor ?? 'claude'
@@ -800,6 +801,7 @@ function SessionPage() {
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
             sendSettlement={sendSettlement}
+            onScheduledScratchlistSend={trackScheduledScratchlistSend}
             viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}

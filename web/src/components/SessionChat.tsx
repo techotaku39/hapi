@@ -473,6 +473,7 @@ type SessionChatProps = {
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
     ) => Promise<SendMessageAcceptance | false>
+    onScheduledScratchlistSend?: (attemptId: string, sessionId: string, entryId: string) => void
     resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
     onUploadSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
@@ -491,6 +492,39 @@ type SessionChatProps = {
     // Called when an `abort-restore` event arrives and the composer is not empty,
     // so the caller can surface the aborted text via the existing sendError path.
     onAbortRestore?: (text: string) => void
+}
+
+type ScheduledScratchlistSendTracker = (
+    attemptId: string,
+    sessionId: string,
+    entryId: string,
+) => void
+
+export function usePendingScratchlistSendCleanup(
+    api: Pick<ApiClient, 'deleteScratchlistEntry'>,
+    sendSettlement: SendMessageSettlement | null,
+): ScheduledScratchlistSendTracker {
+    const pendingSendsRef = useRef(new Map<string, { sessionId: string; entryId: string }>())
+    const sendSettlementRef = useRef<SendMessageSettlement | null>(sendSettlement)
+    sendSettlementRef.current = sendSettlement
+    const settlePendingSend = useCallback((attemptId: string) => {
+        const settlement = sendSettlementRef.current
+        if (settlement?.attemptId !== attemptId) return
+        const pending = pendingSendsRef.current.get(attemptId)
+        if (!pending) return
+        pendingSendsRef.current.delete(attemptId)
+        if (settlement.status === 'success') {
+            void api.deleteScratchlistEntry(pending.sessionId, pending.entryId)
+        }
+    }, [api])
+    useEffect(() => {
+        if (!sendSettlement) return
+        settlePendingSend(sendSettlement.attemptId)
+    }, [sendSettlement, settlePendingSend])
+    return useCallback((attemptId, sessionId, entryId) => {
+        pendingSendsRef.current.set(attemptId, { sessionId, entryId })
+        settlePendingSend(attemptId)
+    }, [settlePendingSend])
 }
 
 /**
@@ -584,25 +618,6 @@ function SessionChatInner(props: SessionChatProps) {
     const enqueueCursorModelApply = useMemo(() => createSerialAsyncQueue(), [])
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
     const scratchlist = useHubScratchlist(props.session.id, props.api)
-    /**
-     * Scheduled scratchlist messages keep Hub-owned attachment paths until
-     * the Hub accepts the message. Remove the draft only after the matching
-     * mutation settles successfully, otherwise cleanup can win the race and
-     * delete the blob before scheduled-message validation runs.
-    */
-    const pendingScratchlistSendsRef = useRef(new Map<string, string>())
-    const sendSettlementRef = useRef<SendMessageSettlement | null>(props.sendSettlement)
-    sendSettlementRef.current = props.sendSettlement
-    useEffect(() => {
-        const settlement = props.sendSettlement
-        if (!settlement) return
-        const entryId = pendingScratchlistSendsRef.current.get(settlement.attemptId)
-        if (!entryId) return
-        pendingScratchlistSendsRef.current.delete(settlement.attemptId)
-        if (settlement.status === 'success') {
-            void scratchlist.remove(entryId)
-        }
-    }, [props.sendSettlement, scratchlist.remove])
     const { sessions: allSessions } = useSessions(props.api)
     const resolveSessionMentionTooltip = useCallback((id: string, title: string) => {
         const hit = allSessions.find((s) => s.id === id) ?? null
@@ -863,17 +878,7 @@ function SessionChatInner(props: SessionChatProps) {
         // hub path so validation can run against the persisted message; wait
         // for the matching mutation settlement before removing the draft.
         if (scheduledAt != null && hubItems.length > 0) {
-            pendingScratchlistSendsRef.current.set(accepted.attemptId, entry.id)
-            // The mutation may settle before React renders the new settlement
-            // prop. Handle that narrow ordering window without relying solely
-            // on the effect above.
-            const settlement = sendSettlementRef.current
-            if (settlement?.attemptId === accepted.attemptId) {
-                pendingScratchlistSendsRef.current.delete(accepted.attemptId)
-                if (settlement.status === 'success') {
-                    void scratchlist.remove(entry.id)
-                }
-            }
+            props.onScheduledScratchlistSend?.(accepted.attemptId, props.session.id, entry.id)
         } else {
             if (hubItems.length > 0) {
                 await Promise.allSettled(
@@ -883,7 +888,7 @@ function SessionChatInner(props: SessionChatProps) {
             await scratchlist.remove(entry.id)
         }
         return true
-    }, [props.api, props.onSend, props.session.id, scratchlist.remove])
+    }, [props.api, props.onSend, props.onScheduledScratchlistSend, props.session.id, scratchlist.remove])
 
     const handleSendScratchlistEntry = useCallback(
         (entry: ScratchlistEntry) => sendScratchlistEntry(entry, null),

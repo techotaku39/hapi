@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import {
     applyGlobalSelectAll,
     applyModelChangeWithReasoningRollback,
@@ -10,9 +11,37 @@ import {
     resolveLatestCompletedBoundaryIdForView,
     shouldAutoClearPendingSchedule,
     shouldRouteToScratchlist,
+    usePendingScratchlistSendCleanup,
 } from './SessionChat'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
+import type { SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
+
+describe('usePendingScratchlistSendCleanup', () => {
+    it('keeps the source-session cleanup pending across keyed chat remounts', async () => {
+        const api = {
+            deleteScratchlistEntry: vi.fn().mockResolvedValue(undefined),
+        }
+        const initialProps: { settlement: SendMessageSettlement | null } = { settlement: null }
+        const { result, rerender } = renderHook(
+            ({ settlement }: { settlement: SendMessageSettlement | null }) => (
+                usePendingScratchlistSendCleanup(api, settlement)
+            ),
+            { initialProps },
+        )
+
+        act(() => {
+            result.current('attempt-navigation', 'source-session', 'draft-entry')
+        })
+        // The keyed SessionChatInner may be replaced while this unkeyed hook
+        // owner remains mounted for the route.
+        rerender({ settlement: { attemptId: 'attempt-navigation', status: 'success' } })
+
+        await waitFor(() => {
+            expect(api.deleteScratchlistEntry).toHaveBeenCalledWith('source-session', 'draft-entry')
+        })
+    })
+})
 
 describe('applyModelChangeWithReasoningRollback', () => {
     it('restores the previous effort when the model switch fails after clearing it', async () => {
