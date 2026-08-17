@@ -1053,10 +1053,12 @@ export class MessageService {
                         deliveryContent = await this.getScheduledDeliveryContent(msg)
                     } catch {
                         // Keep the row uninvoked. The next tick retries after
-                        // the file or CLI connection becomes available.
-                        continue
+                        // the file or CLI connection becomes available. Do not
+                        // overtake this row with a later scheduled message in
+                        // the same session; mature delivery is FIFO.
+                        break
                     }
-                    if (deliveryContent === null) continue
+                    if (deliveryContent === null) break
 
                     // Cancellation or an acknowledgement may have won while
                     // the attachment was being uploaded. Never emit the stale

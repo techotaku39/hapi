@@ -1258,6 +1258,69 @@ describe('MessageService.sendMessage with scheduledAt', () => {
             .toEqual(['/tmp/materialized-1.png', '/tmp/materialized-2.png'])
     })
 
+    it('keeps later mature messages behind a failed attachment materialization', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-fifo-materialize')
+        const cliEmitted: unknown[] = []
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    }
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } }
+            })
+        } as unknown as Server
+        let shouldFail = true
+        const service = new MessageService(
+            store,
+            io,
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => {
+                    if (shouldFail) throw new Error('temporary staging failure')
+                    return attachments.map((attachment) => ({ ...attachment, path: '/tmp/fifo.png' }))
+                }
+            }
+        )
+        const matureAt = Date.now() - 1_000
+        store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'first image',
+                    attachments: [{
+                        id: 'att-fifo',
+                        filename: 'image.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path: 'hapi-hub:scratchlist/default/sched-fifo-materialize/att.png'
+                    }]
+                }
+            },
+            'local-fifo-image',
+            matureAt,
+        )
+        store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'second text' } },
+            'local-fifo-text',
+            matureAt,
+        )
+
+        await service.releaseMatureScheduledMessages(Date.now())
+        expect(cliEmitted).toHaveLength(0)
+
+        shouldFail = false
+        await service.releaseMatureScheduledMessages(Date.now())
+        expect(cliEmitted.map((data: any) => data.body.message.localId))
+            .toEqual(['local-fifo-image', 'local-fifo-text'])
+    })
+
     it('cancels a scheduled attachment while materialization is pending without invoking it', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-cancel-during-materialize')

@@ -40,7 +40,6 @@ export async function rehomeMessageAttachments(
         if (!candidates.has(message.id)) candidates.set(message.id, message)
     }
 
-    const rewrites: Array<{ messageId: string; attachments: AttachmentMetadata[] }> = []
     const hapiHome = getHapiHomeDir()
     for (const [messageId, candidate] of candidates) {
         if (!targetById.has(messageId)) continue
@@ -62,9 +61,10 @@ export async function rehomeMessageAttachments(
             { throwOnFailure: true },
         )
         if (moved.some((attachment, index) => attachment.path !== attachments[index]?.path)) {
-            rewrites.push({ messageId, attachments: moved })
+            // Persist each successful message re-home immediately. If a later
+            // message fails to move, earlier filesystem moves and their DB
+            // paths remain consistent and can be retried independently.
+            store.messages.rewriteMessageAttachments(newSessionId, [{ messageId, attachments: moved }])
         }
     }
-
-    store.messages.rewriteMessageAttachments(newSessionId, rewrites)
 }

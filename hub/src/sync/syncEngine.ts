@@ -596,11 +596,15 @@ export class SyncEngine {
         this.triggerDedupIfNeeded(payload.sid)
     }
 
-    handleSessionReady(payload: { sid: string; time: number }): void {
+    handleSessionConnected(sessionId: string): void {
         // Materialized attachment paths belong to the previous CLI process.
-        // A reconnect may not deliver the old session-end event, so never
-        // reuse those host-local paths after the new CLI becomes ready.
-        this.messageService.clearScheduledAttachmentDeliveryCache(payload.sid)
+        // Socket reconnection is the reliable generation boundary for every
+        // agent, including ordinary sessions that do not emit session-ready.
+        this.messageService.clearScheduledAttachmentDeliveryCache(sessionId)
+    }
+
+    handleSessionReady(payload: { sid: string; time: number }): void {
+        this.handleSessionConnected(payload.sid)
         this.sessionReadyIds.add(payload.sid)
         const session = this.sessionCache.getSession(payload.sid)
         if (session?.metadata?.piResumeAttempt) {

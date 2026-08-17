@@ -190,6 +190,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             }
             return store.sessions.getSession(sessionId)
         },
+        onSessionConnected: (sessionId) => syncEngine?.handleSessionConnected(sessionId),
         onWebappEvent: (event: SyncEvent) => syncEngine?.handleRealtimeEvent(event),
         onSessionAlive: (payload) => syncEngine?.handleSessionAlive(payload),
         onSessionReady: (payload) => syncEngine?.handleSessionReady(payload),

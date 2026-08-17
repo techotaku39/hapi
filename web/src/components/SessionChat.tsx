@@ -584,6 +584,25 @@ function SessionChatInner(props: SessionChatProps) {
     const enqueueCursorModelApply = useMemo(() => createSerialAsyncQueue(), [])
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
     const scratchlist = useHubScratchlist(props.session.id, props.api)
+    /**
+     * Scheduled scratchlist messages keep Hub-owned attachment paths until
+     * the Hub accepts the message. Remove the draft only after the matching
+     * mutation settles successfully, otherwise cleanup can win the race and
+     * delete the blob before scheduled-message validation runs.
+    */
+    const pendingScratchlistSendsRef = useRef(new Map<string, string>())
+    const sendSettlementRef = useRef<SendMessageSettlement | null>(props.sendSettlement)
+    sendSettlementRef.current = props.sendSettlement
+    useEffect(() => {
+        const settlement = props.sendSettlement
+        if (!settlement) return
+        const entryId = pendingScratchlistSendsRef.current.get(settlement.attemptId)
+        if (!entryId) return
+        pendingScratchlistSendsRef.current.delete(settlement.attemptId)
+        if (settlement.status === 'success') {
+            void scratchlist.remove(entryId)
+        }
+    }, [props.sendSettlement, scratchlist.remove])
     const { sessions: allSessions } = useSessions(props.api)
     const resolveSessionMentionTooltip = useCallback((id: string, title: string) => {
         const hit = allSessions.find((s) => s.id === id) ?? null
@@ -841,17 +860,30 @@ function SessionChatInner(props: SessionChatProps) {
 
         // Immediate sends copy hub blobs into the CLI upload directory and can
         // release the scratchlist file right away. Scheduled sends retain the
-        // hub path so the hub can materialize it when the message matures;
-        // deleting the draft is safe because the hub protects pending-message
-        // references from attachment cleanup.
-        if (hubItems.length > 0 && scheduledAt == null) {
-            await Promise.allSettled(
-                hubItems.map((attachment) => props.api.deleteScratchlistAttachment(props.session.id, attachment.id))
-            )
+        // hub path so validation can run against the persisted message; wait
+        // for the matching mutation settlement before removing the draft.
+        if (scheduledAt != null && hubItems.length > 0) {
+            pendingScratchlistSendsRef.current.set(accepted.attemptId, entry.id)
+            // The mutation may settle before React renders the new settlement
+            // prop. Handle that narrow ordering window without relying solely
+            // on the effect above.
+            const settlement = sendSettlementRef.current
+            if (settlement?.attemptId === accepted.attemptId) {
+                pendingScratchlistSendsRef.current.delete(accepted.attemptId)
+                if (settlement.status === 'success') {
+                    void scratchlist.remove(entry.id)
+                }
+            }
+        } else {
+            if (hubItems.length > 0) {
+                await Promise.allSettled(
+                    hubItems.map((attachment) => props.api.deleteScratchlistAttachment(props.session.id, attachment.id))
+                )
+            }
+            await scratchlist.remove(entry.id)
         }
-        await scratchlist.remove(entry.id)
         return true
-    }, [props.api, props.onSend, props.session.id, scratchlist])
+    }, [props.api, props.onSend, props.session.id, scratchlist.remove])
 
     const handleSendScratchlistEntry = useCallback(
         (entry: ScratchlistEntry) => sendScratchlistEntry(entry, null),
