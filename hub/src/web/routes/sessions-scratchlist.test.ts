@@ -448,7 +448,7 @@ describe('PUT /api/sessions/:id/scratchlist/:entryId', () => {
                 position: 0,
                 attachments: [],
             }),
-            updateScratchlistEntry: (_sessionId, entryId, patch) => ({
+            updateScratchlistEntry: async (_sessionId, entryId, patch) => ({
                 entryId,
                 text: patch.text ?? 'before',
                 createdAt: 1000,
@@ -472,7 +472,7 @@ describe('PUT /api/sessions/:id/scratchlist/:entryId', () => {
         const session = createSession()
         const app = createApp(session, {
             getScratchlistEntry: () => null,
-            updateScratchlistEntry: () => null
+            updateScratchlistEntry: async () => null
         })
         const res = await app.request('/api/sessions/session-1/scratchlist/missing-id', {
             method: 'PUT',
@@ -558,7 +558,7 @@ describe('DELETE /api/sessions/:id/scratchlist/:entryId', () => {
     it('returns ok:true when the row was removed', async () => {
         const session = createSession()
         const app = createApp(session, {
-            deleteScratchlistEntry: () => true
+            deleteScratchlistEntry: async () => true
         })
         const res = await app.request('/api/sessions/session-1/scratchlist/e1', {
             method: 'DELETE'
@@ -570,7 +570,7 @@ describe('DELETE /api/sessions/:id/scratchlist/:entryId', () => {
     it('returns 404 when the row did not exist', async () => {
         const session = createSession()
         const app = createApp(session, {
-            deleteScratchlistEntry: () => false
+            deleteScratchlistEntry: async () => false
         })
         const res = await app.request('/api/sessions/session-1/scratchlist/missing', {
             method: 'DELETE'

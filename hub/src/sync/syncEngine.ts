@@ -238,12 +238,34 @@ export class SyncEngine {
             {
                 validateScheduledAttachments: (sessionId, attachments) =>
                     this.validateScheduledAttachments(sessionId, attachments),
+                withScheduledAttachmentLock: (sessionId, fn) => {
+                    const namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default'
+                    return this.withScratchlistAttachmentLock(namespace, sessionId, fn)
+                },
                 materializeScheduledAttachments: (sessionId, attachments) =>
                     this.materializeScheduledAttachments(sessionId, attachments),
-                deleteScheduledAttachments: async (_sessionId, attachments) => {
-                    const { deleteScratchlistAttachmentFiles, getHapiHomeDir } =
-                        await import('../scratchlistAttachments/storage')
-                    await deleteScratchlistAttachmentFiles(getHapiHomeDir(), attachments)
+                deleteScheduledAttachments: async (sessionId, attachments) => {
+                    const namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default'
+                    await this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
+                        const { deleteScratchlistAttachmentFiles, getHapiHomeDir } =
+                            await import('../scratchlistAttachments/storage')
+                        await deleteScratchlistAttachmentFiles(getHapiHomeDir(), attachments)
+                    })
+                },
+                deleteMaterializedScheduledAttachments: async (sessionId, attachments) => {
+                    const namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default'
+                    await this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
+                        await Promise.allSettled(attachments.map(async (attachment) => {
+                            try {
+                                const deleted = await this.rpcGateway.deleteUploadFile(sessionId, attachment.path)
+                                if (!deleted.success) {
+                                    console.error(`[Scratchlist] failed to clean cancelled upload ${attachment.path}: ${deleted.error ?? 'unknown error'}`)
+                                }
+                            } catch (error) {
+                                console.error(`[Scratchlist] failed to clean cancelled upload ${attachment.path}`, error)
+                            }
+                        }))
+                    })
                 },
                 rehomeScheduledMessageAttachments: async (sourceSessionId, targetSessionId, message) => {
                     const sourceSession = this.store.sessions.getSession(sourceSessionId)
@@ -770,32 +792,42 @@ export class SyncEngine {
         }
     }
 
-    updateScratchlistEntry(
+    async updateScratchlistEntry(
         sessionId: string,
         entryId: string,
         patch: {
             text?: string
             attachments?: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
-        }
-    ): {
+        },
+        namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default',
+    ): Promise<{
         entryId: string
         text: string
         createdAt: number
         updatedAt: number
         position: number
         attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
-    } | null {
-        const updated = this.store.scratchlist.update(sessionId, entryId, patch)
-        if (!updated) return null
-        this.sessionCache.emitScratchlistChanged(sessionId, updated.updatedAt)
-        return {
-            entryId: updated.entryId,
-            text: updated.text,
-            createdAt: updated.createdAt,
-            updatedAt: updated.updatedAt,
-            position: updated.position,
-            attachments: updated.attachments,
-        }
+    } | null> {
+        return this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
+            const existing = this.store.scratchlist.get(sessionId, entryId)
+            const updated = this.store.scratchlist.update(sessionId, entryId, patch)
+            if (!updated) return null
+            if (patch.attachments !== undefined && existing) {
+                const removedAttachments = existing.attachments.filter(
+                    (old) => !updated.attachments.some((next) => next.id === old.id)
+                )
+                await this.deleteOrphanedScratchlistAttachmentsLocked(sessionId, removedAttachments)
+            }
+            this.sessionCache.emitScratchlistChanged(sessionId, updated.updatedAt)
+            return {
+                entryId: updated.entryId,
+                text: updated.text,
+                createdAt: updated.createdAt,
+                updatedAt: updated.updatedAt,
+                position: updated.position,
+                attachments: updated.attachments,
+            }
+        })
     }
 
     reorderScratchlistEntries(
@@ -842,30 +874,43 @@ export class SyncEngine {
         ))
     }
 
-    deleteScratchlistEntry(sessionId: string, entryId: string): boolean {
-        const existing = this.store.scratchlist.get(sessionId, entryId)
-        const removed = this.store.scratchlist.delete(sessionId, entryId)
-        if (removed && existing) {
-            // Attachment ids may be shared across entries (direct REST).
-            // Only delete blobs that no remaining entry still references.
-            const remainingIds = new Set(
-                this.store.scratchlist
-                    .list(sessionId)
-                    .flatMap((entry) => entry.attachments.map((att) => att.id))
+    private async deleteOrphanedScratchlistAttachmentsLocked(
+        sessionId: string,
+        attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[],
+    ): Promise<void> {
+        if (attachments.length === 0) return
+        const remaining = this.store.scratchlist.list(sessionId)
+        const orphaned = attachments.filter((attachment) => !remaining.some((entry) =>
+            entry.attachments.some((candidate) =>
+                candidate.id === attachment.id || candidate.path === attachment.path
             )
-            const orphaned = existing.attachments.filter((att) => !remainingIds.has(att.id))
-            const deletable = orphaned.filter((att) => this.canDeleteScratchlistAttachment(sessionId, att))
-            if (deletable.length > 0) {
-                void import('../scratchlistAttachments/storage').then(({ deleteScratchlistAttachmentFiles, getHapiHomeDir }) =>
-                    deleteScratchlistAttachmentFiles(getHapiHomeDir(), deletable)
-                )
-            }
-            this.sessionCache.emitScratchlistChanged(sessionId, Date.now())
-        }
-        return removed
+        ))
+        const deletable = orphaned.filter((attachment) =>
+            this.canDeleteScratchlistAttachment(sessionId, attachment)
+        )
+        if (deletable.length === 0) return
+        const { deleteScratchlistAttachmentFiles, getHapiHomeDir } =
+            await import('../scratchlistAttachments/storage')
+        await deleteScratchlistAttachmentFiles(getHapiHomeDir(), deletable)
     }
 
-    private async withScratchlistUploadLock<T>(
+    async deleteScratchlistEntry(
+        sessionId: string,
+        entryId: string,
+        namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default',
+    ): Promise<boolean> {
+        return this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
+            const existing = this.store.scratchlist.get(sessionId, entryId)
+            const removed = this.store.scratchlist.delete(sessionId, entryId)
+            if (removed && existing) {
+                await this.deleteOrphanedScratchlistAttachmentsLocked(sessionId, existing.attachments)
+                this.sessionCache.emitScratchlistChanged(sessionId, Date.now())
+            }
+            return removed
+        })
+    }
+
+    private async withScratchlistAttachmentLock<T>(
         namespace: string,
         sessionId: string,
         fn: () => Promise<T>
@@ -916,7 +961,7 @@ export class SyncEngine {
 
         const hapiHome = getHapiHomeDir()
         const buffer = Buffer.from(contentBase64, 'base64')
-        return await this.withScratchlistUploadLock(namespace, sessionId, async () => {
+        return await this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
             const sessionBytes = await sumScratchlistAttachmentBytesOnDisk(hapiHome, namespace, sessionId)
             const provisional = {
                 id: 'pending',
@@ -970,12 +1015,14 @@ export class SyncEngine {
         namespace: string,
         attachmentId: string
     ): Promise<boolean> {
-        if (!this.canDeleteScratchlistAttachment(sessionId, { id: attachmentId })) return false
-        const {
-            deleteScratchlistAttachmentById: deleteById,
-            getHapiHomeDir,
-        } = await import('../scratchlistAttachments/storage')
-        return deleteById(getHapiHomeDir(), namespace, sessionId, attachmentId)
+        return this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
+            if (!this.canDeleteScratchlistAttachment(sessionId, { id: attachmentId })) return false
+            const {
+                deleteScratchlistAttachmentById: deleteById,
+                getHapiHomeDir,
+            } = await import('../scratchlistAttachments/storage')
+            return deleteById(getHapiHomeDir(), namespace, sessionId, attachmentId)
+        })
     }
 
     async readScratchlistAttachment(

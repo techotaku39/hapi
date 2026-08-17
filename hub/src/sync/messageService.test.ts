@@ -1190,6 +1190,7 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         const started = new Promise<void>((resolve) => { materializeStarted = resolve })
         let resolveMaterialization!: (attachments: AttachmentMetadata[]) => void
         const materialized = new Promise<AttachmentMetadata[]>((resolve) => { resolveMaterialization = resolve })
+        const deletedMaterializedPaths: string[] = []
         const service = new MessageService(
             store,
             io,
@@ -1202,7 +1203,10 @@ describe('MessageService.sendMessage with scheduledAt', () => {
                         ...attachment,
                         path: '/tmp/materialized-after-cancel.png'
                     })))
-                }
+                },
+                deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedMaterializedPaths.push(...attachments.map((attachment) => attachment.path))
+                },
             }
         )
         const message = store.messages.addMessage(
@@ -1236,6 +1240,7 @@ describe('MessageService.sendMessage with scheduledAt', () => {
 
         expect(ackCalls).toBe(0)
         expect(cliEmitted).toHaveLength(0)
+        expect(deletedMaterializedPaths).toEqual(['/tmp/materialized-after-cancel.png'])
         expect(store.messages.lookupQueuedMessage(session.id, message.id)).toEqual({ status: 'absent' })
     })
 

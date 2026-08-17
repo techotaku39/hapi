@@ -473,6 +473,7 @@ export function useHubScratchlist(
         HubEntry[],
         { previousData: ScratchlistResponse | undefined }
     >({
+        scope: { id: `scratchlist-reorder:${sessionId}` },
         mutationFn: async (entries) => {
             if (!api || !sessionId) throw new Error('Scratchlist unavailable')
             return await api.reorderScratchlistEntries(

@@ -123,7 +123,8 @@ export async function moveScratchlistAttachmentFilesForSession(
     namespace: string,
     oldSessionId: string,
     newSessionId: string,
-    attachments: ScratchlistAttachmentMetadata[]
+    attachments: ScratchlistAttachmentMetadata[],
+    options: { throwOnFailure?: boolean } = {},
 ): Promise<ScratchlistAttachmentMetadata[]> {
     if (oldSessionId === newSessionId || attachments.length === 0) {
         return attachments
@@ -131,40 +132,65 @@ export async function moveScratchlistAttachmentFilesForSession(
     const oldPrefix = sessionStoragePrefix(namespace, oldSessionId)
     const newPrefix = sessionStoragePrefix(namespace, newSessionId)
     const moved: ScratchlistAttachmentMetadata[] = []
-    for (const att of attachments) {
-        const storageKey = parseHubScratchlistAttachmentPath(att.path)
-        if (!storageKey || !storageKey.startsWith(oldPrefix)) {
-            moved.push(att)
-            continue
-        }
-        const fileName = storageKey.slice(oldPrefix.length)
-        const newKey = `${newPrefix}${fileName}`
-        let oldPath: string
-        let newPath: string
-        try {
-            oldPath = resolveScratchlistStoragePath(hapiHome, storageKey)
-            newPath = resolveScratchlistStoragePath(hapiHome, newKey)
-        } catch {
-            moved.push(att)
-            continue
-        }
-        await mkdir(join(newPath, '..'), { recursive: true })
-        try {
+    const completedMoves: Array<{ oldPath: string; newPath: string; destinationExisted: boolean }> = []
+    try {
+        for (const att of attachments) {
+            const storageKey = parseHubScratchlistAttachmentPath(att.path)
+            if (!storageKey || !storageKey.startsWith(oldPrefix)) {
+                moved.push(att)
+                continue
+            }
+            const fileName = storageKey.slice(oldPrefix.length)
+            const newKey = `${newPrefix}${fileName}`
+            let oldPath: string
+            let newPath: string
+            try {
+                oldPath = resolveScratchlistStoragePath(hapiHome, storageKey)
+                newPath = resolveScratchlistStoragePath(hapiHome, newKey)
+            } catch (error) {
+                if (options.throwOnFailure) throw error
+                moved.push(att)
+                continue
+            }
+            await mkdir(join(newPath, '..'), { recursive: true })
             const destExists = await stat(newPath).then((info) => info.isFile()).catch(() => false)
             if (destExists) {
-                await rm(oldPath, { force: true })
+                if (!options.throwOnFailure) {
+                    await rm(oldPath, { force: true })
+                }
             } else {
-                await rename(oldPath, newPath)
+                try {
+                    await rename(oldPath, newPath)
+                } catch (error) {
+                    if (options.throwOnFailure) throw error
+                    // best effort — still rewrite metadata so quota/resolve use the new id
+                }
             }
-        } catch {
-            // best effort — still rewrite metadata so quota/resolve use the new id
+            completedMoves.push({ oldPath, newPath, destinationExisted: destExists })
+            moved.push({
+                ...att,
+                path: toHubScratchlistAttachmentPath(newKey),
+            })
         }
-        moved.push({
-            ...att,
-            path: toHubScratchlistAttachmentPath(newKey),
-        })
+        if (options.throwOnFailure) {
+            // Defer target-wins source cleanup until every rename succeeds so a
+            // later failure can leave all metadata pointing at valid old paths.
+            await Promise.all(completedMoves
+                .filter((move) => move.destinationExisted)
+                .map((move) => rm(move.oldPath, { force: true })))
+        }
+        return moved
+    } catch (error) {
+        if (options.throwOnFailure) {
+            await Promise.allSettled(completedMoves
+                .filter((move) => !move.destinationExisted)
+                .reverse()
+                .map(async (move) => {
+                    await rename(move.newPath, move.oldPath)
+                }))
+        }
+        throw error
     }
-    return moved
 }
 
 export async function deleteScratchlistSessionAttachmentDir(

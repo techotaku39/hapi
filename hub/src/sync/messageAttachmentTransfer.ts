@@ -59,6 +59,7 @@ export async function rehomeMessageAttachments(
             oldSessionId,
             newSessionId,
             attachments,
+            { throwOnFailure: true },
         )
         if (moved.some((attachment, index) => attachment.path !== attachments[index]?.path)) {
             rewrites.push({ messageId, attachments: moved })

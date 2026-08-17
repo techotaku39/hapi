@@ -1199,26 +1199,17 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: attachmentValidation.error, code: attachmentValidation.code }, 400)
         }
 
-        const updated = engine.updateScratchlistEntry(
+        const updated = await engine.updateScratchlistEntry(
             sessionResult.sessionId,
             entryId,
             {
                 text: nextText,
                 attachments: nextAttachments,
-            }
+            },
+            namespace,
         )
         if (!updated) {
             return c.json({ error: 'Scratchlist entry not found' }, 404)
-        }
-        if (removedAttachments.length > 0) {
-            const orphaned = removedAttachments.filter((att) =>
-                engine.canDeleteScratchlistAttachment(sessionResult.sessionId, att)
-            )
-            if (orphaned.length > 0) {
-                void import('../../scratchlistAttachments/storage').then(({ deleteScratchlistAttachmentFiles, getHapiHomeDir }) =>
-                    deleteScratchlistAttachmentFiles(getHapiHomeDir(), orphaned)
-                )
-            }
         }
         return c.json({ entry: updated })
     })
@@ -1265,7 +1256,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ ok: true })
     })
 
-    app.delete('/sessions/:id/scratchlist/:entryId', (c) => {
+    app.delete('/sessions/:id/scratchlist/:entryId', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {
             return engine
@@ -1278,7 +1269,11 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (!entryId) {
             return c.json({ error: 'Missing entryId' }, 400)
         }
-        const removed = engine.deleteScratchlistEntry(sessionResult.sessionId, entryId)
+        const removed = await engine.deleteScratchlistEntry(
+            sessionResult.sessionId,
+            entryId,
+            c.get('namespace'),
+        )
         if (!removed) {
             return c.json({ error: 'Scratchlist entry not found' }, 404)
         }

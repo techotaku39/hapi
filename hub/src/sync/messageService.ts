@@ -148,6 +148,14 @@ type MessageServiceOptions = {
         sessionId: string,
         attachments: AttachmentMetadata[],
     ) => Promise<void>
+    deleteMaterializedScheduledAttachments?: (
+        sessionId: string,
+        attachments: AttachmentMetadata[],
+    ) => Promise<void>
+    withScheduledAttachmentLock?: <T>(
+        sessionId: string,
+        fn: () => Promise<T>,
+    ) => Promise<T>
     rehomeScheduledMessageAttachments?: (
         sourceSessionId: string,
         targetSessionId: string,
@@ -164,6 +172,10 @@ export class MessageService {
     private readonly materializingScheduledMessageKeys = new Set<string>()
     /** Keep mature delivery FIFO per session without blocking unrelated sessions. */
     private readonly matureReleaseInFlightSessions = new Set<string>()
+
+    private withScheduledAttachmentLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+        return this.options.withScheduledAttachmentLock?.(sessionId, fn) ?? fn()
+    }
 
     constructor(
         private readonly store: Store,
@@ -747,10 +759,6 @@ export class MessageService {
         ) {
             throw new Error('sendMessage: scheduled messages with attachments must use scratchlist attachments')
         }
-        if (payload.scheduledAt != null && attachments.length > 0) {
-            await this.options.validateScheduledAttachments?.(sessionId, attachments)
-        }
-
         const sentFrom = payload.sentFrom ?? 'webapp'
         const deliveryMode = getNormalizedDeliveryMode(
             this.store.sessions.getSession(sessionId)?.metadata,
@@ -771,25 +779,37 @@ export class MessageService {
             }
         }
 
-        const inserted = this.store.addMessageForCurrentSession(
-            sessionId,
-            content,
-            payload.localId ?? undefined,
-            payload.scheduledAt ?? null
-        )
-        const actualSessionId = inserted.sessionId
-        let msg = inserted.message
-        if (
-            actualSessionId !== sessionId
-            && msg.scheduledAt !== null
-            && getUserMessageAttachments(msg.content).length > 0
-        ) {
-            msg = await this.options.rehomeScheduledMessageAttachments?.(
+        const insertMessage = async () => {
+            if (payload.scheduledAt != null && attachments.length > 0) {
+                await this.options.validateScheduledAttachments?.(sessionId, attachments)
+            }
+            const inserted = this.store.addMessageForCurrentSession(
                 sessionId,
-                actualSessionId,
-                msg,
-            ) ?? msg
+                content,
+                payload.localId ?? undefined,
+                payload.scheduledAt ?? null
+            )
+            const actualSessionId = inserted.sessionId
+            let msg = inserted.message
+            if (
+                actualSessionId !== sessionId
+                && msg.scheduledAt !== null
+                && getUserMessageAttachments(msg.content).length > 0
+            ) {
+                msg = await this.options.rehomeScheduledMessageAttachments?.(
+                    sessionId,
+                    actualSessionId,
+                    msg,
+                ) ?? msg
+            }
+            return { inserted, msg }
         }
+        const insertedWithMessage = payload.scheduledAt != null && attachments.length > 0
+            ? await this.withScheduledAttachmentLock(sessionId, insertMessage)
+            : await insertMessage()
+        const inserted = insertedWithMessage.inserted
+        const actualSessionId = inserted.sessionId
+        const msg = insertedWithMessage.msg
         // A duplicate localId is an idempotent retry, not proof that the
         // original Pi turn still exists. Its stored row may retain steer
         // provenance from a POST whose response was lost, so deliver the
@@ -1033,7 +1053,15 @@ export class MessageService {
                     // snapshot after the row leaves the queued state.
                     const current = this.store.messages.lookupQueuedMessage(sessionId, msg.id)
                     if (current.status !== 'queued') {
+                        const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
                         this.scheduledAttachmentDeliveryCache.delete(materializingKey)
+                        if (staged && this.options.deleteMaterializedScheduledAttachments) {
+                            try {
+                                await this.options.deleteMaterializedScheduledAttachments(sessionId, staged)
+                            } catch (error) {
+                                console.error('[Scratchlist] failed to clean cancelled scheduled uploads', error)
+                            }
+                        }
                         continue
                     }
                 } finally {

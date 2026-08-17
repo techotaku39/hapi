@@ -158,12 +158,10 @@ describe('SyncEngine.clearOpenCodeSession', () => {
     })
 
     it('retries clear-abort attachment re-homing after a failed filesystem move', async () => {
-        const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs')
+        const { mkdtempSync, rmSync } = await import('node:fs')
         const { join } = await import('node:path')
         const { tmpdir } = await import('node:os')
         const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-clear-abort-retry-'))
-        const badHome = join(tmpdir(), `hapi-clear-abort-not-a-directory-${Date.now()}`)
-        writeFileSync(badHome, 'not a directory')
         const previousHome = process.env.HAPI_HOME
         process.env.HAPI_HOME = hapiHome
         const { store, engine } = createEngine()
@@ -175,7 +173,8 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             const reserved = engine.reserveOpenCodeClearSession(source.id, 'default')
             if (reserved.type !== 'success') throw new Error('reservation failed')
 
-            const { writeScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
+            const { deleteScratchlistAttachmentFile, writeScratchlistAttachmentFile } =
+                await import('../scratchlistAttachments/storage')
             const attachment = await writeScratchlistAttachmentFile(
                 hapiHome,
                 'default',
@@ -191,11 +190,24 @@ describe('SyncEngine.clearOpenCodeSession', () => {
                 attachments: [attachment]
             })
 
-            process.env.HAPI_HOME = badHome
+            const redirected = store.messages.getAllMessages(reserved.sessionId)[0]
+            const redirectedPath = (redirected?.content as {
+                content?: { attachments?: Array<{ path: string }> }
+            }).content?.attachments?.[0]?.path
+            if (!redirectedPath) throw new Error('redirected attachment path missing')
+            expect(await deleteScratchlistAttachmentFile(hapiHome, redirectedPath)).toBe(true)
             const first = await engine.abortOpenCodeClearSession(source.id, 'default', reserved.sessionId)
             expect(first).toMatchObject({ type: 'error', code: 'replacement_link_failed' })
 
-            process.env.HAPI_HOME = hapiHome
+            await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                reserved.sessionId,
+                'retry.png',
+                'image/png',
+                Buffer.from('retry-image'),
+                attachment.id,
+            )
             const second = await engine.abortOpenCodeClearSession(source.id, 'default', reserved.sessionId)
             expect(second).toEqual({ type: 'success', sessionId: source.id })
             const restored = store.messages.getAllMessages(source.id)[0]
@@ -208,7 +220,6 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             if (previousHome === undefined) delete process.env.HAPI_HOME
             else process.env.HAPI_HOME = previousHome
             rmSync(hapiHome, { recursive: true, force: true })
-            rmSync(badHome, { force: true })
         }
     })
 
