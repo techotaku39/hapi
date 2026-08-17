@@ -61,6 +61,10 @@ export function shouldShowInlineToolCardBody(
     return !presentationMinimal
 }
 
+export function isTerminalToolBlock(block: ToolCallBlock): boolean {
+    return block.tool.name === 'CodexBash' || getToolGroupActionKind(block) === 'command'
+}
+
 export function getToolTimingDetails(tool: ChatToolCall, now: number): {
     startedAt: number | null
     completedAt: number | null
@@ -449,7 +453,7 @@ function ToolCardInner(props: ToolCardProps) {
         ? getSubagentModel(props.block.children, getInputStringAny(props.block.tool.input, ['model']))
         : null
     const isCodexAgentCard = toolName === 'CodexAgent'
-    const isTerminalTool = getToolGroupActionKind(props.block) === 'command'
+    const isTerminalTool = isTerminalToolBlock(props.block)
     const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode, isTerminalTool)
     const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode, isTerminalTool)
     const CompactToolView = showInline ? getToolViewComponent(toolName) : null

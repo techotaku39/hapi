@@ -92,6 +92,11 @@ export function useToolCardDisplayMode(): {
         if (!isBrowser()) return
 
         const syncFromStorage = () => setToolCardDisplayModeState(getInitialToolCardDisplayMode())
+        const onChange = (event: Event) => {
+            const detail = (event as CustomEvent<unknown>).detail
+            const mode = parseToolCardDisplayMode(typeof detail === 'string' ? detail : null)
+            setToolCardDisplayModeState(mode ?? getInitialToolCardDisplayMode())
+        }
         const onStorage = (event: StorageEvent) => {
             if (
                 event.key === STORAGE_KEY
@@ -103,10 +108,10 @@ export function useToolCardDisplayMode(): {
         }
 
         window.addEventListener('storage', onStorage)
-        window.addEventListener(CHANGE_EVENT, syncFromStorage)
+        window.addEventListener(CHANGE_EVENT, onChange)
         return () => {
             window.removeEventListener('storage', onStorage)
-            window.removeEventListener(CHANGE_EVENT, syncFromStorage)
+            window.removeEventListener(CHANGE_EVENT, onChange)
         }
     }, [])
 
@@ -119,7 +124,7 @@ export function useToolCardDisplayMode(): {
         } else {
             safeSetItem(STORAGE_KEY, mode)
         }
-        if (isBrowser()) window.dispatchEvent(new Event(CHANGE_EVENT))
+        if (isBrowser()) window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: mode }))
     }, [])
 
     return { toolCardDisplayMode, setToolCardDisplayMode }

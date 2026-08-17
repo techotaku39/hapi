@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     DEFAULT_TOOL_CARD_DISPLAY_MODE,
     getInitialToolCardDisplayMode,
@@ -86,5 +86,20 @@ describe('useToolCardDisplayMode', () => {
         expect(first.result.current.toolCardDisplayMode).toBe('grouped')
         expect(second.result.current.toolCardDisplayMode).toBe('grouped')
         expect(window.localStorage.getItem('hapi-tool-card-display-mode')).toBeNull()
+    })
+
+    it('keeps the selected mode when localStorage rejects a write', () => {
+        const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('storage unavailable')
+        })
+        try {
+            const first = renderHook(() => useToolCardDisplayMode())
+
+            act(() => first.result.current.setToolCardDisplayMode('detailed'))
+
+            expect(first.result.current.toolCardDisplayMode).toBe('detailed')
+        } finally {
+            setItem.mockRestore()
+        }
     })
 })

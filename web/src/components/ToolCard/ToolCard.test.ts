@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatSubagentModelLabel, getSubagentModel, getToolTimingDetails, shouldShowInlineToolCardBody, shouldUseCompactTerminalToolCard } from '@/components/ToolCard/ToolCard'
+import { formatSubagentModelLabel, getSubagentModel, getToolTimingDetails, isTerminalToolBlock, shouldShowInlineToolCardBody, shouldUseCompactTerminalToolCard } from '@/components/ToolCard/ToolCard'
 import { getToolGroupActionKind } from '@/chat/toolGroups'
 import type { AgentTextBlock, ChatBlock, ToolCallBlock } from '@/chat/types'
 
@@ -74,11 +74,30 @@ describe('ToolCard terminal display mode helpers', () => {
         })
 
         for (const block of [alias, acp]) {
-            const isTerminalTool = getToolGroupActionKind(block) === 'command'
+            const isTerminalTool = isTerminalToolBlock(block)
             expect(isTerminalTool).toBe(true)
             expect(shouldUseCompactTerminalToolCard(block.tool.name, 'compact', isTerminalTool)).toBe(true)
             expect(shouldShowInlineToolCardBody(block.tool.name, true, 'detailed', isTerminalTool)).toBe(true)
         }
+    })
+
+    it('keeps Codex user-shell read/search cards terminal-style', () => {
+        const block = makeToolCallChild({
+            tool: {
+                ...makeToolCallChild().tool,
+                name: 'CodexBash',
+                input: {
+                    command: 'cat README.md',
+                    command_source: 'userShell',
+                    command_actions: [{ type: 'read', command: 'cat README.md', name: 'README.md', path: '/repo/README.md' }],
+                },
+            },
+        })
+
+        expect(getToolGroupActionKind(block)).toBe('read')
+        expect(isTerminalToolBlock(block)).toBe(true)
+        expect(shouldShowInlineToolCardBody(block.tool.name, true, 'compact', true)).toBe(false)
+        expect(shouldShowInlineToolCardBody(block.tool.name, true, 'detailed', true)).toBe(true)
     })
 
     it('still hides inline bodies for minimal and Task/Agent subagent cards', () => {
