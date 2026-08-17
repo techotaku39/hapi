@@ -58,14 +58,22 @@ export const CreateSessionResponseSchema = z.object({
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 
 export const HubSettingsResponseSchema = z.object({
-    sessionSummaryContract: z.boolean()
+    sessionSummaryContract: z.boolean(),
+    /** Show compact AGENT_NOTIFY_SUMMARY in chat (default off / hide). */
+    sessionSummaryInChat: z.boolean()
 })
 
 export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
 
-export const UpdateHubSettingsRequestSchema = z.object({
-    sessionSummaryContract: z.boolean()
-})
+export const UpdateHubSettingsRequestSchema = z
+    .object({
+        sessionSummaryContract: z.boolean().optional(),
+        sessionSummaryInChat: z.boolean().optional()
+    })
+    .refine(
+        (data) => data.sessionSummaryContract !== undefined || data.sessionSummaryInChat !== undefined,
+        { message: 'At least one hub setting field is required' }
+    )
 
 export type UpdateHubSettingsRequest = z.infer<typeof UpdateHubSettingsRequestSchema>
 
@@ -168,6 +176,11 @@ export const CodexImportedMessageSchema = z.union([
     z.object({
         role: z.literal('agent'),
         content: z.object({ type: z.literal('codex'), data: z.unknown() }),
+        meta: z.object({ sentFrom: z.literal('cli') })
+    }),
+    z.object({
+        role: z.literal('agent'),
+        content: z.object({ type: z.literal('event'), data: z.unknown() }),
         meta: z.object({ sentFrom: z.literal('cli') })
     })
 ])
@@ -307,6 +320,18 @@ export const RenameSessionRequestSchema = z.object({
 })
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
+
+export const UpdateSessionSummaryRequestSchema = z.object({
+    text: z.string().trim().min(1).max(255)
+})
+
+export type UpdateSessionSummaryRequest = z.infer<typeof UpdateSessionSummaryRequestSchema>
+
+export const SessionTitleSuggestionResponseSchema = z.object({
+    title: z.string().min(1).max(255)
+})
+
+export type SessionTitleSuggestionResponse = z.infer<typeof SessionTitleSuggestionResponseSchema>
 
 export const SetSessionPinnedRequestSchema = z.object({
     mode: z.enum(['none', 'project', 'global'])

@@ -18,6 +18,7 @@ export interface Settings {
     telegramNotification?: boolean
     serverChanSendKey?: string
     serverChanNotification?: boolean
+    serverChanBackgroundOnly?: boolean
     listenHost?: string
     listenPort?: number
     publicUrl?: string
@@ -29,6 +30,11 @@ export interface Settings {
      * into supported flavor system / developer instructions. Default off.
      */
     sessionSummaryContract?: boolean
+    /**
+     * When true, web chat shows a compact AGENT_NOTIFY_SUMMARY row.
+     * Default off: render/copy strip the footer; store stays raw.
+     */
+    sessionSummaryInChat?: boolean
     /**
      * Hub-side provider API keys / endpoints managed from Settings.
      * Env vars still win when set at process start (ops override).
