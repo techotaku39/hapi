@@ -1198,6 +1198,66 @@ describe('MessageService.sendMessage with scheduledAt', () => {
             .toBe('/tmp/materialized.png')
     })
 
+    it('drops cached CLI attachment paths when the session reconnects', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-reconnect-cache')
+        const cliEmitted: unknown[] = []
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    }
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } }
+            })
+        } as unknown as Server
+        let materializeCalls = 0
+        const service = new MessageService(
+            store,
+            io,
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => {
+                    materializeCalls += 1
+                    return attachments.map((attachment) => ({
+                        ...attachment,
+                        path: `/tmp/materialized-${materializeCalls}.png`,
+                    }))
+                }
+            }
+        )
+        const matureAt = Date.now() - 1_000
+        store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'reconnect image',
+                    attachments: [{
+                        id: 'att-reconnect',
+                        filename: 'image.png',
+                        mimeType: 'image/png',
+                        size: 10,
+                        path: 'hapi-hub:scratchlist/default/sched-reconnect-cache/att.png'
+                    }]
+                }
+            },
+            'local-reconnect-cache',
+            matureAt,
+        )
+
+        await service.releaseMatureScheduledMessages(Date.now())
+        service.clearScheduledAttachmentDeliveryCache(session.id)
+        await service.releaseMatureScheduledMessages(Date.now())
+
+        expect(materializeCalls).toBe(2)
+        expect(cliEmitted.map((data: any) => data.body.message.content.content.attachments[0].path))
+            .toEqual(['/tmp/materialized-1.png', '/tmp/materialized-2.png'])
+    })
+
     it('cancels a scheduled attachment while materialization is pending without invoking it', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-cancel-during-materialize')

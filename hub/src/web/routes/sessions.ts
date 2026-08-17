@@ -1036,76 +1036,78 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
         }
 
-        // Idempotent-retry short-circuit (HAPI Bot, PR #896 review):
-        // when the caller supplies an explicit entryId AND that id
-        // already exists, return the canonical row with 200 BEFORE the
-        // cap check fires. Otherwise a session sitting at the
-        // 200-entry cap would 409 a duplicate POST that should be a
-        // no-op - which is exactly the path the localStorage migration
-        // retry uses after a partial failure.
-        if (parsed.data.entryId) {
-            const existing = engine.getScratchlistEntry(
-                sessionResult.sessionId,
-                parsed.data.entryId
-            )
-            if (existing) {
-                return c.json({ entry: existing }, 200)
-            }
-        }
-
-        // Server-side cap enforcement. Mirrors the web-side cap so a
-        // malicious / runaway client can't drive the table without
-        // bound. Bypassing the optimistic add path on the web client
-        // (e.g. direct REST call) hits this guard. Bumped only with the
-        // shared SCRATCHLIST_MAX_ENTRIES constant.
-        const currentCount = engine.countScratchlistEntries(sessionResult.sessionId)
-        if (currentCount >= SCRATCHLIST_MAX_ENTRIES) {
-            return c.json({
-                error: `Scratchlist is at its ${SCRATCHLIST_MAX_ENTRIES}-entry cap`,
-                code: 'scratchlist_at_cap'
-            }, 409)
-        }
-
         const limits = loadScratchlistAttachmentLimitsFromEnv()
         const namespace = c.get('namespace')
-        const checked = await engine.resolveScratchlistAttachmentsForSession(
-            sessionResult.sessionId,
-            namespace,
-            parsed.data.attachments
-        )
-        if (!checked.ok) {
-            return c.json({ error: checked.error, code: 'scratchlist_attachment_invalid' }, 400)
-        }
-        const diskBytes = await engine.sumScratchlistAttachmentBytesOnDisk(sessionResult.sessionId, namespace)
-        const entryBytes = checked.attachments.reduce((sum, att) => sum + att.size, 0)
-        // Files are already on disk from upload; don't double-count them.
-        const sessionBytesBefore = Math.max(0, diskBytes - entryBytes)
-        const attachmentValidation = validateScratchlistAttachmentsForWrite(
-            checked.attachments,
-            limits,
-            sessionBytesBefore
-        )
-        if (!attachmentValidation.ok) {
-            return c.json({ error: attachmentValidation.error, code: attachmentValidation.code }, 400)
-        }
-
-        const result = engine.createScratchlistEntry(
-            sessionResult.sessionId,
-            parsed.data.text.trim(),
-            {
-                entryId: parsed.data.entryId,
-                createdAt: parsed.data.createdAt,
-                position: parsed.data.position,
-                attachments: checked.attachments,
+        return engine.withScratchlistAttachmentLock(namespace, sessionResult.sessionId, async () => {
+            // Idempotent-retry short-circuit (HAPI Bot, PR #896 review):
+            // when the caller supplies an explicit entryId AND that id
+            // already exists, return the canonical row with 200 BEFORE the
+            // cap check fires. Otherwise a session sitting at the
+            // 200-entry cap would 409 a duplicate POST that should be a
+            // no-op - which is exactly the path the localStorage migration
+            // retry uses after a partial failure.
+            if (parsed.data.entryId) {
+                const existing = engine.getScratchlistEntry(
+                    sessionResult.sessionId,
+                    parsed.data.entryId
+                )
+                if (existing) {
+                    return c.json({ entry: existing }, 200)
+                }
             }
-        )
-        if (result.outcome === 'session-not-found') {
-            return c.json({ error: 'Session not found' }, 404)
-        }
-        // `duplicate` (same entryId already exists) returns 200 with the
-        // canonical row so the migration path can retry idempotently.
-        // The web client treats 200-with-existing as success either way.
-        return c.json({ entry: result.entry }, result.outcome === 'created' ? 201 : 200)
+
+            // Server-side cap enforcement. Mirrors the web-side cap so a
+            // malicious / runaway client can't drive the table without
+            // bound. Bypassing the optimistic add path on the web client
+            // (e.g. direct REST call) hits this guard. Bumped only with the
+            // shared SCRATCHLIST_MAX_ENTRIES constant.
+            const currentCount = engine.countScratchlistEntries(sessionResult.sessionId)
+            if (currentCount >= SCRATCHLIST_MAX_ENTRIES) {
+                return c.json({
+                    error: `Scratchlist is at its ${SCRATCHLIST_MAX_ENTRIES}-entry cap`,
+                    code: 'scratchlist_at_cap'
+                }, 409)
+            }
+
+            const checked = await engine.resolveScratchlistAttachmentsForSession(
+                sessionResult.sessionId,
+                namespace,
+                parsed.data.attachments
+            )
+            if (!checked.ok) {
+                return c.json({ error: checked.error, code: 'scratchlist_attachment_invalid' }, 400)
+            }
+            const diskBytes = await engine.sumScratchlistAttachmentBytesOnDisk(sessionResult.sessionId, namespace)
+            const entryBytes = checked.attachments.reduce((sum, att) => sum + att.size, 0)
+            // Files are already on disk from upload; don't double-count them.
+            const sessionBytesBefore = Math.max(0, diskBytes - entryBytes)
+            const attachmentValidation = validateScratchlistAttachmentsForWrite(
+                checked.attachments,
+                limits,
+                sessionBytesBefore
+            )
+            if (!attachmentValidation.ok) {
+                return c.json({ error: attachmentValidation.error, code: attachmentValidation.code }, 400)
+            }
+
+            const result = engine.createScratchlistEntry(
+                sessionResult.sessionId,
+                parsed.data.text.trim(),
+                {
+                    entryId: parsed.data.entryId,
+                    createdAt: parsed.data.createdAt,
+                    position: parsed.data.position,
+                    attachments: checked.attachments,
+                }
+            )
+            if (result.outcome === 'session-not-found') {
+                return c.json({ error: 'Session not found' }, 404)
+            }
+            // `duplicate` (same entryId already exists) returns 200 with the
+            // canonical row so the migration path can retry idempotently.
+            // The web client treats 200-with-existing as success either way.
+            return c.json({ entry: result.entry }, result.outcome === 'created' ? 201 : 200)
+        })
     })
 
     app.put('/sessions/:id/scratchlist/reorder', async (c) => {

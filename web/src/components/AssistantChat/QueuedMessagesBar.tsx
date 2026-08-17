@@ -187,6 +187,8 @@ export function computeCanCancel({
  * Each item has an edit button (✎) and a cancel button (✕).
  *
  * Edit = client-side cancel + prefill composer with message text (Codex dialect).
+ * Scheduled rows carrying attachments stay cancel-only because their attachment
+ * metadata cannot be restored by the text-only edit flow.
  * Cancel = DELETE /sessions/:id/messages/:messageId with optimistic removal.
  */
 export function QueuedMessagesBar({
@@ -349,6 +351,11 @@ export function QueuedMessagesBar({
                         const localId = msg.localId ?? msg.id
                         const isPending = cancelMutation.isPending || queuedOperationPending
                         const canCancel = computeCanCancel({ id: msg.id, localId: msg.localId, isPending })
+                        // Cancelling a scheduled attachment row cannot restore its
+                        // attachment metadata to the composer, so do not expose an
+                        // edit action that would silently turn the attachment into
+                        // plain text (or drop it altogether).
+                        const canEdit = canCancel && !(msg.scheduledAt != null && hasAttachments)
 
                         const handleCancel = () => {
                             if (!canCancel) return
@@ -392,7 +399,7 @@ export function QueuedMessagesBar({
                         }
 
                         const handleEdit = async () => {
-                            if (!canCancel) return
+                            if (!canEdit) return
                             // Edit = cancel + restore composer (text + schedule).
                             // Works the same for immediate-queued and future-scheduled messages.
                             const restoredPendingSchedule = computeEditPendingSchedule(msg.scheduledAt, Date.now())
@@ -466,8 +473,6 @@ export function QueuedMessagesBar({
                                 endQueuedOperation(sessionId, token)
                             }
                         }
-
-                        const canEdit = canCancel
 
                         return (
                             <li

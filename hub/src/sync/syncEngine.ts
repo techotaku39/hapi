@@ -597,6 +597,10 @@ export class SyncEngine {
     }
 
     handleSessionReady(payload: { sid: string; time: number }): void {
+        // Materialized attachment paths belong to the previous CLI process.
+        // A reconnect may not deliver the old session-end event, so never
+        // reuse those host-local paths after the new CLI becomes ready.
+        this.messageService.clearScheduledAttachmentDeliveryCache(payload.sid)
         this.sessionReadyIds.add(payload.sid)
         const session = this.sessionCache.getSession(payload.sid)
         if (session?.metadata?.piResumeAttempt) {
@@ -907,7 +911,12 @@ export class SyncEngine {
         })
     }
 
-    private async withScratchlistAttachmentLock<T>(
+    /**
+     * Serialize attachment validation and scratchlist mutations per session.
+     * Route-layer creates use this same gate as uploads and cleanup so a
+     * cleanup cannot remove a validated file before the new row references it.
+     */
+    async withScratchlistAttachmentLock<T>(
         namespace: string,
         sessionId: string,
         fn: () => Promise<T>

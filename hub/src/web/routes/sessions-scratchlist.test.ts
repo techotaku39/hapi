@@ -71,6 +71,7 @@ type EngineOverrides = Partial<{
     deleteScratchlistAttachmentById: SyncEngine['deleteScratchlistAttachmentById']
     readScratchlistAttachment: SyncEngine['readScratchlistAttachment']
     canDeleteScratchlistAttachment: SyncEngine['canDeleteScratchlistAttachment']
+    withScratchlistAttachmentLock: SyncEngine['withScratchlistAttachmentLock']
     sessionAccess: 'ok' | 'not-found' | 'wrong-namespace'
     callerNamespace: string
 }>
@@ -122,6 +123,8 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
         ) => ({ ok: true as const, attachments: claimed }),
         sumScratchlistAttachmentBytesOnDisk: async () => 0,
         deleteScratchlistAttachmentById: overrides.deleteScratchlistAttachmentById ?? (async () => true),
+        withScratchlistAttachmentLock: overrides.withScratchlistAttachmentLock
+            ?? (async (_namespace: string, _sessionId: string, fn: () => Promise<unknown>) => fn()),
         } as unknown as SyncEngine
 
     const app = new Hono<WebAppEnv>()
@@ -233,6 +236,54 @@ describe('POST /api/sessions/:id/scratchlist', () => {
         expect(calls).toHaveLength(1)
         expect(calls[0]?.sessionId).toBe('session-1')
         expect(calls[0]?.position).toBe(3)
+    })
+
+    it('keeps scratchlist insertion inside the attachment lifecycle lock', async () => {
+        const session = createSession()
+        let lockDepth = 0
+        let createLockDepth = 0
+        const app = createApp(session, {
+            withScratchlistAttachmentLock: async (_namespace, _sessionId, fn) => {
+                lockDepth += 1
+                try {
+                    return await fn()
+                } finally {
+                    lockDepth -= 1
+                }
+            },
+            createScratchlistEntry: (sessionId, text, options) => {
+                createLockDepth = lockDepth
+                return {
+                    outcome: 'created' as const,
+                    entry: {
+                        entryId: options?.entryId ?? 'with-attachment',
+                        text,
+                        createdAt: 1000,
+                        updatedAt: 1000,
+                        position: options?.position ?? 0,
+                        attachments: options?.attachments ?? [],
+                    }
+                }
+            }
+        })
+        const res = await app.request('/api/sessions/session-1/scratchlist', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                text: 'keep this file',
+                attachments: [{
+                    id: '11111111-1111-4111-8111-111111111111',
+                    filename: 'image.png',
+                    mimeType: 'image/png',
+                    size: 3,
+                    path: 'hapi-hub:scratchlist/default/session-1/11111111-1111-4111-8111-111111111111-image.png',
+                }],
+            })
+        })
+
+        expect(res.status).toBe(201)
+        expect(createLockDepth).toBe(1)
+        expect(lockDepth).toBe(0)
     })
 
     it('returns 200 with the existing row on duplicate (migration idempotency path)', async () => {
