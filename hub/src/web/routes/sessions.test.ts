@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import type { Session, SyncEngine } from '../../sync/syncEngine'
+import { TitleSuggestionError } from '../../sync/titleSuggestion'
 import type { WebAppEnv } from '../middleware/auth'
 import { createSessionsRoutes } from './sessions'
 
@@ -189,6 +190,22 @@ describe('sessions routes', () => {
 
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ title: 'Generated title' })
+    })
+
+    it('preserves title suggestion error codes for the web client', async () => {
+        const { app } = createApp(createSession(), {
+            suggestSessionTitle: async () => {
+                throw new TitleSuggestionError('unavailable', 'Title provider is not configured', 503)
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/title-suggestion', { method: 'POST' })
+
+        expect(response.status).toBe(503)
+        expect(await response.json()).toEqual({
+            error: 'Title provider is not configured',
+            code: 'unavailable'
+        })
     })
 
     it('writes generated titles through the summary metadata endpoint', async () => {

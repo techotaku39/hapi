@@ -72,7 +72,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
         } catch (error) {
             if (generation === generationRef.current) {
                 setError(
-                    error instanceof ApiError && error.status === 503
+                    error instanceof ApiError && error.code === 'unavailable'
                         ? t('dialog.rename.generateUnavailable')
                         : t('dialog.rename.generateError')
                 )

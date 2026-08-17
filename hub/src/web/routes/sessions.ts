@@ -815,7 +815,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ title })
         } catch (error) {
             if (error instanceof TitleSuggestionError) {
-                return c.json({ error: error.message }, error.status)
+                return c.json({ error: error.message, code: error.code }, error.status)
             }
             return c.json({ error: 'Failed to generate a session title' }, 502)
         }

@@ -70,7 +70,7 @@ describe('session dialog title alignment', () => {
                 currentName="Session"
                 onRename={vi.fn(async () => {})}
                 onSuggestTitle={async () => {
-                    throw new ApiError('not configured', 503)
+                    throw new ApiError('not configured', 503, 'unavailable')
                 }}
                 isPending={false}
             />
@@ -80,6 +80,26 @@ describe('session dialog title alignment', () => {
 
         await waitFor(() => expect(screen.getByText(/HAPI_TITLE_PROVIDER_BASE_URL/)).toBeInTheDocument())
         expect(screen.getByText(/titleProvider\.baseUrl/)).toBeInTheDocument()
+    })
+
+    it('uses the generic error for a provider failure with HTTP 503', async () => {
+        renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={async () => {
+                    throw new ApiError('provider unavailable', 503, 'provider')
+                }}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+        await waitFor(() => expect(screen.getByText('Failed to generate a title. Please try again.')).toBeInTheDocument())
+        expect(screen.queryByText(/HAPI_TITLE_PROVIDER_BASE_URL/)).not.toBeInTheDocument()
     })
 
     it('saves an untouched generated draft as metadata.summary.text', async () => {
