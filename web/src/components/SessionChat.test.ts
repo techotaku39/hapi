@@ -41,6 +41,25 @@ describe('usePendingScratchlistSendCleanup', () => {
             expect(api.deleteScratchlistEntry).toHaveBeenCalledWith('source-session', 'draft-entry')
         })
     })
+
+    it('keeps the draft when the matching send settlement fails', async () => {
+        const api = {
+            deleteScratchlistEntry: vi.fn().mockResolvedValue(undefined),
+        }
+        const initialProps: { settlement: SendMessageSettlement | null } = { settlement: null }
+        const { result, rerender } = renderHook(
+            ({ settlement }: { settlement: SendMessageSettlement | null }) => (
+                usePendingScratchlistSendCleanup(api, settlement)
+            ),
+            { initialProps },
+        )
+
+        act(() => {
+            result.current('attempt-failure', 'source-session', 'draft-with-attachment')
+        })
+        rerender({ settlement: { attemptId: 'attempt-failure', status: 'error' } })
+        await waitFor(() => expect(api.deleteScratchlistEntry).not.toHaveBeenCalled())
+    })
 })
 
 describe('applyModelChangeWithReasoningRollback', () => {

@@ -653,7 +653,7 @@ function SessionPage() {
             // 'no-session' and 'pending' don't need toast - either invalid state or expected behavior
         }
     })
-    const trackScheduledScratchlistSend = usePendingScratchlistSendCleanup(api, sendSettlement)
+    const trackScratchlistSend = usePendingScratchlistSendCleanup(api, sendSettlement)
 
     // Get agent type from session metadata for slash commands
     const agentType = session?.metadata?.flavor ?? 'claude'
@@ -801,7 +801,7 @@ function SessionPage() {
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
             sendSettlement={sendSettlement}
-            onScheduledScratchlistSend={trackScheduledScratchlistSend}
+            onScratchlistSendAccepted={trackScratchlistSend}
             viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}

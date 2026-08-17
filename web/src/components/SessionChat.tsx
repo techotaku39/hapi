@@ -473,7 +473,7 @@ type SessionChatProps = {
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
     ) => Promise<SendMessageAcceptance | false>
-    onScheduledScratchlistSend?: (attemptId: string, sessionId: string, entryId: string) => void
+    onScratchlistSendAccepted: (attemptId: string, sessionId: string, entryId: string) => void
     resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
     onUploadSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
@@ -494,7 +494,7 @@ type SessionChatProps = {
     onAbortRestore?: (text: string) => void
 }
 
-type ScheduledScratchlistSendTracker = (
+type ScratchlistSendTracker = (
     attemptId: string,
     sessionId: string,
     entryId: string,
@@ -503,7 +503,7 @@ type ScheduledScratchlistSendTracker = (
 export function usePendingScratchlistSendCleanup(
     api: Pick<ApiClient, 'deleteScratchlistEntry'>,
     sendSettlement: SendMessageSettlement | null,
-): ScheduledScratchlistSendTracker {
+): ScratchlistSendTracker {
     const pendingSendsRef = useRef(new Map<string, { sessionId: string; entryId: string }>())
     const sendSettlementRef = useRef<SendMessageSettlement | null>(sendSettlement)
     sendSettlementRef.current = sendSettlement
@@ -850,9 +850,9 @@ function SessionChatInner(props: SessionChatProps) {
         const attachments = stripPreviewUrls(entry.attachments ?? [])
         const hubItems = attachments.filter((attachment) => isHubScratchlistAttachmentPath(attachment.path))
         let sendAttachments = attachments
+        let staged: AttachmentMetadata[] = []
         if (hubItems.length > 0 && scheduledAt == null) {
             const normalItems = attachments.filter((attachment) => !isHubScratchlistAttachmentPath(attachment.path))
-            let staged: AttachmentMetadata[]
             try {
                 staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,
@@ -871,24 +871,21 @@ function SessionChatInner(props: SessionChatProps) {
             scheduledAt,
             'queue',
         )
-        if (!accepted) return false
-
-        // Immediate sends copy hub blobs into the CLI upload directory and can
-        // release the scratchlist file right away. Scheduled sends retain the
-        // hub path so validation can run against the persisted message; wait
-        // for the matching mutation settlement before removing the draft.
-        if (scheduledAt != null && hubItems.length > 0) {
-            props.onScheduledScratchlistSend?.(accepted.attemptId, props.session.id, entry.id)
-        } else {
-            if (hubItems.length > 0) {
-                await Promise.allSettled(
-                    hubItems.map((attachment) => props.api.deleteScratchlistAttachment(props.session.id, attachment.id))
-                )
-            }
-            await scratchlist.remove(entry.id)
+        if (!accepted) {
+            await Promise.allSettled(staged.map((attachment) => props.api.deleteUploadFile(
+                props.session.id,
+                attachment.path,
+            )))
+            return false
         }
+
+        // Keep the durable draft and its Hub attachments until the matching
+        // mutation settles successfully. The tracker removes the row after
+        // success, allowing the Hub to delete its attachments safely; a send
+        // failure therefore leaves the draft available for retry.
+        props.onScratchlistSendAccepted(accepted.attemptId, props.session.id, entry.id)
         return true
-    }, [props.api, props.onSend, props.onScheduledScratchlistSend, props.session.id, scratchlist.remove])
+    }, [props.api, props.onSend, props.onScratchlistSendAccepted, props.session.id])
 
     const handleSendScratchlistEntry = useCallback(
         (entry: ScratchlistEntry) => sendScratchlistEntry(entry, null),
