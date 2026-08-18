@@ -248,9 +248,9 @@ export class SyncEngine {
             {
                 validateScheduledAttachments: (sessionId, attachments) =>
                     this.validateScheduledAttachments(sessionId, attachments),
-                withScheduledAttachmentLock: (sessionId, fn) => {
-                    const namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default'
-                    return this.withScratchlistAttachmentLock(namespace, sessionId, fn)
+                withScheduledAttachmentLocks: (sessionIds, fn) => {
+                    const namespace = this.store.sessions.getSession(sessionIds[0] ?? '')?.namespace ?? 'default'
+                    return this.withScratchlistAttachmentLocks(namespace, sessionIds, fn)
                 },
                 materializeScheduledAttachments: (sessionId, attachments) =>
                     this.materializeScheduledAttachments(sessionId, attachments),

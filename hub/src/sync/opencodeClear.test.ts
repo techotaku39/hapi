@@ -1,6 +1,7 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { describe, expect, it, mock, spyOn } from 'bun:test'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { Store } from '../store'
+import { rehomeMessageAttachments } from './messageAttachmentTransfer'
 import { SyncEngine, type SyncEvent } from './syncEngine'
 
 function createEngine(onCliEmit?: (payload: unknown) => void) {
@@ -150,6 +151,104 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', reserved.sessionId))
                 .toBe('scheduled-image'.length)
         } finally {
+            engine.stop()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
+    it('serializes redirected attachment re-home with a concurrent target merge', async () => {
+        const { mkdtempSync, rmSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-clear-redirect-lock-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const { store, engine } = createEngine()
+        const storage = await import('../scratchlistAttachments/storage')
+        const originalMove = storage.moveScratchlistAttachmentFilesForSession
+        let releaseSourceMove!: () => void
+        let resolveSourceMoveStarted!: () => void
+        const sourceMoveStarted = new Promise<void>((resolve) => { resolveSourceMoveStarted = resolve })
+        const sourceMovePaused = new Promise<void>((resolve) => { releaseSourceMove = resolve })
+        let moveSpy: { mockRestore: () => void } | undefined
+        try {
+            const source = engine.getOrCreateSession('redirect-lock-source', {
+                path: '/tmp/project', host: 'host', flavor: 'opencode'
+            }, null, 'default')
+            const target = engine.getOrCreateSession('redirect-lock-target', {
+                path: '/tmp/project', host: 'host', flavor: 'opencode'
+            }, null, 'default')
+            const final = engine.getOrCreateSession('redirect-lock-final', {
+                path: '/tmp/project', host: 'host', flavor: 'opencode'
+            }, null, 'default')
+            moveSpy = spyOn(storage, 'moveScratchlistAttachmentFilesForSession').mockImplementation(async (...args) => {
+                const [, , oldSessionId, newSessionId] = args
+                if (oldSessionId === source.id && newSessionId === target.id) {
+                    resolveSourceMoveStarted()
+                    await sourceMovePaused
+                }
+                return originalMove(...args)
+            })
+            const stored = store.sessions.getSessionByNamespace(source.id, 'default')!
+            store.sessions.updateSessionMetadata(source.id, {
+                ...(stored.metadata as Record<string, unknown>),
+                supersededBySessionId: target.id,
+            }, stored.metadataVersion, 'default')
+
+            const attachment = await storage.writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                source.id,
+                'redirected.png',
+                'image/png',
+                Buffer.from('redirected-image'),
+            )
+            const sendPromise = engine.sendMessage(source.id, {
+                text: 'redirected attachment',
+                localId: 'redirect-lock-message',
+                scheduledAt: Date.now() + 60_000,
+                attachments: [attachment],
+            })
+
+            await sourceMoveStarted
+            let mergeEntered = false
+            const mergePromise = engine.withScratchlistAttachmentLocks(
+                'default',
+                [target.id, final.id],
+                async () => {
+                    mergeEntered = true
+                    const sourceMessages = store.messages.getAllMessages(target.id)
+                    store.messages.moveUninvokedMessages(target.id, final.id)
+                    await rehomeMessageAttachments(store, 'default', target.id, final.id, sourceMessages)
+                },
+            )
+
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+            expect(mergeEntered).toBe(false)
+            expect(store.messages.getAllMessages(target.id)).toHaveLength(1)
+
+            releaseSourceMove()
+            await sendPromise
+            await mergePromise
+
+            expect(mergeEntered).toBe(true)
+            expect(store.messages.getAllMessages(target.id)).toHaveLength(0)
+            const moved = store.messages.getAllMessages(final.id)
+            const movedAttachment = (moved[0]?.content as {
+                content?: { attachments?: Array<{ path: string }> }
+            }).content?.attachments?.[0]
+            expect(movedAttachment?.path).toContain(`/${final.id}/`)
+            expect(movedAttachment?.path).not.toContain(`/${source.id}/`)
+            expect(movedAttachment?.path).not.toContain(`/${target.id}/`)
+            expect(await storage.sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', source.id)).toBe(0)
+            expect(await storage.sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', target.id)).toBe(0)
+            expect(await storage.sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', final.id))
+                .toBe('redirected-image'.length)
+        } finally {
+            releaseSourceMove()
+            moveSpy?.mockRestore()
             engine.stop()
             if (previousHome === undefined) delete process.env.HAPI_HOME
             else process.env.HAPI_HOME = previousHome

@@ -156,6 +156,10 @@ type MessageServiceOptions = {
         sessionId: string,
         fn: () => Promise<T>,
     ) => Promise<T>
+    withScheduledAttachmentLocks?: <T>(
+        sessionIds: readonly string[],
+        fn: () => Promise<T>,
+    ) => Promise<T>
     rehomeScheduledMessageAttachments?: (
         sourceSessionId: string,
         targetSessionId: string,
@@ -177,8 +181,43 @@ export class MessageService {
     /** Keep mature delivery FIFO per session without blocking unrelated sessions. */
     private readonly matureReleaseInFlightSessions = new Set<string>()
 
+    private withScheduledAttachmentLocks<T>(sessionIds: readonly string[], fn: () => Promise<T>): Promise<T> {
+        if (this.options.withScheduledAttachmentLocks) {
+            return this.options.withScheduledAttachmentLocks(sessionIds, fn)
+        }
+        if (sessionIds.length === 1 && this.options.withScheduledAttachmentLock) {
+            return this.options.withScheduledAttachmentLock(sessionIds[0]!, fn)
+        }
+        return fn()
+    }
+
     private withScheduledAttachmentLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-        return this.options.withScheduledAttachmentLock?.(sessionId, fn) ?? fn()
+        return this.withScheduledAttachmentLocks([sessionId], fn)
+    }
+
+    private resolveScheduledAttachmentLockSessionIds(sessionId: string): string[] {
+        const source = this.store.sessions.getSession(sessionId)
+        if (!source) throw new Error('Message source session not found')
+
+        const metadata = isObject(source.metadata) ? source.metadata : null
+        const supersededBySessionId = metadata && typeof metadata.supersededBySessionId === 'string'
+            ? metadata.supersededBySessionId
+            : undefined
+        const clearOperation = metadata && isObject(metadata.opencodeClearOperation)
+            ? metadata.opencodeClearOperation
+            : null
+        const replacementSessionId = clearOperation && typeof clearOperation.replacementSessionId === 'string'
+            ? clearOperation.replacementSessionId
+            : undefined
+        const targetSessionId = supersededBySessionId
+            ?? (clearOperation?.state !== 'aborted' ? replacementSessionId : undefined)
+            ?? sessionId
+
+        if (targetSessionId !== sessionId
+            && !this.store.sessions.getSessionByNamespace(targetSessionId, source.namespace)) {
+            throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
+        }
+        return targetSessionId === sessionId ? [sessionId] : [sessionId, targetSessionId]
     }
 
     constructor(
@@ -885,7 +924,10 @@ export class MessageService {
             return { inserted, msg }
         }
         const insertedWithMessage = payload.scheduledAt != null && attachments.length > 0
-            ? await this.withScheduledAttachmentLock(sessionId, insertMessage)
+            ? await this.withScheduledAttachmentLocks(
+                this.resolveScheduledAttachmentLockSessionIds(sessionId),
+                insertMessage,
+            )
             : await insertMessage()
         const inserted = insertedWithMessage.inserted
         const actualSessionId = inserted.sessionId
