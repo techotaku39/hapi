@@ -328,6 +328,50 @@ function ScratchlistAttachmentThumbnails(props: {
     )
 }
 
+function ScratchlistFileAttachments(props: {
+    attachments: Array<ScratchlistAttachmentMetadata & { previewUrl?: string }>
+    onRemove: (attachmentId: string) => void
+}) {
+    const fileAttachments = props.attachments.filter((attachment) => !isImageMimeType(attachment.mimeType))
+    if (fileAttachments.length === 0) return null
+
+    return (
+        <div
+            className="mt-0.5 mb-1 flex min-w-0 flex-col gap-1"
+            data-testid="scratchlist-attachment-files"
+        >
+            {fileAttachments.map((attachment) => (
+                <div
+                    key={attachment.id}
+                    className="flex min-w-0 items-center gap-1.5 rounded-md bg-[var(--app-subtle-bg)] px-2 py-1"
+                    data-testid="scratchlist-attachment-file"
+                >
+                    <span
+                        className="min-w-0 flex-1 truncate text-xs text-[var(--app-hint)]"
+                        title={attachment.filename}
+                    >
+                        {attachment.filename}
+                    </span>
+                    <button
+                        type="button"
+                        data-scratchlist-action="remove-attachment"
+                        aria-label={`Remove attachment ${attachment.filename}`}
+                        title={`Remove attachment ${attachment.filename}`}
+                        onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            props.onRemove(attachment.id)
+                        }}
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--app-link)]"
+                    >
+                        <ScratchlistRemoveIcon />
+                    </button>
+                </div>
+            ))}
+        </div>
+    )
+}
+
 const LONG_PRESS_TO_DRAG_MS = 450
 const DRAG_CANCEL_DISTANCE_PX = 8
 const COPY_SUCCESS_FEEDBACK_MS = 1000
@@ -1014,6 +1058,12 @@ function ScratchlistInventory({
                                     <ScratchlistAttachmentThumbnails
                                         sessionId={sessionId}
                                         api={api}
+                                        attachments={entry.attachments}
+                                        onRemove={(attachmentId) => removeAttachment(entry, attachmentId)}
+                                    />
+                                ) : null}
+                                {entry.attachments && entry.attachments.length > 0 ? (
+                                    <ScratchlistFileAttachments
                                         attachments={entry.attachments}
                                         onRemove={(attachmentId) => removeAttachment(entry, attachmentId)}
                                     />

@@ -9,10 +9,13 @@ type CachedPreview = {
     signature: string
     src: string
     kind: 'data' | 'object-url'
+    bytes: number
 }
 
 const previews = new Map<string, CachedPreview>()
 const MAX_CACHED_PREVIEWS = 64
+const MAX_CACHED_PREVIEW_BYTES = 20 * 1024 * 1024
+let cachedPreviewBytes = 0
 
 function signature(attachment: ScratchlistAttachmentMetadata): string {
     return [
@@ -39,6 +42,7 @@ function putPreview(
         signature: signature(attachment),
         src,
         kind,
+        bytes: Number.isFinite(attachment.size) ? Math.max(0, attachment.size) : 0,
     } satisfies CachedPreview
     const current = previews.get(attachment.id)
     if (
@@ -49,13 +53,16 @@ function putPreview(
         return current.src
     }
     revokeIfOwned(current)
+    cachedPreviewBytes -= current?.bytes ?? 0
     previews.delete(attachment.id)
     previews.set(attachment.id, next)
-    while (previews.size > MAX_CACHED_PREVIEWS) {
+    cachedPreviewBytes += next.bytes
+    while (previews.size > MAX_CACHED_PREVIEWS || cachedPreviewBytes > MAX_CACHED_PREVIEW_BYTES) {
         const oldest = previews.entries().next().value as [string, CachedPreview] | undefined
         if (!oldest) break
         const [oldestId, oldestPreview] = oldest
         revokeIfOwned(oldestPreview)
+        cachedPreviewBytes -= oldestPreview.bytes
         previews.delete(oldestId)
     }
     return next.src
@@ -104,6 +111,7 @@ export function releaseScratchlistAttachmentPreview(attachmentId: string): void 
     const cached = previews.get(attachmentId)
     if (!cached) return
     revokeIfOwned(cached)
+    cachedPreviewBytes -= cached.bytes
     previews.delete(attachmentId)
 }
 
@@ -111,4 +119,5 @@ export function releaseScratchlistAttachmentPreview(attachmentId: string): void 
 export function clearScratchlistAttachmentPreviewCache(): void {
     for (const preview of previews.values()) revokeIfOwned(preview)
     previews.clear()
+    cachedPreviewBytes = 0
 }

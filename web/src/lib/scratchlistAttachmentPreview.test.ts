@@ -6,12 +6,12 @@ import {
     rememberScratchlistAttachmentObjectUrl,
 } from './scratchlistAttachmentPreview'
 
-function attachment(id: string) {
+function attachment(id: string, size = 1) {
     return {
         id,
         filename: `${id}.png`,
         mimeType: 'image/png',
-        size: 1,
+        size,
         path: `hapi-hub:scratchlist/default/session/${id}.png`,
     }
 }
@@ -52,5 +52,22 @@ describe('scratchlist attachment preview cache', () => {
 
         expect(getScratchlistAttachmentPreview(first)).toBeUndefined()
         expect(revoke).toHaveBeenCalledWith('blob:first')
+    })
+
+    it('evicts previews when their attachment bytes exceed the cache budget', () => {
+        const revoke = vi.fn()
+        Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke })
+        const first = attachment('large-first', 8 * 1024 * 1024)
+        const second = attachment('large-second', 8 * 1024 * 1024)
+        const third = attachment('large-third', 8 * 1024 * 1024)
+
+        rememberScratchlistAttachmentObjectUrl(first, 'blob:large-first')
+        rememberScratchlistAttachmentObjectUrl(second, 'blob:large-second')
+        rememberScratchlistAttachmentObjectUrl(third, 'blob:large-third')
+
+        expect(getScratchlistAttachmentPreview(first)).toBeUndefined()
+        expect(getScratchlistAttachmentPreview(second)).toBe('blob:large-second')
+        expect(getScratchlistAttachmentPreview(third)).toBe('blob:large-third')
+        expect(revoke).toHaveBeenCalledWith('blob:large-first')
     })
 })

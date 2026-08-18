@@ -163,6 +163,7 @@ export function useHubScratchlist(
 ): {
     entries: ScratchlistEntry[]
     isLoading: boolean
+    isUpdating: boolean
     add: (text: string, attachments?: import('@/types/api').AttachmentMetadata[]) => Promise<boolean>
     remove: (id: string) => Promise<void>
     update: (id: string, text: string, attachments?: ScratchlistAttachmentWithPreview[]) => Promise<void>
@@ -431,6 +432,19 @@ export function useHubScratchlist(
             if (context?.previousData !== undefined) {
                 queryClient.setQueryData(queryKey, context.previousData)
             }
+        },
+        onSuccess: (data) => {
+            // The optimistic edit uses the browser clock, while the Hub's
+            // monotonic updatedAt is the revision token used by send cleanup.
+            // Reconcile it before the row can be sent again.
+            queryClient.setQueryData<ScratchlistResponse>(queryKey, (prev) => {
+                if (!prev) return prev
+                return {
+                    entries: prev.entries.map((entry) =>
+                        entry.entryId === data.entry.entryId ? data.entry : entry
+                    )
+                }
+            })
         }
     })
 
@@ -617,6 +631,7 @@ export function useHubScratchlist(
     return {
         entries,
         isLoading: query.isLoading,
+        isUpdating: updateMutation.isPending,
         add,
         remove,
         update: updateEntry,

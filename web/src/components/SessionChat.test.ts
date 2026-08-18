@@ -98,6 +98,45 @@ describe('usePendingScratchlistSendCleanup', () => {
             )
         })
     })
+
+    it('retries transient cleanup failures with a bounded backoff', async () => {
+        vi.useFakeTimers()
+        try {
+            const api = {
+                deleteScratchlistEntryIfUnchanged: vi.fn()
+                    .mockRejectedValueOnce(new Error('network failure'))
+                    .mockResolvedValueOnce({ deleted: true }),
+            }
+            const initialProps: { settlement: SendMessageSettlement | null } = { settlement: null }
+            const { result, rerender } = renderHook(
+                ({ settlement }: { settlement: SendMessageSettlement | null }) => (
+                    usePendingScratchlistSendCleanup(api, settlement)
+                ),
+                { initialProps },
+            )
+
+            act(() => {
+                result.current('attempt-cleanup-retry', 'source-session', 'draft-entry', 2468)
+            })
+            rerender({ settlement: { attemptId: 'attempt-cleanup-retry', status: 'success' } })
+            await act(async () => {
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledTimes(1)
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(999)
+            })
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledTimes(1)
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(1)
+            })
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledTimes(2)
+        } finally {
+            vi.useRealTimers()
+        }
+    })
 })
 
 describe('applyModelChangeWithReasoningRollback', () => {

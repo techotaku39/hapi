@@ -506,6 +506,9 @@ type ScratchlistSendTracker = (
     expectedUpdatedAt: number,
 ) => void
 
+const MAX_SCRATCHLIST_CLEANUP_RETRIES = 3
+const SCRATCHLIST_CLEANUP_RETRY_BASE_MS = 1000
+
 export function usePendingScratchlistSendCleanup(
     api: Pick<ApiClient, 'deleteScratchlistEntryIfUnchanged'>,
     sendSettlement: SendMessageSettlement | null,
@@ -516,8 +519,18 @@ export function usePendingScratchlistSendCleanup(
         expectedUpdatedAt: number
     }>())
     const settlingSendsRef = useRef(new Set<string>())
+    const cleanupRetriesRef = useRef(new Map<string, number>())
+    const cleanupRetryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
     const sendSettlementRef = useRef<SendMessageSettlement | null>(sendSettlement)
     sendSettlementRef.current = sendSettlement
+    const clearCleanupRetry = useCallback((attemptId: string) => {
+        cleanupRetriesRef.current.delete(attemptId)
+        const timer = cleanupRetryTimersRef.current.get(attemptId)
+        if (timer !== undefined) {
+            clearTimeout(timer)
+            cleanupRetryTimersRef.current.delete(attemptId)
+        }
+    }, [])
     const settlePendingSend = useCallback((attemptId: string) => {
         const settlement = sendSettlementRef.current
         if (settlement?.attemptId !== attemptId) return
@@ -526,7 +539,11 @@ export function usePendingScratchlistSendCleanup(
         // Keep the source draft association through retryable failures. A
         // retry reuses the same local id, so deleting it here would make a
         // later successful retry unable to clean up the original draft.
-        if (settlement.status !== 'success' || settlingSendsRef.current.has(attemptId)) return
+        if (
+            settlement.status !== 'success'
+            || settlingSendsRef.current.has(attemptId)
+            || cleanupRetryTimersRef.current.has(attemptId)
+        ) return
         settlingSendsRef.current.add(attemptId)
         void api.deleteScratchlistEntryIfUnchanged(
             pending.sessionId,
@@ -536,13 +553,35 @@ export function usePendingScratchlistSendCleanup(
             // A false result is an intentional no-op when another client has
             // edited or deleted the draft; in either case this send is settled.
             pendingSendsRef.current.delete(attemptId)
+            clearCleanupRetry(attemptId)
         }).catch(() => {
-            // Keep the association if the cleanup request itself failed. It
-            // can still be retried by a later matching settlement.
+            // Keep the association if the cleanup request itself failed and
+            // retry transient failures without making the send visible again.
+            const retries = cleanupRetriesRef.current.get(attemptId) ?? 0
+            if (retries >= MAX_SCRATCHLIST_CLEANUP_RETRIES) {
+                // The draft remains available for manual recovery, but do
+                // not retain an unbounded in-memory association forever.
+                pendingSendsRef.current.delete(attemptId)
+                cleanupRetriesRef.current.delete(attemptId)
+                return
+            }
+            const nextRetry = retries + 1
+            cleanupRetriesRef.current.set(attemptId, nextRetry)
+            const timer = setTimeout(() => {
+                cleanupRetryTimersRef.current.delete(attemptId)
+                settlePendingSend(attemptId)
+            }, SCRATCHLIST_CLEANUP_RETRY_BASE_MS * 2 ** (nextRetry - 1))
+            cleanupRetryTimersRef.current.set(attemptId, timer)
         }).finally(() => {
             settlingSendsRef.current.delete(attemptId)
         })
-    }, [api])
+    }, [api, clearCleanupRetry])
+    useEffect(() => () => {
+        for (const timer of cleanupRetryTimersRef.current.values()) {
+            clearTimeout(timer)
+        }
+        cleanupRetryTimersRef.current.clear()
+    }, [])
     useEffect(() => {
         if (!sendSettlement) return
         settlePendingSend(sendSettlement.attemptId)
@@ -1934,7 +1973,7 @@ function SessionChatInner(props: SessionChatProps) {
                                     onDelete={scratchlist.remove}
                                     onSend={handleSendScratchlistEntry}
                                     onSchedule={handleScheduleScratchlistEntry}
-                                    disabled={props.isSending || isScratchlistParking}
+                                    disabled={props.isSending || isScratchlistParking || scratchlist.isUpdating}
                                 />
                             ) : null}
                             <QueuedMessagesBar

@@ -369,6 +369,7 @@ describe('useHubScratchlist - update', () => {
             await result.current.update('a', 'after')
         })
         await waitFor(() => expect(result.current.entries[0]?.text).toBe('after'))
+        expect(result.current.entries[0]?.updatedAt).toBe(5)
     })
 
     it('drops entry when update returns 404 (deleted elsewhere) (HAPI Bot, PR #896)', async () => {

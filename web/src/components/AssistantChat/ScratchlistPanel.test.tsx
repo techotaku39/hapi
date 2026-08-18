@@ -600,6 +600,35 @@ describe('ScratchlistDrawer disabled operations', () => {
         }
     })
 
+    it('renders non-image attachment-only rows with a filename and remove affordance', () => {
+        const attachment = {
+            id: 'document-1',
+            filename: 'brief.pdf',
+            mimeType: 'application/pdf',
+            size: 4,
+            path: 'hapi-hub:scratchlist/default/session-test/document-1.pdf',
+        }
+        const onDelete = vi.fn()
+
+        render(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[makeEntry({ id: 'document-entry', text: '', attachments: [attachment] })]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={vi.fn()}
+                    onReorder={vi.fn()}
+                    onDelete={onDelete}
+                />
+            </I18nProvider>,
+        )
+
+        expect(screen.getByTestId('scratchlist-attachment-files')).toBeInTheDocument()
+        expect(screen.getByText('brief.pdf')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Remove attachment brief.pdf' }))
+        expect(onDelete).toHaveBeenCalledWith('document-entry')
+    })
+
     it('renders composer-style image chips with a filename, remove button, and fullscreen preview', async () => {
         const { ScratchlistDrawer } = await import('./ScratchlistPanel')
         const attachment = {
