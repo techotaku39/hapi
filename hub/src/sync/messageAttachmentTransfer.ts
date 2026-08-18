@@ -41,6 +41,11 @@ export async function rehomeMessageAttachments(
     }
 
     const hapiHome = getHapiHomeDir()
+    const sourceDraftPaths = new Set(
+        store.scratchlist
+            .list(oldSessionId)
+            .flatMap((entry) => entry.attachments.map((attachment) => attachment.path))
+    )
     for (const messageId of candidates.keys()) {
         const persisted = targetById.get(messageId)
         // Consumed scheduled messages may still carry the original Hub path in
@@ -63,7 +68,14 @@ export async function rehomeMessageAttachments(
             oldSessionId,
             newSessionId,
             attachments,
-            { throwOnFailure: true },
+            {
+                throwOnFailure: true,
+                preserveSourcePaths: new Set(
+                    attachments
+                        .filter((attachment) => sourceDraftPaths.has(attachment.path))
+                        .map((attachment) => attachment.path)
+                ),
+            },
         )
         if (moved.some((attachment, index) => attachment.path !== attachments[index]?.path)) {
             // Persist each successful message re-home immediately. If a later

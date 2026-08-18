@@ -603,6 +603,10 @@ export class SyncEngine {
         collaborationMode?: CodexCollaborationMode
     }): void {
         this.sessionCache.handleSessionAlive(payload)
+        // The CLI registers its RPC handlers during socket connect before
+        // sending session-alive. Clean uploads invalidated by that reconnect
+        // only after the delete-upload target is available.
+        void this.messageService.flushScheduledAttachmentDeliveryCleanup(payload.sid)
         this.messageService.replayImmediateQueuedMessages(payload.sid)
         this.triggerDedupIfNeeded(payload.sid)
     }
@@ -634,6 +638,7 @@ export class SyncEngine {
 
     handleSessionEnd(payload: { sid: string; time: number; reason?: SessionEndReason }): void {
         this.messageService.clearScheduledAttachmentDeliveryCache(payload.sid)
+        void this.messageService.flushScheduledAttachmentDeliveryCleanup(payload.sid)
         const before = this.sessionCache.getSession(payload.sid)
         if (before?.metadata?.opencodeClearOperation?.state === 'reserved' && payload.reason !== 'cleared') {
             const operation = before.metadata.opencodeClearOperation

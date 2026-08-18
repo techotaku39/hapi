@@ -168,6 +168,8 @@ export class MessageService {
     private readonly scheduledMatureNotifiedLocalIds = new Set<string>()
     /** CLI upload paths are session-scoped; reuse them until the CLI session ends. */
     private readonly scheduledAttachmentDeliveryCache = new Map<string, AttachmentMetadata[]>()
+    /** Materialized uploads invalidated during reconnect, awaiting a live RPC target for cleanup. */
+    private readonly pendingScheduledAttachmentDeliveryCleanup = new Map<string, AttachmentMetadata[]>()
     /** In-flight materialization results from a previous CLI connection are stale after reconnect. */
     private readonly scheduledAttachmentDeliveryGenerations = new Map<string, number>()
     /** A deferred materialization has not emitted its row to the CLI yet. */
@@ -193,11 +195,28 @@ export class MessageService {
             sessionId,
             (this.scheduledAttachmentDeliveryGenerations.get(sessionId) ?? 0) + 1,
         )
-        for (const messageId of this.scheduledAttachmentDeliveryCache.keys()) {
-            if (messageId.startsWith(`${sessionId}:`)) {
-                this.scheduledAttachmentDeliveryCache.delete(messageId)
+        const staleAttachments: AttachmentMetadata[] = []
+        for (const [cacheKey, attachments] of this.scheduledAttachmentDeliveryCache) {
+            if (cacheKey.startsWith(`${sessionId}:`)) {
+                this.scheduledAttachmentDeliveryCache.delete(cacheKey)
+                staleAttachments.push(...attachments)
             }
         }
+        if (staleAttachments.length > 0) {
+            const unique = new Map(
+                (this.pendingScheduledAttachmentDeliveryCleanup.get(sessionId) ?? [])
+                    .concat(staleAttachments)
+                    .map((attachment) => [attachment.path, attachment])
+            )
+            this.pendingScheduledAttachmentDeliveryCleanup.set(sessionId, [...unique.values()])
+        }
+    }
+
+    async flushScheduledAttachmentDeliveryCleanup(sessionId: string): Promise<void> {
+        const attachments = this.pendingScheduledAttachmentDeliveryCleanup.get(sessionId)
+        if (!attachments) return
+        this.pendingScheduledAttachmentDeliveryCleanup.delete(sessionId)
+        await this.cleanupMaterializedScheduledAttachments(sessionId, attachments)
     }
 
     private async cleanupMaterializedScheduledAttachments(

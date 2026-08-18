@@ -1284,6 +1284,47 @@ describe('MessageService.sendMessage with scheduledAt', () => {
             .toEqual(['/tmp/materialized-1.png', '/tmp/materialized-2.png'])
     })
 
+    it('cleans invalidated CLI attachment uploads after RPC handlers become available', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-reconnect-cleanup')
+        const deletedPaths: string[] = []
+        const service = new MessageService(
+            store,
+            makeIo(() => {}),
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => attachments.map((attachment) => ({
+                    ...attachment,
+                    path: '/tmp/materialized-before-reconnect.png',
+                })),
+                deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedPaths.push(...attachments.map((attachment) => attachment.path))
+                },
+            },
+        )
+        store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'reconnect cleanup',
+                    attachments: [makeHubScratchlistAttachment(session.id, 'reconnect-cleanup')],
+                },
+            },
+            'local-reconnect-cleanup',
+            Date.now() - 1_000,
+        )
+
+        await service.releaseMatureScheduledMessages(Date.now())
+        service.clearScheduledAttachmentDeliveryCache(session.id)
+
+        expect(deletedPaths).toEqual([])
+        await service.flushScheduledAttachmentDeliveryCleanup(session.id)
+        expect(deletedPaths).toEqual(['/tmp/materialized-before-reconnect.png'])
+    })
+
     it('discards materialization that completes after a reconnect generation reset', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-reconnect-inflight')

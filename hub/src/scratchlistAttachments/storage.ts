@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -124,7 +124,10 @@ export async function moveScratchlistAttachmentFilesForSession(
     oldSessionId: string,
     newSessionId: string,
     attachments: ScratchlistAttachmentMetadata[],
-    options: { throwOnFailure?: boolean } = {},
+    options: {
+        throwOnFailure?: boolean
+        preserveSourcePaths?: ReadonlySet<string>
+    } = {},
 ): Promise<ScratchlistAttachmentMetadata[]> {
     if (oldSessionId === newSessionId || attachments.length === 0) {
         return attachments
@@ -132,7 +135,12 @@ export async function moveScratchlistAttachmentFilesForSession(
     const oldPrefix = sessionStoragePrefix(namespace, oldSessionId)
     const newPrefix = sessionStoragePrefix(namespace, newSessionId)
     const moved: ScratchlistAttachmentMetadata[] = []
-    const completedMoves: Array<{ oldPath: string; newPath: string; destinationExisted: boolean }> = []
+    const completedMoves: Array<{
+        oldPath: string
+        newPath: string
+        destinationExisted: boolean
+        sourcePreserved: boolean
+    }> = []
     try {
         for (const att of attachments) {
             const storageKey = parseHubScratchlistAttachmentPath(att.path)
@@ -154,40 +162,50 @@ export async function moveScratchlistAttachmentFilesForSession(
             }
             await mkdir(join(newPath, '..'), { recursive: true })
             const destExists = await stat(newPath).then((info) => info.isFile()).catch(() => false)
+            const sourcePreserved = options.preserveSourcePaths?.has(att.path) ?? false
             if (destExists) {
-                if (!options.throwOnFailure) {
+                if (!sourcePreserved && !options.throwOnFailure) {
                     await rm(oldPath, { force: true })
                 }
             } else {
                 try {
-                    await rename(oldPath, newPath)
+                    if (sourcePreserved) await copyFile(oldPath, newPath)
+                    else await rename(oldPath, newPath)
                 } catch (error) {
                     if (options.throwOnFailure) throw error
                     // best effort — still rewrite metadata so quota/resolve use the new id
                 }
             }
-            completedMoves.push({ oldPath, newPath, destinationExisted: destExists })
+            completedMoves.push({
+                oldPath,
+                newPath,
+                destinationExisted: destExists,
+                sourcePreserved,
+            })
             moved.push({
                 ...att,
                 path: toHubScratchlistAttachmentPath(newKey),
             })
         }
         if (options.throwOnFailure) {
-            // Defer target-wins source cleanup until every rename succeeds so a
+            // Defer target-wins source cleanup until every file move/copy succeeds so a
             // later failure can leave all metadata pointing at valid old paths.
             await Promise.allSettled(completedMoves
-                .filter((move) => move.destinationExisted)
+                .filter((move) => move.destinationExisted && !move.sourcePreserved)
                 .map((move) => rm(move.oldPath, { force: true })))
         }
         return moved
     } catch (error) {
         if (options.throwOnFailure) {
             await Promise.allSettled(completedMoves
-                .filter((move) => !move.destinationExisted)
+                .filter((move) => !move.destinationExisted && !move.sourcePreserved)
                 .reverse()
                 .map(async (move) => {
                     await rename(move.newPath, move.oldPath)
                 }))
+            await Promise.allSettled(completedMoves
+                .filter((move) => !move.destinationExisted && move.sourcePreserved)
+                .map((move) => rm(move.newPath, { force: true })))
         }
         throw error
     }

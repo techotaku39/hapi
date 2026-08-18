@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store } from '../store'
-import { deleteScratchlistAttachmentFiles, writeScratchlistAttachmentFile } from '../scratchlistAttachments/storage'
+import {
+    deleteScratchlistAttachmentFiles,
+    readScratchlistAttachmentFile,
+    writeScratchlistAttachmentFile,
+} from '../scratchlistAttachments/storage'
 import { MessageService } from './messageService'
 import { rehomeMessageAttachments } from './messageAttachmentTransfer'
 
@@ -224,6 +228,73 @@ describe('rehomeMessageAttachments', () => {
                 content?: { attachments?: Array<{ path: string }> }
             }).content?.attachments?.[0]
             expect(mergedAttachment?.path).toBe(attachment.path)
+        } finally {
+            store.close()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
+    it('preserves a source draft blob while re-homing its scheduled message', async () => {
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-message-rehome-draft-ref-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const store = new Store(':memory:')
+        try {
+            const oldSession = store.sessions.getOrCreateSession(
+                'message-rehome-draft-ref-old',
+                { path: '/tmp/old', host: 'localhost' },
+                null,
+                'default',
+            )
+            const newSession = store.sessions.getOrCreateSession(
+                'message-rehome-draft-ref-new',
+                { path: '/tmp/new', host: 'localhost' },
+                null,
+                'default',
+            )
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                oldSession.id,
+                'shared.png',
+                'image/png',
+                Buffer.from('shared'),
+            )
+            store.scratchlist.create(oldSession.id, 'draft remains', {
+                entryId: 'draft-ref',
+                attachments: [attachment],
+            })
+            store.messages.addMessage(
+                oldSession.id,
+                {
+                    role: 'user',
+                    content: { type: 'text', text: 'scheduled message', attachments: [attachment] },
+                },
+                'message-rehome-draft-ref',
+                Date.now() + 60_000,
+            )
+
+            const sourceMessages = store.messages.getAllMessages(oldSession.id)
+            store.messages.mergeSessionMessages(oldSession.id, newSession.id)
+            await rehomeMessageAttachments(
+                store,
+                'default',
+                oldSession.id,
+                newSession.id,
+                sourceMessages,
+            )
+
+            const moved = store.messages.getAllMessages(newSession.id)[0]
+            const movedAttachment = (moved?.content as {
+                content?: { attachments?: Array<{ path: string }> }
+            }).content?.attachments?.[0]
+            expect(movedAttachment?.path).toContain(`/${newSession.id}/`)
+            expect(await readScratchlistAttachmentFile(hapiHome, attachment.path)).not.toBeNull()
+            expect(await readScratchlistAttachmentFile(hapiHome, movedAttachment!.path)).not.toBeNull()
+            expect(store.scratchlist.get(oldSession.id, 'draft-ref')?.attachments[0]?.path)
+                .toBe(attachment.path)
         } finally {
             store.close()
             if (previousHome === undefined) delete process.env.HAPI_HOME

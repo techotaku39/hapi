@@ -473,4 +473,29 @@ describe('SyncEngine session connection generations', () => {
         expect(clearCalls).toEqual(['generation-session'])
         engine.stop()
     })
+
+    it('flushes reconnect cleanup after session-alive registers CLI RPC handlers', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+        const messageService = (engine as unknown as {
+            messageService: {
+                flushScheduledAttachmentDeliveryCleanup: (sessionId: string) => Promise<void>
+            }
+        }).messageService
+        const flush = spyOn(messageService, 'flushScheduledAttachmentDeliveryCleanup')
+            .mockResolvedValue(undefined)
+        try {
+            engine.handleSessionAlive({ sid: 'reconnect-cleanup-session', time: Date.now() })
+            expect(flush).toHaveBeenCalledWith('reconnect-cleanup-session')
+        } finally {
+            flush.mockRestore()
+            engine.stop()
+            store.close()
+        }
+    })
 })
