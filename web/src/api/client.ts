@@ -1128,6 +1128,17 @@ export class ApiClient {
         )
     }
 
+    async deleteScratchlistEntryIfUnchanged(
+        sessionId: string,
+        entryId: string,
+        expectedUpdatedAt: number,
+    ): Promise<{ deleted: boolean }> {
+        return await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/scratchlist/${encodeURIComponent(entryId)}?expectedUpdatedAt=${encodeURIComponent(String(expectedUpdatedAt))}`,
+            { method: 'DELETE' },
+        )
+    }
+
     async fetchVoiceToken(options?: { customAgentId?: string; customApiKey?: string; voiceId?: string }): Promise<{
         allowed: boolean
         token?: string

@@ -69,6 +69,7 @@ type EngineOverrides = Partial<{
     updateScratchlistEntry: SyncEngine['updateScratchlistEntry']
     updateScratchlistEntryAtomic: SyncEngine['updateScratchlistEntryAtomic']
     deleteScratchlistEntry: SyncEngine['deleteScratchlistEntry']
+    deleteScratchlistEntryIfUnchanged: SyncEngine['deleteScratchlistEntryIfUnchanged']
     deleteScratchlistAttachmentById: SyncEngine['deleteScratchlistAttachmentById']
     readScratchlistAttachment: SyncEngine['readScratchlistAttachment']
     canDeleteScratchlistAttachment: SyncEngine['canDeleteScratchlistAttachment']
@@ -139,6 +140,8 @@ function createApp(session: Session, overrides: EngineOverrides = {}) {
                     : { outcome: 'not-found' as const }
             }),
         deleteScratchlistEntry: overrides.deleteScratchlistEntry ?? (() => true),
+        deleteScratchlistEntryIfUnchanged: overrides.deleteScratchlistEntryIfUnchanged
+            ?? (async () => 'deleted' as const),
         readScratchlistAttachment: overrides.readScratchlistAttachment ?? (async () => null),
         canDeleteScratchlistAttachment: overrides.canDeleteScratchlistAttachment ?? (() => true),
         resolveScratchlistAttachmentsForSession: async (
@@ -652,6 +655,39 @@ describe('DELETE /api/sessions/:id/scratchlist/:entryId', () => {
             method: 'DELETE'
         })
         expect(res.status).toBe(404)
+    })
+
+    it('conditionally removes only the revision sent by the client', async () => {
+        const session = createSession()
+        let received: { sessionId: string; entryId: string; expectedUpdatedAt: number } | null = null
+        const app = createApp(session, {
+            deleteScratchlistEntryIfUnchanged: async (sessionId, entryId, expectedUpdatedAt) => {
+                received = { sessionId, entryId, expectedUpdatedAt }
+                return 'deleted'
+            },
+        })
+        const res = await app.request('/api/sessions/session-1/scratchlist/e1?expectedUpdatedAt=1234', {
+            method: 'DELETE',
+        })
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ deleted: true })
+        expect(received as { sessionId: string; entryId: string; expectedUpdatedAt: number } | null).toEqual({
+            sessionId: 'session-1',
+            entryId: 'e1',
+            expectedUpdatedAt: 1234,
+        })
+    })
+
+    it('keeps an edited row when the conditional revision no longer matches', async () => {
+        const session = createSession()
+        const app = createApp(session, {
+            deleteScratchlistEntryIfUnchanged: async () => 'revision-mismatch',
+        })
+        const res = await app.request('/api/sessions/session-1/scratchlist/e1?expectedUpdatedAt=1234', {
+            method: 'DELETE',
+        })
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ deleted: false, reason: 'revision-mismatch' })
     })
 
     it('returns 404 when the session is not visible to the caller', async () => {

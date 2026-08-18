@@ -1231,6 +1231,23 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (!entryId) {
             return c.json({ error: 'Missing entryId' }, 400)
         }
+        const expectedUpdatedAtParam = c.req.query('expectedUpdatedAt')
+        if (expectedUpdatedAtParam !== undefined) {
+            const expectedUpdatedAt = Number(expectedUpdatedAtParam)
+            if (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt < 0) {
+                return c.json({ error: 'Invalid expectedUpdatedAt' }, 400)
+            }
+            const result = await engine.deleteScratchlistEntryIfUnchanged(
+                sessionResult.sessionId,
+                entryId,
+                expectedUpdatedAt,
+                c.get('namespace'),
+            )
+            return c.json({
+                deleted: result === 'deleted',
+                reason: result === 'deleted' ? undefined : result,
+            })
+        }
         const removed = await engine.deleteScratchlistEntry(
             sessionResult.sessionId,
             entryId,

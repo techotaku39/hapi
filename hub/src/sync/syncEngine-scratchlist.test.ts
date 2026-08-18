@@ -249,6 +249,41 @@ describe('SyncEngine scratchlist mutations emit session-updated patches', () => 
         engine.stop()
     })
 
+    it('conditionally deletes only when the scratchlist revision is unchanged', async () => {
+        const { engine, engineEvents } = setup()
+        const session = engine.getOrCreateSession(
+            'tag-delete-revision',
+            { path: '/tmp', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        engine.createScratchlistEntry(session.id, 'before', { entryId: 'e1' })
+        const original = engine.getScratchlistEntry(session.id, 'e1')
+        if (!original) throw new Error('expected scratchlist entry')
+        await engine.updateScratchlistEntry(session.id, 'e1', { text: 'edited' })
+        engineEvents.length = 0
+
+        expect(await engine.deleteScratchlistEntryIfUnchanged(
+            session.id,
+            'e1',
+            original.updatedAt,
+        )).toBe('revision-mismatch')
+        expect(engine.getScratchlistEntry(session.id, 'e1')?.text).toBe('edited')
+        expect(engineEvents.filter(
+            (e) => e.type === 'session-updated' && (e.data as Record<string, unknown>).scratchlistUpdatedAt !== undefined
+        )).toHaveLength(0)
+
+        const edited = engine.getScratchlistEntry(session.id, 'e1')
+        if (!edited) throw new Error('expected edited scratchlist entry')
+        expect(await engine.deleteScratchlistEntryIfUnchanged(
+            session.id,
+            'e1',
+            edited.updatedAt,
+        )).toBe('deleted')
+        expect(engine.getScratchlistEntry(session.id, 'e1')).toBeNull()
+        engine.stop()
+    })
+
     it('createScratchlistEntry on duplicate does not emit an extra patch', () => {
         const { engine, engineEvents } = setup()
         const session = engine.getOrCreateSession(

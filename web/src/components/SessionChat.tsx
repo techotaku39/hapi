@@ -473,7 +473,12 @@ type SessionChatProps = {
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
     ) => Promise<SendMessageAcceptance | false>
-    onScratchlistSendAccepted: (attemptId: string, sessionId: string, entryId: string) => void
+    onScratchlistSendAccepted: (
+        attemptId: string,
+        sessionId: string,
+        entryId: string,
+        expectedUpdatedAt: number,
+    ) => void
     resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
     onUploadSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
@@ -498,13 +503,19 @@ type ScratchlistSendTracker = (
     attemptId: string,
     sessionId: string,
     entryId: string,
+    expectedUpdatedAt: number,
 ) => void
 
 export function usePendingScratchlistSendCleanup(
-    api: Pick<ApiClient, 'deleteScratchlistEntry'>,
+    api: Pick<ApiClient, 'deleteScratchlistEntryIfUnchanged'>,
     sendSettlement: SendMessageSettlement | null,
 ): ScratchlistSendTracker {
-    const pendingSendsRef = useRef(new Map<string, { sessionId: string; entryId: string }>())
+    const pendingSendsRef = useRef(new Map<string, {
+        sessionId: string
+        entryId: string
+        expectedUpdatedAt: number
+    }>())
+    const settlingSendsRef = useRef(new Set<string>())
     const sendSettlementRef = useRef<SendMessageSettlement | null>(sendSettlement)
     sendSettlementRef.current = sendSettlement
     const settlePendingSend = useCallback((attemptId: string) => {
@@ -512,17 +523,32 @@ export function usePendingScratchlistSendCleanup(
         if (settlement?.attemptId !== attemptId) return
         const pending = pendingSendsRef.current.get(attemptId)
         if (!pending) return
-        pendingSendsRef.current.delete(attemptId)
-        if (settlement.status === 'success') {
-            void api.deleteScratchlistEntry(pending.sessionId, pending.entryId)
-        }
+        // Keep the source draft association through retryable failures. A
+        // retry reuses the same local id, so deleting it here would make a
+        // later successful retry unable to clean up the original draft.
+        if (settlement.status !== 'success' || settlingSendsRef.current.has(attemptId)) return
+        settlingSendsRef.current.add(attemptId)
+        void api.deleteScratchlistEntryIfUnchanged(
+            pending.sessionId,
+            pending.entryId,
+            pending.expectedUpdatedAt,
+        ).then(() => {
+            // A false result is an intentional no-op when another client has
+            // edited or deleted the draft; in either case this send is settled.
+            pendingSendsRef.current.delete(attemptId)
+        }).catch(() => {
+            // Keep the association if the cleanup request itself failed. It
+            // can still be retried by a later matching settlement.
+        }).finally(() => {
+            settlingSendsRef.current.delete(attemptId)
+        })
     }, [api])
     useEffect(() => {
         if (!sendSettlement) return
         settlePendingSend(sendSettlement.attemptId)
     }, [sendSettlement, settlePendingSend])
-    return useCallback((attemptId, sessionId, entryId) => {
-        pendingSendsRef.current.set(attemptId, { sessionId, entryId })
+    return useCallback((attemptId, sessionId, entryId, expectedUpdatedAt) => {
+        pendingSendsRef.current.set(attemptId, { sessionId, entryId, expectedUpdatedAt })
         settlePendingSend(attemptId)
     }, [settlePendingSend])
 }
@@ -883,7 +909,12 @@ function SessionChatInner(props: SessionChatProps) {
         // mutation settles successfully. The tracker removes the row after
         // success, allowing the Hub to delete its attachments safely; a send
         // failure therefore leaves the draft available for retry.
-        props.onScratchlistSendAccepted(accepted.attemptId, props.session.id, entry.id)
+        props.onScratchlistSendAccepted(
+            accepted.attemptId,
+            props.session.id,
+            entry.id,
+            entry.updatedAt ?? entry.createdAt,
+        )
         return true
     }, [props.api, props.onSend, props.onScratchlistSendAccepted, props.session.id])
 

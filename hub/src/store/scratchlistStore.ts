@@ -5,6 +5,7 @@ import {
     countScratchlistEntries,
     createScratchlistEntry,
     deleteScratchlistEntry,
+    deleteScratchlistEntryIfUpdatedAt,
     getScratchlistEntry,
     listScratchlistEntries,
     reorderScratchlistEntries,
@@ -63,6 +64,10 @@ export class ScratchlistStore {
 
     delete(sessionId: string, entryId: string): boolean {
         return deleteScratchlistEntry(this.db, sessionId, entryId)
+    }
+
+    deleteIfUpdatedAt(sessionId: string, entryId: string, expectedUpdatedAt: number): boolean {
+        return deleteScratchlistEntryIfUpdatedAt(this.db, sessionId, entryId, expectedUpdatedAt)
     }
 
     reorder(sessionId: string, entryIds: string[]): StoredScratchlistEntry[] | null {

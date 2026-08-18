@@ -20,7 +20,7 @@ import type { SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 describe('usePendingScratchlistSendCleanup', () => {
     it('keeps the source-session cleanup pending across keyed chat remounts', async () => {
         const api = {
-            deleteScratchlistEntry: vi.fn().mockResolvedValue(undefined),
+            deleteScratchlistEntryIfUnchanged: vi.fn().mockResolvedValue({ deleted: true }),
         }
         const initialProps: { settlement: SendMessageSettlement | null } = { settlement: null }
         const { result, rerender } = renderHook(
@@ -31,20 +31,24 @@ describe('usePendingScratchlistSendCleanup', () => {
         )
 
         act(() => {
-            result.current('attempt-navigation', 'source-session', 'draft-entry')
+            result.current('attempt-navigation', 'source-session', 'draft-entry', 1234)
         })
         // The keyed SessionChatInner may be replaced while this unkeyed hook
         // owner remains mounted for the route.
         rerender({ settlement: { attemptId: 'attempt-navigation', status: 'success' } })
 
         await waitFor(() => {
-            expect(api.deleteScratchlistEntry).toHaveBeenCalledWith('source-session', 'draft-entry')
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledWith(
+                'source-session',
+                'draft-entry',
+                1234,
+            )
         })
     })
 
-    it('keeps the draft when the matching send settlement fails', async () => {
+    it('keeps the draft association across a failed send and retries cleanup on success', async () => {
         const api = {
-            deleteScratchlistEntry: vi.fn().mockResolvedValue(undefined),
+            deleteScratchlistEntryIfUnchanged: vi.fn().mockResolvedValue({ deleted: true }),
         }
         const initialProps: { settlement: SendMessageSettlement | null } = { settlement: null }
         const { result, rerender } = renderHook(
@@ -55,10 +59,44 @@ describe('usePendingScratchlistSendCleanup', () => {
         )
 
         act(() => {
-            result.current('attempt-failure', 'source-session', 'draft-with-attachment')
+            result.current('attempt-failure', 'source-session', 'draft-with-attachment', 5678)
         })
         rerender({ settlement: { attemptId: 'attempt-failure', status: 'error' } })
-        await waitFor(() => expect(api.deleteScratchlistEntry).not.toHaveBeenCalled())
+        expect(api.deleteScratchlistEntryIfUnchanged).not.toHaveBeenCalled()
+
+        rerender({ settlement: { attemptId: 'attempt-failure', status: 'success' } })
+        await waitFor(() => {
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledWith(
+                'source-session',
+                'draft-with-attachment',
+                5678,
+            )
+        })
+    })
+
+    it('does not remove a draft edited before the original send settles', async () => {
+        const api = {
+            deleteScratchlistEntryIfUnchanged: vi.fn().mockResolvedValue({ deleted: false }),
+        }
+        const initialProps: { settlement: SendMessageSettlement | null } = { settlement: null }
+        const { result, rerender } = renderHook(
+            ({ settlement }: { settlement: SendMessageSettlement | null }) => (
+                usePendingScratchlistSendCleanup(api, settlement)
+            ),
+            { initialProps },
+        )
+
+        act(() => {
+            result.current('attempt-edited', 'source-session', 'edited-draft', 1111)
+        })
+        rerender({ settlement: { attemptId: 'attempt-edited', status: 'success' } })
+        await waitFor(() => {
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledWith(
+                'source-session',
+                'edited-draft',
+                1111,
+            )
+        })
     })
 })
 

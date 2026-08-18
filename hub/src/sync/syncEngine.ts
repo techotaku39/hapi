@@ -1042,6 +1042,34 @@ export class SyncEngine {
     }
 
     /**
+     * Delete a scratchlist entry only if it has not changed since a send began.
+     * The conditional SQL delete keeps a late send settlement from deleting
+     * an edited draft, including edits made by another web client.
+     */
+    async deleteScratchlistEntryIfUnchanged(
+        sessionId: string,
+        entryId: string,
+        expectedUpdatedAt: number,
+        namespace = this.store.sessions.getSession(sessionId)?.namespace ?? 'default',
+    ): Promise<'deleted' | 'revision-mismatch' | 'not-found'> {
+        return this.withScratchlistAttachmentLock(namespace, sessionId, async () => {
+            const existing = this.store.scratchlist.get(sessionId, entryId)
+            if (!existing) return 'not-found'
+            if (existing.updatedAt !== expectedUpdatedAt) return 'revision-mismatch'
+
+            const removed = this.store.scratchlist.deleteIfUpdatedAt(
+                sessionId,
+                entryId,
+                expectedUpdatedAt,
+            )
+            if (!removed) return 'revision-mismatch'
+            await this.deleteOrphanedScratchlistAttachmentsLocked(sessionId, existing.attachments)
+            this.sessionCache.emitScratchlistChanged(sessionId, Date.now())
+            return 'deleted'
+        })
+    }
+
+    /**
      * Serialize attachment validation and scratchlist mutations per session.
      * Route-layer creates use this same gate as uploads and cleanup so a
      * cleanup cannot remove a validated file before the new row references it.

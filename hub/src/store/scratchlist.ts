@@ -190,7 +190,8 @@ export function createScratchlistEntry(
 }
 
 /**
- * Update an existing entry's `text`. Bumps `updated_at` to `Date.now()`.
+ * Update an existing entry's `text`. Bumps `updated_at` to a monotonic
+ * timestamp based on `Date.now()`.
  * Returns `null` when the entry does not exist (route layer turns into a
  * 404). Note: `created_at` is intentionally NOT updated.
  */
@@ -203,7 +204,9 @@ export function updateScratchlistEntry(
     const existing = getScratchlistEntry(db, sessionId, entryId)
     if (!existing) return null
 
-    const now = Date.now()
+    // Keep the timestamp a true revision token even when two edits land in
+    // the same millisecond; conditional send cleanup relies on this changing.
+    const now = Math.max(Date.now(), existing.updatedAt + 1)
     const text = patch.text ?? existing.text
     const attachments = patch.attachments ?? existing.attachments
     const attachmentsJson = serializeScratchlistAttachments(attachments)
@@ -237,6 +240,22 @@ export function deleteScratchlistEntry(
         `DELETE FROM session_scratchlist
           WHERE session_id = ? AND entry_id = ?`
     ).run(sessionId, entryId)
+    if (result.changes === 0) return false
+    normalizeScratchlistPositions(db, sessionId)
+    return true
+}
+
+/** Delete an entry only when it still has the expected revision timestamp. */
+export function deleteScratchlistEntryIfUpdatedAt(
+    db: Database,
+    sessionId: string,
+    entryId: string,
+    expectedUpdatedAt: number,
+): boolean {
+    const result = db.prepare(
+        `DELETE FROM session_scratchlist
+          WHERE session_id = ? AND entry_id = ? AND updated_at = ?`
+    ).run(sessionId, entryId, expectedUpdatedAt)
     if (result.changes === 0) return false
     normalizeScratchlistPositions(db, sessionId)
     return true
