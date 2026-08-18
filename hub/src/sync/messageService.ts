@@ -291,6 +291,17 @@ export class MessageService {
         }
     }
 
+    private async releaseInvokedScheduledAttachment(
+        sessionId: string,
+        message: StoredMessageForDelivery,
+    ): Promise<void> {
+        // A not-found/timeout cancel acknowledgement is ambiguous: the CLI
+        // may already have dequeued the row and started consuming the staged
+        // upload. Release only the durable Hub source; the CLI owns the staged
+        // path until its session lifecycle cleans it up.
+        await this.releaseScheduledAttachments(sessionId, [message])
+    }
+
     private forgetScheduledMatureNotified(localIds: Iterable<string>): void {
         for (const localId of localIds) {
             this.scheduledMatureNotifiedLocalIds.delete(localId)
@@ -647,7 +658,7 @@ export class MessageService {
             }
             const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
             if (recheck.status === 'invoked') {
-                await this.releaseCancelledScheduledAttachment(sessionId, message)
+                await this.releaseInvokedScheduledAttachment(sessionId, message)
                 return recheck
             }
             if (recheck.status === 'absent') return { status: 'cancelled', localId }
@@ -672,7 +683,7 @@ export class MessageService {
             const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
             if (recheck.status === 'invoked') {
                 // CLI beat us — treat identically to Race-B (ack returned not-found).
-                await this.releaseCancelledScheduledAttachment(sessionId, message)
+                await this.releaseInvokedScheduledAttachment(sessionId, message)
                 this.forgetScheduledMatureNotified([localId])
                 this.publisher.emit({
                     type: 'messages-consumed',
@@ -711,8 +722,9 @@ export class MessageService {
             }
             // The messages-consumed event below is local to this Hub process and
             // does not pass through SyncEngine's normal consumed-message cleanup.
-            // Release any now-unreferenced Hub attachment explicitly.
-            await this.releaseCancelledScheduledAttachment(sessionId, message)
+            // Release only the now-unreferenced Hub attachment. The CLI may
+            // already be consuming the staged upload after an ambiguous ack.
+            await this.releaseInvokedScheduledAttachment(sessionId, message)
             this.forgetScheduledMatureNotified([localId])
             // Notify all SSE subscribers (other open tabs) that this queued row is now
             // invoked so they remove it from the floating bar.  Without this emit, only

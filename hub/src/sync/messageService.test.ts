@@ -1616,6 +1616,50 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect(deletedMaterializedPaths).toEqual(['/tmp/materialized-before-cancel.png'])
     })
 
+    it('keeps the CLI upload when cancellation is ambiguous after materialization', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cancel-after-ambiguous-ack')
+        const deletedHubPaths: string[] = []
+        const deletedMaterializedPaths: string[] = []
+        const service = new MessageService(
+            store,
+            makeIo((ack) => ack(null, [{ removed: false }])),
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => attachments.map((attachment) => ({
+                    ...attachment,
+                    path: '/tmp/materialized-ambiguous-cancel.png',
+                })),
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedHubPaths.push(...attachments.map((attachment) => attachment.path))
+                },
+                deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedMaterializedPaths.push(...attachments.map((attachment) => attachment.path))
+                },
+            },
+        )
+        const attachment = makeHubScratchlistAttachment(session.id, 'cancel-ambiguous-ack')
+        const message = store.messages.addMessage(
+            session.id,
+            {
+                role: 'user',
+                content: { type: 'text', text: 'ambiguous cancel', attachments: [attachment] },
+            },
+            'local-cancel-ambiguous-ack',
+            Date.now() - 1_000,
+        )
+
+        await service.releaseMatureScheduledMessages(Date.now())
+        await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({
+            status: 'invoked',
+            message: { localId: 'local-cancel-ambiguous-ack' },
+        })
+
+        expect(deletedHubPaths).toEqual([attachment.path])
+        expect(deletedMaterializedPaths).toEqual([])
+    })
+
     it('does not let a slow scheduled attachment block mature delivery in another session', async () => {
         const store = makeStore()
         const sessionA = makeSession(store, 'sched-slow-session-a')
