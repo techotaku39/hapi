@@ -102,6 +102,50 @@ describe('session dialog title alignment', () => {
         expect(screen.queryByText(/HAPI_TITLE_PROVIDER_BASE_URL/)).not.toBeInTheDocument()
     })
 
+    it('keeps Save disabled but does not show Saving while generating', async () => {
+        let resolveSuggestion!: (title: string) => void
+        const onSuggestTitle = vi.fn(() => new Promise<string>((resolve) => {
+            resolveSuggestion = resolve
+        }))
+        const view = renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={onSuggestTitle}
+                onUpdateSummary={vi.fn(async () => {})}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+        await waitFor(() => expect(screen.getByRole('button', { name: /^Generating/ })).toBeDisabled())
+
+        view.rerender(
+            <I18nProvider>
+                <ToastProvider>
+                    <RenameSessionDialog
+                        isOpen={true}
+                        onClose={vi.fn()}
+                        currentName="Session"
+                        onRename={vi.fn(async () => {})}
+                        onSuggestTitle={onSuggestTitle}
+                        onUpdateSummary={vi.fn(async () => {})}
+                        isPending={true}
+                    />
+                </ToastProvider>
+            </I18nProvider>
+        )
+
+        const save = screen.getByRole('button', { name: 'Save' })
+        expect(save).toBeDisabled()
+        expect(screen.queryByRole('button', { name: 'Saving' })).not.toBeInTheDocument()
+
+        resolveSuggestion('Generated title')
+        await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('Generated title'))
+    })
+
     it('saves an untouched generated draft as metadata.summary.text', async () => {
         const onRename = vi.fn(async () => {})
         const onUpdateSummary = vi.fn(async () => {})
@@ -122,8 +166,30 @@ describe('session dialog title alignment', () => {
         await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('Generated title'))
         fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-        await waitFor(() => expect(onUpdateSummary).toHaveBeenCalledWith('Generated title'))
+        await waitFor(() => expect(onUpdateSummary).toHaveBeenCalledWith('Generated title', true))
         expect(onRename).not.toHaveBeenCalled()
+    })
+
+    it('trims whitespace around a generated title before saving', async () => {
+        const onUpdateSummary = vi.fn(async () => {})
+
+        renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={async () => '  Generated title  '}
+                onUpdateSummary={onUpdateSummary}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+        await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('Generated title'))
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+        await waitFor(() => expect(onUpdateSummary).toHaveBeenCalledWith('Generated title', true))
     })
 
     it('treats any edit to a generated draft as a manual metadata.name rename', async () => {

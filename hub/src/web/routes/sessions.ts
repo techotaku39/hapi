@@ -839,7 +839,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            await engine.updateSessionSummary(sessionResult.sessionId, parsed.data.text)
+            await engine.updateSessionSummary(sessionResult.sessionId, parsed.data.text, {
+                clearName: parsed.data.clearName
+            })
             return c.json({ ok: true })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to update session summary'

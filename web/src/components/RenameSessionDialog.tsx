@@ -15,7 +15,7 @@ type RenameSessionDialogProps = {
     currentName: string
     onRename: (newName: string) => Promise<void>
     onSuggestTitle?: () => Promise<string>
-    onUpdateSummary?: (text: string) => Promise<void>
+    onUpdateSummary?: (text: string, clearName?: boolean) => Promise<void>
     isPending: boolean
 }
 
@@ -94,7 +94,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
         setError(null)
         try {
             if (draftSource === 'generated' && onUpdateSummary) {
-                await onUpdateSummary(trimmed)
+                await onUpdateSummary(trimmed, true)
             } else {
                 await onRename(trimmed)
             }
@@ -165,7 +165,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
                                 type="submit"
                                 disabled={busy || !name.trim()}
                             >
-                                {isPending ? t('dialog.rename.saving') : t('button.save')}
+                                {isGenerating ? t('button.save') : isPending ? t('dialog.rename.saving') : t('button.save')}
                             </Button>
                         </div>
                     </div>

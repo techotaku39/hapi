@@ -209,21 +209,21 @@ describe('sessions routes', () => {
     })
 
     it('writes generated titles through the summary metadata endpoint', async () => {
-        const updates: Array<[string, string]> = []
+        const updates: Array<[string, string, { clearName?: boolean }]> = []
         const { app } = createApp(createSession(), {
-            updateSessionSummary: async (sessionId, text) => {
-                updates.push([sessionId, text])
+            updateSessionSummary: async (sessionId, text, options) => {
+                updates.push([sessionId, text, options ?? {}])
             }
         })
 
         const response = await app.request('/api/sessions/session-1/summary', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: '  Generated title  ' })
+            body: JSON.stringify({ text: '  Generated title  ', clearName: true })
         })
 
         expect(response.status).toBe(200)
-        expect(updates).toEqual([['session-1', 'Generated title']])
+        expect(updates).toEqual([['session-1', 'Generated title', { clearName: true }]])
     })
 
     it('rejects an empty summary', async () => {

@@ -118,6 +118,7 @@ describe('OpenAI-compatible title provider', () => {
 
     it('normalizes a one-line title and caps it for the metadata field', () => {
         expect(normalizeTitleSuggestion('Title: "A useful title"\nExtra text')).toBe('A useful title')
+        expect(normalizeTitleSuggestion('  Generated title with trailing spaces   ')).toBe('Generated title with trailing spaces')
         expect(normalizeTitleSuggestion('   ')).toBeNull()
         expect(normalizeTitleSuggestion('x'.repeat(100))).toHaveLength(80)
     })
@@ -187,7 +188,7 @@ describe('TitleSuggestionService', () => {
 
     it('reports unavailable configuration and enforces the per-session request limit', async () => {
         const { store, sessionId } = makeStore()
-        const unavailable = createTitleSuggestionService(store)
+        const unavailable = createTitleSuggestionService(store, null)
         await expect(unavailable.suggestTitle(sessionId)).rejects.toMatchObject({
             code: 'unavailable',
             status: 503

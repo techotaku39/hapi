@@ -1861,8 +1861,8 @@ export class SyncEngine {
         return await this.titleSuggestionService.suggestTitle(sessionId)
     }
 
-    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
-        await this.sessionCache.updateSessionSummary(sessionId, text)
+    async updateSessionSummary(sessionId: string, text: string, options: { clearName?: boolean } = {}): Promise<void> {
+        await this.sessionCache.updateSessionSummary(sessionId, text, options)
     }
 
     async deleteSession(sessionId: string): Promise<void> {
