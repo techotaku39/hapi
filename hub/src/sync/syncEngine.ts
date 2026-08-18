@@ -210,7 +210,7 @@ export class SyncEngine {
     private readonly piResumeQuarantinedIds = new Set<string>()
     /** Unexpected version-skew temp child -> original row whose retry is blocked until child ends. */
     private readonly piUnexpectedTempOriginalIds = new Map<string, string>()
-    /** Serialize scratchlist uploads per session so disk-byte caps cannot race. */
+    /** Serialize scratchlist attachment ownership changes per session or session pair. */
     private readonly scratchlistUploadTails = new Map<string, Promise<unknown>>()
     /** Prevent overlapping startup/retry scheduled-attachment reconciliation scans. */
     private consumedAttachmentReconciliationInFlight = false
@@ -233,7 +233,11 @@ export class SyncEngine {
         sseManager: SSEManager,
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
-        this.sessionCache = new SessionCache(store, this.eventPublisher)
+        this.sessionCache = new SessionCache(
+            store,
+            this.eventPublisher,
+            (namespace, sessionIds, fn) => this.withScratchlistAttachmentLocks(namespace, sessionIds, fn),
+        )
         this.machineCache = new MachineCache(store, this.eventPublisher)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.messageService = new MessageService(
@@ -1094,22 +1098,66 @@ export class SyncEngine {
         sessionId: string,
         fn: () => Promise<T>
     ): Promise<T> {
-        const key = `${namespace}:${sessionId}`
-        const previous = this.scratchlistUploadTails.get(key) ?? Promise.resolve()
-        let release!: () => void
-        const gate = new Promise<void>((resolve) => {
-            release = resolve
+        return this.withScratchlistAttachmentLocks(namespace, [sessionId], fn)
+    }
+
+    /**
+     * Serialize attachment ownership changes for an ordered set of sessions.
+     * Session merges move database rows before re-keying files, so the source
+     * and destination must share one lock with draft cleanup and attachment
+     * writes. Sorting keys gives overlapping multi-session operations a stable
+     * acquisition order and prevents deadlocks.
+     */
+    async withScratchlistAttachmentLocks<T>(
+        namespace: string,
+        sessionIds: readonly string[],
+        fn: () => Promise<T>,
+    ): Promise<T> {
+        const keys = [...new Set(sessionIds)]
+            .map((sessionId) => `${namespace}:${sessionId}`)
+            .sort()
+        if (keys.length === 0) return fn()
+
+        const previous = keys.map((key) => this.scratchlistUploadTails.get(key))
+        const releases: Array<() => void> = []
+        const tails = keys.map((key, index) => {
+            let release!: () => void
+            const gate = new Promise<void>((resolve) => {
+                release = resolve
+            })
+            releases[index] = release
+            const tail = (previous[index]?.catch(() => undefined) ?? Promise.resolve()).then(() => gate)
+            this.scratchlistUploadTails.set(key, tail)
+            return tail
         })
-        const tail = previous.catch(() => undefined).then(() => gate)
-        this.scratchlistUploadTails.set(key, tail)
-        await previous.catch(() => undefined)
+
+        const releaseLocks = () => {
+            for (const release of releases) release()
+            for (const [index, key] of keys.entries()) {
+                if (this.scratchlistUploadTails.get(key) === tails[index]) {
+                    this.scratchlistUploadTails.delete(key)
+                }
+            }
+        }
+
+        // Preserve the synchronous prefix of the original single-session lock
+        // when no operation is queued. Some session lifecycle paths perform a
+        // database move before their first await, and another callback can
+        // legitimately observe that move in the same event-loop turn.
+        if (previous.every((tail) => tail === undefined)) {
+            try {
+                return await fn().finally(releaseLocks)
+            } catch (error) {
+                releaseLocks()
+                throw error
+            }
+        }
+
+        await Promise.all(previous.map((tail) => tail?.catch(() => undefined)))
         try {
             return await fn()
         } finally {
-            release()
-            if (this.scratchlistUploadTails.get(key) === tail) {
-                this.scratchlistUploadTails.delete(key)
-            }
+            releaseLocks()
         }
     }
 
@@ -2471,11 +2519,15 @@ export class SyncEngine {
                 // A previous attempt may have committed the database move
                 // before the filesystem re-home failed. Retry that re-home
                 // even though the durable operation is already aborted.
-                await rehomeMessageAttachments(
-                    this.store,
+                await this.withScratchlistAttachmentLocks(
                     namespace,
-                    operation.replacementSessionId,
-                    sessionId,
+                    [operation.replacementSessionId, sessionId],
+                    () => rehomeMessageAttachments(
+                        this.store,
+                        namespace,
+                        operation.replacementSessionId,
+                        sessionId,
+                    ),
                 )
                 return { type: 'success', sessionId }
             } catch {
@@ -2490,11 +2542,15 @@ export class SyncEngine {
             if (!current) break
             if (current.replacementSessionId === required.replacementSessionId && current.state === 'aborted') {
                 try {
-                    await rehomeMessageAttachments(
-                        this.store,
+                    await this.withScratchlistAttachmentLocks(
                         namespace,
-                        current.replacementSessionId,
-                        sessionId,
+                        [current.replacementSessionId, sessionId],
+                        () => rehomeMessageAttachments(
+                            this.store,
+                            namespace,
+                            current.replacementSessionId,
+                            sessionId,
+                        ),
                     )
                     return { type: 'success', sessionId }
                 } catch {
@@ -2504,25 +2560,35 @@ export class SyncEngine {
             if ((required.requireInactive && latest.active)
                 || current.replacementSessionId !== required.replacementSessionId
                 || current.state !== required.state) break
-            const sourceMessages = this.store.messages.getAllMessages(current.replacementSessionId)
-            const result = this.store.abortOpenCodeClearOperation(sessionId, current.replacementSessionId, {
-                ...latest.metadata,
-                opencodeClearOperation: { ...current, state: 'aborted', updatedAt: Date.now(), error: undefined }
-            }, latest.metadataVersion, namespace, required)
+            let result: ReturnType<Store['abortOpenCodeClearOperation']>
+            try {
+                result = await this.withScratchlistAttachmentLocks(
+                    namespace,
+                    [current.replacementSessionId, sessionId],
+                    async () => {
+                        const sourceMessages = this.store.messages.getAllMessages(current.replacementSessionId)
+                        const abortResult = this.store.abortOpenCodeClearOperation(sessionId, current.replacementSessionId, {
+                            ...latest.metadata,
+                            opencodeClearOperation: { ...current, state: 'aborted', updatedAt: Date.now(), error: undefined }
+                        }, latest.metadataVersion, namespace, required)
+                        if (abortResult.result === 'success') {
+                            this.sessionCache.refreshSession(sessionId)
+                            await rehomeMessageAttachments(
+                                this.store,
+                                namespace,
+                                current.replacementSessionId,
+                                sessionId,
+                                sourceMessages,
+                            )
+                        }
+                        return abortResult
+                    },
+                )
+            } catch {
+                return { type: 'error', message: 'Could not restore clear attachments', code: 'replacement_link_failed' }
+            }
             if (result.result === 'success') {
-                this.sessionCache.refreshSession(sessionId)
-                try {
-                    await rehomeMessageAttachments(
-                        this.store,
-                        namespace,
-                        current.replacementSessionId,
-                        sessionId,
-                        sourceMessages,
-                    )
-                    return { type: 'success', sessionId }
-                } catch {
-                    return { type: 'error', message: 'Could not restore clear attachments', code: 'replacement_link_failed' }
-                }
+                return { type: 'success', sessionId }
             }
             if (result.result !== 'version-mismatch') break
             this.sessionCache.refreshSession(sessionId)
@@ -2707,15 +2773,18 @@ export class SyncEngine {
             }
         }
         try {
-            const sourceMessages = this.store.messages.getAllMessages(sessionId)
-            const moved = this.store.messages.moveUninvokedMessages(sessionId, replacementSessionId)
-            await rehomeMessageAttachments(
-                this.store,
-                namespace,
-                sessionId,
-                replacementSessionId,
-                sourceMessages,
-            )
+            let moved = 0
+            await this.withScratchlistAttachmentLocks(namespace, [sessionId, replacementSessionId], async () => {
+                const sourceMessages = this.store.messages.getAllMessages(sessionId)
+                moved = this.store.messages.moveUninvokedMessages(sessionId, replacementSessionId)
+                await rehomeMessageAttachments(
+                    this.store,
+                    namespace,
+                    sessionId,
+                    replacementSessionId,
+                    sourceMessages,
+                )
+            })
             if (moved > 0) {
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId })
                 this.eventPublisher.emit({ type: 'messages-invalidated', sessionId: replacementSessionId })

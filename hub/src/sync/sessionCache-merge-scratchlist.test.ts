@@ -35,8 +35,16 @@ function createCapturingPublisher(events: SyncEvent[]): EventPublisher {
 function setup() {
     const store = new Store(':memory:')
     const events: SyncEvent[] = []
-    const cache = new SessionCache(store, createCapturingPublisher(events))
-    return { store, events, cache }
+    const lockCalls: Array<{ namespace: string; sessionIds: string[] }> = []
+    const cache = new SessionCache(
+        store,
+        createCapturingPublisher(events),
+        async (namespace, sessionIds, fn) => {
+            lockCalls.push({ namespace, sessionIds: [...sessionIds] })
+            return fn()
+        },
+    )
+    return { store, events, cache, lockCalls }
 }
 
 function makeSessions(cache: SessionCache, ns: string = 'default') {
@@ -56,6 +64,18 @@ function makeSessions(cache: SessionCache, ns: string = 'default') {
 }
 
 describe('mergeSessions (deleteOldSession=true) - scratchlist transfer', () => {
+    it('runs the message and scratchlist transfer under one source-target attachment lock', async () => {
+        const { cache, lockCalls } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        expect(lockCalls).toEqual([{
+            namespace: 'default',
+            sessionIds: [oldSession.id, newSession.id],
+        }])
+    })
+
     it('moves scratchlist rows from old to new before the cascade-delete fires', async () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)

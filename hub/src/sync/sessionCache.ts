@@ -14,6 +14,11 @@ const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // HTTP caller as 409 instead of spinning forever.
 const METADATA_RETRY_ATTEMPTS = 5
 type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'effort' | 'serviceTier' | 'collaborationMode' | 'copilotAgentMode'
+type SessionAttachmentLock = <T>(
+    namespace: string,
+    sessionIds: readonly string[],
+    fn: () => Promise<T>,
+) => Promise<T>
 
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
@@ -26,7 +31,8 @@ export class SessionCache {
 
     constructor(
         private readonly store: Store,
-        private readonly publisher: EventPublisher
+        private readonly publisher: EventPublisher,
+        private readonly withAttachmentLocks: SessionAttachmentLock = async (_namespace, _sessionIds, fn) => fn(),
     ) {
     }
 
@@ -1111,6 +1117,18 @@ export class SessionCache {
         if (oldSessionId === newSessionId) {
             return
         }
+
+        await this.withAttachmentLocks(namespace, [oldSessionId, newSessionId], () => (
+            this.mergeSessionDataLocked(oldSessionId, newSessionId, namespace, options)
+        ))
+    }
+
+    private async mergeSessionDataLocked(
+        oldSessionId: string,
+        newSessionId: string,
+        namespace: string,
+        options: { deleteOldSession: boolean; mergeAgentState?: boolean }
+    ): Promise<void> {
 
         const oldStored = this.store.sessions.getSessionByNamespace(oldSessionId, namespace)
         const newStored = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
