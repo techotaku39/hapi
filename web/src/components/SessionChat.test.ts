@@ -137,6 +137,56 @@ describe('usePendingScratchlistSendCleanup', () => {
             vi.useRealTimers()
         }
     })
+
+    it('keeps each successful attempt eligible when cleanup retries interleave', async () => {
+        vi.useFakeTimers()
+        try {
+            const api = {
+                deleteScratchlistEntryIfUnchanged: vi.fn()
+                    .mockRejectedValueOnce(new Error('retry A'))
+                    .mockResolvedValue({ deleted: true }),
+            }
+            const initialProps: { settlement: SendMessageSettlement | null } = { settlement: null }
+            const { result, rerender } = renderHook(
+                ({ settlement }: { settlement: SendMessageSettlement | null }) => (
+                    usePendingScratchlistSendCleanup(api, settlement)
+                ),
+                { initialProps },
+            )
+
+            act(() => {
+                result.current('attempt-A', 'source-session', 'draft-A', 1001)
+            })
+            rerender({ settlement: { attemptId: 'attempt-A', status: 'success' } })
+            await act(async () => {
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledTimes(1)
+
+            act(() => {
+                result.current('attempt-B', 'source-session', 'draft-B', 1002)
+            })
+            rerender({ settlement: { attemptId: 'attempt-B', status: 'success' } })
+            await act(async () => {
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(1000)
+            })
+
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenCalledTimes(3)
+            expect(api.deleteScratchlistEntryIfUnchanged).toHaveBeenLastCalledWith(
+                'source-session',
+                'draft-A',
+                1001,
+            )
+        } finally {
+            vi.useRealTimers()
+        }
+    })
 })
 
 describe('applyModelChangeWithReasoningRollback', () => {

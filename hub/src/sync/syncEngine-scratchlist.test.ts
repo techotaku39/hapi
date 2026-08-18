@@ -484,7 +484,7 @@ describe('SyncEngine session connection generations', () => {
         }
     })
 
-    it('does not clear scheduled attachment cache again on session-ready', () => {
+    it('does not invalidate scheduled attachment paths on same-client reconnects', () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
             store,
@@ -502,10 +502,12 @@ describe('SyncEngine session connection generations', () => {
             clearCalls.push(sessionId)
         }
 
-        engine.handleSessionConnected('generation-session')
+        engine.handleSessionConnected('generation-session', 'client-a')
+        engine.handleSessionConnected('generation-session', 'client-a')
         engine.handleSessionReady({ sid: 'generation-session', time: Date.now() })
+        engine.handleSessionConnected('generation-session', 'client-b')
 
-        expect(clearCalls).toEqual(['generation-session'])
+        expect(clearCalls).toEqual(['generation-session', 'generation-session'])
         engine.stop()
     })
 

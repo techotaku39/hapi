@@ -22,6 +22,8 @@ type SessionAlivePayload = {
     collaborationMode?: CodexCollaborationMode
 }
 
+type SessionConnectedHandler = (sessionId: string, clientInstanceId?: string) => void
+
 type SessionEndPayload = {
     sid: string
     time: number
@@ -42,7 +44,7 @@ export type CliHandlersDeps = {
     store: Store
     rpcRegistry: RpcRegistry
     terminalRegistry: TerminalRegistry
-    onSessionConnected?: (sessionId: string) => void
+    onSessionConnected?: SessionConnectedHandler
     onSessionAlive?: (payload: SessionAlivePayload) => void
     onSessionReady?: (payload: SessionReadyPayload) => void
     onSessionEnd?: (payload: SessionEndPayload) => void
@@ -89,9 +91,12 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
 
     const auth = socket.handshake.auth as Record<string, unknown> | undefined
     const sessionId = typeof auth?.sessionId === 'string' ? auth.sessionId : null
+    const clientInstanceId = typeof auth?.clientInstanceId === 'string' && auth.clientInstanceId.length > 0
+        ? auth.clientInstanceId
+        : undefined
     if (sessionId && resolveSessionAccess(sessionId).ok) {
         socket.join(`session:${sessionId}`)
-        onSessionConnected?.(sessionId)
+        onSessionConnected?.(sessionId, clientInstanceId)
     }
 
     const machineId = typeof auth?.machineId === 'string' ? auth.machineId : null

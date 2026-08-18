@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
+} from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
 import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
@@ -509,20 +518,25 @@ type ScratchlistSendTracker = (
 const MAX_SCRATCHLIST_CLEANUP_RETRIES = 3
 const SCRATCHLIST_CLEANUP_RETRY_BASE_MS = 1000
 
-export function usePendingScratchlistSendCleanup(
+type ScratchlistSendCleanupRegistry = {
+    track: ScratchlistSendTracker
+    observeSettlement: (settlement: SendMessageSettlement | null) => void
+}
+
+const ScratchlistSendCleanupContext = createContext<ScratchlistSendCleanupRegistry | null>(null)
+
+function useScratchlistSendCleanupRegistry(
     api: Pick<ApiClient, 'deleteScratchlistEntryIfUnchanged'>,
-    sendSettlement: SendMessageSettlement | null,
-): ScratchlistSendTracker {
+): ScratchlistSendCleanupRegistry {
     const pendingSendsRef = useRef(new Map<string, {
         sessionId: string
         entryId: string
         expectedUpdatedAt: number
     }>())
+    const successfulAttemptsRef = useRef(new Set<string>())
     const settlingSendsRef = useRef(new Set<string>())
     const cleanupRetriesRef = useRef(new Map<string, number>())
     const cleanupRetryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
-    const sendSettlementRef = useRef<SendMessageSettlement | null>(sendSettlement)
-    sendSettlementRef.current = sendSettlement
     const clearCleanupRetry = useCallback((attemptId: string) => {
         cleanupRetriesRef.current.delete(attemptId)
         const timer = cleanupRetryTimersRef.current.get(attemptId)
@@ -532,16 +546,13 @@ export function usePendingScratchlistSendCleanup(
         }
     }, [])
     const settlePendingSend = useCallback((attemptId: string) => {
-        const settlement = sendSettlementRef.current
-        if (settlement?.attemptId !== attemptId) return
         const pending = pendingSendsRef.current.get(attemptId)
-        if (!pending) return
+        if (!pending || !successfulAttemptsRef.current.has(attemptId)) return
         // Keep the source draft association through retryable failures. A
         // retry reuses the same local id, so deleting it here would make a
         // later successful retry unable to clean up the original draft.
         if (
-            settlement.status !== 'success'
-            || settlingSendsRef.current.has(attemptId)
+            settlingSendsRef.current.has(attemptId)
             || cleanupRetryTimersRef.current.has(attemptId)
         ) return
         settlingSendsRef.current.add(attemptId)
@@ -553,6 +564,7 @@ export function usePendingScratchlistSendCleanup(
             // A false result is an intentional no-op when another client has
             // edited or deleted the draft; in either case this send is settled.
             pendingSendsRef.current.delete(attemptId)
+            successfulAttemptsRef.current.delete(attemptId)
             clearCleanupRetry(attemptId)
         }).catch(() => {
             // Keep the association if the cleanup request itself failed and
@@ -562,6 +574,7 @@ export function usePendingScratchlistSendCleanup(
                 // The draft remains available for manual recovery, but do
                 // not retain an unbounded in-memory association forever.
                 pendingSendsRef.current.delete(attemptId)
+                successfulAttemptsRef.current.delete(attemptId)
                 cleanupRetriesRef.current.delete(attemptId)
                 return
             }
@@ -576,20 +589,66 @@ export function usePendingScratchlistSendCleanup(
             settlingSendsRef.current.delete(attemptId)
         })
     }, [api, clearCleanupRetry])
+    const observeSettlement = useCallback((settlement: SendMessageSettlement | null) => {
+        if (settlement?.status !== 'success') return
+        // The observer also receives ordinary composer sends. Only retain a
+        // success for an attempt that was registered by the scratchlist
+        // sender, otherwise every successful chat message would accumulate in
+        // this long-lived provider's in-memory set.
+        if (!pendingSendsRef.current.has(settlement.attemptId)) return
+        successfulAttemptsRef.current.add(settlement.attemptId)
+        settlePendingSend(settlement.attemptId)
+    }, [settlePendingSend])
+    const track = useCallback((
+        attemptId: string,
+        sessionId: string,
+        entryId: string,
+        expectedUpdatedAt: number,
+    ) => {
+        pendingSendsRef.current.set(attemptId, { sessionId, entryId, expectedUpdatedAt })
+        settlePendingSend(attemptId)
+    }, [settlePendingSend])
     useEffect(() => () => {
         for (const timer of cleanupRetryTimersRef.current.values()) {
             clearTimeout(timer)
         }
         cleanupRetryTimersRef.current.clear()
     }, [])
+    return useMemo(() => ({ track, observeSettlement }), [observeSettlement, track])
+}
+
+export function ScratchlistSendCleanupProvider(props: {
+    api: Pick<ApiClient, 'deleteScratchlistEntryIfUnchanged'>
+    children: ReactNode
+}) {
+    const registry = useScratchlistSendCleanupRegistry(props.api)
+    return (
+        <ScratchlistSendCleanupContext.Provider value={registry}>
+            {props.children}
+        </ScratchlistSendCleanupContext.Provider>
+    )
+}
+
+export function useScratchlistSendSettlementObserver(): (settlement: SendMessageSettlement) => void {
+    const registry = useContext(ScratchlistSendCleanupContext)
+    return registry?.observeSettlement ?? (() => {})
+}
+
+export function usePendingScratchlistSendCleanup(
+    api: Pick<ApiClient, 'deleteScratchlistEntryIfUnchanged'>,
+    sendSettlement: SendMessageSettlement | null,
+): ScratchlistSendTracker {
+    const contextRegistry = useContext(ScratchlistSendCleanupContext)
+    const localRegistry = useScratchlistSendCleanupRegistry(api)
+    const registry = contextRegistry ?? localRegistry
     useEffect(() => {
-        if (!sendSettlement) return
-        settlePendingSend(sendSettlement.attemptId)
-    }, [sendSettlement, settlePendingSend])
-    return useCallback((attemptId, sessionId, entryId, expectedUpdatedAt) => {
-        pendingSendsRef.current.set(attemptId, { sessionId, entryId, expectedUpdatedAt })
-        settlePendingSend(attemptId)
-    }, [settlePendingSend])
+        // A provider-backed registry receives settlement events directly from
+        // useSendMessage, including after this chat route unmounts. The local
+        // fallback keeps this hook independently testable and backwards
+        // compatible for callers outside the sessions route.
+        if (!contextRegistry) registry.observeSettlement(sendSettlement)
+    }, [contextRegistry, registry, sendSettlement])
+    return registry.track
 }
 
 /**

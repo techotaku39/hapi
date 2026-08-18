@@ -198,6 +198,8 @@ export class SyncEngine {
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP or validated Pi get_state). */
     private readonly sessionReadyIds = new Set<string>()
+    /** Stable CLI client identity per session; transport reconnects reuse it. */
+    private readonly sessionClientInstanceIds = new Map<string, string>()
     /** Same-ID PTY rows with a resume currently in flight. */
     private readonly ptyResumeInFlightIds = new Set<string>()
     /** PTY rows kept fail-closed after a metadata write/clear failure. */
@@ -611,10 +613,22 @@ export class SyncEngine {
         this.triggerDedupIfNeeded(payload.sid)
     }
 
-    handleSessionConnected(sessionId: string): void {
+    handleSessionConnected(sessionId: string, clientInstanceId?: string): void {
+        const previousClientInstanceId = this.sessionClientInstanceIds.get(sessionId)
+        if (clientInstanceId && previousClientInstanceId === clientInstanceId) {
+            // Socket.IO may reconnect the same ApiSessionClient while its
+            // IncomingMessageFilter and agent queue still retain materialized
+            // attachment paths. Do not invalidate those paths in that case.
+            return
+        }
+        if (clientInstanceId) {
+            this.sessionClientInstanceIds.set(sessionId, clientInstanceId)
+        }
         // Materialized attachment paths belong to the previous CLI process.
-        // Socket reconnection is the reliable generation boundary for every
+        // A different client instance is the generation boundary for every
         // agent, including ordinary sessions that do not emit session-ready.
+        // Legacy clients without an instance id retain the old invalidate-on-
+        // connect behavior until they upgrade.
         this.messageService.clearScheduledAttachmentDeliveryCache(sessionId)
     }
 
@@ -638,6 +652,7 @@ export class SyncEngine {
 
     handleSessionEnd(payload: { sid: string; time: number; reason?: SessionEndReason }): void {
         this.messageService.clearScheduledAttachmentDeliveryCache(payload.sid)
+        this.sessionClientInstanceIds.delete(payload.sid)
         void this.messageService.flushScheduledAttachmentDeliveryCleanup(payload.sid)
         const before = this.sessionCache.getSession(payload.sid)
         if (before?.metadata?.opencodeClearOperation?.state === 'reserved' && payload.reason !== 'cleared') {

@@ -70,6 +70,53 @@ describe('useSendMessage', () => {
         })
     })
 
+    it('reports the settlement through the durable lifecycle callback', async () => {
+        const onSettlement = vi.fn()
+        const api = createMockApi()
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A', { onSettlement }),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            void result.current.sendMessage('hello')
+        })
+
+        await waitFor(() => {
+            expect(onSettlement).toHaveBeenCalledWith({
+                attemptId: 'local-id-1',
+                status: 'success',
+            })
+        })
+    })
+
+    it('reports a settlement after the sending route unmounts', async () => {
+        const request = deferred<void>()
+        const onSettlement = vi.fn()
+        const api = createMockApi(() => request.promise)
+
+        const { result, unmount } = renderHook(
+            () => useSendMessage(api, 'session-A', { onSettlement }),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            void result.current.sendMessage('hello')
+        })
+        unmount()
+
+        await act(async () => {
+            request.resolve()
+            await request.promise
+        })
+
+        expect(onSettlement).toHaveBeenCalledWith({
+            attemptId: 'local-id-1',
+            status: 'success',
+        })
+    })
+
     it('keeps a thinking-session send in flight until the POST confirms it is queued', async () => {
         const request = deferred<void>()
         const api = createMockApi(() => request.promise)
