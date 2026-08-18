@@ -25,6 +25,8 @@ type SendMessageInput = {
 
 export type SendMessageAcceptance = {
     attemptId: string
+    /** Session id the Hub mutation was actually submitted to after resume. */
+    sessionId: string
 }
 
 export type SendMessageSettlement = {
@@ -363,7 +365,7 @@ export function useSendMessage(
             scheduledAt,
             deliveryMode,
         })
-        return { attemptId: localId }
+        return { attemptId: localId, sessionId: targetSessionId }
     }
 
     const retryMessage = (localId: string): boolean => {

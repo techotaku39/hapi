@@ -1009,7 +1009,7 @@ function SessionChatInner(props: SessionChatProps) {
         // failure therefore leaves the draft available for retry.
         props.onScratchlistSendAccepted(
             accepted.attemptId,
-            props.session.id,
+            accepted.sessionId,
             entry.id,
             entry.updatedAt ?? entry.createdAt,
         )
@@ -2030,8 +2030,15 @@ function SessionChatInner(props: SessionChatProps) {
                                     onUpdate={scratchlist.update}
                                     onReorder={scratchlist.reorder}
                                     onDelete={scratchlist.remove}
-                                    onSend={handleSendScratchlistEntry}
-                                    onSchedule={handleScheduleScratchlistEntry}
+                                    // An inactive source session can be resumed
+                                    // by the generic composer flow, but these
+                                    // Hub-backed attachments are already owned
+                                    // by the source session. Hide actions here
+                                    // until the drawer is rendered for the
+                                    // resolved active session instead of
+                                    // starting a send that cannot re-stage them.
+                                    onSend={props.session.active ? handleSendScratchlistEntry : undefined}
+                                    onSchedule={props.session.active ? handleScheduleScratchlistEntry : undefined}
                                     disabled={props.isSending || isScratchlistParking || scratchlist.isUpdating}
                                 />
                             ) : null}
