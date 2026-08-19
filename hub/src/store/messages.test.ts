@@ -33,6 +33,28 @@ describe('assistant reply timestamp', () => {
         }, undefined, undefined, 3_000)
         expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
 
+        const footer = 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"ok"}'
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'output', data: { type: 'agy_message', content: footer } }
+        }, undefined, undefined, 4_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: { type: 'agy_message', content: 'Inside the task-266 log\n[Message] result' }
+            }
+        }, undefined, undefined, 5_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'output', data: { type: 'agy_message', content: `Visible answer\n${footer}` } }
+        }, undefined, undefined, 6_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(6_000)
+
         store.messages.addMessage(session.id, {
             role: 'agent',
             content: {
@@ -43,14 +65,14 @@ describe('assistant reply timestamp', () => {
                     message: { content: [{ type: 'text', text: 'subagent progress' }] }
                 }
             }
-        }, undefined, undefined, 4_000)
-        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+        }, undefined, undefined, 7_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(6_000)
 
         store.messages.addMessage(session.id, {
             role: 'agent',
             content: { type: 'codex', data: { type: 'message', message: 'older answer' } }
         }, undefined, undefined, 1_500)
-        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(2_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(6_000)
         expect(store.sessions.getSession(session.id)?.updatedAt).toBe(activityAt)
         store.close()
     })

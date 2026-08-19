@@ -172,6 +172,25 @@ describe('isAssistantTextMessage', () => {
             }
         })).toBe(false)
     })
+
+    test('rejects hidden notification and AGY tool-only output', () => {
+        const footer = 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"ok"}'
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: { type: 'output', data: { type: 'agy_message', content: footer } }
+        })).toBe(false)
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: { type: 'output', data: { type: 'agy_message', content: `Visible answer\n${footer}` } }
+        })).toBe(true)
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: { type: 'agy_message', content: 'Inside the task-266 log\n[Message] result' }
+            }
+        })).toBe(false)
+    })
 })
 
 describe('extractNotifySummary', () => {
