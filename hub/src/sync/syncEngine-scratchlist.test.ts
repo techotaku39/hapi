@@ -231,6 +231,68 @@ describe('SyncEngine scratchlist mutations emit session-updated patches', () => 
         engine.stop()
     })
 
+    it('deletes the Hub file when an immediate staged copy keeps the id but changes the path', async () => {
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-immediate-staged-cleanup-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+        )
+        try {
+            const session = engine.getOrCreateSession(
+                'immediate-staged-cleanup',
+                { path: '/tmp', host: 'localhost', flavor: 'codex' },
+                null,
+                'default',
+            )
+            const { readScratchlistAttachmentFile, writeScratchlistAttachmentFile } =
+                await import('../scratchlistAttachments/storage')
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                session.id,
+                'image.png',
+                'image/png',
+                Buffer.from('image'),
+                'immediate-staged-attachment',
+            )
+            const created = engine.createScratchlistEntry(session.id, 'image draft', {
+                entryId: 'immediate-staged-draft',
+                attachments: [attachment],
+            })
+            expect(created.outcome).toBe('created')
+
+            // The immediate CLI copy keeps the attachment id but replaces the
+            // Hub path with a transient upload path before acknowledgement.
+            store.messages.addMessage(
+                session.id,
+                {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text: 'image draft',
+                        attachments: [{ ...attachment, path: '/tmp/cli-upload-image.png' }],
+                    },
+                },
+                'immediate-staged-local',
+            )
+
+            expect(await readScratchlistAttachmentFile(hapiHome, attachment.path)).not.toBeNull()
+            expect(await engine.deleteScratchlistEntry(session.id, 'immediate-staged-draft')).toBe(true)
+            expect(await readScratchlistAttachmentFile(hapiHome, attachment.path)).toBeNull()
+        } finally {
+            engine.stop()
+            store.close()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
     it('deleteScratchlistEntry on a missing entry emits nothing', async () => {
         const { engine, engineEvents } = setup()
         const session = engine.getOrCreateSession(

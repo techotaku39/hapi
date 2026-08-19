@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v23 to v24', () => {
+describe('schema migration v23 through v25', () => {
     it('backfills position using the previous newest-first order', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-'))
         tempDirs.push(dir)
@@ -56,7 +56,7 @@ describe('schema migration v23 to v24', () => {
         ])
         const internalDb = (migrated as unknown as { db: Database }).db
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(25)
         migrated.close()
     })
 
@@ -81,7 +81,7 @@ describe('schema migration v23 to v24', () => {
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
 
         expect(columns.some((col) => col.name === 'push_key')).toBe(true)
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(25)
 
         // Existing Android rows survive with a NULL push key.
         const devices = migrated.fcm.getDevicesByNamespace('default')

@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v22 through v24', () => {
+describe('schema migration v22 through v25', () => {
     it('adds events and event_links tables to a V22 database and reaches current schema', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v23-'))
         tempDirs.push(dir)
@@ -40,7 +40,7 @@ describe('schema migration v22 through v24', () => {
 
         expect(events?.name).toBe('events')
         expect(links?.name).toBe('event_links')
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(25)
         migrated.close()
     })
 })

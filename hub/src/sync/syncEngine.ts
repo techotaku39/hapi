@@ -1014,9 +1014,8 @@ export class SyncEngine {
             )
         )
         if (stillInScratchlist) return false
-        if (attachment.path !== undefined
-            && this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)) {
-            return false
+        if (attachment.path !== undefined) {
+            return !this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)
         }
         return !this.store.messages.getAllMessages(sessionId).some((message) => (
             message.invokedAt === null

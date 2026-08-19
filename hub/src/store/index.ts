@@ -41,7 +41,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -329,6 +329,7 @@ export class Store {
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
         })
 
         if (currentVersion === 0) {
@@ -838,46 +839,47 @@ export class Store {
         }
     }
 
+    private migrateFromV23ToV24(): void {
+        const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        if (fcmColumns.length > 0 && !fcmColumns.some((col) => col.name === 'push_key')) {
+            // iOS push registrations add a nullable key; legacy Android rows
+            // keep their existing shape and receive NULL.
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
+    }
+
     /**
      * Persist scratchlist display order (tiann/hapi#893 follow-up).
      * Existing rows retain the previous newest-first order while receiving a
      * dense per-session position that subsequent reorder mutations can update.
      */
-    private migrateFromV23ToV24(): void {
-        const scratchlistColumns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
-        if (scratchlistColumns.length > 0 && !scratchlistColumns.some((col) => col.name === 'position')) {
+    private migrateFromV24ToV25(): void {
+        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
+        if (columns.length === 0) return
+        if (!columns.some((col) => col.name === 'position')) {
             this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
         }
 
-        if (scratchlistColumns.length > 0) {
-            const sessionRows = this.db.prepare(
-                'SELECT DISTINCT session_id FROM session_scratchlist'
-            ).all() as Array<{ session_id: string }>
-            const rowsForSession = this.db.prepare(
-                `SELECT entry_id FROM session_scratchlist
-                 WHERE session_id = ?
-                 ORDER BY created_at DESC, entry_id DESC`
-            )
-            const updatePosition = this.db.prepare(
-                'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
-            )
-            for (const { session_id } of sessionRows) {
-                const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
-                rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
-            }
-
-            this.db.exec(`
-                CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
-                    ON session_scratchlist(session_id, position)
-            `)
+        const sessionRows = this.db.prepare(
+            'SELECT DISTINCT session_id FROM session_scratchlist'
+        ).all() as Array<{ session_id: string }>
+        const rowsForSession = this.db.prepare(
+            `SELECT entry_id FROM session_scratchlist
+             WHERE session_id = ?
+             ORDER BY created_at DESC, entry_id DESC`
+        )
+        const updatePosition = this.db.prepare(
+            'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
+        )
+        for (const { session_id } of sessionRows) {
+            const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
+            rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
         }
 
-        // iOS push registrations add a nullable key; legacy Android rows keep
-        // their existing shape and receive NULL.
-        const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
-        if (fcmColumns.length > 0 && !fcmColumns.some((col) => col.name === 'push_key')) {
-            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
-        }
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
+                ON session_scratchlist(session_id, position)
+        `)
     }
 
     /**
