@@ -119,7 +119,13 @@ public final class SessionListStore: SessionListStoring {
     /// `GET /api/sessions/:id` into the detail cache (chat open / resync).
     @discardableResult
     public func loadSessionDetail(_ sessionId: String) async throws -> Session {
-        let session = try await api.session(id: sessionId)
+        var session = try await api.session(id: sessionId)
+        if let cached = details[sessionId], session.seq < cached.seq {
+            // The rejected snapshot may still contain unrelated fields that
+            // arrived before the newer SSE reply-clock patch. Retry once to
+            // recover that complete server state without creating a loop.
+            session = try await api.session(id: sessionId)
+        }
         if let cached = details[sessionId], session.seq < cached.seq {
             return cached
         }
@@ -153,7 +159,17 @@ public final class SessionListStore: SessionListStoring {
     public func refresh() async throws {
         refreshGeneration += 1
         let generation = refreshGeneration
-        let list = try await api.listSessions()
+        var list = try await api.listSessions()
+        let cachedByIdBeforeRetry = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        if list.contains(where: { incoming in
+            guard let cached = cachedByIdBeforeRetry[incoming.id] else { return false }
+            return (incoming.lastAssistantMessageVersion ?? 0)
+                < (cached.lastAssistantMessageVersion ?? 0)
+        }) {
+            // Recover unrelated row fields after discarding an older list
+            // snapshot, while keeping the retry bounded to one request.
+            list = try await api.listSessions()
+        }
         // A later-started refresh already applied fresher server truth.
         guard generation > lastAppliedRefresh else { return }
         lastAppliedRefresh = generation

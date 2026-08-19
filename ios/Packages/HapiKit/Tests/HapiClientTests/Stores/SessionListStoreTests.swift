@@ -40,13 +40,17 @@ struct SessionListStoreTests {
     @Test func delayedRefreshCannotOverwriteANewerReplyClockPatch() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(
-            storeSummary("reply", updatedAt: 9_000, lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 1),
+            storeSummary("reply", updatedAt: 9_000, lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 1, metadataVersion: 1),
             storeSummary("other", updatedAt: 2_000)
         ))
         try await store.refresh()
 
         await performer.enqueue(json: try sessionsResponseJSON(
-            storeSummary("reply", updatedAt: 9_000, lastAssistantMessageAt: 1_000, lastAssistantMessageVersion: 1),
+            storeSummary("reply", updatedAt: 9_000, lastAssistantMessageAt: 1_000, lastAssistantMessageVersion: 1, metadataVersion: 2),
+            storeSummary("other", updatedAt: 2_000)
+        ))
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("reply", updatedAt: 10_000, lastAssistantMessageAt: 10_000, lastAssistantMessageVersion: 2, metadataVersion: 2),
             storeSummary("other", updatedAt: 2_000)
         ))
         await performer.setDelay(nanoseconds: 100_000_000)
@@ -62,6 +66,7 @@ struct SessionListStoreTests {
         #expect(store.sessions.map(\.id) == ["reply", "other"])
         #expect(store.sessions.first?.lastAssistantMessageAt == 10_000)
         #expect(store.sessions.first?.lastAssistantMessageVersion == 2)
+        #expect(store.sessions.first?.metadataVersion == 2)
     }
 
     @Test func delayedDetailResponseCannotOverwriteANewerFullSessionEvent() async throws {
@@ -70,13 +75,14 @@ struct SessionListStoreTests {
         await performer.enqueue(json: try sessionResponseJSON(current))
         _ = try await store.loadSessionDetail("s1")
 
-        let stale = storeSession("s1", seq: 4, updatedAt: 10_000, lastAssistantMessageAt: 1_000)
+        let newer = storeSession("s1", seq: 6, updatedAt: 11_000, lastAssistantMessageAt: 10_000, metadataVersion: 2)
+        let stale = storeSession("s1", seq: 4, updatedAt: 10_000, lastAssistantMessageAt: 1_000, metadataVersion: 2)
         await performer.enqueue(json: try sessionResponseJSON(stale))
+        await performer.enqueue(json: try sessionResponseJSON(newer))
         await performer.setDelay(nanoseconds: 100_000_000)
         let pending = Task { try await store.loadSessionDetail("s1") }
         try await Task.sleep(for: .milliseconds(10))
 
-        let newer = storeSession("s1", seq: 6, updatedAt: 11_000, lastAssistantMessageAt: 10_000)
         store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: fullSessionJSON(newer)))
         let accepted = try await pending.value
 

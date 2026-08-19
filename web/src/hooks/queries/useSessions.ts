@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { SessionSummary, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
-import { mergeSessionsResponse } from '@/lib/sessionCache'
+import { mergeSessionsResponse, needsSessionsResponseRetry } from '@/lib/sessionCache'
 
 export function useSessions(api: ApiClient | null): {
     sessions: SessionSummary[]
@@ -17,8 +17,14 @@ export function useSessions(api: ApiClient | null): {
             if (!api) {
                 throw new Error('API unavailable')
             }
-            const incoming = await api.getSessions()
-            const current = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+            let incoming = await api.getSessions()
+            let current = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+            if (needsSessionsResponseRetry(current, incoming)) {
+                // Recover unrelated row fields after discarding a stale list
+                // snapshot, while keeping the retry bounded to one request.
+                incoming = await api.getSessions()
+                current = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions) ?? current
+            }
             return mergeSessionsResponse(current, incoming)
         },
         enabled: Boolean(api),

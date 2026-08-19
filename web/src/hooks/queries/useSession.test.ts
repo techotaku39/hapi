@@ -28,7 +28,11 @@ describe('SESSION_DETAIL_STALE_TIME_MS', () => {
     })
 })
 
-function makeSession(seq: number, lastAssistantMessageAt: number | null): Session {
+function makeSession(
+    seq: number,
+    lastAssistantMessageAt: number | null,
+    metadataVersion = 1
+): Session {
     return {
         id: 's1',
         namespace: 'default',
@@ -39,7 +43,7 @@ function makeSession(seq: number, lastAssistantMessageAt: number | null): Sessio
         active: false,
         activeAt: 9_000,
         metadata: null,
-        metadataVersion: 0,
+        metadataVersion,
         agentState: null,
         agentStateVersion: 0,
         thinking: false,
@@ -61,12 +65,15 @@ describe('useSession REST ordering', () => {
     it('does not let a delayed REST response overwrite a newer SSE detail', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         const key = queryKeys.session('s1')
-        queryClient.setQueryData<SessionResponse>(key, { session: makeSession(10, 9_000) })
+        queryClient.setQueryData<SessionResponse>(key, { session: makeSession(8, 9_000, 1) })
 
-        let resolveResponse!: (response: SessionResponse) => void
-        const response = new Promise<SessionResponse>((resolve) => { resolveResponse = resolve })
+        let resolveFirstResponse!: (response: SessionResponse) => void
+        let resolveSecondResponse!: (response: SessionResponse) => void
+        const firstResponse = new Promise<SessionResponse>((resolve) => { resolveFirstResponse = resolve })
+        const secondResponse = new Promise<SessionResponse>((resolve) => { resolveSecondResponse = resolve })
+        const responses = [firstResponse, secondResponse]
         const api = {
-            getSession: vi.fn(() => response)
+            getSession: vi.fn(() => responses.shift()!)
         } as unknown as ApiClient
         const { result } = renderHook(() => useSession(api, 's1'), { wrapper: queryWrapper(queryClient) })
 
@@ -75,10 +82,12 @@ describe('useSession REST ordering', () => {
         await waitFor(() => expect(api.getSession).toHaveBeenCalledTimes(1))
 
         // The SSE correction arrives while the REST request is still pending.
-        queryClient.setQueryData<SessionResponse>(key, { session: makeSession(11, null) })
-        resolveResponse({ session: makeSession(10, 1_000) })
+        queryClient.setQueryData<SessionResponse>(key, { session: makeSession(10, null, 1) })
+        resolveFirstResponse({ session: makeSession(9, 1_000, 2) })
+        await waitFor(() => expect(api.getSession).toHaveBeenCalledTimes(2))
+        resolveSecondResponse({ session: makeSession(10, null, 2) })
         await act(async () => { await refetch })
 
-        expect(queryClient.getQueryData<SessionResponse>(key)?.session).toEqual(makeSession(11, null))
+        expect(queryClient.getQueryData<SessionResponse>(key)?.session).toEqual(makeSession(10, null, 2))
     })
 })

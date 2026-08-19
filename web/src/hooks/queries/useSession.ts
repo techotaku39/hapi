@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { Session, SessionResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
-import { mergeSessionResponse } from '@/lib/sessionCache'
+import { mergeSessionResponse, needsSessionResponseRetry } from '@/lib/sessionCache'
 
 export function isSessionNotFoundError(error: unknown): boolean {
     return error instanceof Error
@@ -35,8 +35,15 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            const incoming = await api.getSession(sessionId)
-            const current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId))
+            let incoming = await api.getSession(sessionId)
+            let current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId))
+            if (needsSessionResponseRetry(current, incoming)) {
+                // A newer SSE patch may only carry the reply clock. Retry once
+                // so unrelated fields from the discarded REST snapshot are
+                // not left stale indefinitely on an otherwise quiet session.
+                incoming = await api.getSession(sessionId)
+                current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId)) ?? current
+            }
             return mergeSessionResponse(current, incoming)
         },
         enabled: Boolean(api && sessionId),

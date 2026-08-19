@@ -10,7 +10,8 @@ import { useSessions } from './useSessions'
 function makeSummary(
     id: string,
     lastAssistantMessageAt: number | null,
-    lastAssistantMessageVersion: number
+    lastAssistantMessageVersion: number,
+    metadataVersion = 1
 ): SessionSummary {
     return {
         id,
@@ -21,7 +22,7 @@ function makeSummary(
         lastAssistantMessageAt,
         lastAssistantMessageVersion,
         metadata: null,
-        metadataVersion: 0,
+        metadataVersion,
         agentStateVersion: 0,
         todosUpdatedAt: 0,
         todoProgress: null,
@@ -50,15 +51,18 @@ describe('useSessions REST ordering', () => {
         const key = queryKeys.sessions
         queryClient.setQueryData<SessionsResponse>(key, {
             sessions: [
-                makeSummary('reply', 9_000, 2),
+                makeSummary('reply', 9_000, 2, 1),
                 makeSummary('other', 2_000, 1)
             ]
         })
 
-        let resolveResponse!: (response: SessionsResponse) => void
-        const response = new Promise<SessionsResponse>((resolve) => { resolveResponse = resolve })
+        let resolveFirstResponse!: (response: SessionsResponse) => void
+        let resolveSecondResponse!: (response: SessionsResponse) => void
+        const firstResponse = new Promise<SessionsResponse>((resolve) => { resolveFirstResponse = resolve })
+        const secondResponse = new Promise<SessionsResponse>((resolve) => { resolveSecondResponse = resolve })
+        const responses = [firstResponse, secondResponse]
         const api = {
-            getSessions: vi.fn(() => response)
+            getSessions: vi.fn(() => responses.shift()!)
         } as unknown as ApiClient
         const { result } = renderHook(() => useSessions(api), { wrapper: queryWrapper(queryClient) })
 
@@ -69,13 +73,20 @@ describe('useSessions REST ordering', () => {
         // A newer reply event reorders the row before the REST request settles.
         queryClient.setQueryData<SessionsResponse>(key, {
             sessions: [
-                makeSummary('reply', 10_000, 3),
+                makeSummary('reply', 10_000, 3, 1),
                 makeSummary('other', 2_000, 1)
             ]
         })
-        resolveResponse({
+        resolveFirstResponse({
             sessions: [
-                makeSummary('reply', 1_000, 2),
+                makeSummary('reply', 1_000, 2, 2),
+                makeSummary('other', 2_000, 1)
+            ]
+        })
+        await waitFor(() => expect(api.getSessions).toHaveBeenCalledTimes(2))
+        resolveSecondResponse({
+            sessions: [
+                makeSummary('reply', 10_000, 3, 2),
                 makeSummary('other', 2_000, 1)
             ]
         })
@@ -83,6 +94,9 @@ describe('useSessions REST ordering', () => {
 
         expect(queryClient.getQueryData<SessionsResponse>(key)?.sessions.map((session) => session.id))
             .toEqual(['reply', 'other'])
-        await waitFor(() => expect(result.current.sessions[0]?.lastAssistantMessageAt).toBe(10_000))
+        await waitFor(() => {
+            expect(result.current.sessions[0]?.lastAssistantMessageAt).toBe(10_000)
+            expect(result.current.sessions[0]?.metadataVersion).toBe(2)
+        })
     })
 })

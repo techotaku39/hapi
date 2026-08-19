@@ -15,6 +15,14 @@ export function shouldAcceptSessionRecord(current: Session | undefined, incoming
     return current === undefined || incoming.seq >= (Number.isFinite(current.seq) ? current.seq : 0)
 }
 
+/** A rejected REST detail snapshot needs one bounded recovery fetch. */
+export function needsSessionResponseRetry(
+    current: SessionResponse | undefined,
+    incoming: SessionResponse
+): boolean {
+    return Boolean(current?.session && !shouldAcceptSessionRecord(current.session, incoming.session))
+}
+
 /**
  * List summaries retain the full-record sequence as the reply-clock
  * watermark. This is the SSE full-record gate; REST list hydration uses the
@@ -33,6 +41,19 @@ export function shouldAcceptRefreshedSessionSummary(
 ): boolean {
     return current === undefined
         || (incoming.lastAssistantMessageVersion ?? 0) >= (current.lastAssistantMessageVersion ?? 0)
+}
+
+/** A rejected REST list snapshot needs one bounded recovery fetch. */
+export function needsSessionsResponseRetry(
+    current: SessionsResponse | undefined,
+    incoming: SessionsResponse
+): boolean {
+    if (!current) return false
+    const currentById = new Map(current.sessions.map((session) => [session.id, session]))
+    return incoming.sessions.some((session) => {
+        const cached = currentById.get(session.id)
+        return Boolean(cached && !shouldAcceptRefreshedSessionSummary(cached, session))
+    })
 }
 
 export function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {

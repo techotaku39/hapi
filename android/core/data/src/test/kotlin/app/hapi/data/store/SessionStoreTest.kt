@@ -77,6 +77,12 @@ class SessionStoreTest {
                 )
                 .setBodyDelay(100, TimeUnit.MILLISECONDS)
         )
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("reply", updatedAt = 10_000, lastAssistantMessageAt = 10_000, lastAssistantMessageVersion = 2, metadataVersion = 2),
+                summary("other", updatedAt = 2_000),
+            )
+        )
         val pending = async(start = CoroutineStart.UNDISPATCHED) { store.refresh() }
         assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
 
@@ -89,6 +95,7 @@ class SessionStoreTest {
         assertEquals(listOf("reply", "other"), store.sessions.value.map { it.id })
         assertEquals(10_000L, store.sessions.value.first().lastAssistantMessageAt)
         assertEquals(2L, store.sessions.value.first().lastAssistantMessageVersion)
+        assertEquals(2L, store.sessions.value.first().metadataVersion)
     }
 
     @Test
@@ -96,16 +103,18 @@ class SessionStoreTest {
         server.enqueueJson("""{"session":${fullSessionJson(session("s1", seq = 5, lastAssistantMessageAt = 9_000))}}""")
         store.loadSessionDetail("s1")
 
+        val newer = session("s1", seq = 6, updatedAt = 11_000, lastAssistantMessageAt = 10_000, metadataVersion = 2)
+
         server.enqueue(
             MockResponse()
                 .setHeader("Content-Type", "application/json")
-                .setBody("""{"session":${fullSessionJson(session("s1", seq = 4, updatedAt = 10_000, lastAssistantMessageAt = 1_000))}}""")
+                .setBody("""{"session":${fullSessionJson(session("s1", seq = 4, updatedAt = 10_000, lastAssistantMessageAt = 1_000, metadataVersion = 2))}}""")
                 .setBodyDelay(100, TimeUnit.MILLISECONDS)
         )
+        server.enqueueJson("""{"session":${fullSessionJson(newer)}}""")
         val pending = async(start = CoroutineStart.UNDISPATCHED) { store.loadSessionDetail("s1") }
         assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
 
-        val newer = session("s1", seq = 6, updatedAt = 11_000, lastAssistantMessageAt = 10_000)
         store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(newer)))
         assertEquals(newer, pending.await())
         assertEquals(newer, store.currentDetail("s1"))

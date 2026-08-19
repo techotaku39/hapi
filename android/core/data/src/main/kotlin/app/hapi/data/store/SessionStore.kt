@@ -166,18 +166,28 @@ class SessionStore(
     override fun currentDetail(sessionId: String): Session? = _details.value[sessionId]
 
     override suspend fun loadSessionDetail(sessionId: String): Session {
-        val session = api.getSession(sessionId).session
-        var accepted = session
-        _details.update { current ->
-            val cached = current[sessionId]
-            if (cached != null && session.seq < cached.seq) {
-                accepted = cached
-                current
-            } else {
-                current + (sessionId to session)
+        var session = api.getSession(sessionId).session
+        var attempt = 0
+        while (true) {
+            var stale = false
+            var accepted = session
+            _details.update { current ->
+                val cached = current[sessionId]
+                stale = cached != null && session.seq < cached.seq
+                if (stale) {
+                    accepted = cached!!
+                    current
+                } else {
+                    current + (sessionId to session)
+                }
             }
+            if (!stale || attempt == 1) return accepted
+            attempt += 1
+            // The rejected snapshot may still contain unrelated fields that
+            // arrived before the newer SSE reply-clock patch. Retry once to
+            // recover that complete server state without creating a loop.
+            session = api.getSession(sessionId).session
         }
-        return accepted
     }
 
     override fun releaseDetail(sessionId: String) {
@@ -198,12 +208,24 @@ class SessionStore(
 
     override suspend fun refresh() {
         refreshMutex.withLock {
-            val response = api.getSessions()
+            var response = api.getSessions()
+            val cachedById = _sessions.value.associateBy { it.id }
+            if (response.sessions.any { incoming ->
+                    val cached = cachedById[incoming.id]
+                    cached != null
+                        && (incoming.lastAssistantMessageVersion ?: 0)
+                            < (cached.lastAssistantMessageVersion ?: 0)
+                }) {
+                // The rejected snapshot may omit unrelated fields that were
+                // present at its older sequence. Retry once, then merge the
+                // result against the latest cache.
+                response = api.getSessions()
+            }
             updateSummaries { list ->
-                val cachedById = list.associateBy { it.id }
+                val latestById = list.associateBy { it.id }
                 sortSessionSummaries(
                     response.sessions.map { incoming ->
-                        val cached = cachedById[incoming.id]
+                        val cached = latestById[incoming.id]
                         if (cached != null
                             && (incoming.lastAssistantMessageVersion ?: 0)
                                 < (cached.lastAssistantMessageVersion ?: 0)
