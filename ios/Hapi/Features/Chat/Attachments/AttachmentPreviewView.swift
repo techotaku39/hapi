@@ -67,9 +67,19 @@ struct AttachmentPreviewView: View {
             }
             return
         }
-        if let attachmentId = attachment.attachmentId,
-           let image = await media?.attachmentImage(for: attachmentId) {
-            phase = .ready(Image(uiImage: image))
+        if let attachmentId = attachment.attachmentId {
+            if let thumbnail = await media?.attachmentImage(for: attachmentId) {
+                phase = .ready(Image(uiImage: thumbnail))
+            } else if let original = await media?.attachmentImage(
+                for: attachmentId,
+                variant: "original"
+            ) {
+                // Durable uploads may legitimately omit their optional
+                // thumbnail; keep the image view usable via the original.
+                phase = .ready(Image(uiImage: original))
+            } else {
+                phase = .unavailable
+            }
             return
         }
         phase = .unavailable
