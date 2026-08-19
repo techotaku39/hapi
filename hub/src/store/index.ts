@@ -16,6 +16,7 @@ import { WorkGraphStore } from './workGraphStore'
 import { AttachmentStore, type StoredAttachment } from './attachments'
 
 export type {
+    NativeDevicePlatform,
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
@@ -639,6 +640,7 @@ export class Store {
                 token TEXT NOT NULL,
                 platform TEXT NOT NULL,
                 device_id TEXT NOT NULL,
+                push_key TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 UNIQUE(namespace, device_id, platform)
@@ -1183,7 +1185,7 @@ export class Store {
         `)
     }
 
-    /** PR1 durable attachment metadata. Bytes are stored outside SQLite. */
+    /** V23→V24 adds durable attachments and the iOS push envelope key. */
     private migrateFromV23ToV24(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS attachments (
@@ -1203,6 +1205,13 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_attachments_namespace_session
                 ON attachments(namespace, session_id, created_at);
         `)
+        const columns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        // Legacy branch may reach this step before fcm_devices exists;
+        // createSchema afterwards builds the table with the column included.
+        if (columns.length === 0) return
+        if (!columns.some((col) => col.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {
