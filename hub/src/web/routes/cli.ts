@@ -304,10 +304,13 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (!attachment) {
             return c.json({ error: 'Attachment not found' }, 404)
         }
+        const safeName = attachment.attachment.filename.replace(/[\r\n\0"\\]/g, '_')
         return new Response(new Uint8Array(attachment.data), {
             headers: {
                 'Content-Type': attachment.mimeType,
                 'Content-Length': String(attachment.size),
+                'Content-Disposition': `attachment; filename="${safeName}"`,
+                'Content-Security-Policy': "sandbox; default-src 'none'",
                 'Cache-Control': 'private, max-age=31536000, immutable',
                 'ETag': `"${attachment.sha256}"`,
                 'X-Hapi-Attachment-Sha256': attachment.sha256,

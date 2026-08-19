@@ -1580,7 +1580,7 @@ describe('durable attachment routes', () => {
     it('returns durable attachment bytes with integrity headers', async () => {
         const { app } = createApp(createSession(), {
             readAttachment: async () => ({
-                attachment: {} as never,
+                attachment: { filename: 'preview.webp' } as never,
                 variant: 'thumbnail' as const,
                 data: Buffer.from([7, 8, 9]),
                 mimeType: 'image/webp',
@@ -1594,10 +1594,33 @@ describe('durable attachment routes', () => {
         expect(response.status).toBe(200)
         expect(response.headers.get('content-type')).toBe('image/webp')
         expect(response.headers.get('content-length')).toBe('3')
+        expect(response.headers.get('content-disposition')).toBe('attachment; filename="preview.webp"')
+        expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'")
         expect(response.headers.get('cache-control')).toContain('immutable')
         expect(response.headers.get('etag')).toBe('"hash-1"')
         expect(response.headers.get('x-content-type-options')).toBe('nosniff')
         expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([7, 8, 9])
+    })
+
+    it('sandboxes active MIME types and sanitizes attachment filenames', async () => {
+        const { app } = createApp(createSession(), {
+            readAttachment: async () => ({
+                attachment: { filename: 'evil"\r\n.html' } as never,
+                variant: 'original' as const,
+                data: Buffer.from('<script>alert(1)</script>'),
+                mimeType: 'text/html',
+                size: 25,
+                sha256: 'html-hash'
+            })
+        })
+
+        const response = await app.request('/api/sessions/session-1/attachments/attachment-1/original')
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toBe('text/html')
+        expect(response.headers.get('content-disposition')).toBe('attachment; filename="evil___.html"')
+        expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'")
+        expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     })
 
     it('deletes a durable attachment by opaque id without invoking the legacy path RPC', async () => {

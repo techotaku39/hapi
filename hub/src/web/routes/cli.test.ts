@@ -293,7 +293,7 @@ describe('cli lazy session creation', () => {
 describe('cli durable attachment delivery', () => {
     it('serves an owned original through the authenticated CLI endpoint', async () => {
         const readAttachment = mock(async () => ({
-            attachment: {} as never,
+            attachment: { filename: 'document.pdf' } as never,
             variant: 'original' as const,
             data: Buffer.from([1, 2, 3, 4]),
             mimeType: 'application/pdf',
@@ -317,7 +317,37 @@ describe('cli durable attachment delivery', () => {
         expect(readAttachment).toHaveBeenCalledWith('session-1', 'default', 'attachment-1', 'original')
         expect(response.headers.get('content-type')).toBe('application/pdf')
         expect(response.headers.get('content-length')).toBe('4')
+        expect(response.headers.get('content-disposition')).toBe('attachment; filename="document.pdf"')
+        expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'")
         expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3, 4])
+    })
+
+    it('sandboxes active MIME types and sanitizes CLI attachment filenames', async () => {
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId: 'session-1',
+                session: {} as never,
+            }),
+            readAttachment: mock(async () => ({
+                attachment: { filename: 'evil"\r\n.html' } as never,
+                variant: 'original' as const,
+                data: Buffer.from('<script>alert(1)</script>'),
+                mimeType: 'text/html',
+                size: 25,
+                sha256: 'html-hash',
+            })),
+        } as never)
+
+        const response = await app.request('/cli/sessions/session-1/attachments/attachment-1/original', {
+            headers: authHeaders(),
+        })
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toBe('text/html')
+        expect(response.headers.get('content-disposition')).toBe('attachment; filename="evil___.html"')
+        expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'")
+        expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     })
 
     it('does not expose an attachment when the session is outside the CLI namespace', async () => {

@@ -131,16 +131,25 @@ private fun AttachmentView(attachment: ChatAttachment) {
 
     if (!hasInlinePreview) {
         var viewerOpen by remember { mutableStateOf(false) }
-        AsyncImage(
-            model = remoteThumbnailUrl,
-            imageLoader = media.imageLoader!!,
-            contentDescription = attachment.filename,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .heightIn(max = 180.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .clickable(enabled = remoteOriginalUrl != null) { viewerOpen = true },
-        )
+        var thumbnailFailed by remember(attachment.attachmentId) { mutableStateOf(false) }
+        if (thumbnailFailed) {
+            AttachmentChip(
+                attachment,
+                modifier = Modifier.clickable(enabled = remoteOriginalUrl != null) { viewerOpen = true },
+            )
+        } else {
+            AsyncImage(
+                model = remoteThumbnailUrl,
+                imageLoader = media.imageLoader!!,
+                contentDescription = attachment.filename,
+                contentScale = ContentScale.Fit,
+                onError = { thumbnailFailed = true },
+                modifier = Modifier
+                    .heightIn(max = 180.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(enabled = remoteOriginalUrl != null) { viewerOpen = true },
+            )
+        }
         if (viewerOpen && remoteOriginalUrl != null) {
             Dialog(
                 onDismissRequest = { viewerOpen = false },
@@ -189,10 +198,11 @@ private fun AttachmentView(attachment: ChatAttachment) {
 }
 
 @Composable
-private fun AttachmentChip(attachment: ChatAttachment) {
+private fun AttachmentChip(attachment: ChatAttachment, modifier: Modifier = Modifier) {
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
         shape = RoundedCornerShape(8.dp),
+        modifier = modifier,
     ) {
         Text(
             text = "${if (attachment.mimeType.startsWith("image/")) "🖼" else "📎"} ${attachment.filename}",
