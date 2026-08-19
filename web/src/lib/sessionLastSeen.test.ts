@@ -1,10 +1,19 @@
+import { createElement } from 'react'
+import { act, render } from '@testing-library/react'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import {
     getSessionLastSeenAt,
     getSessionLastSeenSnapshot,
     initializeSessionLastSeen,
+    markSessionUnread,
     markSessionSeen,
+    useSessionLastSeenVersion,
 } from './sessionLastSeen'
+
+function SessionLastSeenVersionProbe() {
+    const version = useSessionLastSeenVersion()
+    return createElement('output', { 'data-testid': 'last-seen-version' }, version)
+}
 
 describe('sessionLastSeen', () => {
     beforeEach(() => {
@@ -30,6 +39,33 @@ describe('sessionLastSeen', () => {
         markSessionSeen('session-a', 5000)
         markSessionSeen('session-a', 2000)
         expect(getSessionLastSeenAt('session-a')).toBe(5000)
+    })
+
+    it('moves the watermark behind the current activity when marking unread', () => {
+        markSessionSeen('session-a', 5000)
+
+        markSessionUnread('session-a', 5000)
+
+        expect(getSessionLastSeenAt('session-a')).toBe(4999)
+    })
+
+    it('does not change an already-unread watermark when marking unread', () => {
+        markSessionSeen('session-a', 1000)
+
+        markSessionUnread('session-a', 5000)
+
+        expect(getSessionLastSeenAt('session-a')).toBe(1000)
+    })
+
+    it('notifies same-tab consumers when the watermark changes', () => {
+        const view = render(createElement(SessionLastSeenVersionProbe))
+        const initialVersion = Number(view.getByTestId('last-seen-version').textContent)
+
+        act(() => {
+            markSessionUnread('session-a', 5000)
+        })
+
+        expect(view.getByTestId('last-seen-version')).toHaveTextContent(String(initialVersion + 1))
     })
 
     it('uses the first session list as the unread baseline', () => {

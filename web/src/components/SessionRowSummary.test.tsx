@@ -61,4 +61,37 @@ describe('SessionRowSummary background status', () => {
         expect(tooltip).toHaveTextContent('Background tasks running')
         expect(tooltip).toHaveTextContent('2 tasks running')
     })
+
+    it('refreshes unread attention when the local watermark version changes', () => {
+        const session = makeSummary({
+            active: false,
+            backgroundTaskCount: 0,
+            updatedAt: 2_000,
+        })
+        localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ [session.id]: 2_000 }))
+        const view = render(
+            <I18nProvider>
+                <SessionRowSummary
+                    session={session}
+                    showDetailedStatus={true}
+                    lastSeenVersion={0}
+                />
+            </I18nProvider>
+        )
+
+        expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument()
+
+        localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ [session.id]: 1_999 }))
+        view.rerender(
+            <I18nProvider>
+                <SessionRowSummary
+                    session={session}
+                    showDetailedStatus={true}
+                    lastSeenVersion={1}
+                />
+            </I18nProvider>
+        )
+
+        expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
+    })
 })

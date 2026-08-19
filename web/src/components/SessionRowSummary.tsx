@@ -109,6 +109,8 @@ export function SessionRowSummary(props: {
     nestedTooltips?: boolean
     /** Pass from parent when the parent owns `aria-describedby` (session list). */
     attentionTooltipId?: string
+    /** Recompute local unread attention when the session-list watermark changes. */
+    lastSeenVersion?: number
     scheduleTooltipId?: string
     className?: string
     /** Rows inside the pinned "in progress" section skip the text label (dot only). */
@@ -125,6 +127,7 @@ export function SessionRowSummary(props: {
         selected = false,
         nestedTooltips = true,
         attentionTooltipId: attentionTooltipIdProp,
+        lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
         inRunningSection = false,
@@ -142,7 +145,7 @@ export function SessionRowSummary(props: {
                 lastSeenAt: getSessionLastSeenAt(s.id),
             })
             : null,
-        [s, selected, showDetailedStatus]
+        [s, selected, showDetailedStatus, lastSeenVersion]
     )
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
     const urgentAttention = attention !== null
