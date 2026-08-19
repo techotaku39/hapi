@@ -23,7 +23,7 @@ struct SSEFixtureTests {
 
     @Test func replyClockBackwardAndNullFixtureMatchesGeneratedFold() throws {
         let data = try Data(contentsOf: Self.fixtureURL("reply-clock-versioned-backward-and-null.json"))
-        let fixture = try HapiJSON.decoder.decode(Fixture.self, from: data)
+        let fixture = try JSONDecoder().decode(Fixture.self, from: data)
         var session = fixture.initialSession
         for (patch, expectedResult) in zip(fixture.patches, fixture.expectedPatchResults) {
             let next = applySessionDetailPatch(session: session, patch: patch)
