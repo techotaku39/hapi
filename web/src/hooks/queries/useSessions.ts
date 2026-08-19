@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { SessionSummary } from '@/types/api'
+import type { SessionSummary, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
+import { mergeSessionsResponse } from '@/lib/sessionCache'
 
 export function useSessions(api: ApiClient | null): {
     sessions: SessionSummary[]
@@ -9,13 +10,16 @@ export function useSessions(api: ApiClient | null): {
     error: string | null
     refetch: () => Promise<unknown>
 } {
+    const queryClient = useQueryClient()
     const query = useQuery({
         queryKey: queryKeys.sessions,
         queryFn: async () => {
             if (!api) {
                 throw new Error('API unavailable')
             }
-            return await api.getSessions()
+            const incoming = await api.getSessions()
+            const current = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+            return mergeSessionsResponse(current, incoming)
         },
         enabled: Boolean(api),
     })

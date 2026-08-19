@@ -12,7 +12,9 @@ public protocol SessionListStoring: AnyObject {
     /// pending > recency).
     var sessions: [SessionSummary] { get }
 
-    /// `GET /api/sessions` — replaces the list wholesale. Throws on failure.
+    /// `GET /api/sessions` — refreshes membership and merges each row by its
+    /// reply-clock version so an older response cannot overwrite newer SSE
+    /// state. Throws on failure.
     func refresh() async throws
 
     /// Coalesced fire-and-forget ``refresh()`` (the web's 16 ms invalidation
@@ -118,6 +120,9 @@ public final class SessionListStore: SessionListStoring {
     @discardableResult
     public func loadSessionDetail(_ sessionId: String) async throws -> Session {
         let session = try await api.session(id: sessionId)
+        if let cached = details[sessionId], session.seq < cached.seq {
+            return cached
+        }
         details[sessionId] = session
         return session
     }
@@ -152,7 +157,16 @@ public final class SessionListStore: SessionListStoring {
         // A later-started refresh already applied fresher server truth.
         guard generation > lastAppliedRefresh else { return }
         lastAppliedRefresh = generation
-        setSessions(sortSessionSummaries(list))
+        let cachedById = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let merged = list.map { incoming in
+            guard let cached = cachedById[incoming.id],
+                  (incoming.lastAssistantMessageVersion ?? 0)
+                    < (cached.lastAssistantMessageVersion ?? 0) else {
+                return incoming
+            }
+            return cached
+        }
+        setSessions(sortSessionSummaries(merged))
     }
 
     public func scheduleRefresh() {

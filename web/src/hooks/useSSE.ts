@@ -5,7 +5,6 @@ import {
     computePendingRequests,
     computePendingRequestsCount,
     computeTodoProgress,
-    getSessionListSortTimestamp,
     isObject,
     toSessionSummary,
     toSessionSummaryMetadata
@@ -24,6 +23,11 @@ import type {
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
 import { applySessionDetailPatch } from '@/lib/sessionPatch'
+import {
+    shouldAcceptSessionRecord,
+    shouldAcceptSessionSummaryRecord,
+    sortSessionSummaries
+} from '@/lib/sessionCache'
 
 // Pure patch-application rules live in @/lib/sessionPatch (React-free, shared
 // with the fixture generator); re-exported here so hook consumers and existing
@@ -79,17 +83,11 @@ export function canApplyVersionedSummaryPatch(
  * deliver the same event out of order, so an older record must not replace a
  * newer rewind/backfill result.
  */
-export function shouldAcceptSessionRecord(current: Session | undefined, incoming: Session): boolean {
-    return current === undefined || incoming.seq >= (Number.isFinite(current.seq) ? current.seq : 0)
-}
-
-/** Same ordering gate for list summaries, which retain only the reply-clock watermark. */
-export function shouldAcceptSessionSummaryRecord(
-    current: SessionSummary | undefined,
-    incoming: Pick<Session, 'seq'>
-): boolean {
-    return current === undefined || incoming.seq >= (current.lastAssistantMessageVersion ?? 0)
-}
+export {
+    shouldAcceptSessionRecord,
+    shouldAcceptSessionSummaryRecord,
+    sortSessionSummaries
+} from '@/lib/sessionCache'
 
 type VisibilityState = 'visible' | 'hidden'
 
@@ -116,22 +114,6 @@ const RECONNECT_JITTER_MS = 500
 const RECONNECT_SLOW_AFTER_ATTEMPTS = 8
 const RECONNECT_SLOW_MAX_DELAY_MS = 300_000
 const INVALIDATION_BATCH_MS = 16
-
-export function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
-    if (Boolean(left.globalPinned) !== Boolean(right.globalPinned)) {
-        return left.globalPinned ? -1 : 1
-    }
-    if (Boolean(left.pinned) !== Boolean(right.pinned)) {
-        return left.pinned ? -1 : 1
-    }
-    if (left.active !== right.active) {
-        return left.active ? -1 : 1
-    }
-    if (left.active && left.pendingRequestsCount !== right.pendingRequestsCount) {
-        return right.pendingRequestsCount - left.pendingRequestsCount
-    }
-    return getSessionListSortTimestamp(right) - getSessionListSortTimestamp(left)
-}
 
 function isSessionRecord(value: unknown): value is Session {
     return SessionSchema.safeParse(value).success

@@ -3,12 +3,15 @@ package app.hapi.data.store
 import app.hapi.data.sse.SseSubscriptionKey
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.Dispatcher
@@ -47,6 +50,61 @@ class SessionStoreTest {
         )
         store.refresh()
         assertEquals(listOf("pinned", "active", "old-inactive"), store.sessions.value.map { it.id })
+    }
+
+    @Test
+    fun `delayed refresh cannot overwrite a newer reply-clock patch`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("reply", updatedAt = 9_000, lastAssistantMessageAt = 9_000, lastAssistantMessageVersion = 1),
+                summary("other", updatedAt = 2_000),
+            )
+        )
+        store.refresh()
+
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    sessionsResponseJson(
+                        summary("reply", updatedAt = 9_000, lastAssistantMessageAt = 1_000, lastAssistantMessageVersion = 1),
+                        summary("other", updatedAt = 2_000),
+                    )
+                )
+                .setBodyDelay(100, TimeUnit.MILLISECONDS)
+        )
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { store.refresh() }
+        assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
+
+        store.applySessionEvent(
+            globalScope,
+            sessionUpdatedEvent("reply", """{"lastAssistantMessageAt":10000,"lastAssistantMessageVersion":2}"""),
+        )
+        pending.await()
+
+        assertEquals(listOf("reply", "other"), store.sessions.value.map { it.id })
+        assertEquals(10_000L, store.sessions.value.first().lastAssistantMessageAt)
+        assertEquals(2L, store.sessions.value.first().lastAssistantMessageVersion)
+    }
+
+    @Test
+    fun `delayed detail response cannot overwrite a newer full-session event`() = runStoreTest { store, server ->
+        server.enqueueJson("""{"session":${fullSessionJson(session("s1", seq = 5, lastAssistantMessageAt = 9_000))}}""")
+        store.loadSessionDetail("s1")
+
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"session":${fullSessionJson(session("s1", seq = 4, updatedAt = 10_000, lastAssistantMessageAt = 1_000))}}""")
+                .setBodyDelay(100, TimeUnit.MILLISECONDS)
+        )
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { store.loadSessionDetail("s1") }
+        assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
+
+        val newer = session("s1", seq = 6, updatedAt = 11_000, lastAssistantMessageAt = 10_000)
+        store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(newer)))
+        assertEquals(newer, pending.await())
+        assertEquals(newer, store.currentDetail("s1"))
     }
 
     @Test

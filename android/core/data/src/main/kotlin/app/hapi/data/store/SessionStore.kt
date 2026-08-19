@@ -40,7 +40,7 @@ interface SessionListStore {
     /** Sorted with `sortSessionSummaries` (globalPinned > pinned > active > pending > recency). */
     val sessions: StateFlow<List<SessionSummary>>
 
-    /** `GET /api/sessions` — replaces the list wholesale. Throws on failure. */
+    /** `GET /api/sessions` — refreshes membership and merges reply-clock versions. Throws on failure. */
     suspend fun refresh()
 
     /** Coalesced fire-and-forget [refresh] (the web's 16 ms invalidation batch). */
@@ -167,8 +167,17 @@ class SessionStore(
 
     override suspend fun loadSessionDetail(sessionId: String): Session {
         val session = api.getSession(sessionId).session
-        _details.update { it + (sessionId to session) }
-        return session
+        var accepted = session
+        _details.update { current ->
+            val cached = current[sessionId]
+            if (cached != null && session.seq < cached.seq) {
+                accepted = cached
+                current
+            } else {
+                current + (sessionId to session)
+            }
+        }
+        return accepted
     }
 
     override fun releaseDetail(sessionId: String) {
@@ -190,7 +199,22 @@ class SessionStore(
     override suspend fun refresh() {
         refreshMutex.withLock {
             val response = api.getSessions()
-            updateSummaries { sortSessionSummaries(response.sessions) }
+            updateSummaries { list ->
+                val cachedById = list.associateBy { it.id }
+                sortSessionSummaries(
+                    response.sessions.map { incoming ->
+                        val cached = cachedById[incoming.id]
+                        if (cached != null
+                            && (incoming.lastAssistantMessageVersion ?: 0)
+                                < (cached.lastAssistantMessageVersion ?: 0)
+                        ) {
+                            cached
+                        } else {
+                            incoming
+                        }
+                    }
+                )
+            }
         }
     }
 

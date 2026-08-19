@@ -37,6 +37,53 @@ struct SessionListStoreTests {
         #expect(store.sessions.map(\.id) == ["pinned", "active", "old-inactive"])
     }
 
+    @Test func delayedRefreshCannotOverwriteANewerReplyClockPatch() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("reply", updatedAt: 9_000, lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 1),
+            storeSummary("other", updatedAt: 2_000)
+        ))
+        try await store.refresh()
+
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("reply", updatedAt: 9_000, lastAssistantMessageAt: 1_000, lastAssistantMessageVersion: 1),
+            storeSummary("other", updatedAt: 2_000)
+        ))
+        await performer.setDelay(nanoseconds: 100_000_000)
+        let pending = Task { try await store.refresh() }
+        try await Task.sleep(for: .milliseconds(10))
+
+        store.applySessionEvent(try sessionUpdatedEvent(
+            "reply",
+            dataJSON: "{\"lastAssistantMessageAt\":10000,\"lastAssistantMessageVersion\":2}"
+        ))
+        try await pending.value
+
+        #expect(store.sessions.map(\.id) == ["reply", "other"])
+        #expect(store.sessions.first?.lastAssistantMessageAt == 10_000)
+        #expect(store.sessions.first?.lastAssistantMessageVersion == 2)
+    }
+
+    @Test func delayedDetailResponseCannotOverwriteANewerFullSessionEvent() async throws {
+        let (performer, store) = try makeStore()
+        let current = storeSession("s1", seq: 5, lastAssistantMessageAt: 9_000)
+        await performer.enqueue(json: try sessionResponseJSON(current))
+        _ = try await store.loadSessionDetail("s1")
+
+        let stale = storeSession("s1", seq: 4, updatedAt: 10_000, lastAssistantMessageAt: 1_000)
+        await performer.enqueue(json: try sessionResponseJSON(stale))
+        await performer.setDelay(nanoseconds: 100_000_000)
+        let pending = Task { try await store.loadSessionDetail("s1") }
+        try await Task.sleep(for: .milliseconds(10))
+
+        let newer = storeSession("s1", seq: 6, updatedAt: 11_000, lastAssistantMessageAt: 10_000)
+        store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: fullSessionJSON(newer)))
+        let accepted = try await pending.value
+
+        #expect(accepted == newer)
+        #expect(store.detail(for: "s1") == newer)
+    }
+
     @Test func refreshFailureThrowsAndKeepsPreviousState() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1")))
