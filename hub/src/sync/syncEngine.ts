@@ -61,6 +61,7 @@ import {
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { rehomeMessageAttachments } from './messageAttachmentTransfer'
+import { ScheduledAttachmentValidationError } from './scheduledAttachmentValidation'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -1272,7 +1273,28 @@ export class SyncEngine {
             attachments,
         )
         if (!checked.ok) {
-            throw new Error(`Invalid scheduled attachment: ${checked.error}`)
+            throw new ScheduledAttachmentValidationError(`Invalid scheduled attachment: ${checked.error}`)
+        }
+        await this.assertScheduledAttachmentsWithinLimits(checked.attachments)
+    }
+
+    private async assertScheduledAttachmentsWithinLimits(
+        attachments: AttachmentMetadata[],
+    ): Promise<void> {
+        const uniquePaths = new Set(attachments.map((attachment) => attachment.path))
+        if (uniquePaths.size !== attachments.length) {
+            throw new ScheduledAttachmentValidationError('Duplicate scheduled attachment')
+        }
+
+        const { loadScratchlistAttachmentLimitsFromEnv } = await import('../config/scratchlistAttachmentLimits')
+        const { validateScratchlistAttachmentsForWrite } = await import('../scratchlistAttachments/validate')
+        const validation = validateScratchlistAttachmentsForWrite(
+            attachments,
+            loadScratchlistAttachmentLimitsFromEnv(),
+            0,
+        )
+        if (!validation.ok) {
+            throw new ScheduledAttachmentValidationError(`Invalid scheduled attachment: ${validation.error}`)
         }
     }
 
@@ -1294,8 +1316,9 @@ export class SyncEngine {
             attachments,
         )
         if (!checked.ok) {
-            throw new Error(`Invalid scheduled attachment: ${checked.error}`)
+            throw new ScheduledAttachmentValidationError(`Invalid scheduled attachment: ${checked.error}`)
         }
+        await this.assertScheduledAttachmentsWithinLimits(checked.attachments)
 
         const { getHapiHomeDir, readScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
         const materialized: AttachmentMetadata[] = []

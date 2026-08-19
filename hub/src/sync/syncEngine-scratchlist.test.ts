@@ -7,6 +7,7 @@ import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import type { EventPublisher } from './eventPublisher'
 import { SessionCache } from './sessionCache'
+import { ScheduledAttachmentValidationError } from './scheduledAttachmentValidation'
 import { SyncEngine } from './syncEngine'
 
 /**
@@ -284,6 +285,93 @@ describe('SyncEngine scratchlist mutations emit session-updated patches', () => 
             expect(await readScratchlistAttachmentFile(hapiHome, attachment.path)).not.toBeNull()
             expect(await engine.deleteScratchlistEntry(session.id, 'immediate-staged-draft')).toBe(true)
             expect(await readScratchlistAttachmentFile(hapiHome, attachment.path)).toBeNull()
+        } finally {
+            engine.stop()
+            store.close()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
+    it('rejects duplicate scheduled Hub attachments before queueing the message', async () => {
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-duplicate-scheduled-attachment-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+        )
+        try {
+            const session = engine.getOrCreateSession(
+                'duplicate-scheduled-attachment',
+                { path: '/tmp', host: 'localhost', flavor: 'codex' },
+                null,
+                'default',
+            )
+            const { writeScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                session.id,
+                'duplicate.png',
+                'image/png',
+                Buffer.from('duplicate'),
+                '22222222-2222-4222-8222-222222222222',
+            )
+
+            await expect(engine.sendMessage(session.id, {
+                text: 'duplicate attachment',
+                localId: 'duplicate-scheduled-message',
+                scheduledAt: Date.now() + 60_000,
+                attachments: [attachment, attachment],
+            })).rejects.toBeInstanceOf(ScheduledAttachmentValidationError)
+            expect(store.messages.getUninvokedLocalMessages(session.id)).toHaveLength(0)
+        } finally {
+            engine.stop()
+            store.close()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
+    it('rejects a missing scheduled Hub attachment with a typed validation error', async () => {
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-missing-scheduled-attachment-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+        )
+        try {
+            const session = engine.getOrCreateSession(
+                'missing-scheduled-attachment',
+                { path: '/tmp', host: 'localhost', flavor: 'codex' },
+                null,
+                'default',
+            )
+            const attachment = {
+                id: '33333333-3333-4333-8333-333333333333',
+                filename: 'missing.png',
+                mimeType: 'image/png',
+                size: 10,
+                path: `hapi-hub:scratchlist/default/${session.id}/33333333-3333-4333-8333-333333333333-missing.png`,
+            }
+
+            await expect(engine.sendMessage(session.id, {
+                text: 'missing attachment',
+                localId: 'missing-scheduled-message',
+                scheduledAt: Date.now() + 60_000,
+                attachments: [attachment],
+            })).rejects.toBeInstanceOf(ScheduledAttachmentValidationError)
+            expect(store.messages.getUninvokedLocalMessages(session.id)).toHaveLength(0)
         } finally {
             engine.stop()
             store.close()
