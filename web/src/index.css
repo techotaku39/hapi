@@ -488,6 +488,15 @@ html:has(.chat-scroll-y) #root {
     }
 }
 
+/* Hybrid devices may keep a fine primary pointer while also exposing touch. */
+@media (any-pointer: coarse) {
+    .sidebar-hide-button {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
 .sidebar-resize-handle[data-dragging] .sidebar-hide-button {
     transform: translate(-50%, -50%) scale(0.85);
     opacity: 0;
