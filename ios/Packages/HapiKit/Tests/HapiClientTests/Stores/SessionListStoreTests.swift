@@ -74,6 +74,40 @@ struct SessionListStoreTests {
         #expect(row.nextScheduledAt == 999)
     }
 
+    @Test func olderFullSessionEventCannotRewindReplyClockCaches() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("s1", updatedAt: 9_000, lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 5)
+        ))
+        try await store.refresh()
+        let current = storeSession("s1", seq: 5, updatedAt: 9_000, lastAssistantMessageAt: 9_000)
+        store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: fullSessionJSON(current)))
+
+        let stale = storeSession("s1", seq: 4, updatedAt: 10_000, lastAssistantMessageAt: 1_000)
+        store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: fullSessionJSON(stale)))
+
+        #expect(store.detail(for: "s1") == current)
+        #expect(store.sessions.first?.lastAssistantMessageAt == 9_000)
+        #expect(store.sessions.first?.lastAssistantMessageVersion == 5)
+    }
+
+    @Test func replyPatchUpdatesTimestampAndListOrderingWithoutChangingActivityClock() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("older-reply", updatedAt: 9_000, lastAssistantMessageAt: 1_000, lastAssistantMessageVersion: 1),
+            storeSummary("newer-reply", updatedAt: 1_000, lastAssistantMessageAt: 2_000, lastAssistantMessageVersion: 1)
+        ))
+        try await store.refresh()
+        #expect(store.sessions.map(\.id) == ["newer-reply", "older-reply"])
+
+        store.applySessionEvent(try sessionUpdatedEvent(
+            "older-reply",
+            dataJSON: "{\"lastAssistantMessageAt\":3000,\"lastAssistantMessageVersion\":2}"
+        ))
+        #expect(store.sessions.map(\.id) == ["older-reply", "newer-reply"])
+        #expect(store.sessions.first?.updatedAt == 9_000)
+    }
+
     @Test func fullSessionEventWithMismatchedIdFallsBackToListRefetch() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1", updatedAt: 100)))

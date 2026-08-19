@@ -362,7 +362,10 @@ class SessionStore(
         // parse, then the REST fallback.
         val full = parseFullSession(data)?.takeIf { it.id == sessionId }
         if (full != null) {
-            _details.update { it + (sessionId to full) }
+            val currentDetail = _details.value[sessionId]
+            if (currentDetail == null || full.seq >= currentDetail.seq) {
+                _details.update { it + (sessionId to full) }
+            }
             upsertSummary(full)
             return
         }
@@ -409,6 +412,9 @@ class SessionStore(
         updateSummaries { list ->
             val index = list.indexOfFirst { it.id == session.id }
             val existing = if (index >= 0) list[index] else null
+            if (existing != null && session.seq < (existing.lastAssistantMessageVersion ?: 0)) {
+                return@updateSummaries list
+            }
             // The projection cannot derive the hub-computed scheduled-message
             // fields — carry them over from the previous row (web
             // `upsertSessionSummary`).
@@ -446,7 +452,12 @@ class SessionStore(
             val next = SummaryPatching.applySessionSummaryPatch(current, patch)
             // Keep-alive noise: activeAt-only movement keeps the previous
             // list identity (no emission, no re-sort, no snapshot write).
-            if (SummaryPatching.isRenderIrrelevantPatch(current, next)) return@updateSummaries list
+            if (
+                SummaryPatching.isRenderIrrelevantPatch(current, next)
+                && current.lastAssistantMessageVersion == next.lastAssistantMessageVersion
+            ) {
+                return@updateSummaries list
+            }
             sortSessionSummaries(list.toMutableList().also { it[index] = next })
         }
         return present

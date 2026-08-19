@@ -82,6 +82,47 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `older full-session event cannot rewind reply clock caches`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("s1", updatedAt = 9_000, lastAssistantMessageAt = 9_000, lastAssistantMessageVersion = 5)
+            )
+        )
+        store.refresh()
+        val current = session("s1", seq = 5, updatedAt = 9_000, lastAssistantMessageAt = 9_000)
+        store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(current)))
+
+        val stale = session("s1", seq = 4, updatedAt = 10_000, lastAssistantMessageAt = 1_000)
+        store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(stale)))
+
+        assertEquals(current, store.currentDetail("s1"))
+        assertEquals(9_000L, store.sessions.value.single().lastAssistantMessageAt)
+        assertEquals(5L, store.sessions.value.single().lastAssistantMessageVersion)
+    }
+
+    @Test
+    fun `reply patch updates timestamp and list ordering without changing activity clock`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("older-reply", active = false, updatedAt = 9_000, lastAssistantMessageAt = 1_000, lastAssistantMessageVersion = 1),
+                summary("newer-reply", active = false, updatedAt = 1_000, lastAssistantMessageAt = 2_000, lastAssistantMessageVersion = 1),
+            )
+        )
+        store.refresh()
+        assertEquals(listOf("newer-reply", "older-reply"), store.sessions.value.map { it.id })
+
+        store.applySessionEvent(
+            globalScope,
+            sessionUpdatedEvent(
+                "older-reply",
+                """{"lastAssistantMessageAt":3000,"lastAssistantMessageVersion":2}""",
+            ),
+        )
+        assertEquals(listOf("older-reply", "newer-reply"), store.sessions.value.map { it.id })
+        assertEquals(9_000L, store.sessions.value.first().updatedAt)
+    }
+
+    @Test
     fun `full-session event with mismatched id falls back to list refetch`() = runStoreTest { store, server ->
         server.enqueueJson(sessionsResponseJson(summary("s1", updatedAt = 100)))
         store.refresh()

@@ -245,7 +245,9 @@ public final class SessionListStore: SessionListStoring {
         // already encodes the session-vs-strict-patch discrimination.
         switch data {
         case .session(let full) where full.id == sessionId:
-            details[full.id] = full
+            if details[full.id].map({ full.seq >= $0.seq }) ?? true {
+                details[full.id] = full
+            }
             upsertSummary(full)
         case .patch(let patch) where patch != SessionPatch():
             patchDetail(sessionId: sessionId, patch: patch)
@@ -275,6 +277,9 @@ public final class SessionListStore: SessionListStoring {
         var list = sessions
         let index = list.firstIndex { $0.id == session.id }
         let existing = index.map { list[$0] }
+        if let existing, session.seq < (existing.lastAssistantMessageVersion ?? 0) {
+            return
+        }
         // The projection cannot derive the hub-computed scheduled-message
         // fields — carry them over from the previous row (web
         // `upsertSessionSummary`).
@@ -309,7 +314,8 @@ public final class SessionListStore: SessionListStoring {
         let next = SummaryPatching.applySessionSummaryPatch(current, patch)
         // Keep-alive noise: activeAt-only movement keeps the previous list
         // (no revision bump, no re-sort, no snapshot write).
-        if SummaryPatching.isRenderIrrelevantPatch(current: current, next: next) {
+        if SummaryPatching.isRenderIrrelevantPatch(current: current, next: next)
+            && current.lastAssistantMessageVersion == next.lastAssistantMessageVersion {
             return true
         }
         var list = sessions
