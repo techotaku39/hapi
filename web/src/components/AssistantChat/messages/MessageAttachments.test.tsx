@@ -59,4 +59,28 @@ describe('MessageAttachments', () => {
         await waitFor(() => expect(fetchAttachmentBlob).toHaveBeenCalledTimes(2))
         expect(fetchAttachmentBlob).toHaveBeenNthCalledWith(2, 'session-1', 'attachment-1', 'original')
     })
+
+    it('does not create an original object URL after unmount while loading', async () => {
+        let resolveOriginal!: (blob: Blob) => void
+        const originalPromise = new Promise<Blob>(resolve => {
+            resolveOriginal = resolve
+        })
+        const createObjectURL = vi.fn(() => 'blob:original')
+        const revokeObjectURL = vi.fn()
+        const fetchAttachmentBlob = vi.fn()
+            .mockRejectedValueOnce(new Error('thumbnail unavailable'))
+            .mockReturnValueOnce(originalPromise)
+        vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+
+        const view = renderAttachments(fetchAttachmentBlob)
+
+        await waitFor(() => expect(fetchAttachmentBlob).toHaveBeenCalledTimes(1))
+        fireEvent.click(screen.getByRole('button', { name: /Load original/ }))
+        await waitFor(() => expect(fetchAttachmentBlob).toHaveBeenCalledTimes(2))
+
+        view.unmount()
+        resolveOriginal(new Blob(['original'], { type: 'image/png' }))
+
+        await waitFor(() => expect(createObjectURL).not.toHaveBeenCalled())
+    })
 })

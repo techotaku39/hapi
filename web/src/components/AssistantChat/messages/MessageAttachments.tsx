@@ -21,8 +21,10 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
     const [originalFailed, setOriginalFailed] = useState(false)
     const thumbnailUrlRef = useRef<string | undefined>(undefined)
     const originalUrlRef = useRef<string | undefined>(undefined)
+    const lifecycleRef = useRef(0)
 
     useEffect(() => {
+        lifecycleRef.current += 1
         let cancelled = false
         setThumbnailUrl(attachment.previewUrl ?? '')
         setPreviewFailed(false)
@@ -44,6 +46,7 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
         }
         return () => {
             cancelled = true
+            lifecycleRef.current += 1
             if (thumbnailUrlRef.current) URL.revokeObjectURL(thumbnailUrlRef.current)
             if (originalUrlRef.current) URL.revokeObjectURL(originalUrlRef.current)
             thumbnailUrlRef.current = undefined
@@ -54,9 +57,15 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
     const openOriginal = async (): Promise<string | undefined> => {
         if (!attachment.attachmentId) return undefined
         if (originalUrlRef.current) return originalUrlRef.current
+        const lifecycle = lifecycleRef.current
         try {
             const blob = await props.api.fetchAttachmentBlob(props.sessionId, attachment.attachmentId, 'original')
+            if (lifecycle !== lifecycleRef.current) return undefined
             const url = URL.createObjectURL(blob)
+            if (lifecycle !== lifecycleRef.current) {
+                URL.revokeObjectURL(url)
+                return undefined
+            }
             originalUrlRef.current = url
             return url
         } catch {
@@ -68,7 +77,9 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
         if (originalLoading) return
         setOriginalLoading(true)
         setOriginalFailed(false)
+        const lifecycle = lifecycleRef.current
         const url = await openOriginal()
+        if (lifecycle !== lifecycleRef.current) return
         if (url) {
             setThumbnailUrl(url)
             setPreviewFailed(false)

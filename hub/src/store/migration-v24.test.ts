@@ -13,15 +13,15 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v23 to v24', () => {
-    it('adds the durable attachments table automatically', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-'))
+describe('schema migration v24 to v25', () => {
+    it('adds the durable attachments table when upgrading a V24 database', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
         new Store(dbPath, { attachmentsRoot: join(dir, 'attachments') }).close()
         const legacy = new Database(dbPath)
-        legacy.exec('DROP TABLE IF EXISTS attachments; PRAGMA user_version = 23;')
+        legacy.exec('DROP TABLE IF EXISTS attachments; PRAGMA user_version = 24;')
         legacy.close()
 
         const migrated = new Store(dbPath, { attachmentsRoot: join(dir, 'attachments') })
@@ -32,7 +32,7 @@ describe('schema migration v23 to v24', () => {
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
 
         expect(table?.name).toBe('attachments')
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(25)
         migrated.close()
     })
 
@@ -57,7 +57,7 @@ describe('schema migration v23 to v24', () => {
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
 
         expect(columns.some((col) => col.name === 'push_key')).toBe(true)
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(25)
 
         // Existing Android rows survive with a NULL push key.
         const devices = migrated.fcm.getDevicesByNamespace('default')

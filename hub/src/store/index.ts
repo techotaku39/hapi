@@ -57,7 +57,7 @@ function sameMessageIds(left: Set<string>, right: Set<string>): boolean {
     return true
 }
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -497,6 +497,7 @@ export class Store {
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
         })
 
         if (currentVersion === 0) {
@@ -1185,8 +1186,19 @@ export class Store {
         `)
     }
 
-    /** V23→V24 adds durable attachments and the iOS push envelope key. */
+    /** V23→V24 adds the iOS push envelope key. */
     private migrateFromV23ToV24(): void {
+        const columns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        // Legacy branch may reach this step before fcm_devices exists;
+        // createSchema afterwards builds the table with the column included.
+        if (columns.length === 0) return
+        if (!columns.some((col) => col.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
+    }
+
+    /** V24→V25 adds durable attachment metadata and blob references. */
+    private migrateFromV24ToV25(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS attachments (
                 id TEXT PRIMARY KEY,
@@ -1205,13 +1217,6 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_attachments_namespace_session
                 ON attachments(namespace, session_id, created_at);
         `)
-        const columns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
-        // Legacy branch may reach this step before fcm_devices exists;
-        // createSchema afterwards builds the table with the column included.
-        if (columns.length === 0) return
-        if (!columns.some((col) => col.name === 'push_key')) {
-            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
-        }
     }
 
     private getSessionColumnNames(): Set<string> {
