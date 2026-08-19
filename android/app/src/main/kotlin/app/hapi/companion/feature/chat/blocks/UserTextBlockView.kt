@@ -164,7 +164,7 @@ private fun AttachmentView(attachment: ChatAttachment) {
                 ) {
                     AsyncImage(
                         model = remoteOriginalUrl,
-                        imageLoader = media.imageLoader,
+                        imageLoader = media.imageLoader!!,
                         contentDescription = attachment.filename,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier.fillMaxSize().padding(8.dp),
