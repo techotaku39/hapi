@@ -350,6 +350,33 @@ describe('cli durable attachment delivery', () => {
         expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     })
 
+    it('encodes Unicode attachment filenames for CLI download headers', async () => {
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId: 'session-1',
+                session: {} as never,
+            }),
+            readAttachment: mock(async () => ({
+                attachment: { filename: '截图😀.png' } as never,
+                variant: 'original' as const,
+                data: Buffer.from([1]),
+                mimeType: 'image/png',
+                size: 1,
+                sha256: 'unicode-hash',
+            })),
+        } as never)
+
+        const response = await app.request('/cli/sessions/session-1/attachments/attachment-1/original', {
+            headers: authHeaders(),
+        })
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-disposition')).toBe(
+            "attachment; filename=\"____.png\"; filename*=UTF-8''%E6%88%AA%E5%9B%BE%F0%9F%98%80.png"
+        )
+    })
+
     it('does not expose an attachment when the session is outside the CLI namespace', async () => {
         const readAttachment = mock(async () => null)
         const app = createApp({

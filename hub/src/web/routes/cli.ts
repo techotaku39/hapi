@@ -13,6 +13,7 @@ import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { SessionIdentityConflictError } from '../../store/sessions'
+import { attachmentContentDisposition } from '../attachmentHeaders'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
@@ -304,12 +305,11 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (!attachment) {
             return c.json({ error: 'Attachment not found' }, 404)
         }
-        const safeName = attachment.attachment.filename.replace(/[\r\n\0"\\]/g, '_')
         return new Response(new Uint8Array(attachment.data), {
             headers: {
                 'Content-Type': attachment.mimeType,
                 'Content-Length': String(attachment.size),
-                'Content-Disposition': `attachment; filename="${safeName}"`,
+                'Content-Disposition': attachmentContentDisposition(attachment.attachment.filename),
                 'Content-Security-Policy': "sandbox; default-src 'none'",
                 'Cache-Control': 'private, max-age=31536000, immutable',
                 'ETag': `"${attachment.sha256}"`,

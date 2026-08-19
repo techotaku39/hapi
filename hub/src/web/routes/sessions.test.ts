@@ -1623,6 +1623,26 @@ describe('durable attachment routes', () => {
         expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     })
 
+    it('encodes Unicode attachment filenames for API download headers', async () => {
+        const { app } = createApp(createSession(), {
+            readAttachment: async () => ({
+                attachment: { filename: '截图😀.png' } as never,
+                variant: 'original' as const,
+                data: Buffer.from([1]),
+                mimeType: 'image/png',
+                size: 1,
+                sha256: 'unicode-hash'
+            })
+        })
+
+        const response = await app.request('/api/sessions/session-1/attachments/attachment-1/original')
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-disposition')).toBe(
+            "attachment; filename=\"____.png\"; filename*=UTF-8''%E6%88%AA%E5%9B%BE%F0%9F%98%80.png"
+        )
+    })
+
     it('deletes a durable attachment by opaque id without invoking the legacy path RPC', async () => {
         const durableCalls: string[][] = []
         const legacyCalls: string[][] = []

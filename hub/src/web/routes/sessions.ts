@@ -32,6 +32,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
+import { attachmentContentDisposition } from '../attachmentHeaders'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -373,12 +374,11 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Attachment not found' }, 404)
         }
 
-        const safeName = attachment.attachment.filename.replace(/[\r\n\0"\\]/g, '_')
         return new Response(new Uint8Array(attachment.data), {
             headers: {
                 'Content-Type': attachment.mimeType,
                 'Content-Length': String(attachment.size),
-                'Content-Disposition': `attachment; filename="${safeName}"`,
+                'Content-Disposition': attachmentContentDisposition(attachment.attachment.filename),
                 'Content-Security-Policy': "sandbox; default-src 'none'",
                 'Cache-Control': 'private, max-age=31536000, immutable',
                 'ETag': `"${attachment.sha256}"`,
