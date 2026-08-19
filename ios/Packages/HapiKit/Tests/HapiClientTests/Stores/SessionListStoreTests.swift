@@ -269,7 +269,9 @@ struct SessionListStoreTests {
         let store = SessionListStore(api: api, refreshBatch: .milliseconds(1))
 
         await performer.setRoutes([
-            (pathPrefix: "/api/sessions", json: try sessionsResponseJSON(storeSummary("s1", updatedAt: 100))),
+            (pathPrefix: "/api/sessions", json: try sessionsResponseJSON(
+                storeSummary("s1", updatedAt: 100, lastAssistantMessageVersion: 1)
+            )),
         ])
         try await store.refresh()
         store.applySessionEvent(
@@ -278,7 +280,9 @@ struct SessionListStoreTests {
 
         await performer.setRoutes([
             (pathPrefix: "/api/sessions/s1", json: try sessionResponseJSON(storeSession("s1", updatedAt: 900))),
-            (pathPrefix: "/api/sessions", json: try sessionsResponseJSON(storeSummary("s1", updatedAt: 900))),
+            (pathPrefix: "/api/sessions", json: try sessionsResponseJSON(
+                storeSummary("s1", updatedAt: 900, lastAssistantMessageVersion: 1)
+            )),
         ])
         // `data` present but neither a Session nor a strict patch.
         store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: "{\"unknownKey\":1}"))
