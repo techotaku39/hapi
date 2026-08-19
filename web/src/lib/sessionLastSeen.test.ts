@@ -4,6 +4,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 import {
     getSessionLastSeenAt,
     getSessionLastSeenSnapshot,
+    getSessionManualUnreadAt,
     initializeSessionLastSeen,
     markSessionUnread,
     markSessionSeen,
@@ -47,6 +48,7 @@ describe('sessionLastSeen', () => {
         markSessionUnread('session-a', 5000)
 
         expect(getSessionLastSeenAt('session-a')).toBe(4999)
+        expect(getSessionManualUnreadAt('session-a')).toBe(5000)
     })
 
     it('does not change an already-unread watermark when marking unread', () => {
@@ -55,6 +57,16 @@ describe('sessionLastSeen', () => {
         markSessionUnread('session-a', 5000)
 
         expect(getSessionLastSeenAt('session-a')).toBe(1000)
+        expect(getSessionManualUnreadAt('session-a')).toBe(5000)
+    })
+
+    it('clears the explicit unread marker when the session is seen', () => {
+        markSessionUnread('session-a', 5000)
+        expect(getSessionManualUnreadAt('session-a')).toBe(5000)
+
+        markSessionSeen('session-a', 5000)
+
+        expect(getSessionManualUnreadAt('session-a')).toBeNull()
     })
 
     it('notifies same-tab consumers when the watermark changes', () => {

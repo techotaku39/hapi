@@ -1,12 +1,14 @@
 import { useSyncExternalStore } from 'react'
 
 const STORAGE_KEY = 'hapi.sessionLastSeen.v1'
+const MANUAL_UNREAD_KEY = 'hapi.sessionManualUnread.v1'
 const BASELINE_KEY = 'hapi.sessionLastSeenBaseline.v1'
 const CHANGE_EVENT = 'hapi.sessionLastSeen.changed'
 
 let changeVersion = 0
 
 type LastSeenStore = Record<string, number>
+type ManualUnreadStore = Record<string, number>
 
 function getLocalStorage(): Storage | null {
     if (typeof window === 'undefined') {
@@ -40,6 +42,27 @@ function readStore(): LastSeenStore {
     }
 }
 
+function readManualUnreadStore(): ManualUnreadStore {
+    const storage = getLocalStorage()
+    if (!storage) {
+        return {}
+    }
+
+    try {
+        const raw = storage.getItem(MANUAL_UNREAD_KEY)
+        if (!raw) {
+            return {}
+        }
+        const parsed: unknown = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object') {
+            return {}
+        }
+        return parsed as ManualUnreadStore
+    } catch {
+        return {}
+    }
+}
+
 function writeStore(store: LastSeenStore): boolean {
     const storage = getLocalStorage()
     if (!storage) {
@@ -47,6 +70,20 @@ function writeStore(store: LastSeenStore): boolean {
     }
     try {
         storage.setItem(STORAGE_KEY, JSON.stringify(store))
+        return true
+    } catch {
+        // Ignore storage errors
+        return false
+    }
+}
+
+function writeManualUnreadStore(store: ManualUnreadStore): boolean {
+    const storage = getLocalStorage()
+    if (!storage) {
+        return false
+    }
+    try {
+        storage.setItem(MANUAL_UNREAD_KEY, JSON.stringify(store))
         return true
     } catch {
         // Ignore storage errors
@@ -73,7 +110,7 @@ function getStoreChangeVersion(): number {
     return changeVersion
 }
 
-/** Re-render consumers when a same-tab read watermark changes. */
+/** Re-render consumers when same-tab read-state changes. */
 export function useSessionLastSeenVersion(): number {
     return useSyncExternalStore(
         subscribeToStoreChanges,
@@ -84,6 +121,12 @@ export function useSessionLastSeenVersion(): number {
 
 export function getSessionLastSeenAt(sessionId: string): number {
     return readStore()[sessionId] ?? 0
+}
+
+/** Timestamp of the activity the operator explicitly marked unread, if any. */
+export function getSessionManualUnreadAt(sessionId: string): number | null {
+    const value = readManualUnreadStore()[sessionId]
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 /** One localStorage read/parse for bulk filters (e.g. unread-only lens). */
@@ -118,31 +161,54 @@ export function markSessionSeen(sessionId: string, seenAt: number): void {
         return
     }
     const store = readStore()
+    const manualUnreadStore = readManualUnreadStore()
     const nextSeenAt = Math.max(store[sessionId] ?? 0, seenAt)
-    if (store[sessionId] === nextSeenAt) {
+    const seenChanged = store[sessionId] !== nextSeenAt
+    const manualUnreadChanged = Object.prototype.hasOwnProperty.call(manualUnreadStore, sessionId)
+    if (!seenChanged && !manualUnreadChanged) {
         return
     }
-    store[sessionId] = nextSeenAt
-    if (writeStore(store)) {
+
+    if (seenChanged) {
+        store[sessionId] = nextSeenAt
+    }
+    if (manualUnreadChanged) {
+        delete manualUnreadStore[sessionId]
+    }
+
+    const seenWritten = !seenChanged || writeStore(store)
+    const manualUnreadWritten = !manualUnreadChanged || writeManualUnreadStore(manualUnreadStore)
+    if (seenWritten || manualUnreadWritten) {
         notifyStoreChanged()
     }
 }
 
-/** Move the local watermark just behind the current activity. */
+/** Move the local watermark just behind the current activity and remember the explicit action. */
 export function markSessionUnread(sessionId: string, updatedAt: number): void {
     if (!sessionId || !Number.isFinite(updatedAt)) {
         return
     }
 
     const store = readStore()
+    const manualUnreadStore = readManualUnreadStore()
     const unreadBefore = updatedAt - 1
     const currentSeenAt = store[sessionId]
-    if (typeof currentSeenAt === 'number' && currentSeenAt <= unreadBefore) {
+    const seenChanged = !(typeof currentSeenAt === 'number' && currentSeenAt <= unreadBefore)
+    const manualUnreadChanged = manualUnreadStore[sessionId] !== updatedAt
+    if (!seenChanged && !manualUnreadChanged) {
         return
     }
 
-    store[sessionId] = unreadBefore
-    if (writeStore(store)) {
+    if (seenChanged) {
+        store[sessionId] = unreadBefore
+    }
+    if (manualUnreadChanged) {
+        manualUnreadStore[sessionId] = updatedAt
+    }
+
+    const seenWritten = !seenChanged || writeStore(store)
+    const manualUnreadWritten = !manualUnreadChanged || writeManualUnreadStore(manualUnreadStore)
+    if (seenWritten || manualUnreadWritten) {
         notifyStoreChanged()
     }
 }

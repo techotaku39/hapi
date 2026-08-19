@@ -16,10 +16,16 @@ export function sessionIsUnread(
 
 export function classifySessionAttention(
     summary: SessionSummary,
-    options: { selected: boolean; lastSeenAt: number }
+    options: { selected: boolean; lastSeenAt: number; manualUnreadAt?: number | null }
 ): SessionAttention | null {
-    if (options.selected || summary.thinking) {
+    if (summary.thinking) {
         return null
+    }
+
+    if (options.selected) {
+        return options.manualUnreadAt === summary.updatedAt
+            ? { kind: 'unread' }
+            : null
     }
 
     const pendingRequestKinds = Array.isArray(summary.pendingRequestKinds)

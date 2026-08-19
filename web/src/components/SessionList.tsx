@@ -30,6 +30,7 @@ import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttentio
 import {
     getSessionLastSeenAt,
     getSessionLastSeenSnapshot,
+    getSessionManualUnreadAt,
     markSessionUnread,
     useSessionLastSeenVersion
 } from '@/lib/sessionLastSeen'
@@ -1017,7 +1018,8 @@ function SessionItem(props: {
         () => showDetailedStatus
             ? classifySessionAttention(s, {
                 selected,
-                lastSeenAt: getSessionLastSeenAt(s.id)
+                lastSeenAt: getSessionLastSeenAt(s.id),
+                manualUnreadAt: getSessionManualUnreadAt(s.id)
             })
             : null,
         [s, selected, showDetailedStatus, lastSeenVersion]

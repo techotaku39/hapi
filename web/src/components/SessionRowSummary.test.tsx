@@ -94,4 +94,41 @@ describe('SessionRowSummary background status', () => {
 
         expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
     })
+
+    it('shows an explicit unread dot for the selected session only', () => {
+        const session = makeSummary({
+            id: 'selected-unread',
+            active: false,
+            backgroundTaskCount: 0,
+            updatedAt: 2_000,
+        })
+        localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ [session.id]: 2_000 }))
+        localStorage.setItem('hapi.sessionManualUnread.v1', JSON.stringify({ [session.id]: 2_000 }))
+
+        const view = render(
+            <I18nProvider>
+                <SessionRowSummary
+                    session={session}
+                    selected={true}
+                    showDetailedStatus={true}
+                    lastSeenVersion={0}
+                />
+            </I18nProvider>
+        )
+
+        expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
+
+        view.rerender(
+            <I18nProvider>
+                <SessionRowSummary
+                    session={{ ...session, updatedAt: 2_001 }}
+                    selected={true}
+                    showDetailedStatus={true}
+                    lastSeenVersion={1}
+                />
+            </I18nProvider>
+        )
+
+        expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument()
+    })
 })
