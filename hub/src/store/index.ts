@@ -15,6 +15,7 @@ import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
 
 export type {
+    NativeDevicePlatform,
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
@@ -471,6 +472,7 @@ export class Store {
                 token TEXT NOT NULL,
                 platform TEXT NOT NULL,
                 device_id TEXT NOT NULL,
+                push_key TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 UNIQUE(namespace, device_id, platform)
@@ -842,31 +844,40 @@ export class Store {
      * dense per-session position that subsequent reorder mutations can update.
      */
     private migrateFromV23ToV24(): void {
-        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
-        if (!columns.some((col) => col.name === 'position')) {
+        const scratchlistColumns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
+        if (scratchlistColumns.length > 0 && !scratchlistColumns.some((col) => col.name === 'position')) {
             this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
         }
 
-        const sessionRows = this.db.prepare(
-            'SELECT DISTINCT session_id FROM session_scratchlist'
-        ).all() as Array<{ session_id: string }>
-        const rowsForSession = this.db.prepare(
-            `SELECT entry_id FROM session_scratchlist
-             WHERE session_id = ?
-             ORDER BY created_at DESC, entry_id DESC`
-        )
-        const updatePosition = this.db.prepare(
-            'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
-        )
-        for (const { session_id } of sessionRows) {
-            const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
-            rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
+        if (scratchlistColumns.length > 0) {
+            const sessionRows = this.db.prepare(
+                'SELECT DISTINCT session_id FROM session_scratchlist'
+            ).all() as Array<{ session_id: string }>
+            const rowsForSession = this.db.prepare(
+                `SELECT entry_id FROM session_scratchlist
+                 WHERE session_id = ?
+                 ORDER BY created_at DESC, entry_id DESC`
+            )
+            const updatePosition = this.db.prepare(
+                'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
+            )
+            for (const { session_id } of sessionRows) {
+                const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
+                rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
+            }
+
+            this.db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
+                    ON session_scratchlist(session_id, position)
+            `)
         }
 
-        this.db.exec(`
-            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
-                ON session_scratchlist(session_id, position)
-        `)
+        // iOS push registrations add a nullable key; legacy Android rows keep
+        // their existing shape and receive NULL.
+        const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        if (fcmColumns.length > 0 && !fcmColumns.some((col) => col.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
     }
 
     /**
