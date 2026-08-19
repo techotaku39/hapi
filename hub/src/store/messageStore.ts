@@ -32,6 +32,7 @@ import {
     copyMessageToSession as copyStoredMessageToSession,
     copyMessagesToSession as copyStoredMessagesToSession,
     getAllMessages,
+    getConsumedScheduledMessages,
     getMessagesAfterSeq,
     getMessageSeqById,
     hasUninvokedAttachmentReference,
@@ -76,6 +77,10 @@ export class MessageStore {
 
     getAllMessages(sessionId: string): StoredMessage[] {
         return getAllMessages(this.db, sessionId)
+    }
+
+    getConsumedScheduledMessages(sessionId: string): StoredMessage[] {
+        return getConsumedScheduledMessages(this.db, sessionId)
     }
 
     getMessagesAfterSeq(sessionId: string, afterSeq: number): StoredMessage[] {

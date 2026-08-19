@@ -342,6 +342,22 @@ export function getAllMessages(
     return rows.map(toStoredMessage)
 }
 
+/** Return only consumed scheduled messages needed for attachment reconciliation. */
+export function getConsumedScheduledMessages(
+    db: Database,
+    sessionId: string,
+): StoredMessage[] {
+    const rows = db.prepare(`
+        SELECT * FROM messages
+        WHERE session_id = ?
+          AND scheduled_at IS NOT NULL
+          AND invoked_at IS NOT NULL
+        ORDER BY seq ASC
+    `).all(sessionId) as DbMessageRow[]
+
+    return rows.map(toStoredMessage)
+}
+
 export type MessageAttachmentRewrite = {
     messageId: string
     attachments: AttachmentMetadata[]

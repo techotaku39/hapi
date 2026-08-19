@@ -310,8 +310,7 @@ export class MessageService {
     }
 
     async reconcileConsumedScheduledAttachments(sessionId: string): Promise<void> {
-        const messages = this.store.messages.getAllMessages(sessionId)
-            .filter((message) => message.scheduledAt !== null && message.invokedAt !== null)
+        const messages = this.store.messages.getConsumedScheduledMessages(sessionId)
         await this.releaseScheduledAttachments(sessionId, messages)
     }
 

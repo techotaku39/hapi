@@ -7,7 +7,7 @@
  * Race-D (CLI offline): no CLI socket in room → immediate DELETE, message-cancelled emit, no ack call
  * Race-E (partial ack): broadcast ack receives err + [{ removed: true }] → DELETE + status='cancelled'
  */
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1399,6 +1399,13 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-reconcile-consumed')
         const attachment = makeHubScratchlistAttachment(session.id, 'reconcile-consumed')
+        for (let index = 0; index < 25; index += 1) {
+            store.messages.addMessage(
+                session.id,
+                { role: 'assistant', content: { type: 'text', text: `history-${index}` } },
+                `history-${index}`,
+            )
+        }
         const message = store.messages.addMessage(
             session.id,
             { role: 'user', content: { type: 'text', text: 'reconcile me', attachments: [attachment] } },
@@ -1418,9 +1425,13 @@ describe('MessageService.sendMessage with scheduledAt', () => {
                 },
             },
         )
+        const getAllMessages = spyOn(store.messages, 'getAllMessages')
+        const getConsumedScheduledMessages = spyOn(store.messages, 'getConsumedScheduledMessages')
 
         await service.reconcileConsumedScheduledAttachments(session.id)
 
+        expect(getAllMessages).not.toHaveBeenCalled()
+        expect(getConsumedScheduledMessages).toHaveBeenCalledWith(session.id)
         expect(deletedPaths).toEqual([attachment.path])
     })
 
