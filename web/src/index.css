@@ -455,11 +455,11 @@ html:has(.chat-scroll-y) #root {
     cursor: pointer;
     align-items: center;
     justify-content: center;
-    transform: translate(-50%, -50%) scale(0.85);
+    transform: translate(-50%, -50%) scale(1);
     border: 0;
     background: transparent;
-    opacity: 0;
-    pointer-events: none;
+    opacity: 1;
+    pointer-events: auto;
     color: var(--app-hint);
     transition: opacity 0.15s, transform 0.15s, color 0.15s;
 }
@@ -472,12 +472,20 @@ html:has(.chat-scroll-y) #root {
     flex-shrink: 0;
 }
 
-.sidebar-resize-handle:hover .sidebar-hide-button,
-.sidebar-resize-handle:focus-within .sidebar-hide-button,
-.sidebar-hide-button:focus-visible {
-    transform: translate(-50%, -50%) scale(1);
-    opacity: 1;
-    pointer-events: auto;
+@media (hover: hover) and (pointer: fine) {
+    .sidebar-hide-button {
+        transform: translate(-50%, -50%) scale(0.85);
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .sidebar-resize-handle:hover .sidebar-hide-button,
+    .sidebar-resize-handle:focus-within .sidebar-hide-button,
+    .sidebar-hide-button:focus-visible {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+        pointer-events: auto;
+    }
 }
 
 .sidebar-resize-handle[data-dragging] .sidebar-hide-button {
