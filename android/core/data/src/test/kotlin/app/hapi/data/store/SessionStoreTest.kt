@@ -11,8 +11,12 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -156,6 +160,25 @@ class SessionStoreTest {
         assertEquals(current, store.currentDetail("s1"))
         assertEquals(9_000L, store.sessions.value.single().lastAssistantMessageAt)
         assertEquals(5L, store.sessions.value.single().lastAssistantMessageVersion)
+    }
+
+    @Test
+    fun `concurrent full-session events keep the highest detail sequence`() = runStoreTest { store, _ ->
+        coroutineScope {
+            (2L..64L).shuffled().map { seq ->
+                launch(Dispatchers.Default) {
+                    store.applySessionEvent(
+                        globalScope,
+                        sessionUpdatedEvent(
+                            "s1",
+                            fullSessionJson(session("s1", seq = seq, lastAssistantMessageAt = seq * 1_000)),
+                        ),
+                    )
+                }
+            }.joinAll()
+        }
+
+        assertEquals(64L, store.currentDetail("s1")?.seq)
     }
 
     @Test

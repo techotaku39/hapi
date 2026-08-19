@@ -386,9 +386,16 @@ class SessionStore(
         // parse, then the REST fallback.
         val full = parseFullSession(data)?.takeIf { it.id == sessionId }
         if (full != null) {
-            val currentDetail = _details.value[sessionId]
-            if (currentDetail == null || full.seq >= currentDetail.seq) {
-                _details.update { it + (sessionId to full) }
+            // The global and per-session SSE pipes are delivered on separate
+            // coroutines. Keep the sequence check inside the atomic update so
+            // an older full record cannot pass a stale pre-read and write last.
+            _details.update { current ->
+                val cached = current[sessionId]
+                if (cached != null && full.seq < cached.seq) {
+                    current
+                } else {
+                    current + (sessionId to full)
+                }
             }
             upsertSummary(full)
             return
