@@ -149,14 +149,28 @@ describe('isAssistantTextMessage', () => {
         })).toBe(false)
     })
 
-    test('accepts a role-wrapped visible event/message reply', () => {
+    test('rejects a role-wrapped event/message status notice', () => {
         expect(isAssistantTextMessage({
             role: 'agent',
             content: {
                 type: 'event',
                 data: { type: 'message', message: 'Visible event reply.' }
             }
-        })).toBe(true)
+        })).toBe(false)
+    })
+
+    test('rejects sidechain assistant prose', () => {
+        expect(isAssistantTextMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    isSidechain: true,
+                    message: { content: [{ type: 'text', text: 'subagent progress' }] }
+                }
+            }
+        })).toBe(false)
     })
 })
 

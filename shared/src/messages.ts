@@ -93,8 +93,9 @@ export function isRedundantGoalStatusEventContent(value: unknown): boolean {
  *     `content.data.message.content[i].text` (array of `{type:'text', text}`).
  *
  *  3. Agent event messages:  content.type = 'event',
- *     content.data.type = 'message'  -> assistant text at
- *     `content.data.message` (string).
+ *     content.data.type = 'message'  -> status text at
+ *     `content.data.message` (string). These remain extractable for chat
+ *     rendering, but are not reply-clock candidates.
  *
  * Returns `null` when the content does not look like assistant *text*
  * (tool calls, tool results, reasoning, token counts, etc.) so callers can
@@ -151,9 +152,18 @@ export function isAssistantTextMessage(content: unknown): boolean {
     const record = unwrapRoleWrappedRecordEnvelope(content)
     if (record?.role !== 'agent') return false
 
+    // `event/message` is a status-event family (for example, model changes
+    // and compaction notices), not a main-agent prose reply.
+    if (isObject(record.content) && record.content.type === 'event') return false
+
     if (isObject(record.content) && record.content.type === 'output') {
         const data = isObject(record.content.data) ? record.content.data : null
-        if (!data || Boolean(data.isMeta) || Boolean(data.isCompactSummary)) return false
+        if (
+            !data
+            || data.isSidechain === true
+            || Boolean(data.isMeta)
+            || Boolean(data.isCompactSummary)
+        ) return false
         if (!isClaudeChatVisibleMessage({ type: data.type, subtype: data.subtype })) return false
     }
 

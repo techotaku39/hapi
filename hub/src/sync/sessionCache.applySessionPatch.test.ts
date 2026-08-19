@@ -65,7 +65,22 @@ describe('SessionCache.applySessionPatch', () => {
         )
         store.messages.addMessage(session.id, {
             role: 'agent',
-            content: { type: 'event', data: { type: 'message', message: 'historical event reply' } }
+            content: { type: 'event', data: { type: 'message', message: 'Compacting conversation.' } }
+        }, undefined, undefined, 5_000)
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    isSidechain: true,
+                    message: { content: [{ type: 'text', text: 'subagent progress' }] }
+                }
+            }
+        }, undefined, undefined, 4_000)
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'historical assistant reply' } }
         }, undefined, undefined, 3_000)
 
         const db = (store as unknown as { db: import('bun:sqlite').Database }).db
