@@ -36,5 +36,62 @@ test.describe('session sidebar toggle', () => {
         test('keeps the hide action visible and tappable on split layouts', async ({ page }) => {
             await assertTouchToggle(page)
         })
+
+        test('keeps the hybrid-pointer override before the drag-state rule', async ({ page }) => {
+            await page.goto('/e2e-fixtures/session-sidebar-toggle-fixture.html')
+
+            const rule = await page.evaluate(() => {
+                for (const sheet of Array.from(document.styleSheets)) {
+                    let rules: CSSRuleList
+                    try {
+                        rules = sheet.cssRules
+                    } catch {
+                        continue
+                    }
+
+                    const anyPointerIndex = Array.from(rules).findIndex((candidate) => (
+                        candidate instanceof CSSMediaRule
+                        && candidate.conditionText === '(any-pointer: coarse)'
+                    ))
+                    const dragStateIndex = Array.from(rules).findIndex((candidate) => (
+                        candidate instanceof CSSStyleRule
+                        && candidate.selectorText.includes('[data-dragging] .sidebar-hide-button')
+                    ))
+                    const anyPointerRule = Array.from(rules).find((candidate) => (
+                        candidate instanceof CSSMediaRule
+                        && candidate.conditionText === '(any-pointer: coarse)'
+                    ))
+                    if (!(anyPointerRule instanceof CSSMediaRule)) {
+                        continue
+                    }
+
+                    const hideRule = Array.from(anyPointerRule.cssRules).find((candidate) => (
+                        candidate instanceof CSSStyleRule
+                        && candidate.selectorText === '.sidebar-hide-button'
+                    ))
+                    if (!(hideRule instanceof CSSStyleRule)) {
+                        continue
+                    }
+
+                    return {
+                        anyPointerIndex,
+                        dragStateIndex,
+                        opacity: hideRule.style.opacity,
+                        pointerEvents: hideRule.style.pointerEvents,
+                        transform: hideRule.style.transform,
+                    }
+                }
+                return null
+            })
+
+            expect(rule).toEqual({
+                anyPointerIndex: expect.any(Number),
+                dragStateIndex: expect.any(Number),
+                opacity: '1',
+                pointerEvents: 'auto',
+                transform: 'translate(-50%, -50%) scale(1)',
+            })
+            expect(rule!.anyPointerIndex).toBeLessThan(rule!.dragStateIndex)
+        })
     })
 })
