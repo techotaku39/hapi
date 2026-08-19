@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useScratchlistCount } from '@/lib/use-scratchlist-count'
 import { formatReopenError } from '@/lib/reopenError'
 import { formatReasoningLabel, getReasoningEffortForFlavor } from '@/lib/codexStatusLabels'
+import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -145,8 +146,10 @@ export function SessionHeader(props: {
     onToggleTerminal?: () => void
     terminalActive?: boolean
     api: ApiClient | null
+    titleSuggestionAvailable?: boolean
     canReopen?: boolean
     reopenDisabledReason?: string
+    reopenHint?: string
     onSessionDeleted?: () => void
     onSessionReopened?: (newSessionId: string) => void | Promise<void>
 }) {
@@ -220,7 +223,7 @@ export function SessionHeader(props: {
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, setPinMode, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -255,6 +258,7 @@ export function SessionHeader(props: {
         try {
             const result = await reopenSession()
             if (result.sessionId && result.sessionId !== session.id) {
+                retargetSharePendingTransfer(session.id, result.sessionId)
                 await onSessionReopened?.(result.sessionId)
             }
         } catch (error) {
@@ -352,7 +356,7 @@ export function SessionHeader(props: {
     const handleMenuToggle = () => {
         if (!menuOpen && menuAnchorRef.current) {
             const rect = menuAnchorRef.current.getBoundingClientRect()
-            setMenuAnchorPoint({ x: rect.right, y: rect.bottom })
+            setMenuAnchorPoint({ x: rect.left + rect.width / 2, y: rect.bottom })
         }
         setMenuOpen((open) => !open)
     }
@@ -522,6 +526,7 @@ export function SessionHeader(props: {
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={props.canReopen === false ? undefined : handleReopen}
                 reopenDisabledReason={props.reopenDisabledReason}
+                reopenHint={props.reopenHint}
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
@@ -546,6 +551,8 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
+                onSuggestTitle={api && props.titleSuggestionAvailable ? suggestSessionTitle : undefined}
+                onUpdateSummary={api && props.titleSuggestionAvailable ? updateSessionSummary : undefined}
                 isPending={isPending}
             />
 

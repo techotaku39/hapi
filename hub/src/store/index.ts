@@ -16,6 +16,7 @@ import { WorkGraphStore } from './workGraphStore'
 import { MigrationStore } from './migrationStore'
 
 export type {
+    NativeDevicePlatform,
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
@@ -42,7 +43,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -308,6 +309,7 @@ export class Store {
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
         })
 
         if (currentVersion === 0) {
@@ -451,6 +453,7 @@ export class Store {
                 token TEXT NOT NULL,
                 platform TEXT NOT NULL,
                 device_id TEXT NOT NULL,
+                push_key TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 UNIQUE(namespace, device_id, platform)
@@ -983,7 +986,26 @@ export class Store {
         `)
     }
 
+    /**
+     * iOS push (P1, PUSH SPEC v1): `fcm_devices.push_key` stores the
+     * device-generated 32-byte E2E envelope key (base64) for `platform =
+     * 'ios'` rows; phone/wear rows keep NULL. Nullable ALTER keeps existing
+     * Android registrations untouched.
+     *
+     * Rollback: `ALTER TABLE fcm_devices DROP COLUMN push_key` (SQLite
+     * 3.35+) or leave the column unused; `PRAGMA user_version = 23`.
+     */
     private migrateFromV23ToV24(): void {
+        const columns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        // Legacy branch may reach this step before fcm_devices exists;
+        // createSchema afterwards builds the table with the column included.
+        if (columns.length === 0) return
+        if (!columns.some((col) => col.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
+    }
+
+    private migrateFromV24ToV25(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS migration_state (
                 migration_id TEXT PRIMARY KEY,
