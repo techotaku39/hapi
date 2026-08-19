@@ -212,9 +212,7 @@ class SessionStore(
             val cachedById = _sessions.value.associateBy { it.id }
             if (response.sessions.any { incoming ->
                     val cached = cachedById[incoming.id]
-                    cached != null &&
-                        (incoming.lastAssistantMessageVersion ?: 0)
-                            < (cached.lastAssistantMessageVersion ?: 0)
+                    cached != null && (incoming.lastAssistantMessageVersion ?: 0) < (cached.lastAssistantMessageVersion ?: 0)
                 }) {
                 // The rejected snapshot may omit unrelated fields that were
                 // present at its older sequence. Retry once, then merge the
