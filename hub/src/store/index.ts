@@ -18,6 +18,7 @@ export type {
     NativeDevicePlatform,
     StoredMachine,
     StoredMessage,
+    MessageDeliveryState,
     StoredPushSubscription,
     StoredFcmDevice,
     StoredScratchlistEntry,
@@ -153,6 +154,47 @@ export class Store {
                 throw new Error('session activity was not persisted after messages-consumed transition')
             }
 
+            return session.updatedAt
+        })()
+    }
+
+    /** Persist a steer delivery state before/after the native request. */
+    recordSteerDeliveryState(
+        sessionId: string,
+        localIds: string[],
+        state: 'queued' | 'dispatching' | 'indeterminate',
+        namespace: string
+    ): boolean {
+        return this.db.transaction(() => {
+            const changes = this.messages.setMessagesDeliveryState(sessionId, localIds, state)
+            const now = Date.now()
+            if (changes > 0) {
+                this.sessions.touchSessionUpdatedAt(sessionId, now, namespace)
+            }
+            const session = this.sessions.getSessionByNamespace(sessionId, namespace)
+            if (!session) {
+                throw new Error('session not found after steer delivery transition')
+            }
+            return changes > 0
+        })()
+    }
+
+    /** Persist an ambiguous agent steer without stamping it delivered. */
+    recordMessagesIndeterminate(
+        sessionId: string,
+        localIds: string[],
+        namespace: string
+    ): number {
+        return this.db.transaction(() => {
+            const changes = this.messages.markMessagesIndeterminate(sessionId, localIds)
+            const now = Date.now()
+            if (changes > 0) {
+                this.sessions.touchSessionUpdatedAt(sessionId, now, namespace)
+            }
+            const session = this.sessions.getSessionByNamespace(sessionId, namespace)
+            if (!session) {
+                throw new Error('session not found after indeterminate transition')
+            }
             return session.updatedAt
         })()
     }
@@ -407,6 +449,7 @@ export class Store {
                 local_id TEXT,
                 invoked_at INTEGER,
                 scheduled_at INTEGER,
+                delivery_state TEXT NOT NULL DEFAULT 'queued',
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
@@ -921,6 +964,22 @@ export class Store {
         }
     }
 
+    /** v23→v24: add the iOS push envelope key. */
+    private migrateFromV23ToV24(): void {
+        const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        if (fcmColumns.length > 0 && !fcmColumns.some((column) => column.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
+    }
+
+    /** v24→v25: add durable unknown-delivery state for steers. */
+    private migrateFromV24ToV25(): void {
+        const messageColumns = this.getMessageColumnNames()
+        if (messageColumns.size > 0 && !messageColumns.has('delivery_state')) {
+            this.db.exec("ALTER TABLE messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'")
+        }
+    }
+
     /**
      * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
      * Namespace + principal_json required on every events row.
@@ -980,52 +1039,22 @@ export class Store {
     }
 
     /**
-     * iOS push (P1, PUSH SPEC v1): `fcm_devices.push_key` stores the
-     * device-generated 32-byte E2E envelope key (base64) for `platform =
-     * 'ios'` rows; phone/wear rows keep NULL. Nullable ALTER keeps existing
-     * Android registrations untouched.
-     *
-     * Rollback: `ALTER TABLE fcm_devices DROP COLUMN push_key` (SQLite
-     * 3.35+) or leave the column unused; `PRAGMA user_version = 23`.
+     * Add the durable assistant reply clock after the upstream v25 schema.
+     * Existing rows start unchecked so startup can backfill them incrementally;
+     * new rows opt into the write-through path immediately.
      */
-    private migrateFromV23ToV24(): void {
-        const columns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
-        // Legacy branch may reach this step before fcm_devices exists;
-        // createSchema afterwards builds the table with the column included.
-        if (columns.length === 0) return
-        if (!columns.some((col) => col.name === 'push_key')) {
-            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
-        }
-    }
-
-    /**
-     * Keep the prompt/activity clock (`updated_at`) separate from the latest
-     * visible assistant prose used by the web sidebar.
-     */
-    private migrateFromV24ToV25(): void {
+    private migrateFromV25ToV26(): void {
         const columns = this.getSessionColumnNames()
         if (columns.size === 0) return
         if (!columns.has('last_assistant_message_at')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN last_assistant_message_at INTEGER')
         }
-    }
-
-    /**
-     * Track whether the durable assistant reply clock has been checked
-     * against the transcript. Existing rows start unchecked so the hub can
-     * backfill them incrementally after startup; new rows opt into the
-     * current write-through path immediately.
-     */
-    private migrateFromV25ToV26(): void {
-        const columns = this.getSessionColumnNames()
-        if (columns.size === 0) return
         if (!columns.has('assistant_reply_clock_backfilled')) {
             this.db.exec(
                 'ALTER TABLE sessions ADD COLUMN assistant_reply_clock_backfilled INTEGER NOT NULL DEFAULT 0'
             )
         }
     }
-
     private getSessionColumnNames(): Set<string> {
         const rows = this.db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
         return new Set(rows.map((row) => row.name))
