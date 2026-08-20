@@ -97,6 +97,7 @@ test.describe('session sidebar toggle', () => {
                 pointerEvents: 'auto',
                 transform: 'translate(-50%, -50%) scale(1)',
             })
+            expect(rule!.finePointerIndex).toBeGreaterThanOrEqual(0)
             expect(rule!.finePointerIndex).toBeLessThan(rule!.anyPointerIndex)
             expect(rule!.anyPointerIndex).toBeLessThan(rule!.dragStateIndex)
         })
