@@ -177,7 +177,10 @@ export function markSessionSeen(sessionId: string, seenAt: number): void {
     const manualUnreadStore = readManualUnreadStore()
     const nextSeenAt = Math.max(store[sessionId] ?? 0, seenAt)
     const seenChanged = store[sessionId] !== nextSeenAt
-    const manualUnreadChanged = Object.prototype.hasOwnProperty.call(manualUnreadStore, sessionId)
+    const manualUnreadAt = manualUnreadStore[sessionId]
+    const manualUnreadChanged = typeof manualUnreadAt === 'number'
+        && Number.isFinite(manualUnreadAt)
+        && nextSeenAt >= manualUnreadAt
     if (!seenChanged && !manualUnreadChanged) {
         return
     }

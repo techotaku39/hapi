@@ -69,6 +69,15 @@ describe('sessionLastSeen', () => {
         expect(getSessionManualUnreadAt('session-a')).toBeNull()
     })
 
+    it('preserves an explicit unread marker when a stale seen timestamp arrives', () => {
+        markSessionUnread('session-a', 5000)
+
+        markSessionSeen('session-a', 4000)
+
+        expect(getSessionLastSeenAt('session-a')).toBe(4999)
+        expect(getSessionManualUnreadAt('session-a')).toBe(5000)
+    })
+
     it('notifies same-tab consumers when the watermark changes', () => {
         const view = render(createElement(SessionLastSeenVersionProbe))
         const initialVersion = Number(view.getByTestId('last-seen-version').textContent)
