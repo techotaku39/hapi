@@ -80,6 +80,21 @@ describe('sessionLastSeen', () => {
         expect(view.getByTestId('last-seen-version')).toHaveTextContent(String(initialVersion + 1))
     })
 
+    it('notifies consumers when either read-state key changes in another tab', () => {
+        const view = render(createElement(SessionLastSeenVersionProbe))
+        const initialVersion = Number(view.getByTestId('last-seen-version').textContent)
+
+        act(() => {
+            window.dispatchEvent(new StorageEvent('storage', { key: 'hapi.sessionLastSeen.v1' }))
+        })
+        expect(view.getByTestId('last-seen-version')).toHaveTextContent(String(initialVersion + 1))
+
+        act(() => {
+            window.dispatchEvent(new StorageEvent('storage', { key: 'hapi.sessionManualUnread.v1' }))
+        })
+        expect(view.getByTestId('last-seen-version')).toHaveTextContent(String(initialVersion + 2))
+    })
+
     it('uses the first session list as the unread baseline', () => {
         initializeSessionLastSeen('hub-a', [
             { id: 'session-a', updatedAt: 1000 },

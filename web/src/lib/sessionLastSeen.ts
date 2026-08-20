@@ -102,8 +102,21 @@ function subscribeToStoreChanges(listener: () => void): () => void {
     if (typeof window === 'undefined') {
         return () => {}
     }
+
+    const handleStorage = (event: StorageEvent) => {
+        if (event.key !== STORAGE_KEY && event.key !== MANUAL_UNREAD_KEY) {
+            return
+        }
+        changeVersion += 1
+        listener()
+    }
+
     window.addEventListener(CHANGE_EVENT, listener)
-    return () => window.removeEventListener(CHANGE_EVENT, listener)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+        window.removeEventListener(CHANGE_EVENT, listener)
+        window.removeEventListener('storage', handleStorage)
+    }
 }
 
 function getStoreChangeVersion(): number {

@@ -131,4 +131,27 @@ describe('SessionRowSummary background status', () => {
 
         expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument()
     })
+
+    it('shows an explicit unread dot before the thinking spinner', () => {
+        const session = makeSummary({
+            id: 'selected-thinking-unread',
+            thinking: true,
+            updatedAt: 2_000,
+        })
+        localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ [session.id]: 2_000 }))
+        localStorage.setItem('hapi.sessionManualUnread.v1', JSON.stringify({ [session.id]: 2_000 }))
+
+        render(
+            <I18nProvider>
+                <SessionRowSummary
+                    session={session}
+                    selected={true}
+                    showDetailedStatus={true}
+                    lastSeenVersion={0}
+                />
+            </I18nProvider>
+        )
+
+        expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
+    })
 })
