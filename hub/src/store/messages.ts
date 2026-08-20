@@ -484,19 +484,41 @@ export function getDeliverableMessagesAfter(
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
     const safeAfterSeq = Number.isFinite(afterSeq) ? afterSeq : 0
 
-    const rows = db.prepare(`
-        SELECT * FROM messages
-        WHERE session_id = ?
-          AND seq > ?
-          AND (scheduled_at IS NULL OR scheduled_at <= ?)
-          AND delivery_state = 'queued'
-        ORDER BY seq ASC
-        LIMIT ?
-    `).all(sessionId, safeAfterSeq, now, safeLimit) as DbMessageRow[]
+    const deliverable: StoredMessage[] = []
+    let cursor = safeAfterSeq
 
-    return rows
-        .map(toStoredMessage)
-        .filter((message) => message.scheduledAt === null || !hasUserMessageAttachments(message.content))
+    // Attachment-backed scheduled rows stay on the mature-scan path, so the
+    // SQL page can contain rows that are filtered from the CLI backfill. Keep
+    // reading pages until the requested number of deliverable rows is filled;
+    // otherwise a full page of filtered rows can make the CLI stop before it
+    // reaches a later immediate message.
+    while (deliverable.length < safeLimit) {
+        const rows = db.prepare(`
+            SELECT * FROM messages
+            WHERE session_id = ?
+              AND seq > ?
+              AND (scheduled_at IS NULL OR scheduled_at <= ?)
+              AND delivery_state = 'queued'
+            ORDER BY seq ASC
+            LIMIT ?
+        `).all(sessionId, cursor, now, safeLimit) as DbMessageRow[]
+
+        if (rows.length === 0) break
+        cursor = rows[rows.length - 1]!.seq
+
+        for (const row of rows) {
+            const message = toStoredMessage(row)
+            if (message.scheduledAt !== null && hasUserMessageAttachments(message.content)) {
+                continue
+            }
+            deliverable.push(message)
+            if (deliverable.length >= safeLimit) break
+        }
+
+        if (rows.length < safeLimit) break
+    }
+
+    return deliverable
 }
 
 /** How far back to look for a stream's replaceable snapshots.

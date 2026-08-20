@@ -324,6 +324,19 @@ export function shouldRouteToScratchlist(
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
 }
 
+/**
+ * Hub-backed composer attachments can be staged into the normal CLI upload
+ * directory for immediate sends. Scheduled sends must preserve their Hub
+ * paths so the Hub can materialize them when the schedule matures.
+ */
+export function shouldStageScratchlistAttachmentsForComposeSend(
+    attachments: AttachmentMetadata[] | undefined,
+    scheduledAt: number | null | undefined,
+): boolean {
+    return scheduledAt == null
+        && (attachments ?? []).some((attachment) => isHubScratchlistAttachmentPath(attachment.path))
+}
+
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
     return message.invokedAt == null && message.scheduledAt != null
 }
@@ -941,11 +954,13 @@ function SessionChatInner(props: SessionChatProps) {
                 return accepted ? { attemptId: null } : false
             }
             // If the user uploaded while scratchlist mode was on, then toggled
-            // it off before send, pending items still carry hub paths. Stage
-            // those through the normal CLI upload dir before chat send.
+            // it off before an immediate send, pending items still carry Hub
+            // paths. Stage those through the normal CLI upload dir. Scheduled
+            // sends must keep Hub paths so the Hub can materialize them at the
+            // scheduled time.
             const list = attachments ?? []
             const hubItems = list.filter((att) => isHubScratchlistAttachmentPath(att.path))
-            if (hubItems.length > 0) {
+            if (hubItems.length > 0 && shouldStageScratchlistAttachmentsForComposeSend(list, scheduledAt)) {
                 const normalItems = list.filter((att) => !isHubScratchlistAttachmentPath(att.path))
                 const staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,

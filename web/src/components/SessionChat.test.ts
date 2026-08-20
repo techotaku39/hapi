@@ -11,6 +11,7 @@ import {
     resolveLatestCompletedBoundaryIdForView,
     shouldAutoClearPendingSchedule,
     shouldRouteToScratchlist,
+    shouldStageScratchlistAttachmentsForComposeSend,
     usePendingScratchlistSendCleanup,
 } from './SessionChat'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -413,6 +414,30 @@ describe('shouldRouteToScratchlist', () => {
         expect(routed).toBe(true)
         const shouldClearAfterAccepted = !routed
         expect(shouldClearAfterAccepted).toBe(false)
+    })
+})
+
+describe('shouldStageScratchlistAttachmentsForComposeSend', () => {
+    const hubAttachment: AttachmentMetadata = {
+        id: 'hub-attachment',
+        filename: 'hub-attachment.png',
+        mimeType: 'image/png',
+        size: 1024,
+        path: 'hapi-hub:scratchlist/default/session-1/attachment.png',
+    }
+
+    it('stages Hub attachments for immediate sends', () => {
+        expect(shouldStageScratchlistAttachmentsForComposeSend([hubAttachment], null)).toBe(true)
+    })
+
+    it('preserves Hub paths for scheduled sends', () => {
+        expect(shouldStageScratchlistAttachmentsForComposeSend([hubAttachment], Date.now() + 60_000)).toBe(false)
+    })
+
+    it('does not stage normal CLI attachments', () => {
+        expect(shouldStageScratchlistAttachmentsForComposeSend([
+            { ...hubAttachment, path: '/tmp/attachment.png' },
+        ], null)).toBe(false)
     })
 })
 

@@ -406,6 +406,37 @@ describe('getDeliverableMessagesAfter: CLI backfill excludes future-scheduled ro
         expect(store.messages.getMatureScheduledMessages(Date.now())).toContainEqual(scheduled)
     })
 
+    it('continues past a full filtered page to find later deliverable rows', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'backfill-filtered-page')
+        const now = Date.now()
+
+        for (let index = 0; index < 200; index += 1) {
+            store.messages.addMessage(
+                session.id,
+                {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text: `scheduled attachment ${index}`,
+                        attachments: [{ path: `hapi-hub:scratchlist/default/session/file-${index}.png` }],
+                    },
+                },
+                `lid-filtered-${index}`,
+                now - 60_000,
+            )
+        }
+        const immediate = store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'after filtered page' } },
+            'lid-after-filtered-page',
+        )
+
+        const delivered = store.messages.getDeliverableMessagesAfter(session.id, 0, now)
+
+        expect(delivered.map((message) => message.id)).toContain(immediate.id)
+    })
+
     it('respects afterSeq alongside the scheduled_at filter (2-axis interaction)', () => {
         // Verifies the seq cursor and the scheduled-at filter compose correctly:
         // a row that satisfies one axis but fails the other must be excluded.
