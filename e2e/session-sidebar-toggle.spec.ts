@@ -37,7 +37,7 @@ test.describe('session sidebar toggle', () => {
             await assertTouchToggle(page)
         })
 
-        test('keeps the hybrid-pointer override before the drag-state rule', async ({ page }) => {
+        test('keeps the hybrid-pointer override after fine-pointer and before drag-state rules', async ({ page }) => {
             await page.goto('/e2e-fixtures/session-sidebar-toggle-fixture.html')
 
             const rule = await page.evaluate(() => {
@@ -49,6 +49,10 @@ test.describe('session sidebar toggle', () => {
                         continue
                     }
 
+                    const finePointerIndex = Array.from(rules).findIndex((candidate) => (
+                        candidate instanceof CSSMediaRule
+                        && candidate.conditionText === '(hover: hover) and (pointer: fine)'
+                    ))
                     const anyPointerIndex = Array.from(rules).findIndex((candidate) => (
                         candidate instanceof CSSMediaRule
                         && candidate.conditionText === '(any-pointer: coarse)'
@@ -74,6 +78,7 @@ test.describe('session sidebar toggle', () => {
                     }
 
                     return {
+                        finePointerIndex,
                         anyPointerIndex,
                         dragStateIndex,
                         opacity: hideRule.style.opacity,
@@ -85,12 +90,14 @@ test.describe('session sidebar toggle', () => {
             })
 
             expect(rule).toEqual({
+                finePointerIndex: expect.any(Number),
                 anyPointerIndex: expect.any(Number),
                 dragStateIndex: expect.any(Number),
                 opacity: '1',
                 pointerEvents: 'auto',
                 transform: 'translate(-50%, -50%) scale(1)',
             })
+            expect(rule!.finePointerIndex).toBeLessThan(rule!.anyPointerIndex)
             expect(rule!.anyPointerIndex).toBeLessThan(rule!.dragStateIndex)
         })
     })
