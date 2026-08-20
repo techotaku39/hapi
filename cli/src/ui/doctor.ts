@@ -55,11 +55,16 @@ export function redactSettingsForDisplay(settings: Record<string, unknown>): Rec
     }
 
     const titleProvider = settings.titleProvider
-    if (titleProvider && typeof titleProvider === 'object' && !Array.isArray(titleProvider)) {
-        const titleProviderSettings = titleProvider as Record<string, unknown>
-        displaySettings.titleProvider = {
-            ...titleProviderSettings,
-            apiKey: titleProviderSettings.apiKey ? '***' : undefined
+    if (titleProvider !== undefined) {
+        if (titleProvider && typeof titleProvider === 'object' && !Array.isArray(titleProvider)) {
+            const titleProviderSettings = titleProvider as Record<string, unknown>
+            displaySettings.titleProvider = {
+                baseUrl: titleProviderSettings.baseUrl,
+                apiKey: titleProviderSettings.apiKey ? '***' : undefined,
+                model: titleProviderSettings.model
+            }
+        } else {
+            displaySettings.titleProvider = '***'
         }
     }
 

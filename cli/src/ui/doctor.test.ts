@@ -31,4 +31,28 @@ describe('redactSettingsForDisplay', () => {
         expect(JSON.stringify(displaySettings)).not.toContain('client-secret')
         expect(JSON.stringify(displaySettings)).not.toContain('title-provider-secret')
     })
+
+    it('redacts malformed title provider settings without exposing unexpected fields', () => {
+        const displaySettings = redactSettingsForDisplay({
+            titleProvider: {
+                baseUrl: 'https://provider.example.com/v1',
+                apiKey: 'title-provider-secret',
+                model: 'small-model',
+                password: 'unexpected-secret'
+            }
+        })
+
+        expect(displaySettings.titleProvider).toEqual({
+            baseUrl: 'https://provider.example.com/v1',
+            apiKey: '***',
+            model: 'small-model'
+        })
+        expect(JSON.stringify(displaySettings)).not.toContain('unexpected-secret')
+    })
+
+    it('masks non-object title provider settings', () => {
+        for (const titleProvider of [null, 'provider-secret', ['provider-secret'], 42]) {
+            expect(redactSettingsForDisplay({ titleProvider }).titleProvider).toBe('***')
+        }
+    })
 })

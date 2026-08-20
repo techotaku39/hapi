@@ -881,7 +881,7 @@ export class SessionCache {
                 }
             }
 
-            if (options.clearName && typeof newMetadata.name === 'string' && newMetadata.name.trim()) {
+            if (options.clearName && Object.prototype.hasOwnProperty.call(newMetadata, 'name')) {
                 delete newMetadata.name
             }
 

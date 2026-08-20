@@ -55,4 +55,21 @@ describe('SessionCache.updateSessionSummary', () => {
         })
         expect(store.sessions.getSession(created.id)?.metadata).not.toHaveProperty('name')
     })
+
+    it('clears a whitespace-only metadata.name when explicitly replacing it with a generated summary', async () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const created = cache.getOrCreateSession(
+            'summary-whitespace-name-session',
+            { path: '/tmp', host: 'localhost', name: '   ' },
+            null,
+            'default'
+        )
+
+        await cache.updateSessionSummary(created.id, 'Generated title', { clearName: true })
+
+        const updated = cache.getSession(created.id)
+        expect(updated?.metadata?.name).toBeUndefined()
+        expect(updated?.metadata?.summary?.text).toBe('Generated title')
+    })
 })
