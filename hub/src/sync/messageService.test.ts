@@ -1990,7 +1990,7 @@ describe('MessageService.sendMessage deliveryMode', () => {
         expect(backfill).toHaveLength(1)
         expect(backfill[0]?.content).toMatchObject({ meta: { deliveryMode: 'queue' } })
 
-        expect(service.releaseDeliverableQueuedMessages(session.id)).toBe(1)
+        await expect(service.releaseDeliverableQueuedMessages(session.id)).resolves.toBe(1)
         expect(cliEmitted).toHaveLength(3)
         expect(cliEmitted[2]).toMatchObject({
             body: { message: { content: { meta: { deliveryMode: 'queue' } } } }

@@ -439,12 +439,92 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             releaseSpawn()
             await reconcile
             expect(store.isOpenCodeClearDeliveryGated(reserved.sessionId)).toBe(false)
-            await (engine as unknown as { messageService: { releaseMatureScheduledMessages(now: number): Promise<void> } })
-                .messageService.releaseMatureScheduledMessages(Date.now())
             expect(emitted.filter((update) => update.body?.message).map((update) => update.body?.message?.localId)).toEqual([
                 'gated-a', 'gated-b', 'gated-scheduled'
             ])
+            emitted.length = 0
+            await (engine as unknown as { messageService: { releaseMatureScheduledMessages(now: number): Promise<void> } })
+                .messageService.releaseMatureScheduledMessages(Date.now())
+            expect(emitted.filter((update) => update.body?.message).map((update) => update.body?.message?.localId)).toEqual([
+                'gated-scheduled'
+            ])
         } finally { engine.stop() }
+    })
+
+    it('materializes mature scheduled attachments before releasing a clear replacement', async () => {
+        const { mkdtempSync, rmSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-clear-release-att-'))
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const emitted: unknown[] = []
+        const { store, engine } = createEngine((payload) => emitted.push(payload))
+        try {
+            const source = engine.getOrCreateSession('clear-release-attachment-source', {
+                path: '/tmp/project', host: 'host', machineId: 'machine-1', flavor: 'opencode', startedBy: 'runner'
+            }, null, 'default')
+            engine.handleSessionAlive({ sid: source.id, time: Date.now() })
+            const reserved = engine.reserveOpenCodeClearSession(source.id, 'default')
+            if (reserved.type !== 'success') throw new Error('reservation failed')
+
+            const { writeScratchlistAttachmentFile } = await import('../scratchlistAttachments/storage')
+            const attachment = await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                source.id,
+                'scheduled.png',
+                'image/png',
+                Buffer.from('scheduled-image'),
+            )
+            await engine.sendMessage(source.id, {
+                text: 'release this image after clear',
+                localId: 'clear-release-attachment',
+                scheduledAt: Date.now() - 1_000,
+                attachments: [attachment],
+            })
+
+            const rpcGateway = (engine as unknown as {
+                rpcGateway: {
+                    uploadFile: (sessionId: string, filename: string, content: string, mimeType: string) => Promise<{
+                        success: boolean
+                        path?: string
+                    }>
+                }
+            }).rpcGateway
+            rpcGateway.uploadFile = async () => ({ success: true, path: '/cli/materialized.png' })
+
+            expect(engine.confirmOpenCodeClearCleanup(source.id, 'default', reserved.sessionId)).toMatchObject({ type: 'success' })
+            const metadataBeforeEnd = engine.getSessionByNamespace(source.id, 'default')!.metadata!
+            engine.handleSessionEnd({ sid: source.id, time: Date.now(), reason: 'cleared' })
+            const storedAfterEnd = store.sessions.getSessionByNamespace(source.id, 'default')!
+            store.sessions.updateSessionMetadata(
+                source.id,
+                { ...metadataBeforeEnd, lifecycleState: 'archived', archiveReason: 'Cleared by /clear' },
+                storedAfterEnd.metadataVersion,
+                'default',
+            )
+            ;(engine as unknown as { sessionCache: { refreshSession(id: string): unknown } }).sessionCache.refreshSession(source.id)
+            setSpawn(engine, mock(async (...args: unknown[]) => ({ type: 'success' as const, sessionId: args[12] as string })))
+
+            await expect(engine.clearOpenCodeSession(source.id, 'default')).resolves.toEqual({
+                type: 'success',
+                sessionId: reserved.sessionId,
+            })
+
+            const updates = emitted.filter((payload): payload is {
+                body?: { message?: { localId?: string; content?: { content?: { attachments?: Array<{ path?: string }> } } } }
+            } => Boolean((payload as { body?: { message?: unknown } }).body?.message))
+            expect(updates).toHaveLength(1)
+            expect(updates[0]?.body?.message?.localId).toBe('clear-release-attachment')
+            expect(updates[0]?.body?.message?.content?.content?.attachments?.[0]?.path)
+                .toBe('/cli/materialized.png')
+        } finally {
+            engine.stop()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
     })
 
     it.each([

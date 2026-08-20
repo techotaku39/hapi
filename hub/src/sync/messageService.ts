@@ -1297,12 +1297,38 @@ export class MessageService {
     }
 
     /** Release a completed clear handoff in finalized seq order. */
-    releaseDeliverableQueuedMessages(sessionId: string, now: number = Date.now()): number {
-        void now
+    async releaseDeliverableQueuedMessages(sessionId: string, now: number = Date.now()): Promise<number> {
         if (this.store.isOpenCodeClearDeliveryGated(sessionId)) return 0
         const queued = this.store.messages.getUninvokedLocalMessages(sessionId, { deliverableOnly: true })
             .filter((msg) => msg.scheduledAt === null || msg.scheduledAt <= now)
+        let released = 0
         for (const msg of queued) {
+            let deliveryContent: unknown = contentForDeferredDelivery(msg.content)
+            const attachments = getUserMessageAttachments(msg.content)
+            if (msg.scheduledAt !== null && attachments.length > 0) {
+                const materializingKey = `${sessionId}:${msg.id}`
+                this.materializingScheduledMessageKeys.add(materializingKey)
+                try {
+                    try {
+                        deliveryContent = await this.getScheduledDeliveryContent(msg)
+                    } catch {
+                        // Leave the row queued for the mature scan to retry
+                        // after the replacement CLI has finished connecting.
+                        break
+                    }
+                    if (deliveryContent === null) break
+
+                    const current = this.store.messages.lookupQueuedMessage(sessionId, msg.id)
+                    if (current.status !== 'queued') {
+                        const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
+                        this.scheduledAttachmentDeliveryCache.delete(materializingKey)
+                        if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
+                        continue
+                    }
+                } finally {
+                    this.materializingScheduledMessageKeys.delete(materializingKey)
+                }
+            }
             const update = {
                 id: msg.id,
                 seq: msg.seq,
@@ -1315,13 +1341,14 @@ export class MessageService {
                         seq: msg.seq,
                         createdAt: msg.createdAt,
                         localId: msg.localId,
-                        content: contentForDeferredDelivery(msg.content)
+                        content: deliveryContent
                     }
                 }
             }
             this.io.of('/cli').to(`session:${sessionId}`).emit('update', update)
+            released += 1
         }
-        return queued.length
+        return released
     }
 
     private hasCliSessionConnection(sessionId: string): boolean {
