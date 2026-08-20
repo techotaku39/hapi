@@ -55,4 +55,23 @@ describe('redactSettingsForDisplay', () => {
             expect(redactSettingsForDisplay({ titleProvider }).titleProvider).toBe('***')
         }
     })
+
+    it('drops malformed nested title provider fields from diagnostic output', () => {
+        const displaySettings = redactSettingsForDisplay({
+            titleProvider: {
+                baseUrl: { password: 'base-url-secret' },
+                apiKey: { value: 'api-key-secret' },
+                model: ['model-secret']
+            }
+        })
+
+        expect(displaySettings.titleProvider).toEqual({
+            baseUrl: undefined,
+            apiKey: '***',
+            model: undefined
+        })
+        expect(JSON.stringify(displaySettings)).not.toContain('base-url-secret')
+        expect(JSON.stringify(displaySettings)).not.toContain('api-key-secret')
+        expect(JSON.stringify(displaySettings)).not.toContain('model-secret')
+    })
 })

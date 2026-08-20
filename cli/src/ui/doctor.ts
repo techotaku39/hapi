@@ -58,10 +58,11 @@ export function redactSettingsForDisplay(settings: Record<string, unknown>): Rec
     if (titleProvider !== undefined) {
         if (titleProvider && typeof titleProvider === 'object' && !Array.isArray(titleProvider)) {
             const titleProviderSettings = titleProvider as Record<string, unknown>
+            const stringOrUndefined = (value: unknown) => typeof value === 'string' ? value : undefined
             displaySettings.titleProvider = {
-                baseUrl: titleProviderSettings.baseUrl,
+                baseUrl: stringOrUndefined(titleProviderSettings.baseUrl),
                 apiKey: titleProviderSettings.apiKey ? '***' : undefined,
-                model: titleProviderSettings.model
+                model: stringOrUndefined(titleProviderSettings.model)
             }
         } else {
             displaySettings.titleProvider = '***'
