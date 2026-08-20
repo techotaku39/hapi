@@ -61,7 +61,12 @@ import {
     resolveMessageDeliveryMode,
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
-import { isHubScratchlistAttachmentPath, stripPreviewUrls, type MessageDeliveryMode } from '@hapi/protocol'
+import {
+    isHubScratchlistAttachmentPath,
+    stripPreviewUrls,
+    isSteeringSupportedForSession,
+    type MessageDeliveryMode,
+} from '@hapi/protocol'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { ShareSeedConsumer } from '@/components/ShareSeedConsumer'
@@ -2051,7 +2056,11 @@ function SessionChatInner(props: SessionChatProps) {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
-                                canSteer={agentFlavor === 'pi' && props.session.thinking && !controlledByUser}
+                                canSteer={isSteeringSupportedForSession(props.session.metadata)
+                                    && (agentFlavor === 'pi'
+                                        ? props.session.thinking
+                                        : props.session.agentState?.steeringActive === true)
+                                    && !controlledByUser}
                             />
                         </div>
 

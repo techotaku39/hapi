@@ -18,6 +18,7 @@ export type {
     NativeDevicePlatform,
     StoredMachine,
     StoredMessage,
+    MessageDeliveryState,
     StoredPushSubscription,
     StoredFcmDevice,
     StoredScratchlistEntry,
@@ -41,7 +42,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 25
+const SCHEMA_VERSION: number = 26
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -153,6 +154,47 @@ export class Store {
                 throw new Error('session activity was not persisted after messages-consumed transition')
             }
 
+            return session.updatedAt
+        })()
+    }
+
+    /** Persist a steer delivery state before/after the native request. */
+    recordSteerDeliveryState(
+        sessionId: string,
+        localIds: string[],
+        state: 'queued' | 'dispatching' | 'indeterminate',
+        namespace: string
+    ): boolean {
+        return this.db.transaction(() => {
+            const changes = this.messages.setMessagesDeliveryState(sessionId, localIds, state)
+            const now = Date.now()
+            if (changes > 0) {
+                this.sessions.touchSessionUpdatedAt(sessionId, now, namespace)
+            }
+            const session = this.sessions.getSessionByNamespace(sessionId, namespace)
+            if (!session) {
+                throw new Error('session not found after steer delivery transition')
+            }
+            return changes > 0
+        })()
+    }
+
+    /** Persist an ambiguous agent steer without stamping it delivered. */
+    recordMessagesIndeterminate(
+        sessionId: string,
+        localIds: string[],
+        namespace: string
+    ): number {
+        return this.db.transaction(() => {
+            const changes = this.messages.markMessagesIndeterminate(sessionId, localIds)
+            const now = Date.now()
+            if (changes > 0) {
+                this.sessions.touchSessionUpdatedAt(sessionId, now, namespace)
+            }
+            const session = this.sessions.getSessionByNamespace(sessionId, namespace)
+            if (!session) {
+                throw new Error('session not found after indeterminate transition')
+            }
             return session.updatedAt
         })()
     }
@@ -330,6 +372,7 @@ export class Store {
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
         })
 
         if (currentVersion === 0) {
@@ -429,6 +472,7 @@ export class Store {
                 local_id TEXT,
                 invoked_at INTEGER,
                 scheduled_at INTEGER,
+                delivery_state TEXT NOT NULL DEFAULT 'queued',
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
@@ -783,8 +827,8 @@ export class Store {
      *
      * Idempotent via `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT
      * EXISTS`. Cascade-delete from `sessions(id)` handles delete-session
-     * cleanup. Existing localStorage rows are backfilled by the web client's
-     * first-run migration via REST.
+     * cleanup. No data backfill: the web client's first-run migration
+     * pushes any existing `localStorage` entries up via REST.
      *
      * Rollback: `DROP TABLE session_scratchlist; PRAGMA user_version = 11;`
      */
@@ -837,49 +881,6 @@ export class Store {
         if (!columns.some((col) => col.name === 'attachments')) {
             this.db.exec(`ALTER TABLE session_scratchlist ADD COLUMN attachments TEXT DEFAULT NULL`)
         }
-    }
-
-    private migrateFromV23ToV24(): void {
-        const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
-        if (fcmColumns.length > 0 && !fcmColumns.some((col) => col.name === 'push_key')) {
-            // iOS push registrations add a nullable key; legacy Android rows
-            // keep their existing shape and receive NULL.
-            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
-        }
-    }
-
-    /**
-     * Persist scratchlist display order (tiann/hapi#893 follow-up).
-     * Existing rows retain the previous newest-first order while receiving a
-     * dense per-session position that subsequent reorder mutations can update.
-     */
-    private migrateFromV24ToV25(): void {
-        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
-        if (columns.length === 0) return
-        if (!columns.some((col) => col.name === 'position')) {
-            this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
-        }
-
-        const sessionRows = this.db.prepare(
-            'SELECT DISTINCT session_id FROM session_scratchlist'
-        ).all() as Array<{ session_id: string }>
-        const rowsForSession = this.db.prepare(
-            `SELECT entry_id FROM session_scratchlist
-             WHERE session_id = ?
-             ORDER BY created_at DESC, entry_id DESC`
-        )
-        const updatePosition = this.db.prepare(
-            'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
-        )
-        for (const { session_id } of sessionRows) {
-            const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
-            rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
-        }
-
-        this.db.exec(`
-            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
-                ON session_scratchlist(session_id, position)
-        `)
     }
 
     /**
@@ -987,6 +988,52 @@ export class Store {
         if (!columns.has('global_pinned')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
         }
+    }
+
+    /** v23→v24: add the iOS push envelope key. */
+    private migrateFromV23ToV24(): void {
+        const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        if (fcmColumns.length > 0 && !fcmColumns.some((column) => column.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
+    }
+
+    /** v24→v25: add durable unknown-delivery state for steers. */
+    private migrateFromV24ToV25(): void {
+        const messageColumns = this.getMessageColumnNames()
+        if (messageColumns.size > 0 && !messageColumns.has('delivery_state')) {
+            this.db.exec("ALTER TABLE messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'")
+        }
+    }
+
+    /** v25→v26: persist scratchlist display order. */
+    private migrateFromV25ToV26(): void {
+        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
+        if (columns.length === 0) return
+        if (!columns.some((column) => column.name === 'position')) {
+            this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
+        }
+
+        const sessionRows = this.db.prepare(
+            'SELECT DISTINCT session_id FROM session_scratchlist'
+        ).all() as Array<{ session_id: string }>
+        const rowsForSession = this.db.prepare(
+            `SELECT entry_id FROM session_scratchlist
+             WHERE session_id = ?
+             ORDER BY created_at DESC, entry_id DESC`
+        )
+        const updatePosition = this.db.prepare(
+            'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
+        )
+        for (const { session_id } of sessionRows) {
+            const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
+            rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
+        }
+
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
+                ON session_scratchlist(session_id, position)
+        `)
     }
 
     /**

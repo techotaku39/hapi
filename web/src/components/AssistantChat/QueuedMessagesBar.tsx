@@ -8,6 +8,7 @@ import { normalizeDecryptedMessage } from '@/chat/normalize'
 import type { DecryptedMessage } from '@/types/api'
 import { useCancelQueuedMessage } from '@/hooks/mutations/useCancelQueuedMessage'
 import { useSteerQueuedMessage } from '@/hooks/mutations/useSteerQueuedMessage'
+import { useRetryIndeterminateMessage } from '@/hooks/mutations/useRetryIndeterminateMessage'
 import { useTranslation } from '@/lib/use-translation'
 import { useToast } from '@/lib/toast-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -223,6 +224,7 @@ export function QueuedMessagesBar({
     const composerText = useAuiState((state) => state.composer.text)
     const cancelMutation = useCancelQueuedMessage(api)
     const steerMutation = useSteerQueuedMessage(api)
+    const retryMutation = useRetryIndeterminateMessage(api)
     const { t } = useTranslation()
     const { addToast } = useToast()
     const pendingScheduleRef = useRef(pendingSchedule)
@@ -379,6 +381,7 @@ export function QueuedMessagesBar({
                         // (the hub rejects those).
                         const canSteerRow = Boolean(
                             canSteer
+                            && msg.deliveryState !== 'indeterminate'
                             && msg.scheduledAt == null
                             && canCancel
                         )
@@ -393,6 +396,22 @@ export function QueuedMessagesBar({
                                 messageId: msg.id,
                             }).catch(() => {
                                 // useSteerQueuedMessage already toasts the failure.
+                            }).finally(() => {
+                                endQueuedOperation(sessionId, token)
+                            })
+                        }
+
+                        const retryPending = retryMutation.isPending
+                            && retryMutation.variables?.messageId === msg.id
+                        const handleRetry = () => {
+                            if (msg.deliveryState !== 'indeterminate' || !canCancel) return
+                            const token = beginQueuedOperation(sessionId)
+                            if (!token) return
+                            void retryMutation.mutateAsync({
+                                sessionId,
+                                messageId: msg.id,
+                            }).catch(() => {
+                                // The row remains held if the explicit retry fails.
                             }).finally(() => {
                                 endQueuedOperation(sessionId, token)
                             })
@@ -420,6 +439,12 @@ export function QueuedMessagesBar({
                                 })
                                 // Race guard: if the agent already consumed this message, skip prefill
                                 // and inform the user so they aren't confused by the row disappearing.
+                                // A 'busy' cancel means the row is inside an async steer — it was
+                                // NOT cancelled, so never prefill (the instruction may still be
+                                // delivered; prefilling invites a duplicate send).
+                                if (result.status === 'busy') {
+                                    return
+                                }
                                 if (result.status === 'invoked') {
                                     if (mountedRef.current) {
                                         addToast({
@@ -485,6 +510,11 @@ export function QueuedMessagesBar({
                                             {text}
                                         </span>
                                     ) : null}
+                                    {msg.deliveryState === 'indeterminate' ? (
+                                        <div className="mt-1 text-xs text-[var(--app-warning-text)]">
+                                            {t('queuedMessages.steerOutcomeUnknown')}
+                                        </div>
+                                    ) : null}
                                     {hasAttachments ? (
                                         <div className={text ? 'mt-1 flex flex-wrap gap-1' : 'flex flex-wrap gap-1'}>
                                             {attachmentNames.map((name, index) => (
@@ -509,6 +539,19 @@ export function QueuedMessagesBar({
                                     )}
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1">
+                                    {msg.deliveryState === 'indeterminate' ? (
+                                        <button
+                                            type="button"
+                                            aria-label={t('queuedMessages.retryOutcome')}
+                                            title={t('queuedMessages.retryOutcome')}
+                                            disabled={!canCancel || retryPending}
+                                            onClick={handleRetry}
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            className="flex h-6 w-6 items-center justify-center rounded text-[var(--app-hint)] transition-colors hover:bg-[var(--app-border)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-40"
+                                        >
+                                            <span aria-hidden="true">↻</span>
+                                        </button>
+                                    ) : null}
                                     {canSteerRow ? (
                                         <button
                                             type="button"

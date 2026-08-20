@@ -27,6 +27,7 @@ function createApp(opts: {
     getMessagesPage?: GetMessagesPage
     getQueuedState?: (sessionId: string, localIds: string[]) => {
         queuedLocalIds: string[]
+        indeterminateLocalIds: string[]
         invokedLocalMessages: Array<{ localId: string; invokedAt: number }>
     }
     steerQueuedMessage?: (sessionId: string, messageId: string) => Promise<unknown>
@@ -40,6 +41,7 @@ function createApp(opts: {
         queuedStateCalls.push({ sessionId, localIds })
         return {
             queuedLocalIds: localIds.filter((localId) => localId.startsWith('queued-')),
+            indeterminateLocalIds: [],
             invokedLocalMessages: localIds
                 .filter((localId) => localId.startsWith('invoked-'))
                 .map((localId) => ({ localId, invokedAt: 1_000 }))
@@ -482,6 +484,7 @@ describe('POST /api/sessions/:id/messages/queued-state', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
             queuedLocalIds: ['queued-2', 'queued-1'],
+            indeterminateLocalIds: [],
             invokedLocalMessages: [{ localId: 'invoked-1', invokedAt: 1_000 }]
         })
         expect(queuedStateCalls).toEqual([{
@@ -500,7 +503,7 @@ describe('POST /api/sessions/:id/messages/queued-state', () => {
         })
 
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({ queuedLocalIds: [], invokedLocalMessages: [] })
+        expect(await response.json()).toEqual({ queuedLocalIds: [], indeterminateLocalIds: [], invokedLocalMessages: [] })
         expect(queuedStateCalls).toHaveLength(0)
     })
 
