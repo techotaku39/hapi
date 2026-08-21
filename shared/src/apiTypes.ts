@@ -601,6 +601,7 @@ export type QueuedStateRequest = z.infer<typeof QueuedStateRequestSchema>
 
 export type QueuedStateResponse = {
     queuedLocalIds: string[]
+    indeterminateLocalIds?: string[]
     invokedLocalMessages: Array<{
         localId: string
         invokedAt: number
