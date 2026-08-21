@@ -13,9 +13,9 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v24 to v25', () => {
-    it('adds the durable migration state table to a V24 database', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
+describe('schema migration v25 to v26', () => {
+    it('adds the durable migration state table to a V25 database', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
@@ -23,7 +23,7 @@ describe('schema migration v24 to v25', () => {
         const legacy = new Database(dbPath)
         legacy.exec(`
             DROP TABLE migration_state;
-            PRAGMA user_version = 24;
+            PRAGMA user_version = 25;
         `)
         legacy.close()
 
@@ -35,7 +35,7 @@ describe('schema migration v24 to v25', () => {
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
 
         expect(table?.name).toBe('migration_state')
-        expect(version.user_version).toBe(25)
+        expect(version.user_version).toBe(26)
         migrated.close()
     })
 })
