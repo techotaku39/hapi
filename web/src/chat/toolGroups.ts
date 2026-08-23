@@ -339,7 +339,9 @@ function createToolGroupId(
     }
 
     const boundaryId = needsOlderHistory ? lastToolId : firstToolId
-    return `tool-group:${groupingFamily}:${boundaryId}`
+    return groupingFamily === 'default'
+        ? `tool-group:${boundaryId}`
+        : `tool-group:${groupingFamily}:${boundaryId}`
 }
 
 export function isToolGroupBlock(block: VisibleChatBlock | ChatBlock): block is ToolGroupBlock {

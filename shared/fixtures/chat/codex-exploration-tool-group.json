@@ -87,7 +87,7 @@
             {
                 "createdAt": 1755000001500,
                 "firstToolId": "call_expl_read01",
-                "id": "tool-group:codex-exploration:call_expl_read01",
+                "id": "tool-group:call_expl_read01",
                 "kind": "tool-group",
                 "lastToolId": "call_expl_search01",
                 "tools": [
