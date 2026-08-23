@@ -37,7 +37,7 @@ function RemoveIcon() {
     )
 }
 
-export function AttachmentItem() {
+export function AttachmentItem(props: { onRemove?: () => void }) {
     const { name, status, previewUrl } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
     const isParking = useComposerParking()
     const isUploading = status.type === 'running'
@@ -66,6 +66,7 @@ export function AttachmentItem() {
                 ) : null}
                 {!isParking ? (
                     <AttachmentPrimitive.Remove
+                        onClick={props.onRemove}
                         className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white transition-colors hover:bg-black/85 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white"
                         aria-label="Remove attachment"
                         title="Remove attachment"
@@ -89,6 +90,7 @@ export function AttachmentItem() {
             {isError ? <span className="text-xs text-red-500 whitespace-nowrap">Upload failed</span> : null}
             {!isParking ? (
                 <AttachmentPrimitive.Remove
+                    onClick={props.onRemove}
                     className="ml-auto flex h-5 w-5 items-center justify-center rounded text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
                     aria-label="Remove attachment"
                     title="Remove attachment"

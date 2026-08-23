@@ -538,10 +538,12 @@ export function HappyComposer(props: {
     const pendingSendAttemptIdRef = useRef<string | null>(null)
     const pendingSendEditGenerationRef = useRef<number | null>(null)
     const pendingSendAttachmentGenerationRef = useRef<number | null>(null)
+    const pendingSendScheduleGenerationRef = useRef<number | null>(null)
     const acceptedSendEditGenerationRef = useRef<{
         attemptId: string
         generation: number
         attachmentGeneration: number
+        scheduleGeneration: number
     } | null>(null)
     const handledSuccessfulSendRef = useRef<string | null>(null)
     const [showSettings, setShowSettings] = useState(false)
@@ -564,6 +566,7 @@ export function HappyComposer(props: {
             pendingSendAttemptIdRef.current = null
             pendingSendEditGenerationRef.current = null
             pendingSendAttachmentGenerationRef.current = null
+            pendingSendScheduleGenerationRef.current = null
             acceptedSendEditGenerationRef.current = null
             if (acceptance.sessionId) {
                 consumePendingComposerSend(acceptance.sessionId, null)
@@ -574,15 +577,18 @@ export function HappyComposer(props: {
         pendingSendAttemptIdRef.current = acceptance.attemptId
         const pendingGeneration = pendingSendEditGenerationRef.current
         const pendingAttachmentGeneration = pendingSendAttachmentGenerationRef.current
+        const pendingScheduleGeneration = pendingSendScheduleGenerationRef.current
         acceptedSendEditGenerationRef.current = pendingGeneration === null
             ? null
             : {
                 attemptId: acceptance.attemptId,
                 generation: pendingGeneration,
                 attachmentGeneration: pendingAttachmentGeneration ?? userAttachmentGenerationRef.current,
+                scheduleGeneration: pendingScheduleGeneration ?? userScheduleGenerationRef.current,
             }
         pendingSendEditGenerationRef.current = null
         pendingSendAttachmentGenerationRef.current = null
+        pendingSendScheduleGenerationRef.current = null
         const settlement = props.sendSettlement
         if (!settlement || settlement.attemptId !== acceptance.attemptId) return
         pendingSendAttemptIdRef.current = null
@@ -817,6 +823,17 @@ export function HappyComposer(props: {
             ? userAttachmentGenerationRef.current > attachmentGeneration
             : userAttachmentGenerationRef.current > 0
         if (attachmentsChangedAfterSend) {
+            consumeSettlement()
+            return
+        }
+
+        const scheduleGeneration = acceptedSend?.attemptId === settlement.attemptId
+            ? acceptedSend.scheduleGeneration
+            : pendingSendScheduleGenerationRef.current
+        const scheduleChangedAfterSend = scheduleGeneration !== null
+            ? userScheduleGenerationRef.current > scheduleGeneration
+            : userScheduleGenerationRef.current > 0
+        if (scheduleChangedAfterSend) {
             consumeSettlement()
             return
         }
@@ -1326,11 +1343,13 @@ export function HappyComposer(props: {
             if (pendingSendIntentRef) pendingSendIntentRef.current = effectiveIntent
             pendingSendEditGenerationRef.current = userEditGenerationRef.current
             pendingSendAttachmentGenerationRef.current = userAttachmentGenerationRef.current
+            pendingSendScheduleGenerationRef.current = userScheduleGenerationRef.current
             api.composer().send()
         } catch (error) {
             resetPendingSendIntent()
             pendingSendEditGenerationRef.current = null
             pendingSendAttachmentGenerationRef.current = null
+            pendingSendScheduleGenerationRef.current = null
             throw error
         }
         // SessionChat owns clearing the schedule — it clears only after awaiting
@@ -2320,7 +2339,15 @@ export function HappyComposer(props: {
                             <div className={`flex flex-wrap gap-2 px-4 pt-3 ${
                                 isExpanded ? 'max-h-[35%] shrink-0 overflow-y-auto' : ''
                             }`}>
-                                <ComposerPrimitive.Attachments components={{ Attachment: AttachmentItem }} />
+                            <ComposerPrimitive.Attachments components={{
+                                Attachment: () => (
+                                    <AttachmentItem
+                                        onRemove={() => {
+                                            userAttachmentGenerationRef.current += 1
+                                        }}
+                                    />
+                                ),
+                            }} />
                             </div>
                         ) : null}
 

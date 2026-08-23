@@ -39,6 +39,7 @@ const runtime = vi.hoisted(() => ({
     } as FakeRuntimeState,
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
     restoredAttachmentIds: null as null | ((ids: readonly string[]) => void),
+    attachmentRemove: null as null | (() => void),
     pendingSendIntentRef: null as null | { current: ComposerSendIntent },
     sentIntents: [] as ComposerSendIntent[],
     modelChanges: [] as Array<{ provider: string; modelId: string } | string | null>,
@@ -96,7 +97,10 @@ vi.mock('@assistant-ui/react', async () => {
                     />
                 ),
             ),
-            Attachments: () => null,
+            Attachments: (props: { components?: { Attachment?: React.ComponentType } }) => {
+                const Attachment = props.components?.Attachment
+                return Attachment ? <Attachment /> : null
+            },
         },
     }
 })
@@ -118,6 +122,12 @@ vi.mock('@/hooks/useComposerDraft', () => ({
     ) => {
         runtime.restoredAttachmentIds = onRestoredAttachmentIds ?? null
         return { sessionId, complete: true, restoredAny: false, hasStoredAttachments: false }
+    },
+}))
+vi.mock('@/components/AssistantChat/AttachmentItem', () => ({
+    AttachmentItem: (props: { onRemove?: () => void }) => {
+        runtime.attachmentRemove = props.onRemove ?? null
+        return null
     },
 }))
 vi.mock('@/hooks/useComposerEnterBehavior', () => ({ useComposerEnterBehavior: () => ({ composerEnterBehavior: 'send' }) }))
@@ -241,10 +251,13 @@ function ComposerHarness(props: {
                 attachments: [{ id: 'new-attachment', status: { type: 'complete' } }],
             },
         })),
-        removeAttachments: () => setSnapshot((current) => ({
-            ...current,
-            composer: { ...current.composer, attachments: [] },
-        })),
+        removeAttachments: () => {
+            runtime.attachmentRemove?.()
+            setSnapshot((current) => ({
+                ...current,
+                composer: { ...current.composer, attachments: [] },
+            }))
+        },
         acceptAndClearSchedule: () => setSchedule(null),
         remount: () => setComposerKey((key) => key === 'composer-a' ? 'composer-b' : 'composer-a'),
         programmaticSetText: (text) => setSnapshot((current) => ({
@@ -416,6 +429,7 @@ describe('HappyComposer send-error atomic restore', () => {
         cleanup()
         runtime.setSnapshot = null
         runtime.restoredAttachmentIds = null
+        runtime.attachmentRemove = null
         mockClearDraftsAfterSend.mockReset()
     })
 
@@ -629,6 +643,35 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue(''))
         expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
+    })
+
+    it('preserves a same-text schedule change after a remount', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.programmaticSetText('foo'))
+        fireEvent.click(screen.getByRole('button', { name: 'select schedule' }))
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
+    })
+
+    it('preserves a same-text draft after removing a hydrated attachment', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.hydrateSubmittedAttachment())
+        act(() => controls.current!.programmaticSetText('foo'))
+        act(() => controls.current!.removeAttachments())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
     })
 
     it('preserves a same-text scratchlist promotion after a remount', async () => {
