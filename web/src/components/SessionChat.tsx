@@ -256,6 +256,19 @@ function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
     return message.invokedAt == null && message.scheduledAt != null
 }
 
+/** Publish mutation acceptance before any best-effort post-send cleanup. */
+export async function runAcceptedSendCleanup<T>(
+    send: () => Promise<T | false>,
+    onAccepted: (value: T) => void,
+    cleanup: () => Promise<void>,
+): Promise<T | false> {
+    const accepted = await send()
+    if (!accepted) return false
+    onAccepted(accepted)
+    await cleanup()
+    return accepted
+}
+
 /**
  * Watches for incoming `abort-restore` events (emitted by the PTY launcher
  * when the user aborts a running turn) and surfaces the aborted prompt text —
@@ -759,19 +772,20 @@ function SessionChatInner(props: SessionChatProps) {
                 // scratchlist mode is on. Prefer onParkScratchlist (clears
                 // only after accept).
                 const accepted = await scratchlist.add(text, attachments)
+                if (accepted) {
+                    props.onSendAccepted?.({
+                        attemptId: null,
+                        sessionId: props.session.id,
+                        programmaticEditRevision: props.programmaticEditRevision ?? 0,
+                    }, text)
+                }
                 await finalizeMigratedScratchlistParkCleanup(
                     props.api,
                     props.session.id,
                     attachments,
                     accepted,
                 )
-                return accepted
-                    ? {
-                        attemptId: null,
-                        sessionId: props.session.id,
-                        programmaticEditRevision: props.programmaticEditRevision ?? 0,
-                    }
-                    : false
+                return accepted ? { attemptId: null, sessionId: props.session.id, programmaticEditRevision: props.programmaticEditRevision ?? 0 } : false
             }
             // If the user uploaded while scratchlist mode was on, then toggled
             // it off before send, pending items still carry hub paths. Stage
@@ -785,24 +799,28 @@ function SessionChatInner(props: SessionChatProps) {
                     props.session.id,
                     hubItems,
                 )
-                const accepted = await props.onSend(
-                    text,
-                    [...normalItems, ...staged],
-                    scheduledAt,
-                    deliveryMode,
+                return runAcceptedSendCleanup(
+                    () => props.onSend(
+                        text,
+                        [...normalItems, ...staged],
+                        scheduledAt,
+                        deliveryMode,
+                    ),
+                    (accepted) => props.onSendAccepted?.(accepted, text),
+                    async () => {
+                        // Hub blobs were copied into the normal upload dir; drop the
+                        // scratchlist copies so they stop counting against the session cap.
+                        await Promise.allSettled(
+                            hubItems.map((att) => props.api.deleteScratchlistAttachment(props.session.id, att.id))
+                        )
+                    },
                 )
-                if (accepted) {
-                    // Hub blobs were copied into the normal upload dir; drop the
-                    // scratchlist copies so they stop counting against the session cap.
-                    await Promise.allSettled(
-                        hubItems.map((att) => props.api.deleteScratchlistAttachment(props.session.id, att.id))
-                    )
-                }
-                return accepted
             }
-            return props.onSend(text, attachments, scheduledAt, deliveryMode)
+            const accepted = await props.onSend(text, attachments, scheduledAt, deliveryMode)
+            if (accepted) props.onSendAccepted?.(accepted, text)
+            return accepted
         },
-        [props.onSend, props.api, props.session.id, scratchlist, scratchlistMode],
+        [props.onSend, props.onSendAccepted, props.api, props.programmaticEditRevision, props.session.id, scratchlist, scratchlistMode],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
@@ -1562,7 +1580,6 @@ function SessionChatInner(props: SessionChatProps) {
         })
         const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode)
         if (!accepted) return
-        props.onSendAccepted?.(accepted, text)
         if (!routedToScratchlist) {
             // Clear pendingSchedule only after the mutation is actually
             // accepted - covers both pre-mutation guards AND async

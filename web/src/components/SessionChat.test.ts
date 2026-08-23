@@ -5,6 +5,7 @@ import {
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
     resolvePiContextWindow,
+    runAcceptedSendCleanup,
     shouldAutoClearPendingSchedule,
     shouldRouteToScratchlist,
 } from './SessionChat'
@@ -44,6 +45,34 @@ describe('applyModelChangeWithReasoningRollback', () => {
         expect(setModelReasoningEffort).toHaveBeenCalledOnce()
         expect(setModelReasoningEffort).toHaveBeenCalledWith(null)
         expect(setModel).toHaveBeenCalledWith('gpt-next')
+    })
+})
+
+describe('runAcceptedSendCleanup', () => {
+    it('publishes acceptance before deferred post-send cleanup', async () => {
+        const order: string[] = []
+        let releaseCleanup!: () => void
+        const cleanup = new Promise<void>((resolve) => { releaseCleanup = resolve })
+
+        const resultPromise = runAcceptedSendCleanup(
+            async () => {
+                order.push('send')
+                return 'accepted'
+            },
+            (accepted) => order.push(accepted),
+            async () => {
+                order.push('cleanup-start')
+                await cleanup
+                order.push('cleanup-end')
+            },
+        )
+
+        await Promise.resolve()
+        expect(order).toEqual(['send', 'accepted', 'cleanup-start'])
+
+        releaseCleanup()
+        await expect(resultPromise).resolves.toBe('accepted')
+        expect(order).toEqual(['send', 'accepted', 'cleanup-start', 'cleanup-end'])
     })
 })
 
