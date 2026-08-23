@@ -164,7 +164,7 @@ export function getSessionListSortTimestamp(
     return session.lastAssistantMessageAt ?? session.updatedAt
 }
 
-const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
+const AGENT_SESSION_ID_FIELD_BY_FLAVOR: Partial<Record<AgentFlavor, keyof Metadata>> = {
     claude: 'claudeSessionId',
     codex: 'codexSessionId',
     gemini: 'geminiSessionId',
@@ -175,12 +175,13 @@ const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
     kimi: 'kimiSessionId',
     copilot: 'copilotSessionId',
     pi: 'piSessionId'
-} as const satisfies Record<AgentFlavor, keyof Metadata>
+}
 
 function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
     const flavor = metadata.flavor
     if (isKnownFlavor(flavor)) {
         const flavorField = AGENT_SESSION_ID_FIELD_BY_FLAVOR[flavor]
+        if (!flavorField) return undefined
         const flavorSessionId = metadata[flavorField]
         return typeof flavorSessionId === 'string' && flavorSessionId.trim()
             ? flavorSessionId.trim()
