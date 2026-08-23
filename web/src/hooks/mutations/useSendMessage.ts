@@ -212,12 +212,23 @@ export function useSendMessage(
 } {
     const { haptic } = usePlatform()
     const [isResolving, setIsResolving] = useState(false)
-    const [sendSettlement, setSendSettlement] = useState<SendMessageSettlement | null>(null)
-    const consumeSendSettlement = useCallback((attemptId: string) => {
-        setSendSettlement((current) =>
-            current?.attemptId === attemptId ? null : current
-        )
+    const [sendSettlements, setSendSettlements] = useState<Record<string, SendMessageSettlement>>({})
+    const sendSettlement = sessionId ? sendSettlements[sessionId] ?? null : null
+    const publishSendSettlement = useCallback((settlement: SendMessageSettlement) => {
+        setSendSettlements((current) => ({
+            ...current,
+            [settlement.sessionId]: settlement,
+        }))
     }, [])
+    const consumeSendSettlement = useCallback((attemptId: string) => {
+        if (!sessionId) return
+        setSendSettlements((current) => {
+            if (current[sessionId]?.attemptId !== attemptId) return current
+            const next = { ...current }
+            delete next[sessionId]
+            return next
+        })
+    }, [sessionId])
     const resolveGuardRef = useRef(false)
     const isSessionThinkingRef = useRef(options?.isSessionThinking ?? false)
     isSessionThinkingRef.current = options?.isSessionThinking ?? false
@@ -242,7 +253,7 @@ export function useSendMessage(
             return { successStatus }
         },
         onSuccess: (_, input, context) => {
-            setSendSettlement({
+            publishSendSettlement({
                 attemptId: input.localId,
                 sessionId: input.sessionId,
                 text: input.text,
@@ -258,7 +269,7 @@ export function useSendMessage(
             options?.onSuccess?.(input.sessionId, input.text)
         },
         onError: (error, input) => {
-            setSendSettlement({
+            publishSendSettlement({
                 attemptId: input.localId,
                 sessionId: input.sessionId,
                 text: input.text,
