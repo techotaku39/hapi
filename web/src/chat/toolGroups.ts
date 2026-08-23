@@ -386,7 +386,10 @@ export function buildVisibleChatBlocks(
     options: ToolGroupingOptions
 ): VisibleChatBlock[] {
     const visibleBlocks: VisibleChatBlock[] = []
-    const groupingMode = options.groupingMode ?? 'classified'
+    // Preserve the historical aggregate behavior for callers that do not
+    // provide a UI presentation mode. Compact/detailed views pass
+    // `groupingMode: 'classified'` explicitly from SessionChat.
+    const groupingMode = options.groupingMode ?? 'grouped'
     const previousGroups = options.previousGroupingMode == null || options.previousGroupingMode === groupingMode
         ? (options.previousGroups ?? [])
         : []

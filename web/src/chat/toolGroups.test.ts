@@ -292,7 +292,7 @@ describe('buildVisibleChatBlocks', () => {
             }]
         })
 
-        const visible = buildVisibleChatBlocks([read, search], { hasMoreMessages: false })
+        const visible = buildVisibleChatBlocks([read, search], { hasMoreMessages: false, groupingMode: 'classified' })
 
         expect(visible).toHaveLength(1)
         expect(isToolGroupBlock(visible[0])).toBe(true)
@@ -312,7 +312,7 @@ describe('buildVisibleChatBlocks', () => {
                 command: 'rg nativeTitle web/src',
                 command_actions: [{ type: 'search', command: 'rg nativeTitle web/src', query: 'nativeTitle' }]
             })
-        ], { hasMoreMessages: false, codexExplorationCollapsed: false })
+        ], { hasMoreMessages: false, groupingMode: 'classified', codexExplorationCollapsed: false })
 
         expect(isToolGroupBlock(visible[0]) && visible[0].defaultOpen).toBe(true)
     })
@@ -341,7 +341,7 @@ describe('buildVisibleChatBlocks', () => {
             }]
         })
 
-        const visible = buildVisibleChatBlocks([read, test, nextRead], { hasMoreMessages: false })
+        const visible = buildVisibleChatBlocks([read, test, nextRead], { hasMoreMessages: false, groupingMode: 'classified' })
 
         expect(visible).toHaveLength(3)
         expect(isToolGroupBlock(visible[0]) && visible[0].presentationMode).toBe('codex-exploration')
