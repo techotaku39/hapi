@@ -537,9 +537,11 @@ export function HappyComposer(props: {
     const lastSendAcceptanceRef = useRef(props.sendAcceptance)
     const pendingSendAttemptIdRef = useRef<string | null>(null)
     const pendingSendEditGenerationRef = useRef<number | null>(null)
+    const pendingSendAttachmentGenerationRef = useRef<number | null>(null)
     const acceptedSendEditGenerationRef = useRef<{
         attemptId: string
         generation: number
+        attachmentGeneration: number
     } | null>(null)
     const handledSuccessfulSendRef = useRef<string | null>(null)
     const [showSettings, setShowSettings] = useState(false)
@@ -561,6 +563,7 @@ export function HappyComposer(props: {
         if (acceptance.attemptId === null) {
             pendingSendAttemptIdRef.current = null
             pendingSendEditGenerationRef.current = null
+            pendingSendAttachmentGenerationRef.current = null
             acceptedSendEditGenerationRef.current = null
             if (acceptance.sessionId) {
                 consumePendingComposerSend(acceptance.sessionId, null)
@@ -570,13 +573,16 @@ export function HappyComposer(props: {
         }
         pendingSendAttemptIdRef.current = acceptance.attemptId
         const pendingGeneration = pendingSendEditGenerationRef.current
+        const pendingAttachmentGeneration = pendingSendAttachmentGenerationRef.current
         acceptedSendEditGenerationRef.current = pendingGeneration === null
             ? null
             : {
                 attemptId: acceptance.attemptId,
                 generation: pendingGeneration,
+                attachmentGeneration: pendingAttachmentGeneration ?? userAttachmentGenerationRef.current,
             }
         pendingSendEditGenerationRef.current = null
+        pendingSendAttachmentGenerationRef.current = null
         const settlement = props.sendSettlement
         if (!settlement || settlement.attemptId !== acceptance.attemptId) return
         pendingSendAttemptIdRef.current = null
@@ -722,6 +728,17 @@ export function HappyComposer(props: {
         })
     }, [active, attachmentRevision, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, sessionId])
 
+    // A user-added attachment must make a successful-send cleanup unsafe even
+    // when the text remains unchanged. Keep this effect before the settlement
+    // decision so the generation is current for the same render commit.
+    useEffect(() => {
+        for (const attachment of attachments) {
+            if (observedAttachmentIdsRef.current.has(attachment.id)) continue
+            observedAttachmentIdsRef.current.add(attachment.id)
+            userAttachmentGenerationRef.current += 1
+        }
+    }, [attachments])
+
     // A keyed session remount can hydrate the text that assistant-ui cleared
     // before the POST settled. Once that exact send succeeds, clear only an
     // untouched matching draft; a new user edit must win over settlement.
@@ -784,6 +801,17 @@ export function HappyComposer(props: {
         // same-session resume can rehydrate the submitted text without that
         // revision, so it must remain clearable.
         if (editedProgrammaticallyAfterSend) {
+            consumeSettlement()
+            return
+        }
+
+        const attachmentGeneration = acceptedSend?.attemptId === settlement.attemptId
+            ? acceptedSend.attachmentGeneration
+            : pendingSendAttachmentGenerationRef.current
+        const attachmentsChangedAfterSend = attachmentGeneration !== null
+            ? userAttachmentGenerationRef.current > attachmentGeneration
+            : userAttachmentGenerationRef.current > 0
+        if (attachmentsChangedAfterSend) {
             consumeSettlement()
             return
         }
@@ -909,19 +937,6 @@ export function HappyComposer(props: {
         if (composerText === restored.text && attachments.length === 0) return
         onClearSendError?.()
     }, [sendError, attachments, composerText, onClearSendError])
-
-    // A user-added attachment must make a recovery unsafe even if it is removed
-    // again before the send error arrives. This runs even without a local send
-    // guard so a post-resume composer gets the same protection. Attachment IDs
-    // already present at mount are the baseline; assistant-ui's send clear only
-    // removes IDs and therefore does not look like a user addition.
-    useEffect(() => {
-        for (const attachment of attachments) {
-            if (observedAttachmentIdsRef.current.has(attachment.id)) continue
-            observedAttachmentIdsRef.current.add(attachment.id)
-            userAttachmentGenerationRef.current += 1
-        }
-    }, [attachments])
 
     useEffect(() => {
         if (richMentionsEnabled) {
@@ -1305,10 +1320,12 @@ export function HappyComposer(props: {
             // this ref synchronously from assistant-ui's onNew callback.
             if (pendingSendIntentRef) pendingSendIntentRef.current = effectiveIntent
             pendingSendEditGenerationRef.current = userEditGenerationRef.current
+            pendingSendAttachmentGenerationRef.current = userAttachmentGenerationRef.current
             api.composer().send()
         } catch (error) {
             resetPendingSendIntent()
             pendingSendEditGenerationRef.current = null
+            pendingSendAttachmentGenerationRef.current = null
             throw error
         }
         // SessionChat owns clearing the schedule — it clears only after awaiting

@@ -581,6 +581,19 @@ describe('HappyComposer send-error atomic restore', () => {
         expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
     })
 
+    it('preserves a matching draft when an attachment is added after the send', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.programmaticSetText('foo'))
+        act(() => controls.current!.addAttachment())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
+    })
+
     it('preserves a same-text scratchlist promotion after a remount', async () => {
         const controls = renderComposer('foo', null)
         send()
