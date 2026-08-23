@@ -40,7 +40,8 @@ import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
-import { clearComposerDraftSnapshotIfText, persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
+import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
+import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -785,7 +786,7 @@ export function HappyComposer(props: {
         if (composerText === settlement.text) {
             api.composer().setText('')
         }
-        clearComposerDraftSnapshotIfText(sessionId, settlement.text)
+        clearDraftsAfterSend(settlement.sessionId, null, settlement.text)
         consumeSettlement()
     }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
 

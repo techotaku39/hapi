@@ -5,7 +5,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
+import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
+
+vi.mock('@/lib/clearDraftsAfterSend', () => ({
+    clearDraftsAfterSend: vi.fn(),
+}))
+
 import { HappyComposer, type ComposerSendError } from './HappyComposer'
+
+const mockClearDraftsAfterSend = vi.mocked(clearDraftsAfterSend)
 
 /**
  * HappyComposer owns the recovery guard, while assistant-ui owns the live
@@ -364,6 +372,7 @@ describe('HappyComposer send-error atomic restore', () => {
     afterEach(() => {
         cleanup()
         runtime.setSnapshot = null
+        mockClearDraftsAfterSend.mockReset()
     })
 
     it('collapses an expanded composer only after an accepted send succeeds', async () => {
@@ -522,6 +531,10 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.settleSend())
 
         await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
+
+        act(() => controls.current!.remount())
+        await waitFor(() => expect(input()).toHaveValue('foo'))
     })
 
     it('preserves a matching draft when a retry settles without composer acceptance', async () => {
@@ -542,6 +555,7 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.settleSend())
 
         await waitFor(() => expect(input()).toHaveValue(''))
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-resolved', null, 'foo')
     })
 
     it('preserves a later same-text draft after success and a session remount', async () => {

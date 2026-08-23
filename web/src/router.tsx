@@ -42,7 +42,6 @@ import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { seedMessageWindowFromSession, syncTailMessages } from '@/lib/message-window-store'
-import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
@@ -577,8 +576,7 @@ function SessionPage() {
         consumeSendSettlement,
     } = useSendMessage(api, sessionId, {
         isSessionThinking: session?.thinking ?? false,
-        onSuccess: (sentSessionId, sentText) => {
-            clearDraftsAfterSend(sentSessionId, sessionId, sentText)
+        onSuccess: (sentSessionId) => {
             // 中文注释：一旦用户已经在 Hapi 内继续这个 Codex 会话，就清除"刚从 Codex 导入"的标记。
             clearCodexImportedSession(session?.metadata?.codexSessionId)
             // A successful send supersedes any previously-rendered error
