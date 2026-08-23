@@ -135,11 +135,6 @@ export function isRedundantGoalStatusEventContent(value: unknown): boolean {
  *     content.data.type = 'assistant'  -> text at
  *     `content.data.message.content[i].text` (array of `{type:'text', text}`).
  *
- *  3. Agent event messages:  content.type = 'event',
- *     content.data.type = 'message'  -> status text at
- *     `content.data.message` (string). These remain extractable for chat
- *     rendering, but are not reply-clock candidates.
- *
  * Returns `null` when the content does not look like assistant *text*
  * (tool calls, tool results, reasoning, token counts, etc.) so callers can
  * skip those messages and fall back to the previous one.
@@ -147,7 +142,7 @@ export function isRedundantGoalStatusEventContent(value: unknown): boolean {
 export function extractAssistantPlainText(content: unknown): string | null {
     if (!isObject(content)) return null
 
-    if (content.type === 'codex' || content.type === 'event') {
+    if (content.type === 'codex') {
         const data = isObject(content.data) ? content.data : null
         if (!data || data.type !== 'message') return null
         return typeof data.message === 'string' && data.message.trim().length > 0

@@ -31,7 +31,7 @@ describe('extractAssistantPlainText', () => {
         expect(extractAssistantPlainText(content)).toBe('Hello there.')
     })
 
-    test('extracts event/message text', () => {
+    test('ignores event/message status text', () => {
         const content = {
             type: 'event',
             data: {
@@ -39,7 +39,7 @@ describe('extractAssistantPlainText', () => {
                 message: 'Visible event reply.'
             }
         }
-        expect(extractAssistantPlainText(content)).toBe('Visible event reply.')
+        expect(extractAssistantPlainText(content)).toBeNull()
     })
 
     test('returns null for codex/tool-call (no text)', () => {
