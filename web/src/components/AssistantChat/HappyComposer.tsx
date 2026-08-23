@@ -612,6 +612,7 @@ export function HappyComposer(props: {
     const userScheduleGenerationRef = useRef(0)
     const userAttachmentGenerationRef = useRef(0)
     const observedAttachmentIdsRef = useRef(new Set(attachments.map((attachment) => attachment.id)))
+    const restoredDraftAttachmentIdsRef = useRef(new Set<string>())
     const sendRestoreGuardRef = useRef<{
         userEditGeneration: number
         userScheduleGeneration: number
@@ -678,6 +679,9 @@ export function HappyComposer(props: {
         props.canRestoreAttachments ?? active,
         (text) => api.composer().setText(text),
         (file) => api.composer().addAttachment(file),
+        (ids) => {
+            for (const id of ids) restoredDraftAttachmentIdsRef.current.add(id)
+        },
     )
     const canHydrateAttachments = props.canRestoreAttachments ?? active
     const hiddenAttachmentStatePending =
@@ -735,6 +739,7 @@ export function HappyComposer(props: {
         for (const attachment of attachments) {
             if (observedAttachmentIdsRef.current.has(attachment.id)) continue
             observedAttachmentIdsRef.current.add(attachment.id)
+            if (restoredDraftAttachmentIdsRef.current.delete(attachment.id)) continue
             userAttachmentGenerationRef.current += 1
         }
     }, [attachments])

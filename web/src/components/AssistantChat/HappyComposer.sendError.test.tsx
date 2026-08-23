@@ -38,6 +38,7 @@ const runtime = vi.hoisted(() => ({
         thread: { isRunning: false, isDisabled: false },
     } as FakeRuntimeState,
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
+    restoredAttachmentIds: null as null | ((ids: readonly string[]) => void),
     pendingSendIntentRef: null as null | { current: ComposerSendIntent },
     sentIntents: [] as ComposerSendIntent[],
     modelChanges: [] as Array<{ provider: string; modelId: string } | string | null>,
@@ -106,7 +107,18 @@ vi.mock('@/lib/composerSegments', () => ({
         showContinueHint ? 'misc.typeMessage' : 'misc.typeAMessage',
 }))
 vi.mock('@/hooks/useComposerDraft', () => ({
-    useComposerDraft: (sessionId: string | undefined) => ({ sessionId, complete: true, restoredAny: false, hasStoredAttachments: false }),
+    useComposerDraft: (
+        sessionId: string | undefined,
+        _composerText: string,
+        _attachments: readonly FakeAttachment[],
+        _canRestoreAttachments: boolean,
+        _setText: (text: string) => void,
+        _addAttachment: (file: File) => Promise<void>,
+        onRestoredAttachmentIds?: (ids: readonly string[]) => void,
+    ) => {
+        runtime.restoredAttachmentIds = onRestoredAttachmentIds ?? null
+        return { sessionId, complete: true, restoredAny: false, hasStoredAttachments: false }
+    },
 }))
 vi.mock('@/hooks/useComposerEnterBehavior', () => ({ useComposerEnterBehavior: () => ({ composerEnterBehavior: 'send' }) }))
 vi.mock('@/hooks/usePlatform', () => ({ usePlatform: () => ({ haptic: { impact: () => {}, notification: () => {} }, isTouch: false }) }))
@@ -167,6 +179,7 @@ type HarnessControls = {
     programmaticSetText: (text: string) => void
     queuedEditSetText: (text: string) => void
     scratchlistPromoteSetText: (text: string) => void
+    hydrateSubmittedAttachment: () => void
     acceptSend: () => void
     setSending: (sending: boolean) => void
     setThreadDisabled: (disabled: boolean) => void
@@ -250,6 +263,16 @@ function ComposerHarness(props: {
             setSnapshot((current) => ({
                 ...current,
                 composer: { ...current.composer, text },
+            }))
+        },
+        hydrateSubmittedAttachment: () => {
+            runtime.restoredAttachmentIds?.(['new-attachment'])
+            setSnapshot((current) => ({
+                ...current,
+                composer: {
+                    ...current.composer,
+                    attachments: [{ id: 'new-attachment', status: { type: 'complete' } }],
+                },
             }))
         },
         acceptSend: () => {
@@ -392,6 +415,7 @@ describe('HappyComposer send-error atomic restore', () => {
     afterEach(() => {
         cleanup()
         runtime.setSnapshot = null
+        runtime.restoredAttachmentIds = null
         mockClearDraftsAfterSend.mockReset()
     })
 
@@ -592,6 +616,19 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue('foo'))
         expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
+    })
+
+    it('clears sent attachments restored by draft hydration after a remount', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.hydrateSubmittedAttachment())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue(''))
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
     })
 
     it('preserves a same-text scratchlist promotion after a remount', async () => {
