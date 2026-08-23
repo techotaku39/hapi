@@ -1481,11 +1481,13 @@ export function buildCliArgs(
             ? 'copilot'
             : agent === 'opencode'
             ? 'opencode'
-            : agent === 'pi'
-              ? 'pi'
-              : agent === 'agy'
-                ? 'agy'
-                : 'claude';
+            : agent === 'dsh'
+              ? 'dsh'
+              : agent === 'pi'
+                ? 'pi'
+                : agent === 'agy'
+                  ? 'agy'
+                  : 'claude';
   const args = [agentCommand];
   if (options.resumeSessionId) {
     if (agent === 'codex') {
@@ -1499,10 +1501,8 @@ export function buildCliArgs(
       args.push('--resume', options.resumeSessionId);
     }
   }
-  // agy PTY reuses the existing hub row directly on reopen/resume.
-  if (options.existingSessionId && agent === 'agy') {
-    args.push('--hapi-session-id', options.existingSessionId);
-  }
+  // agy headless reuses the existing hub row on reopen/resume via the generic
+  // --existing-session-id flow (no PTY special case anymore).
   // Message-level Fork current for Claude: must follow --resume.
   if (options.forkSession && agentCommand === 'claude') {
     args.push('--fork-session');
@@ -1513,6 +1513,8 @@ export function buildCliArgs(
   // forks reuse the original HAPI row via --existing-session-id.
   if (agent === 'codex' || agent === 'cursor' || agent === 'pi'
       || agent === 'opencode'
+      || agent === 'agy'
+      || agent === 'dsh'
       || (agentCommand === 'claude' && options.forkSession)) {
     const existingSessionId = options.existingSessionId ?? options.sessionId;
     if (existingSessionId) {
@@ -1529,7 +1531,7 @@ export function buildCliArgs(
   if (options.model) {
     args.push('--model', options.model);
   }
-  if (options.effort && (agent === 'claude' || agent === 'grok' || agent === 'pi')) {
+  if (options.effort && (agent === 'claude' || agent === 'grok' || agent === 'pi' || agent === 'agy')) {
     args.push('--effort', options.effort);
   }
   if (options.modelReasoningEffort && (agent === 'codex' || agent === 'opencode')) {
@@ -1546,7 +1548,7 @@ export function buildCliArgs(
   }
   // Pi RPC mode has no permission switching; never pass these flags to it
   // (the Pi parser rejects --permission-mode and ignores --yolo).
-  if (agent !== 'pi') {
+  if (agent !== 'pi' && agent !== 'dsh') {
     if (options.permissionMode && (PERMISSION_MODES as readonly string[]).includes(options.permissionMode)) {
       args.push('--permission-mode', options.permissionMode);
     } else if (yolo) {

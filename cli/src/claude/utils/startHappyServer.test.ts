@@ -118,6 +118,16 @@ describe('startHappyServer skill_lookup', () => {
         ])
     })
 
+    it('describes display_image as user output rather than image input', async () => {
+        const mcp = await connect(false)
+        const tools = await mcp.listTools()
+        const displayImage = tools.tools.find((tool) => tool.name === 'display_image')
+
+        expect(displayImage?.description).toContain('human user')
+        expect(displayImage?.description).toContain('does not provide image input to the model')
+        expect(displayImage?.description).toContain('cannot be used to read, inspect, or analyze image contents')
+    })
+
     it('displays audio through display_media and emits a generated media message', async () => {
         const path = join(sandboxDir, 'sample.wav')
         await writeFile(path, Buffer.from('RIFFxxxxWAVE'))
@@ -134,6 +144,26 @@ describe('startHappyServer skill_lookup', () => {
             type: 'generated-image',
             fileName: 'sample.wav',
             mimeType: 'audio/wav',
+            source: { ingress: 'mcp', toolName: 'display_media' }
+        }))
+    })
+
+    it('preserves the source extension when display_media title omits one', async () => {
+        const path = join(sandboxDir, 'plan-a.zip')
+        await writeFile(path, Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+        const mcp = await connect(false)
+
+        const result = await mcp.callTool({
+            name: 'display_media',
+            arguments: { path, title: 'Cursor Plan A Markdown 导出' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Displayed media: Cursor Plan A Markdown 导出.zip')
+        expect(sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'generated-image',
+            fileName: 'Cursor Plan A Markdown 导出.zip',
+            mimeType: 'application/octet-stream',
             source: { ingress: 'mcp', toolName: 'display_media' }
         }))
     })

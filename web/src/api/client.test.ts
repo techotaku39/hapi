@@ -80,6 +80,32 @@ describe('ApiClient error mapping', () => {
         }
     })
 
+    it('returns export warnings and sends explicit confirmation for large exports', async () => {
+        const warning = {
+            type: 'warning',
+            count: 20_001,
+            limit: 20_000,
+            estimatedBytes: 12_345_678
+        }
+        const payload = {
+            schemaVersion: 2,
+            exportedAt: 1_762_000_000_000,
+            session: { id: 'session-1' },
+            messages: [],
+            scratchlist: []
+        }
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify(warning), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getSessionExport('session-1')).resolves.toEqual(warning)
+        await expect(api.getSessionExport('session-1', { force: true })).resolves.toEqual(payload)
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session-1/export')
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/sessions/session-1/export?force=true')
+    })
+
     it('loads the Cursor chat store status for the selected session', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(JSON.stringify({ onDisk: false, store: null }), { status: 200 })
@@ -91,6 +117,40 @@ describe('ApiClient error mapping', () => {
             store: null
         })
         expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%20cursor/cursor-chat-store')
+    })
+
+    it('generates a title and saves the summary through separate session endpoints', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ title: 'Generated title' }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.suggestSessionTitle('session /?#')).resolves.toEqual({ title: 'Generated title' })
+        await api.updateSessionSummary('session /?#', 'Generated title')
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%20%2F%3F%23/title-suggestion')
+        expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/sessions/session%20%2F%3F%23/summary')
+        expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+            method: 'PATCH',
+            body: JSON.stringify({ text: 'Generated title' })
+        })
+    })
+
+    it('reads the Hub title suggestion capability', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            status: 'ok',
+            protocolVersion: 1,
+            capabilities: { titleSuggestion: true }
+        }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getHealth()).resolves.toEqual({
+            status: 'ok',
+            protocolVersion: 1,
+            capabilities: { titleSuggestion: true }
+        })
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/health')
     })
 
     it('lists and imports Pi sessions through the selected machine', async () => {

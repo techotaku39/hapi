@@ -13,6 +13,10 @@ import {
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
+import {
+    getSessionListSelectionNavigation,
+    PRESERVE_SESSION_SIDEBAR_SCROLL,
+} from '@/lib/sessionNavigation'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
@@ -150,7 +154,7 @@ function SettingsIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, baseUrl } = useAppContext()
+    const { api, baseUrl, titleSuggestionAvailable = false } = useAppContext()
     const navigate = useNavigate()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
@@ -214,7 +218,8 @@ function SessionsPage() {
             to: '/sessions/new',
             search: args.machineId
                 ? { directory: args.directory, machineId: args.machineId }
-                : { directory: args.directory }
+                : { directory: args.directory },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate])
 
@@ -235,11 +240,11 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId) => navigate({
-                            to: '/sessions/$sessionId',
-                            params: { sessionId },
+                        onSelect={(sessionId) => navigate(getSessionListSelectionNavigation(sessionId))}
+                        onNewSession={() => navigate({
+                            to: '/sessions/new',
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         })}
-                        onNewSession={() => navigate({ to: '/sessions/new' })}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
@@ -267,7 +272,10 @@ function SessionsPage() {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => navigate({ to: '/sessions/new' })}
+                                    onClick={() => navigate({
+                                        to: '/sessions/new',
+                                        ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+                                    })}
                                     className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
                                     title={t('sessions.new')}
                                 >
@@ -276,6 +284,7 @@ function SessionsPage() {
                             </div>
                         )}
                         api={api}
+                        titleSuggestionAvailable={titleSuggestionAvailable}
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
                     />
@@ -328,7 +337,7 @@ function classifySendError(
 }
 
 function SessionPage() {
-    const { api } = useAppContext()
+    const { api, titleSuggestionAvailable = false } = useAppContext()
     const { t } = useTranslation()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
@@ -359,6 +368,7 @@ function SessionPage() {
         viewMode: messagesViewMode,
         messagesVersion,
         historyVersion,
+        tailRevision,
         setViewMode,
     } = useMessages(api, sessionId)
 
@@ -443,7 +453,8 @@ function SessionPage() {
                         () => navigate({
                             to: '/sessions/$sessionId',
                             params: { sessionId: result.sessionId },
-                            replace: true
+                            replace: true,
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         }),
                     )
                 }
@@ -556,7 +567,8 @@ function SessionPage() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: resolvedSessionId },
-            replace: true
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
         if (api) {
             void refreshSessionDetailPreservingActive(
@@ -736,6 +748,7 @@ function SessionPage() {
             to: '/sessions/$sessionId',
             params: { sessionId },
             replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessionId])
 
@@ -774,6 +787,7 @@ function SessionPage() {
     return (
         <SessionChat
             api={api}
+            titleSuggestionAvailable={titleSuggestionAvailable}
             session={session}
             cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
             reopenDisabledReason={cursorReopenDisabledReason}
@@ -789,6 +803,7 @@ function SessionPage() {
             viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}
+            tailRevision={tailRevision}
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
@@ -855,7 +870,8 @@ function SessionDetailRoute() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: supersedingSessionId },
-            replace: true
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, session, sessionId, supersedingSessionId])
 
@@ -863,7 +879,11 @@ function SessionDetailRoute() {
         if (!sessionNotFound) {
             return
         }
-        navigate({ to: '/sessions', replace: true })
+        navigate({
+            to: '/sessions',
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
     }, [navigate, sessionNotFound, sessionId])
 
     if (sessionNotFound) {
@@ -890,7 +910,10 @@ function NewSessionPage() {
         if (shareTransferId) {
             void deleteShareTransfer(shareTransferId)
         }
-        navigate({ to: '/sessions' })
+        navigate({
+            to: '/sessions',
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
     }, [navigate, shareTransferId])
 
     const handleSuccess = useCallback((sessionId: string) => {
@@ -899,12 +922,17 @@ function NewSessionPage() {
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
-        navigate({ to: '/sessions', replace: true })
+        navigate({
+            to: '/sessions',
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
         // Then navigate to new session
         requestAnimationFrame(() => {
             navigate({
                 to: '/sessions/$sessionId',
                 params: { sessionId },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
             })
         })
     }, [navigate, queryClient, shareTransferId])

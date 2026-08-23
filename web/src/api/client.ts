@@ -8,6 +8,7 @@ import type {
     CodexDesktopSyncRequest,
     CodexDesktopStatusResponse,
     CodexArchiveSessionResponse,
+    DecryptedMessage,
     CodexCollaborationMode,
     CopilotAgentMode,
     FileSearchResponse,
@@ -23,8 +24,10 @@ import type {
     SkillsResponse,
     SpawnResponse,
     VisibilityPayload,
-    HapiSessionExport,
+    HapiSessionExportResponse,
+    HubHealthResponse,
     SessionResponse,
+    SessionTitleSuggestionResponse,
     SessionsResponse
 } from '@/types/api'
 import type {
@@ -45,6 +48,7 @@ import type {
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
     OpencodeReasoningEffortResponse,
+    PiModelsResponse,
     QueuedStateResponse,
     ReopenSessionResponse,
     SqliteStorageUsageResponse,
@@ -56,6 +60,11 @@ import type {
 import type { AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
 import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
+
+export type RetryIndeterminateMessageResponse =
+    | { status: 'retried' | 'already-queued' | 'retry-unavailable'; localId: string | null }
+    | { status: 'invoked'; message: DecryptedMessage }
+    | { status: 'not-found' }
 
 export type ProviderCredentialSource = 'env' | 'settings' | 'none'
 
@@ -247,6 +256,10 @@ export class ApiClient {
         return await this.request<SessionsResponse>('/api/sessions')
     }
 
+    async getHealth(): Promise<HubHealthResponse> {
+        return await this.request<HubHealthResponse>('/health')
+    }
+
     async getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse> {
         return await this.request<PushVapidPublicKeyResponse>('/api/push/vapid-public-key')
     }
@@ -340,9 +353,13 @@ export class ApiClient {
         return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`)
     }
 
-    async getSessionExport(sessionId: string, options?: { signal?: AbortSignal }): Promise<HapiSessionExport> {
-        return await this.request<HapiSessionExport>(
-            `/api/sessions/${encodeURIComponent(sessionId)}/export`,
+    async getSessionExport(
+        sessionId: string,
+        options?: { force?: boolean; signal?: AbortSignal }
+    ): Promise<HapiSessionExportResponse> {
+        const query = options?.force ? '?force=true' : ''
+        return await this.request<HapiSessionExportResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/export${query}`,
             { signal: options?.signal }
         )
     }
@@ -546,6 +563,13 @@ export class ApiClient {
             { method: 'POST' }
         )
         return response as SteerQueuedMessageResponse
+    }
+
+    async retryIndeterminateMessage(sessionId: string, messageId: string): Promise<RetryIndeterminateMessageResponse> {
+        return await this.request<RetryIndeterminateMessageResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/retry`,
+            { method: 'POST' }
+        )
     }
 
     async abortSession(sessionId: string): Promise<void> {
@@ -832,6 +856,12 @@ export class ApiClient {
         )
     }
 
+    async getMachinePiModels(machineId: string): Promise<PiModelsResponse> {
+        return await this.request<PiModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/pi-models`
+        )
+    }
+
     async getMachineCodexModels(machineId: string): Promise<CodexModelsResponse> {
         return await this.request<CodexModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/codex-models`
@@ -935,6 +965,20 @@ export class ApiClient {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'PATCH',
             body: JSON.stringify({ name })
+        })
+    }
+
+    async suggestSessionTitle(sessionId: string): Promise<SessionTitleSuggestionResponse> {
+        return await this.request<SessionTitleSuggestionResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/title-suggestion`,
+            { method: 'POST' }
+        )
+    }
+
+    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/summary`, {
+            method: 'PATCH',
+            body: JSON.stringify({ text })
         })
     }
 

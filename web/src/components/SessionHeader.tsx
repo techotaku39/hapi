@@ -27,6 +27,7 @@ import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectMobileSessionHeaderSecondary } from '@/lib/sessionHeaderMobileMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
+import { markSessionUnread } from '@/lib/sessionLastSeen'
 
 /** Same preference order as session-list chips: display label → host → short id. */
 export function resolveSessionHeaderMachineLabel(
@@ -146,6 +147,7 @@ export function SessionHeader(props: {
     onToggleTerminal?: () => void
     terminalActive?: boolean
     api: ApiClient | null
+    titleSuggestionAvailable?: boolean
     canReopen?: boolean
     reopenDisabledReason?: string
     reopenHint?: string
@@ -222,7 +224,7 @@ export function SessionHeader(props: {
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, setPinMode, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -355,7 +357,7 @@ export function SessionHeader(props: {
     const handleMenuToggle = () => {
         if (!menuOpen && menuAnchorRef.current) {
             const rect = menuAnchorRef.current.getBoundingClientRect()
-            setMenuAnchorPoint({ x: rect.right, y: rect.bottom })
+            setMenuAnchorPoint({ x: rect.left + rect.width / 2, y: rect.bottom })
         }
         setMenuOpen((open) => !open)
     }
@@ -518,6 +520,7 @@ export function SessionHeader(props: {
                 sessionPinned={Boolean(session.pinned)}
                 sessionGlobalPinned={Boolean(session.globalPinned)}
                 onRename={() => setRenameOpen(true)}
+                onMarkUnread={() => markSessionUnread(session.id, session.updatedAt)}
                 onSetPinMode={api ? (mode) => void handleSetPinMode(mode) : undefined}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
@@ -550,6 +553,8 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
+                onSuggestTitle={api && props.titleSuggestionAvailable ? suggestSessionTitle : undefined}
+                onUpdateSummary={api && props.titleSuggestionAvailable ? updateSessionSummary : undefined}
                 isPending={isPending}
             />
 

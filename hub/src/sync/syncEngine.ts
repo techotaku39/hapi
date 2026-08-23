@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { isKnownFlavor, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -27,11 +27,13 @@ import { CursorLegacyMigrator, type CursorLegacyMigratorOptions } from '../curso
 
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
-import { MessageService } from './messageService'
+import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
+import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
 import { selectForkTranscriptPrefix } from './forkTranscript'
 import {
     RpcGateway,
     RpcTargetMissingError,
+    type FileSearchOptions,
     type RpcCodexModel,
     type RpcCommandResponse,
     type RpcDeleteUploadResponse,
@@ -39,6 +41,7 @@ import {
     type RpcListDirectoryResponse,
     type RpcStatFilesResponse,
     type RpcListAgyModelsResponse,
+    type RpcListPiModelsResponse,
     type RpcListCodexModelsResponse,
     type RpcListPiSessionsResponse,
     type RpcArchiveCodexSessionResponse,
@@ -72,6 +75,7 @@ export type {
     RpcListDirectoryResponse,
     RpcStatFilesResponse,
     RpcListAgyModelsResponse,
+    RpcListPiModelsResponse,
     RpcListCodexModelsResponse,
     RpcListPiSessionsResponse,
     RpcListCursorModelsResponse,
@@ -171,6 +175,7 @@ export class SyncEngine {
     private readonly sessionCache: SessionCache
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
+    private readonly titleSuggestionService: TitleSuggestionService
     private readonly rpcGateway: RpcGateway
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP or validated Pi get_state). */
@@ -212,6 +217,7 @@ export class SyncEngine {
             this.eventPublisher,
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
+        this.titleSuggestionService = createTitleSuggestionService(store)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
@@ -401,8 +407,8 @@ export class SyncEngine {
         return this.messageService.getQueuedState(sessionId, localIds)
     }
 
-    getSessionExport(sessionId: string, session: Session): HapiSessionExportResult {
-        return this.messageService.getSessionExport(sessionId, session)
+    getSessionExport(sessionId: string, session: Session, options?: { force?: boolean }): HapiSessionExportResult {
+        return this.messageService.getSessionExport(sessionId, session, options)
     }
 
     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {
@@ -1021,10 +1027,19 @@ export class SyncEngine {
         return this.messageService.cancelQueuedMessage(sessionId, messageId)
     }
 
+    async retryIndeterminateMessage(
+        sessionId: string,
+        messageId: string
+    ): Promise<RetryIndeterminateMessageResult> {
+        return this.messageService.retryIndeterminateMessage(sessionId, messageId)
+    }
+
     /**
-     * Ask the CLI to deliver one waiting-queue message into the active Pi turn
-     * (Pi native steer). Only pi sessions support this today; the CLI's
-     * `steer-queued-message` handler is registered by the pi runner alone.
+     * Ask the CLI to deliver one waiting-queue message into the active turn
+     * (native steer). Supported for Pi, Codex, and Cursor ACP sessions; the
+     * CLI's `steer-queued-message` handler is registered per flavor. Legacy
+     * stream-json Cursor sessions and other flavors are rejected by the
+     * capability gate.
      */
     async steerQueuedMessage(
         sessionId: string,
@@ -1034,8 +1049,8 @@ export class SyncEngine {
         if (!session) {
             return { status: 'failed', error: 'Session not found', localId: null }
         }
-        if (session.metadata?.flavor !== 'pi') {
-            return { status: 'failed', error: 'Steering is only supported for Pi sessions', localId: null }
+        if (!isSteeringSupportedForSession(session.metadata)) {
+            return { status: 'failed', error: 'Steering is only supported for Pi, Codex, and Cursor ACP sessions', localId: null }
         }
         if (session.agentState?.controlledByUser === true) {
             return { status: 'failed', error: 'Steering is only available for remote sessions', localId: null }
@@ -1846,6 +1861,14 @@ export class SyncEngine {
         await this.sessionCache.renameSession(sessionId, name)
     }
 
+    async suggestSessionTitle(sessionId: string): Promise<string> {
+        return await this.titleSuggestionService.suggestTitle(sessionId)
+    }
+
+    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
+        await this.sessionCache.updateSessionSummary(sessionId, text)
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
     }
@@ -2381,6 +2404,9 @@ export class SyncEngine {
         if (flavor === 'kimi') return metadata.kimiSessionId ?? null
         if (flavor === 'copilot') return metadata.copilotSessionId ?? null
         if (flavor === 'pi') return metadata.piSessionId ?? null
+        // The official DSH ACP server creates fresh sessions only; never fall
+        // through to a stale Claude id and advertise a false resume path.
+        if (flavor === 'dsh') return null
 
         return metadata.claudeSessionId ?? this.recoverClaudeSessionIdFromMessages(session.id, namespace)
     }
@@ -3857,8 +3883,8 @@ export class SyncEngine {
         return await this.rpcGateway.deleteUploadFile(sessionId, path)
     }
 
-    async runRipgrep(sessionId: string, args: string[], cwd?: string): Promise<RpcCommandResponse> {
-        return await this.rpcGateway.runRipgrep(sessionId, args, cwd)
+    async runRipgrep(sessionId: string, args: string[], cwd?: string, fileSearch?: FileSearchOptions): Promise<RpcCommandResponse> {
+        return await this.rpcGateway.runRipgrep(sessionId, args, cwd, fileSearch)
     }
 
     async listSlashCommands(sessionId: string, agent: string): Promise<SlashCommandsResponse> {
@@ -3875,6 +3901,10 @@ export class SyncEngine {
 
     async listAgyModelsForMachine(machineId: string): Promise<RpcListAgyModelsResponse> {
         return await this.rpcGateway.listAgyModelsForMachine(machineId)
+    }
+
+    async listPiModelsForMachine(machineId: string): Promise<RpcListPiModelsResponse> {
+        return await this.rpcGateway.listPiModelsForMachine(machineId)
     }
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
