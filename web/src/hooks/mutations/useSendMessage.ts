@@ -14,6 +14,7 @@ import type { MessageDeliveryMode } from '@hapi/protocol'
 import { getRetryDeliveryMode } from '@/lib/messageDelivery'
 import {
     consumeComposerSendSettlement,
+    getComposerDraftRevision,
     getComposerProgrammaticEditRevision,
     getComposerSendSettlement,
     publishComposerSendSettlement,
@@ -35,6 +36,7 @@ export type SendMessageAcceptance = {
     attemptId: string | null
     sessionId: string
     programmaticEditRevision: number
+    draftRevision: number
 }
 
 export type SendMessageSettlement = {
@@ -333,6 +335,7 @@ export function useSendMessage(
         let targetSessionId = sessionId
         let sendAttachments = attachments
         let programmaticEditRevision = getComposerProgrammaticEditRevision(targetSessionId)
+        let draftRevision = getComposerDraftRevision(targetSessionId)
         if (options?.resolveSessionId) {
             resolveGuardRef.current = true
             setIsResolving(true)
@@ -342,6 +345,7 @@ export function useSendMessage(
                 // Capture before resume navigation can mount the target
                 // composer and let a same-text programmatic edit advance it.
                 programmaticEditRevision = getComposerProgrammaticEditRevision(targetSessionId)
+                draftRevision = getComposerDraftRevision(targetSessionId)
                 if (resolved.resumed) {
                     // Await draft transfer / navigation before the mutation so
                     // hidden inactive attachments move with the resumed id
@@ -395,7 +399,7 @@ export function useSendMessage(
             deliveryMode,
             source: 'send',
         })
-        return { attemptId: localId, sessionId: targetSessionId, programmaticEditRevision }
+        return { attemptId: localId, sessionId: targetSessionId, programmaticEditRevision, draftRevision }
     }
 
     const retryMessage = (localId: string): boolean => {

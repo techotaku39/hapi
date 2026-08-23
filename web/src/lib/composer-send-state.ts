@@ -5,10 +5,12 @@ export type PendingComposerSend = {
     sessionId: string
     text: string
     programmaticEditRevision: number
+    draftRevision: number
 }
 
 const pendingComposerSends = new Map<string, PendingComposerSend>()
 const composerProgrammaticEditRevisions = new Map<string, number>()
+const composerDraftRevisions = new Map<string, number>()
 const composerSendSettlements = new Map<string, Map<string, SendMessageSettlement>>()
 const listeners = new Set<() => void>()
 
@@ -16,6 +18,7 @@ const listeners = new Set<() => void>()
 export function resetComposerSendStateForTests(): void {
     pendingComposerSends.clear()
     composerProgrammaticEditRevisions.clear()
+    composerDraftRevisions.clear()
     composerSendSettlements.clear()
     notify()
 }
@@ -49,11 +52,21 @@ export function getComposerProgrammaticEditRevision(sessionId: string): number {
     return composerProgrammaticEditRevisions.get(sessionId) ?? 0
 }
 
+export function getComposerDraftRevision(sessionId: string): number {
+    return composerDraftRevisions.get(sessionId) ?? 0
+}
+
+export function recordComposerDraftChange(sessionId: string): void {
+    composerDraftRevisions.set(sessionId, getComposerDraftRevision(sessionId) + 1)
+    notify()
+}
+
 export function recordComposerProgrammaticEdit(sessionId: string): void {
     composerProgrammaticEditRevisions.set(
         sessionId,
         getComposerProgrammaticEditRevision(sessionId) + 1,
     )
+    composerDraftRevisions.set(sessionId, getComposerDraftRevision(sessionId) + 1)
     notify()
 }
 

@@ -6,6 +6,7 @@ import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
+import { getComposerDraftRevision, resetComposerSendStateForTests } from '@/lib/composer-send-state'
 
 vi.mock('@/lib/clearDraftsAfterSend', () => ({
     clearDraftsAfterSend: vi.fn(),
@@ -222,6 +223,7 @@ function ComposerHarness(props: {
         attemptId: string | null
         sessionId: string
         programmaticEditRevision: number
+        draftRevision: number
     } | null>(null)
     const [sendSettlement, setSendSettlement] = useState<{
         attemptId: string
@@ -291,7 +293,12 @@ function ComposerHarness(props: {
         acceptSend: () => {
             setIsSending(true)
             setSendSettlement(null)
-            setSendAcceptance({ attemptId: 'attempt-1', sessionId, programmaticEditRevision })
+            setSendAcceptance({
+                attemptId: 'attempt-1',
+                sessionId,
+                programmaticEditRevision,
+                draftRevision: getComposerDraftRevision(sessionId),
+            })
         },
         setSending: setIsSending,
         setThreadDisabled: (disabled) => setSnapshot((current) => ({
@@ -430,6 +437,7 @@ describe('HappyComposer send-error atomic restore', () => {
         runtime.setSnapshot = null
         runtime.restoredAttachmentIds = null
         runtime.attachmentRemove = null
+        resetComposerSendStateForTests()
         mockClearDraftsAfterSend.mockReset()
     })
 
@@ -593,6 +601,19 @@ describe('HappyComposer send-error atomic restore', () => {
 
         act(() => controls.current!.remount())
         await waitFor(() => expect(input()).toHaveValue('foo'))
+    })
+
+    it('preserves a same-text user draft after a keyed remount', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        fireEvent.change(input(), { target: { value: 'foo' } })
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
     })
 
     it('clears stale text restored by a same-session resume', async () => {

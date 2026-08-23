@@ -193,6 +193,7 @@ describe('useSendMessage', () => {
             attemptId: 'local-id-1',
             sessionId: targetSessionId,
             programmaticEditRevision: 0,
+            draftRevision: 0,
         })
         expect(onSessionResolved).toHaveBeenCalledOnce()
     })
@@ -614,6 +615,7 @@ describe('useSendMessage', () => {
             attemptId: 'local-id-1',
             sessionId: 'session-A',
             programmaticEditRevision: 0,
+            draftRevision: 0,
         })
     })
 
@@ -678,6 +680,7 @@ describe('useSendMessage', () => {
             attemptId: 'local-id-1',
             sessionId: 'session-resolved',
             programmaticEditRevision: 0,
+            draftRevision: 0,
         })
     })
 

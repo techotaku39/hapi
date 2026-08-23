@@ -41,7 +41,7 @@ import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
-import { consumePendingComposerSend } from '@/lib/composer-send-state'
+import { consumePendingComposerSend, getComposerDraftRevision, recordComposerDraftChange } from '@/lib/composer-send-state'
 import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
@@ -375,6 +375,7 @@ export function HappyComposer(props: {
         attemptId: string | null
         sessionId?: string
         programmaticEditRevision?: number
+        draftRevision?: number
     } | null
     /** Monotonic programmatic Queued Edit revision owned outside this keyed composer. */
     programmaticEditRevision?: number
@@ -644,10 +645,12 @@ export function HappyComposer(props: {
 
     const recordUserEdit = useCallback(() => {
         userEditGenerationRef.current += 1
-    }, [])
+        if (sessionId) recordComposerDraftChange(sessionId)
+    }, [sessionId])
     const handleAttachmentRemove = useCallback(() => {
         userAttachmentGenerationRef.current += 1
-    }, [])
+        if (sessionId) recordComposerDraftChange(sessionId)
+    }, [sessionId])
     const attachmentComponents = useMemo(() => ({
         Attachment: function TrackedAttachmentItem() {
             return <AttachmentItem onRemove={handleAttachmentRemove} />
@@ -755,8 +758,9 @@ export function HappyComposer(props: {
             observedAttachmentIdsRef.current.add(attachment.id)
             if (restoredDraftAttachmentIdsRef.current.delete(attachment.id)) continue
             userAttachmentGenerationRef.current += 1
+            if (sessionId) recordComposerDraftChange(sessionId)
         }
-    }, [attachments])
+    }, [attachments, sessionId])
 
     // A keyed session remount can hydrate the text that assistant-ui cleared
     // before the POST settled. Once that exact send succeeds, clear only an
@@ -792,6 +796,14 @@ export function HappyComposer(props: {
             return
         }
         if (draftHydration.sessionId !== sessionId || !draftHydration.complete) return
+
+        if (
+            props.sendAcceptance?.draftRevision !== undefined
+            && getComposerDraftRevision(sessionId) > props.sendAcceptance.draftRevision
+        ) {
+            consumeSettlement()
+            return
+        }
 
         const acceptedSend = acceptedSendEditGenerationRef.current
         const sendEditGeneration = acceptedSend?.attemptId === settlement.attemptId
@@ -1245,19 +1257,21 @@ export function HappyComposer(props: {
 
     const handleUserSchedule = useCallback((nextPendingSchedule: PendingSchedule) => {
         userScheduleGenerationRef.current += 1
+        if (sessionId) recordComposerDraftChange(sessionId)
         if (sendError) onClearSendError?.()
         setPendingSchedule(nextPendingSchedule)
-    }, [onClearSendError, sendError, setPendingSchedule])
+    }, [onClearSendError, sendError, sessionId, setPendingSchedule])
 
     const handleUserClearSchedule = useCallback(() => {
         userScheduleGenerationRef.current += 1
+        if (sessionId) recordComposerDraftChange(sessionId)
         if (sendError) onClearSendError?.()
         if (isControlled) {
             onClearScheduleProp?.()
         } else {
             setPendingScheduleLocal(null)
         }
-    }, [isControlled, onClearScheduleProp, onClearSendError, sendError])
+    }, [isControlled, onClearScheduleProp, onClearSendError, sendError, sessionId])
     // Preserve the original controlled-mode contract: without a parent clear
     // handler the schedule button opens the picker instead of claiming it can
     // clear a value it does not own.

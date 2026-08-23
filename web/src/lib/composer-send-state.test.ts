@@ -3,11 +3,13 @@ import type { SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import {
     consumeComposerSendSettlement,
     consumePendingComposerSend,
+    getComposerDraftRevision,
     getComposerProgrammaticEditRevision,
     getComposerSendSettlement,
     getPendingComposerSend,
     publishComposerSendSettlement,
     recordComposerProgrammaticEdit,
+    recordComposerDraftChange,
     recordPendingComposerSend,
     resetComposerSendStateForTests,
 } from './composer-send-state'
@@ -31,6 +33,7 @@ describe('composer send state', () => {
             attemptId: 'attempt-A',
             text: 'message A',
             programmaticEditRevision: 0,
+            draftRevision: 0,
         })
         publishComposerSendSettlement(settlement('session-A', 'attempt-A'))
 
@@ -65,6 +68,7 @@ describe('composer send state', () => {
             attemptId: 'attempt-B',
             text: 'message B',
             programmaticEditRevision: 0,
+            draftRevision: 0,
         })
         publishComposerSendSettlement(settlement('session-A', 'attempt-B'))
         publishComposerSendSettlement(settlement('session-A', 'attempt-A'))
@@ -84,6 +88,15 @@ describe('composer send state', () => {
         recordComposerProgrammaticEdit('session-B')
         expect(getComposerProgrammaticEditRevision('session-A')).toBe(2)
         expect(getComposerProgrammaticEditRevision('session-B')).toBe(1)
+    })
+
+    it('tracks all draft changes independently per session', () => {
+        expect(getComposerDraftRevision('session-A')).toBe(0)
+        recordComposerDraftChange('session-A')
+        recordComposerProgrammaticEdit('session-A')
+        recordComposerDraftChange('session-B')
+        expect(getComposerDraftRevision('session-A')).toBe(2)
+        expect(getComposerDraftRevision('session-B')).toBe(1)
     })
 
     it('consumes failed settlements so they cannot reappear after later sends', () => {

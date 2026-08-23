@@ -77,6 +77,7 @@ import { useTranslation } from '@/lib/use-translation'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import {
+    getComposerDraftRevision,
     getComposerProgrammaticEditRevision,
     getPendingComposerSend,
     recordComposerProgrammaticEdit,
@@ -434,6 +435,7 @@ type SessionChatProps = {
         attemptId: string | null
         sessionId: string
         programmaticEditRevision: number
+        draftRevision: number
     } | null
     programmaticEditRevision?: number
     onSendAccepted?: (acceptance: SendMessageAcceptance, text: string) => void
@@ -508,6 +510,7 @@ export function SessionChat(props: SessionChatProps) {
             attemptId: pendingSend.attemptId,
             sessionId: pendingSend.sessionId,
             programmaticEditRevision: pendingSend.programmaticEditRevision,
+            draftRevision: pendingSend.draftRevision,
         }
         : null, [pendingSend])
     const onSendAccepted = useCallback((acceptance: SendMessageAcceptance, text: string) => {
@@ -776,6 +779,7 @@ function SessionChatInner(props: SessionChatProps) {
                         attemptId: null,
                         sessionId: props.session.id,
                         programmaticEditRevision: props.programmaticEditRevision ?? 0,
+                        draftRevision: getComposerDraftRevision(props.session.id),
                     }, text)
                 }
                 await finalizeMigratedScratchlistParkCleanup(
@@ -784,7 +788,14 @@ function SessionChatInner(props: SessionChatProps) {
                     attachments,
                     accepted,
                 )
-                return accepted ? { attemptId: null, sessionId: props.session.id, programmaticEditRevision: props.programmaticEditRevision ?? 0 } : false
+                return accepted
+                    ? {
+                        attemptId: null,
+                        sessionId: props.session.id,
+                        programmaticEditRevision: props.programmaticEditRevision ?? 0,
+                        draftRevision: getComposerDraftRevision(props.session.id),
+                    }
+                    : false
             }
             // If the user uploaded while scratchlist mode was on, then toggled
             // it off before send, pending items still carry hub paths. Stage
