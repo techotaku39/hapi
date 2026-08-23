@@ -797,6 +797,21 @@ export function HappyComposer(props: {
         consumeSettlement()
     }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
 
+    // Failed sends use the separate sendError recovery path, so their terminal
+    // settlement can be consumed immediately and must not remain in the
+    // module-level store after a later send succeeds.
+    useEffect(() => {
+        const settlement = props.sendSettlement
+        if (
+            !settlement
+            || settlement.status !== 'error'
+            || settlement.sessionId !== sessionId
+            || !sessionId
+        ) return
+        props.onConsumeSendSettlement?.(settlement.attemptId)
+        consumePendingComposerSend(sessionId, settlement.attemptId)
+    }, [props.onConsumeSendSettlement, props.sendSettlement, sessionId])
+
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the
     // mutation is accepted. A failure must put the text and absolute schedule

@@ -87,4 +87,15 @@ describe('composer send state', () => {
         expect(getComposerProgrammaticEditRevision('session-A')).toBe(2)
         expect(getComposerProgrammaticEditRevision('session-B')).toBe(1)
     })
+
+    it('consumes failed settlements so they cannot reappear after later sends', () => {
+        publishComposerSendSettlement({
+            ...settlement('session-A', 'attempt-error'),
+            status: 'error',
+        })
+
+        consumeComposerSendSettlement('session-A', 'attempt-error')
+
+        expect(getComposerSendSettlement('session-A')).toBeNull()
+    })
 })
