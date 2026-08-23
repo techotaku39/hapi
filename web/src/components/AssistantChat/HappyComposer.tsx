@@ -882,12 +882,15 @@ export function HappyComposer(props: {
                 key: `history:${entry.id}`,
                 text: entry.text,
                 // History restores the message text only. Attachment metadata
-                // remains available in the history entry but is intentionally
-                // omitted here to avoid suggesting that files will be restored.
+                // remains available in the history entry, while the generic
+                // indicator warns that selecting the row will not restore files.
                 label: preview,
+                description: entry.attachments.length > 0
+                    ? t('composerHistory.attachmentsNotRestored', { count: entry.attachments.length })
+                    : undefined,
             }
         }),
-        [visibleHistoryEntries]
+        [t, visibleHistoryEntries]
     )
     const historySuggestionsVisible = historySuggestions.length > 0
         && (historyNavigation !== null || historyTriggerVisible)

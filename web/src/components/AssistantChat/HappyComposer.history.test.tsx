@@ -198,10 +198,11 @@ describe('HappyComposer message history', () => {
 
         setComposerValue(input, '#old')
         expect(screen.getByTestId('history-autocomplete')).toHaveTextContent('older task')
+        expect(screen.getByTestId('history-autocomplete')).toHaveTextContent('Attachments (1) won’t be restored')
         expect(screen.getByTestId('history-autocomplete')).not.toHaveTextContent('old.txt')
         expect(screen.getByTestId('history-autocomplete')).not.toHaveTextContent('newest task')
 
-        fireEvent.click(screen.getByRole('button', { name: 'older task' }))
+        fireEvent.click(screen.getByRole('button', { name: /older task/ }))
         expect(input.value).toBe('older task')
         expect(screen.queryByTestId('history-autocomplete')).toBeNull()
 
