@@ -172,6 +172,7 @@ type HarnessControls = {
     settleSend: (error?: ComposerSendError) => void
     settleRetrySend: () => void
     settleAttachmentSendFailure: () => void
+    resumeSameSession: () => void
     getClearErrorCalls: () => number
 }
 
@@ -180,6 +181,7 @@ function ComposerHarness(props: {
     initialSchedule?: PendingSchedule | null
     piRunning?: boolean
     sessionId?: string
+    canRestoreAttachments?: boolean
     controls: { current: HarnessControls | null }
 }) {
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
@@ -189,6 +191,7 @@ function ComposerHarness(props: {
     const [schedule, setSchedule] = useState<PendingSchedule | null>(props.initialSchedule ?? null)
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
     const [isSending, setIsSending] = useState(false)
+    const [canRestoreAttachments, setCanRestoreAttachments] = useState(props.canRestoreAttachments ?? true)
     const [composerKey, setComposerKey] = useState('composer-a')
     const [programmaticEditRevision, setProgrammaticEditRevision] = useState(0)
     const [sendAcceptance, setSendAcceptance] = useState<{
@@ -282,6 +285,13 @@ function ComposerHarness(props: {
             })
             setIsSending(false)
         },
+        resumeSameSession: () => {
+            setCanRestoreAttachments(true)
+            setSnapshot((current) => ({
+                ...current,
+                composer: { ...current.composer, text: props.initialText },
+            }))
+        },
         getClearErrorCalls: () => clearErrorCallsRef.current,
     }
 
@@ -292,6 +302,7 @@ function ComposerHarness(props: {
                 sessionId={sessionId}
                 disabled={isSending}
                 pendingSchedule={schedule}
+                canRestoreAttachments={canRestoreAttachments}
                 sendAcceptance={sendAcceptance}
                 programmaticEditRevision={programmaticEditRevision}
                 sendSettlement={sendSettlement}
@@ -323,11 +334,12 @@ function renderComposer(
     initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 },
     piRunning = false,
     sessionId = 'session-a',
+    canRestoreAttachments = true,
 ) {
     const controls: { current: HarnessControls | null } = { current: null }
     runtime.sentIntents = []
     runtime.modelChanges = []
-    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} sessionId={sessionId} controls={controls} />)
+    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} sessionId={sessionId} canRestoreAttachments={canRestoreAttachments} controls={controls} />)
     return controls
 }
 
@@ -535,6 +547,18 @@ describe('HappyComposer send-error atomic restore', () => {
 
         act(() => controls.current!.remount())
         await waitFor(() => expect(input()).toHaveValue('foo'))
+    })
+
+    it('clears stale text restored by a same-session resume', async () => {
+        const controls = renderComposer('foo', null, false, 'session-a', false)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.resumeSameSession())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue(''))
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
     })
 
     it('preserves a matching draft when a retry settles without composer acceptance', async () => {

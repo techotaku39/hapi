@@ -539,7 +539,6 @@ export function HappyComposer(props: {
     const acceptedSendEditGenerationRef = useRef<{
         attemptId: string
         generation: number
-        startedHere: boolean
     } | null>(null)
     const handledSuccessfulSendRef = useRef<string | null>(null)
     const [showSettings, setShowSettings] = useState(false)
@@ -570,7 +569,6 @@ export function HappyComposer(props: {
         acceptedSendEditGenerationRef.current = {
             attemptId: acceptance.attemptId,
             generation: pendingGeneration ?? userEditGenerationRef.current,
-            startedHere: pendingGeneration !== null,
         }
         pendingSendEditGenerationRef.current = null
         const settlement = props.sendSettlement
@@ -774,11 +772,11 @@ export function HappyComposer(props: {
             > (props.sendAcceptance?.programmaticEditRevision ?? 0)
 
         // Queued-message Edit restores text through the assistant-ui store and
-        // does not fire the composer input handlers. If the accepted send
-        // started in this composer, an exact-text replacement is still newer
-        // state and must survive the settlement. A keyed remount has no local
-        // accepted-send marker, so its hydrated stale draft remains clearable.
-        if (editedProgrammaticallyAfterSend || (composerText === settlement.text && acceptedSend?.startedHere)) {
+        // does not fire the composer input handlers. Its external revision is
+        // the only signal that an exact-text replacement is newer state. A
+        // same-session resume can rehydrate the submitted text without that
+        // revision, so it must remain clearable.
+        if (editedProgrammaticallyAfterSend) {
             consumeSettlement()
             return
         }
