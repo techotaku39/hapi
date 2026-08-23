@@ -75,11 +75,14 @@ describe('getToolGroupActionKind', () => {
         read.tool.nativeKind = 'read'
         const execute = makeToolBlock('native-execute', 'bun test grok')
         execute.tool.nativeKind = 'execute'
+        const titledExecute = makeToolBlock('native-titled-execute', 'ls')
+        titledExecute.tool.nativeKind = 'execute'
         const edit = makeToolBlock('native-edit', 'Writing to src/grok.ts')
         edit.tool.nativeKind = 'edit'
 
         expect(getToolGroupActionKind(read)).toBe('read')
         expect(getToolGroupActionKind(execute)).toBe('command')
+        expect(getToolGroupActionKind(titledExecute)).toBe('command')
         expect(getToolGroupActionKind(edit)).toBe('mutation')
     })
 

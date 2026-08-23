@@ -186,19 +186,19 @@ export function getToolGroupActionKind(block: ToolCallBlock): ToolGroupActionKin
         return 'read'
     }
 
-    const name = normalizeToolIdentifier(block.tool.name)
-    if (WEB_TOOL_NAMES.has(name)) return 'web'
-    if (READ_TOOL_NAMES.has(name)) return 'read'
-    if (SEARCH_TOOL_NAMES.has(name)) return 'search'
-    if (COMMAND_TOOL_NAMES.has(name)) return 'command'
-    if (MUTATION_TOOL_NAMES.has(name)) return 'mutation'
-
     const nativeKind = normalizeToolIdentifier(block.tool.nativeKind)
     if (WEB_NATIVE_KINDS.has(nativeKind)) return 'web'
     if (READ_NATIVE_KINDS.has(nativeKind)) return 'read'
     if (SEARCH_NATIVE_KINDS.has(nativeKind)) return 'search'
     if (COMMAND_NATIVE_KINDS.has(nativeKind)) return 'command'
     if (MUTATION_NATIVE_KINDS.has(nativeKind)) return 'mutation'
+
+    const name = normalizeToolIdentifier(block.tool.name)
+    if (WEB_TOOL_NAMES.has(name)) return 'web'
+    if (READ_TOOL_NAMES.has(name)) return 'read'
+    if (SEARCH_TOOL_NAMES.has(name)) return 'search'
+    if (COMMAND_TOOL_NAMES.has(name)) return 'command'
+    if (MUTATION_TOOL_NAMES.has(name)) return 'mutation'
     return 'other'
 }
 
