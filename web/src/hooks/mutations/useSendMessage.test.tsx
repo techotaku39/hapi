@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useSendMessage, type SendMessageAcceptance } from './useSendMessage'
 import { ApiError, type ApiClient } from '@/api/client'
+import { recordComposerProgrammaticEdit, resetComposerSendStateForTests } from '@/lib/composer-send-state'
 
 vi.mock('@/lib/message-window-store', () => ({
     appendOptimisticMessage: vi.fn(),
@@ -46,6 +47,7 @@ function deferred<T>() {
 describe('useSendMessage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        resetComposerSendStateForTests()
     })
 
     it('calls onSuccess with the session ID that was sent', async () => {
@@ -164,6 +166,35 @@ describe('useSendMessage', () => {
         await waitFor(() => {
             expect(onSuccess).toHaveBeenCalledWith('session-resolved', 'hello')
         })
+    })
+
+    it('captures the resolved target revision before resume navigation', async () => {
+        const targetSessionId = 'session-resolved-before-revision-test'
+        const api = createMockApi()
+        const onSessionResolved = vi.fn(async () => {
+            // Simulate a same-text Queued Edit exposed by the target route
+            // while resume navigation is still in flight.
+            recordComposerProgrammaticEdit(targetSessionId)
+        })
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-original', {
+                resolveSessionId: async () => ({ sessionId: targetSessionId, resumed: true }),
+                onSessionResolved,
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        let accepted: Awaited<ReturnType<typeof result.current.sendMessage>> | undefined
+        await act(async () => {
+            accepted = await result.current.sendMessage('hello')
+        })
+
+        expect(accepted).toEqual({
+            attemptId: 'local-id-1',
+            sessionId: targetSessionId,
+            programmaticEditRevision: 0,
+        })
+        expect(onSessionResolved).toHaveBeenCalledOnce()
     })
 
     it('does not call onSuccess when send fails', async () => {
@@ -579,7 +610,11 @@ describe('useSendMessage', () => {
         act(() => {
             acceptedPromise = result.current.sendMessage('hello')
         })
-        await expect(acceptedPromise!).resolves.toEqual({ attemptId: 'local-id-1', sessionId: 'session-A' })
+        await expect(acceptedPromise!).resolves.toEqual({
+            attemptId: 'local-id-1',
+            sessionId: 'session-A',
+            programmaticEditRevision: 0,
+        })
     })
 
     it('resolves false when blocked (no api) so the caller can preserve schedule state', async () => {
@@ -639,7 +674,11 @@ describe('useSendMessage', () => {
         act(() => {
             acceptedPromise = result.current.sendMessage('hello')
         })
-        await expect(acceptedPromise!).resolves.toEqual({ attemptId: 'local-id-1', sessionId: 'session-resolved' })
+        await expect(acceptedPromise!).resolves.toEqual({
+            attemptId: 'local-id-1',
+            sessionId: 'session-resolved',
+            programmaticEditRevision: 0,
+        })
     })
 
     it('awaits onSessionResolved before starting the send mutation', async () => {

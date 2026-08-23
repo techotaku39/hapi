@@ -735,8 +735,8 @@ export function HappyComposer(props: {
         if (handledSuccessfulSendRef.current === settlementKey) return
         const consumeSettlement = () => {
             handledSuccessfulSendRef.current = settlementKey
-            consumePendingComposerSend(sessionId, settlement.attemptId)
             props.onConsumeSendSettlement?.(settlement.attemptId)
+            consumePendingComposerSend(sessionId, settlement.attemptId)
         }
 
         // Retry settlements reuse the failed message's local id and do not

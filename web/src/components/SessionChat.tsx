@@ -502,7 +502,7 @@ export function SessionChat(props: SessionChatProps) {
             ...acceptance,
             routeSessionId: sessionId,
             text,
-            programmaticEditRevision: getComposerProgrammaticEditRevision(acceptance.sessionId),
+            programmaticEditRevision: acceptance.programmaticEditRevision,
         })
     }, [sessionId])
     const onProgrammaticEdit = useCallback(() => {
@@ -765,7 +765,13 @@ function SessionChatInner(props: SessionChatProps) {
                     attachments,
                     accepted,
                 )
-                return accepted ? { attemptId: null, sessionId: props.session.id } : false
+                return accepted
+                    ? {
+                        attemptId: null,
+                        sessionId: props.session.id,
+                        programmaticEditRevision: props.programmaticEditRevision ?? 0,
+                    }
+                    : false
             }
             // If the user uploaded while scratchlist mode was on, then toggled
             // it off before send, pending items still carry hub paths. Stage

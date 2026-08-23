@@ -10,8 +10,16 @@ export type PendingComposerSend = {
 
 const pendingComposerSends = new Map<string, PendingComposerSend>()
 const composerProgrammaticEditRevisions = new Map<string, number>()
-const composerSendSettlements = new Map<string, SendMessageSettlement>()
+const composerSendSettlements = new Map<string, Map<string, SendMessageSettlement>>()
 const listeners = new Set<() => void>()
+
+/** Test isolation; production state intentionally survives route unmounts. */
+export function resetComposerSendStateForTests(): void {
+    pendingComposerSends.clear()
+    composerProgrammaticEditRevisions.clear()
+    composerSendSettlements.clear()
+    notify()
+}
 
 function notify(): void {
     for (const listener of listeners) listener()
@@ -51,17 +59,26 @@ export function recordComposerProgrammaticEdit(sessionId: string): void {
 }
 
 export function getComposerSendSettlement(sessionId: string | null): SendMessageSettlement | null {
-    return sessionId ? composerSendSettlements.get(sessionId) ?? null : null
+    if (!sessionId) return null
+    const byAttempt = composerSendSettlements.get(sessionId)
+    if (!byAttempt) return null
+    const pendingAttemptId = pendingComposerSends.get(sessionId)?.attemptId
+    if (pendingAttemptId !== null && pendingAttemptId !== undefined) {
+        return byAttempt.get(pendingAttemptId) ?? null
+    }
+    return byAttempt.values().next().value ?? null
 }
 
 export function publishComposerSendSettlement(settlement: SendMessageSettlement): void {
-    composerSendSettlements.set(settlement.sessionId, settlement)
+    const byAttempt = composerSendSettlements.get(settlement.sessionId) ?? new Map<string, SendMessageSettlement>()
+    byAttempt.set(settlement.attemptId, settlement)
+    composerSendSettlements.set(settlement.sessionId, byAttempt)
     notify()
 }
 
 export function consumeComposerSendSettlement(sessionId: string, attemptId: string): void {
-    const current = composerSendSettlements.get(sessionId)
-    if (!current || current.attemptId !== attemptId) return
-    composerSendSettlements.delete(sessionId)
+    const byAttempt = composerSendSettlements.get(sessionId)
+    if (!byAttempt?.delete(attemptId)) return
+    if (byAttempt.size === 0) composerSendSettlements.delete(sessionId)
     notify()
 }

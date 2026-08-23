@@ -9,6 +9,7 @@ import {
     publishComposerSendSettlement,
     recordComposerProgrammaticEdit,
     recordPendingComposerSend,
+    resetComposerSendStateForTests,
 } from './composer-send-state'
 
 const settlement = (sessionId: string, attemptId: string): SendMessageSettlement => ({
@@ -21,12 +22,7 @@ const settlement = (sessionId: string, attemptId: string): SendMessageSettlement
 
 describe('composer send state', () => {
     beforeEach(() => {
-        for (const sessionId of ['session-A', 'session-B']) {
-            const pending = getPendingComposerSend(sessionId)
-            if (pending) consumePendingComposerSend(sessionId, pending.attemptId)
-            const current = getComposerSendSettlement(sessionId)
-            if (current) consumeComposerSendSettlement(sessionId, current.attemptId)
-        }
+        resetComposerSendStateForTests()
     })
 
     it('retains accepted sends and settlements while the chat tree is unmounted', () => {
@@ -62,6 +58,25 @@ describe('composer send state', () => {
             attemptId: 'attempt-A',
         }))
         expect(getComposerSendSettlement('session-B')).toBeNull()
+    })
+
+    it('selects the currently accepted attempt when same-session sends settle out of order', () => {
+        recordPendingComposerSend({
+            sessionId: 'session-A',
+            attemptId: 'attempt-B',
+            routeSessionId: 'session-A',
+            text: 'message B',
+            programmaticEditRevision: 0,
+        })
+        publishComposerSendSettlement(settlement('session-A', 'attempt-B'))
+        publishComposerSendSettlement(settlement('session-A', 'attempt-A'))
+
+        expect(getComposerSendSettlement('session-A')?.attemptId).toBe('attempt-B')
+
+        consumeComposerSendSettlement('session-A', 'attempt-B')
+        consumePendingComposerSend('session-A', 'attempt-B')
+        expect(getComposerSendSettlement('session-A')?.attemptId).toBe('attempt-A')
+        consumeComposerSendSettlement('session-A', 'attempt-A')
     })
 
     it('increments programmatic edit revisions per session', () => {
