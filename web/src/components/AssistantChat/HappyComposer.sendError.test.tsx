@@ -590,6 +590,15 @@ describe('HappyComposer send intent gestures', () => {
         expect(runtime.pendingSendIntentRef?.current).toBe('default')
     })
 
+    it('matches the logical S key across keyboard layouts', () => {
+        renderComposer('shortcut send', null, true)
+
+        fireEvent.keyDown(input(), { key: 's', code: 'KeyO', altKey: true })
+
+        expect(runtime.sentIntents).toEqual(['default'])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
     it('does not treat modified Alt+S combinations as the send shortcut', () => {
         renderComposer('shortcut send', null, true)
 

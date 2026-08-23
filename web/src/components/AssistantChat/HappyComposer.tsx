@@ -1230,10 +1230,9 @@ export function HappyComposer(props: {
         }
 
         // Alt+S is an explicit send shortcut, independent of the Enter setting.
-        // Match the logical key too so printable Option/dead-key characters remain input.
+        // Match the logical key so keyboard layouts can map Alt+S to another physical key.
         const isAltSShortcut =
-            e.code === 'KeyS'
-            && (e.key === 's' || e.key === 'S')
+            (e.key === 's' || e.key === 'S')
             && e.altKey
             && !e.ctrlKey
             && !e.metaKey
