@@ -326,11 +326,13 @@ export function ScratchlistDrawerHost(props: {
         deliveryMode?: MessageDeliveryMode,
     ) => Promise<boolean | SendMessageAcceptance>
     onExitScratchlistMode: () => void
+    onProgrammaticEdit?: () => void
     disabled?: boolean
 }) {
     const assistantApi = useAui()
     const handlePromoteToComposer = useCallback(async (entry: ScratchlistEntry) => {
         if (props.disabled) return
+        props.onProgrammaticEdit?.()
         assistantApi.composer().setText(entry.text)
         // Exit scratchlist mode before rehydrating attachments so addAttachment
         // uses the normal chat upload adapter (not the scratchlist hub adapter).
@@ -345,7 +347,7 @@ export function ScratchlistDrawerHost(props: {
                 assistantApi.composer()
             )
         }
-    }, [assistantApi, props.api, props.disabled, props.onExitScratchlistMode, props.sessionId])
+    }, [assistantApi, props.api, props.disabled, props.onExitScratchlistMode, props.onProgrammaticEdit, props.sessionId])
     const handlePromoteToQueue = useCallback(async (entry: ScratchlistEntry) => {
         if (props.disabled) return false
         let attachments: AttachmentMetadata[] | undefined
@@ -1770,6 +1772,7 @@ function SessionChatInner(props: SessionChatProps) {
                                     onDelete={scratchlist.remove}
                                     onSend={props.onSend}
                                     onExitScratchlistMode={() => setScratchlistMode(false)}
+                                    onProgrammaticEdit={props.onProgrammaticEdit}
                                     disabled={props.isSending || isScratchlistParking}
                                 />
                             ) : null}

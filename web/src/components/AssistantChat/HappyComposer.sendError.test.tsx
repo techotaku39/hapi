@@ -166,6 +166,7 @@ type HarnessControls = {
     remount: () => void
     programmaticSetText: (text: string) => void
     queuedEditSetText: (text: string) => void
+    scratchlistPromoteSetText: (text: string) => void
     acceptSend: () => void
     setSending: (sending: boolean) => void
     setThreadDisabled: (disabled: boolean) => void
@@ -238,6 +239,13 @@ function ComposerHarness(props: {
             composer: { ...current.composer, text },
         })),
         queuedEditSetText: (text) => {
+            setProgrammaticEditRevision((revision) => revision + 1)
+            setSnapshot((current) => ({
+                ...current,
+                composer: { ...current.composer, text },
+            }))
+        },
+        scratchlistPromoteSetText: (text) => {
             setProgrammaticEditRevision((revision) => revision + 1)
             setSnapshot((current) => ({
                 ...current,
@@ -559,6 +567,19 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue(''))
         expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
+    })
+
+    it('preserves a same-text scratchlist promotion after a remount', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.scratchlistPromoteSetText('foo'))
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
     })
 
     it('preserves a matching draft when a retry settles without composer acceptance', async () => {
