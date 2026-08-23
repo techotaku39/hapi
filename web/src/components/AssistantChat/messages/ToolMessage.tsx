@@ -121,7 +121,13 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                     probe.onload = () => {
                         if (disposed) return
                         const scale = computeTinyImageScale(probe.naturalWidth, probe.naturalHeight)
-                        setImageStyle(scale === 1 ? undefined : { transform: `scale(${scale})` })
+                        setImageStyle(scale === 1 ? undefined : {
+                            // Keep the enlarged preview inside normal layout flow. CSS transforms
+                            // only change painting, so a w-fit card would reserve the tiny source
+                            // dimensions and could overlap adjacent chat content.
+                            width: probe.naturalWidth * scale,
+                            height: probe.naturalHeight * scale,
+                        })
                     }
                     probe.src = nextObjectUrl
                 }

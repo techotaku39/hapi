@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
-import { GeneratedImageCard } from '@/components/AssistantChat/messages/ToolMessage'
+import { computeTinyImageScale, GeneratedImageCard } from '@/components/AssistantChat/messages/ToolMessage'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { ApiClient } from '@/api/client'
 import type { HappyChatContextValue } from '@/components/AssistantChat/context'
@@ -107,6 +107,33 @@ describe('GeneratedImageCard media fetch', () => {
         expect(frame).toHaveClass('w-fit', 'max-w-full')
         expect(frame).not.toHaveClass('min-h-32', 'min-w-[12rem]')
         expect(card).toHaveClass('w-fit', 'max-w-[92%]')
+    })
+
+    it('reserves layout space when scaling a skinny tiny image', async () => {
+        expect(computeTinyImageScale(16, 32)).toBe(2)
+
+        class MockImage {
+            naturalWidth = 16
+            naturalHeight = 32
+            onload: (() => void) | null = null
+
+            set src(_value: string) {
+                queueMicrotask(() => this.onload?.())
+            }
+        }
+
+        vi.stubGlobal('Image', MockImage)
+        try {
+            renderCard({ mimeType: 'image/png' })
+            const image = await screen.findByRole('img', { name: 'clip.mp4' })
+
+            await waitFor(() => {
+                expect(image).toHaveStyle({ width: '32px', height: '64px' })
+            })
+            expect(image).not.toHaveStyle({ transform: 'scale(2)' })
+        } finally {
+            vi.unstubAllGlobals()
+        }
     })
 
     it('shows a friendly error and retries a failed image load', async () => {
