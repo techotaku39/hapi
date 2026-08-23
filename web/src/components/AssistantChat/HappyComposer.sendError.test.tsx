@@ -599,6 +599,15 @@ describe('HappyComposer send intent gestures', () => {
         expect(runtime.pendingSendIntentRef?.current).toBe('default')
     })
 
+    it('does not send Alt+S while an IME composition is active', () => {
+        renderComposer('shortcut send', null, true)
+
+        fireEvent.keyDown(input(), { key: 's', code: 'KeyS', altKey: true, isComposing: true })
+
+        expect(runtime.sentIntents).toEqual([])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
     it('does not treat modified Alt+S combinations as the send shortcut', () => {
         renderComposer('shortcut send', null, true)
 
