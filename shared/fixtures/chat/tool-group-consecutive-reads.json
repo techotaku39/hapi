@@ -75,58 +75,49 @@
             },
             {
                 "createdAt": 1755000002000,
-                "firstToolId": "toolu_01GrpRead0001",
-                "id": "tool-group:toolu_01GrpRead0001",
-                "kind": "tool-group",
-                "lastToolId": "toolu_01GrpGlob0003",
-                "tools": [
-                    {
-                        "createdAt": 1755000002000,
-                        "id": "toolu_01GrpRead0001",
-                        "kind": "tool-call",
-                        "localId": null,
-                        "tool": {
-                            "id": "toolu_01GrpRead0001",
-                            "input": {
-                                "file_path": "/repo/hub/src/store/index.ts"
-                            },
-                            "name": "Read",
-                            "result": "export * from \"./sessionStore\"\nexport * from \"./contentCodec\"",
-                            "state": "completed"
-                        }
+                "id": "toolu_01GrpRead0001",
+                "kind": "tool-call",
+                "localId": null,
+                "tool": {
+                    "id": "toolu_01GrpRead0001",
+                    "input": {
+                        "file_path": "/repo/hub/src/store/index.ts"
                     },
-                    {
-                        "createdAt": 1755000003400,
-                        "id": "toolu_01GrpGrep0002",
-                        "kind": "tool-call",
-                        "localId": null,
-                        "tool": {
-                            "id": "toolu_01GrpGrep0002",
-                            "input": {
-                                "path": "/repo/hub/src",
-                                "pattern": "class SessionStore"
-                            },
-                            "name": "Grep",
-                            "result": "hub/src/store/sessionStore.ts:42:export class SessionStore {",
-                            "state": "completed"
-                        }
+                    "name": "Read",
+                    "result": "export * from \"./sessionStore\"\nexport * from \"./contentCodec\"",
+                    "state": "completed"
+                }
+            },
+            {
+                "createdAt": 1755000003400,
+                "id": "toolu_01GrpGrep0002",
+                "kind": "tool-call",
+                "localId": null,
+                "tool": {
+                    "id": "toolu_01GrpGrep0002",
+                    "input": {
+                        "path": "/repo/hub/src",
+                        "pattern": "class SessionStore"
                     },
-                    {
-                        "createdAt": 1755000004700,
-                        "id": "toolu_01GrpGlob0003",
-                        "kind": "tool-call",
-                        "localId": null,
-                        "tool": {
-                            "id": "toolu_01GrpGlob0003",
-                            "input": {
-                                "pattern": "hub/src/store/**/*.test.ts"
-                            },
-                            "name": "Glob",
-                            "result": "hub/src/store/sessionStore.test.ts\nhub/src/store/contentCodec.test.ts",
-                            "state": "completed"
-                        }
-                    }
-                ]
+                    "name": "Grep",
+                    "result": "hub/src/store/sessionStore.ts:42:export class SessionStore {",
+                    "state": "completed"
+                }
+            },
+            {
+                "createdAt": 1755000004700,
+                "id": "toolu_01GrpGlob0003",
+                "kind": "tool-call",
+                "localId": null,
+                "tool": {
+                    "id": "toolu_01GrpGlob0003",
+                    "input": {
+                        "pattern": "hub/src/store/**/*.test.ts"
+                    },
+                    "name": "Glob",
+                    "result": "hub/src/store/sessionStore.test.ts\nhub/src/store/contentCodec.test.ts",
+                    "state": "completed"
+                }
             },
             {
                 "createdAt": 1755000006500,
