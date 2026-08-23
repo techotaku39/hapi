@@ -599,6 +599,15 @@ describe('HappyComposer send intent gestures', () => {
         expect(runtime.pendingSendIntentRef?.current).toBe('default')
     })
 
+    it('preserves printable Option characters that share the physical S key', () => {
+        renderComposer('shortcut send', null, true)
+
+        fireEvent.keyDown(input(), { key: 'ß', code: 'KeyS', altKey: true })
+
+        expect(runtime.sentIntents).toEqual([])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
     it('consumes a restored queue retry mark before resetting the shared ref', () => {
         renderComposer('retry queue', null, true)
         runtime.pendingSendIntentRef!.current = 'queue'

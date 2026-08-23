@@ -1230,8 +1230,15 @@ export function HappyComposer(props: {
         }
 
         // Alt+S is an explicit send shortcut, independent of the Enter setting.
-        // Use the physical key code so macOS Option/dead-key layouts still match.
-        if (e.code === 'KeyS' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        // Match the logical key too so printable Option/dead-key characters remain input.
+        const isAltSShortcut =
+            e.code === 'KeyS'
+            && (e.key === 's' || e.key === 'S')
+            && e.altKey
+            && !e.ctrlKey
+            && !e.metaKey
+            && !e.shiftKey
+        if (isAltSShortcut) {
             e.preventDefault()
             if (canSend) {
                 flushAndSend()
