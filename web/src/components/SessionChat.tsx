@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
 import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
@@ -76,6 +76,13 @@ import {
 import { useTranslation } from '@/lib/use-translation'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
+import {
+    getComposerProgrammaticEditRevision,
+    getPendingComposerSend,
+    recordComposerProgrammaticEdit,
+    recordPendingComposerSend,
+    subscribeComposerSendState,
+} from '@/lib/composer-send-state'
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
@@ -414,7 +421,7 @@ type SessionChatProps = {
         programmaticEditRevision: number
     } | null
     programmaticEditRevision?: number
-    onSendAccepted?: (sessionId: string, attemptId: string | null) => void
+    onSendAccepted?: (acceptance: SendMessageAcceptance, text: string) => void
     onProgrammaticEdit?: () => void
     viewMode: 'tail' | 'history'
     messagesVersion: number
@@ -470,28 +477,34 @@ type SessionChatProps = {
  * SessionChatInner.
  */
 export function SessionChat(props: SessionChatProps) {
-    const sendAcceptanceBySessionRef = useRef(new Map<string, {
-        attemptId: string | null
-        sessionId: string
-        programmaticEditRevision: number
-    }>())
-    const programmaticEditRevisionBySessionRef = useRef(new Map<string, number>())
-    const [, forceComposerStateUpdate] = useState(0)
     const sessionId = props.session.id
-    const sendAcceptance = sendAcceptanceBySessionRef.current.get(sessionId) ?? null
-    const programmaticEditRevision = programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0
-    const onSendAccepted = useCallback((acceptedSessionId: string, attemptId: string | null) => {
-        sendAcceptanceBySessionRef.current.set(acceptedSessionId, {
-            attemptId,
-            sessionId: acceptedSessionId,
-            programmaticEditRevision: programmaticEditRevisionBySessionRef.current.get(acceptedSessionId) ?? 0,
+    const pendingSend = useSyncExternalStore(
+        subscribeComposerSendState,
+        () => getPendingComposerSend(sessionId),
+        () => null,
+    )
+    const programmaticEditRevision = useSyncExternalStore(
+        subscribeComposerSendState,
+        () => getComposerProgrammaticEditRevision(sessionId),
+        () => 0,
+    )
+    const sendAcceptance = useMemo(() => pendingSend
+        ? {
+            attemptId: pendingSend.attemptId,
+            sessionId: pendingSend.sessionId,
+            programmaticEditRevision: pendingSend.programmaticEditRevision,
+        }
+        : null, [pendingSend])
+    const onSendAccepted = useCallback((acceptance: SendMessageAcceptance, text: string) => {
+        recordPendingComposerSend({
+            ...acceptance,
+            routeSessionId: sessionId,
+            text,
+            programmaticEditRevision: getComposerProgrammaticEditRevision(acceptance.sessionId),
         })
-        forceComposerStateUpdate((version) => version + 1)
-    }, [])
+    }, [sessionId])
     const onProgrammaticEdit = useCallback(() => {
-        const nextRevision = (programmaticEditRevisionBySessionRef.current.get(sessionId) ?? 0) + 1
-        programmaticEditRevisionBySessionRef.current.set(sessionId, nextRevision)
-        forceComposerStateUpdate((version) => version + 1)
+        recordComposerProgrammaticEdit(sessionId)
     }, [sessionId])
 
     return (
@@ -1541,7 +1554,7 @@ function SessionChatInner(props: SessionChatProps) {
         })
         const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode)
         if (!accepted) return
-        props.onSendAccepted?.(accepted.sessionId, accepted.attemptId)
+        props.onSendAccepted?.(accepted, text)
         if (!routedToScratchlist) {
             // Clear pendingSchedule only after the mutation is actually
             // accepted - covers both pre-mutation guards AND async

@@ -41,6 +41,7 @@ import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
+import { consumePendingComposerSend, getPendingComposerSend } from '@/lib/composer-send-state'
 import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
@@ -561,6 +562,9 @@ export function HappyComposer(props: {
             pendingSendAttemptIdRef.current = null
             pendingSendEditGenerationRef.current = null
             acceptedSendEditGenerationRef.current = null
+            if (acceptance.sessionId) {
+                consumePendingComposerSend(acceptance.sessionId, null)
+            }
             setIsExpanded(false)
             return
         }
@@ -731,6 +735,7 @@ export function HappyComposer(props: {
         if (handledSuccessfulSendRef.current === settlementKey) return
         const consumeSettlement = () => {
             handledSuccessfulSendRef.current = settlementKey
+            consumePendingComposerSend(sessionId, settlement.attemptId)
             props.onConsumeSendSettlement?.(settlement.attemptId)
         }
 
@@ -784,7 +789,11 @@ export function HappyComposer(props: {
         if (composerText === settlement.text) {
             api.composer().setText('')
         }
-        clearDraftsAfterSend(settlement.sessionId, null, settlement.text)
+        clearDraftsAfterSend(
+            settlement.sessionId,
+            getPendingComposerSend(sessionId)?.routeSessionId ?? null,
+            settlement.text,
+        )
         consumeSettlement()
     }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
 

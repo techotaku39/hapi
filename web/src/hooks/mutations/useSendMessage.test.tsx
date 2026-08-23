@@ -934,6 +934,7 @@ describe('useSendMessage', () => {
             requests[0].resolve()
             await requests[0].promise
         })
+        await waitFor(() => expect(result.current.isSending).toBe(false))
         expect(result.current.sendSettlement).toBeNull()
 
         act(() => {
