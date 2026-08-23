@@ -3,7 +3,6 @@ import type { SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 export type PendingComposerSend = {
     attemptId: string | null
     sessionId: string
-    routeSessionId: string
     text: string
     programmaticEditRevision: number
 }

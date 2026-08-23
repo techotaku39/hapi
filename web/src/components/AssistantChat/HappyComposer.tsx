@@ -41,7 +41,7 @@ import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
-import { consumePendingComposerSend, getPendingComposerSend } from '@/lib/composer-send-state'
+import { consumePendingComposerSend } from '@/lib/composer-send-state'
 import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
@@ -645,6 +645,14 @@ export function HappyComposer(props: {
     const recordUserEdit = useCallback(() => {
         userEditGenerationRef.current += 1
     }, [])
+    const handleAttachmentRemove = useCallback(() => {
+        userAttachmentGenerationRef.current += 1
+    }, [])
+    const attachmentComponents = useMemo(() => ({
+        Attachment: function TrackedAttachmentItem() {
+            return <AttachmentItem onRemove={handleAttachmentRemove} />
+        },
+    }), [handleAttachmentRemove])
 
     const handleUserEdit = useCallback(() => {
         recordUserEdit()
@@ -843,7 +851,7 @@ export function HappyComposer(props: {
         }
         clearDraftsAfterSend(
             settlement.sessionId,
-            getPendingComposerSend(sessionId)?.routeSessionId ?? null,
+            null,
             settlement.text,
         )
         consumeSettlement()
@@ -2339,15 +2347,7 @@ export function HappyComposer(props: {
                             <div className={`flex flex-wrap gap-2 px-4 pt-3 ${
                                 isExpanded ? 'max-h-[35%] shrink-0 overflow-y-auto' : ''
                             }`}>
-                            <ComposerPrimitive.Attachments components={{
-                                Attachment: () => (
-                                    <AttachmentItem
-                                        onRemove={() => {
-                                            userAttachmentGenerationRef.current += 1
-                                        }}
-                                    />
-                                ),
-                            }} />
+                            <ComposerPrimitive.Attachments components={attachmentComponents} />
                             </div>
                         ) : null}
 

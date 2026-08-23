@@ -513,7 +513,6 @@ export function SessionChat(props: SessionChatProps) {
     const onSendAccepted = useCallback((acceptance: SendMessageAcceptance, text: string) => {
         recordPendingComposerSend({
             ...acceptance,
-            routeSessionId: sessionId,
             text,
             programmaticEditRevision: acceptance.programmaticEditRevision,
         })

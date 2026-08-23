@@ -29,7 +29,6 @@ describe('composer send state', () => {
         recordPendingComposerSend({
             sessionId: 'session-A',
             attemptId: 'attempt-A',
-            routeSessionId: 'session-A',
             text: 'message A',
             programmaticEditRevision: 0,
         })
@@ -64,7 +63,6 @@ describe('composer send state', () => {
         recordPendingComposerSend({
             sessionId: 'session-A',
             attemptId: 'attempt-B',
-            routeSessionId: 'session-A',
             text: 'message B',
             programmaticEditRevision: 0,
         })
