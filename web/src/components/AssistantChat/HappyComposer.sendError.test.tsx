@@ -569,6 +569,18 @@ describe('HappyComposer send-error atomic restore', () => {
         expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
     })
 
+    it('preserves a same-text edit made before resumed acceptance is published', async () => {
+        const controls = renderComposer('foo', null)
+        act(() => controls.current!.programmaticSetText(''))
+        fireEvent.change(input(), { target: { value: 'foo' } })
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
+    })
+
     it('preserves a same-text scratchlist promotion after a remount', async () => {
         const controls = renderComposer('foo', null)
         send()

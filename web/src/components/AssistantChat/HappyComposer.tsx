@@ -570,10 +570,12 @@ export function HappyComposer(props: {
         }
         pendingSendAttemptIdRef.current = acceptance.attemptId
         const pendingGeneration = pendingSendEditGenerationRef.current
-        acceptedSendEditGenerationRef.current = {
-            attemptId: acceptance.attemptId,
-            generation: pendingGeneration ?? userEditGenerationRef.current,
-        }
+        acceptedSendEditGenerationRef.current = pendingGeneration === null
+            ? null
+            : {
+                attemptId: acceptance.attemptId,
+                generation: pendingGeneration,
+            }
         pendingSendEditGenerationRef.current = null
         const settlement = props.sendSettlement
         if (!settlement || settlement.attemptId !== acceptance.attemptId) return
