@@ -7,7 +7,7 @@ import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import type { CodexCollaborationMode } from '@hapi/protocol/types'
 import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
-import type { Store, StoredMessage } from '../../store'
+import type { Store, StoredAttachment, StoredMessage } from '../../store'
 import { truncateOversizedMessageContent } from '../../store/contentCodec'
 import type { WebAppEnv } from '../middleware/auth'
 
@@ -1091,6 +1091,12 @@ function normalizeComparableContent(content: unknown): string | null {
     return null
 }
 
+function hasUserAttachments(content: unknown): boolean {
+    const record = asRecord(content)
+    const body = asRecord(record?.content)
+    return record?.role === 'user' && Array.isArray(body?.attachments) && body.attachments.length > 0
+}
+
 function getComparableStoredMessageKey(message: StoredMessage): string {
     // 中文注释：重复会话合并时优先按标准 user/agent 结构去重；遇到非标准消息再回退到稳定序列化，确保不会遗漏相同内容。
     // Fallback also truncates so a pre-codec (full) row and a post-codec
@@ -1317,14 +1323,25 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
 
     for (const source of sessionStates.slice(1)) {
         latestActivity = Math.max(latestActivity, source.updatedAt)
+        const clonedAttachments = new Map<string, StoredAttachment>()
         for (const message of source.storedMessages) {
             const comparableKey = getComparableStoredMessageKey(message)
-            if (knownKeys.has(comparableKey)) {
+            // Attachment-bearing messages must be copied even when their text
+            // matches the canonical transcript. Otherwise deleting the source
+            // session can delete the only durable bytes for that message.
+            if (knownKeys.has(comparableKey) && !hasUserAttachments(message.content)) {
                 continue
             }
 
+            const copiedContent = await options.store.attachments.cloneMessageAttachments(
+                options.namespace,
+                source.sessionId,
+                canonical.sessionId,
+                message.content,
+                clonedAttachments
+            )
             const copied = options.store.messages.copyMessageToSession(canonical.sessionId, {
-                content: message.content,
+                content: copiedContent,
                 createdAt: message.createdAt,
                 localId: message.localId,
                 invokedAt: message.invokedAt,
