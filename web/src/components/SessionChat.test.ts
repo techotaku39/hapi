@@ -7,6 +7,7 @@ import {
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
     isSelectAllTargetBlocked,
+    mergeStagedAttachmentsInOrder,
     resolvePiContextWindow,
     resolveLatestCompletedBoundaryIdForView,
     shouldAutoClearPendingSchedule,
@@ -438,6 +439,29 @@ describe('shouldStageScratchlistAttachmentsForComposeSend', () => {
         expect(shouldStageScratchlistAttachmentsForComposeSend([
             { ...hubAttachment, path: '/tmp/attachment.png' },
         ], null)).toBe(false)
+    })
+})
+
+describe('mergeStagedAttachmentsInOrder', () => {
+    function attachment(id: string, path: string): AttachmentMetadata {
+        return {
+            id,
+            filename: `${id}.png`,
+            mimeType: 'image/png',
+            size: 1024,
+            path,
+        }
+    }
+
+    it('replaces staged hub attachments without changing mixed attachment order', () => {
+        const hubAttachment = attachment('hub-a', 'hapi-hub:scratchlist/default/session/hub-a.png')
+        const normalAttachment = attachment('normal-b', '/tmp/normal-b.png')
+        const stagedAttachment = attachment('hub-a', '/tmp/staged-hub-a.png')
+
+        expect(mergeStagedAttachmentsInOrder(
+            [hubAttachment, normalAttachment],
+            [stagedAttachment],
+        )).toEqual([stagedAttachment, normalAttachment])
     })
 })
 
