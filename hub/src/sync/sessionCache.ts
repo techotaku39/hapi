@@ -1132,6 +1132,14 @@ export class SessionCache {
 
         const oldStored = this.store.sessions.getSessionByNamespace(oldSessionId, namespace)
         const newStored = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+        if (!oldStored && newStored && options.deleteOldSession) {
+            // A concurrent deduplication pass may have completed the same
+            // source-to-target merge while a resume was waiting for the
+            // attachment lock. Treat the already-deleted source as an
+            // idempotent success instead of turning a successful resume into
+            // "Session not found for merge".
+            return
+        }
         if (!oldStored || !newStored) {
             throw new Error('Session not found for merge')
         }

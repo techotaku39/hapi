@@ -213,6 +213,8 @@ export class SyncEngine {
     private readonly piUnexpectedTempOriginalIds = new Map<string, string>()
     /** Serialize scratchlist attachment ownership changes per session or session pair. */
     private readonly scratchlistUploadTails = new Map<string, Promise<unknown>>()
+    /** Deduplication tasks that a resume must await before merging a replacement. */
+    private readonly deduplicationTails = new Map<string, Promise<void>>()
     /** Prevent overlapping startup/retry scheduled-attachment reconciliation scans. */
     private consumedAttachmentReconciliationInFlight = false
     /** Sessions whose consumed scheduled-attachment cleanup failed and needs retry. */
@@ -311,6 +313,7 @@ export class SyncEngine {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
         }
+        this.deduplicationTails.clear()
     }
 
     subscribe(listener: SyncEventListener): () => void {
@@ -3714,6 +3717,7 @@ export class SyncEngine {
             }
 
             if (spawnResult.sessionId !== access.sessionId) {
+                await this.waitForDeduplication(access.sessionId, spawnResult.sessionId)
                 const oldSession = this.sessionCache.getSessionByNamespace(access.sessionId, namespace)
                 if (oldSession) {
                     try {
@@ -4362,16 +4366,32 @@ export class SyncEngine {
         return true
     }
 
-    private triggerDedupIfNeeded(sessionId: string): void {
+    private triggerDedupIfNeeded(sessionId: string): Promise<void> | undefined {
+        const previous = this.deduplicationTails.get(sessionId)
         const session = this.sessionCache.getSession(sessionId)
-        if (session?.metadata) {
-            if (!this.canRunCursorDedup(session)) {
-                return
-            }
-            void this.sessionCache.deduplicateByAgentSessionId(sessionId).catch(() => {
+        if (!session?.metadata || !this.canRunCursorDedup(session)) {
+            return previous
+        }
+
+        const next = (previous ?? Promise.resolve())
+            .then(() => this.sessionCache.deduplicateByAgentSessionId(sessionId))
+            .catch(() => {
                 // best-effort: web-side safety net hides remaining duplicates
             })
-        }
+        this.deduplicationTails.set(sessionId, next)
+        void next.finally(() => {
+            if (this.deduplicationTails.get(sessionId) === next) {
+                this.deduplicationTails.delete(sessionId)
+            }
+        })
+        return next
+    }
+
+    private async waitForDeduplication(...sessionIds: string[]): Promise<void> {
+        const pending = [...new Set(sessionIds)]
+            .map((sessionId) => this.deduplicationTails.get(sessionId))
+            .filter((task): task is Promise<void> => task !== undefined)
+        await Promise.all(pending)
     }
 
     async waitForSessionActive(sessionId: string, timeoutMs: number = 15_000): Promise<boolean> {
