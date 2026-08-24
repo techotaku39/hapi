@@ -863,13 +863,16 @@ export function HappyComposer(props: {
         if (composerText === settlement.text) {
             api.composer().setText('')
         }
+        if (attachments.length > 0) {
+            void api.composer().clearAttachments()
+        }
         clearDraftsAfterSend(
             settlement.sessionId,
             null,
             settlement.text,
         )
         consumeSettlement()
-    }, [api, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
+    }, [api, attachments.length, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
 
     // Failed sends use the separate sendError recovery path, so their terminal
     // settlement can be consumed immediately and must not remain in the

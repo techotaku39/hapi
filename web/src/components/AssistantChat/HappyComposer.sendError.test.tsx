@@ -57,6 +57,12 @@ vi.mock('@assistant-ui/react', async () => {
                         composer: { ...current.composer, text },
                     }))
                 },
+                clearAttachments: async () => {
+                    runtime.setSnapshot!((current) => ({
+                        ...current,
+                        composer: { ...current.composer, attachments: [] },
+                    }))
+                },
                 send: () => {
                     const intent = runtime.pendingSendIntentRef?.current ?? 'default'
                     runtime.sentIntents.push(intent)
@@ -616,6 +622,7 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.settleSend())
 
         await waitFor(() => expect(input()).toHaveValue(''))
+        await waitFor(() => expect(runtime.snapshot.composer.attachments).toHaveLength(0))
         expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
     })
 
