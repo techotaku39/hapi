@@ -1,3 +1,4 @@
+import CoreGraphics
 import HapiClient
 import HapiProtocol
 import SwiftUI
@@ -86,7 +87,10 @@ final class GeneratedImageLoader {
             ) else {
                 return nil
             }
-            return UIImage(data: payload.data)
+            guard let cgImage = await Self.decodeAttachment(payload.data) else {
+                return nil
+            }
+            return UIImage(cgImage: cgImage)
         }
         inFlight[key] = task
         let image = await task.value
@@ -95,6 +99,13 @@ final class GeneratedImageLoader {
             cache.setObject(image, forKey: key as NSString)
         }
         return image
+    }
+
+    private nonisolated static func decodeAttachment(_ bytes: Data) async -> CGImage? {
+        AttachmentPreparer.decodeDownsampled(
+            bytes,
+            maxDimension: AttachmentPolicy.previewMaxDimension
+        )
     }
 }
 
