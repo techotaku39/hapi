@@ -284,6 +284,7 @@ export function ModelEffortSettingsSection(props: {
 export function HappyComposer(props: {
     sessionId?: string
     onUploadDraftSnapshot?: (text: string, attachments: AttachmentDraftInput[]) => void
+    onReleaseSentAttachments?: (ids: readonly string[]) => void
     canRestoreAttachments?: boolean
     disabled?: boolean
     permissionMode?: PermissionMode
@@ -864,6 +865,7 @@ export function HappyComposer(props: {
             api.composer().setText('')
         }
         if (attachments.length > 0) {
+            props.onReleaseSentAttachments?.(attachments.map(({ id }) => id))
             void api.composer().clearAttachments()
         }
         clearDraftsAfterSend(
@@ -872,7 +874,7 @@ export function HappyComposer(props: {
             settlement.text,
         )
         consumeSettlement()
-    }, [api, attachments.length, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
+    }, [api, attachments.length, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.onReleaseSentAttachments, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
 
     // Failed sends use the separate sendError recovery path, so their terminal
     // settlement can be consumed immediately and must not remain in the

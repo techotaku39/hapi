@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
+import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import {
     consumeComposerSendSettlement,
     consumePendingComposerSend,
@@ -14,6 +15,12 @@ import {
     resetComposerSendStateForTests,
 } from './composer-send-state'
 
+vi.mock('@/lib/clearDraftsAfterSend', () => ({
+    clearDraftsAfterSend: vi.fn(),
+}))
+
+const mockClearDraftsAfterSend = vi.mocked(clearDraftsAfterSend)
+
 const settlement = (sessionId: string, attemptId: string): SendMessageSettlement => ({
     sessionId,
     attemptId,
@@ -25,6 +32,7 @@ const settlement = (sessionId: string, attemptId: string): SendMessageSettlement
 describe('composer send state', () => {
     beforeEach(() => {
         resetComposerSendStateForTests()
+        mockClearDraftsAfterSend.mockClear()
     })
 
     it('retains accepted sends and settlements while the chat tree is unmounted', () => {
@@ -108,5 +116,56 @@ describe('composer send state', () => {
         consumeComposerSendSettlement('session-A', 'attempt-error')
 
         expect(getComposerSendSettlement('session-A')).toBeNull()
+    })
+
+    it('reconciles a successful send when acceptance and settlement meet', () => {
+        recordPendingComposerSend({
+            sessionId: 'session-A',
+            attemptId: 'attempt-A',
+            text: 'message A',
+            programmaticEditRevision: 0,
+            draftRevision: 0,
+        })
+
+        publishComposerSendSettlement(settlement('session-A', 'attempt-A'))
+
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith(
+            'session-A',
+            null,
+            'text-session-A',
+        )
+    })
+
+    it('reconciles when settlement arrives before acceptance', () => {
+        publishComposerSendSettlement(settlement('session-A', 'attempt-A'))
+
+        recordPendingComposerSend({
+            sessionId: 'session-A',
+            attemptId: 'attempt-A',
+            text: 'message A',
+            programmaticEditRevision: 0,
+            draftRevision: 0,
+        })
+
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith(
+            'session-A',
+            null,
+            'text-session-A',
+        )
+    })
+
+    it('does not reconcile after a newer draft revision', () => {
+        recordPendingComposerSend({
+            sessionId: 'session-A',
+            attemptId: 'attempt-A',
+            text: 'message A',
+            programmaticEditRevision: 0,
+            draftRevision: 0,
+        })
+        recordComposerDraftChange('session-A')
+
+        publishComposerSendSettlement(settlement('session-A', 'attempt-A'))
+
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
     })
 })

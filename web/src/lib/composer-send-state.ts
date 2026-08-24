@@ -1,4 +1,5 @@
 import type { SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
+import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 
 export type PendingComposerSend = {
     attemptId: string | null
@@ -38,6 +39,7 @@ export function getPendingComposerSend(sessionId: string): PendingComposerSend |
 
 export function recordPendingComposerSend(send: PendingComposerSend): void {
     pendingComposerSends.set(send.sessionId, send)
+    reconcileSuccessfulSend(send.sessionId)
     notify()
 }
 
@@ -85,7 +87,23 @@ export function publishComposerSendSettlement(settlement: SendMessageSettlement)
     const byAttempt = composerSendSettlements.get(settlement.sessionId) ?? new Map<string, SendMessageSettlement>()
     byAttempt.set(settlement.attemptId, settlement)
     composerSendSettlements.set(settlement.sessionId, byAttempt)
+    reconcileSuccessfulSend(settlement.sessionId)
     notify()
+}
+
+/**
+ * Clear durable draft storage as soon as both halves of a successful send are
+ * known. The mounted composer still owns live assistant-ui cleanup, but this
+ * path keeps a route-unmounted or refreshed page from resurrecting a sent
+ * draft. A newer draft revision always wins and remains intact.
+ */
+function reconcileSuccessfulSend(sessionId: string): void {
+    const pending = pendingComposerSends.get(sessionId)
+    if (!pending?.attemptId) return
+    const settlement = composerSendSettlements.get(sessionId)?.get(pending.attemptId)
+    if (settlement?.status !== 'success') return
+    if (getComposerDraftRevision(sessionId) !== pending.draftRevision) return
+    clearDraftsAfterSend(sessionId, null, settlement.text)
 }
 
 export function consumeComposerSendSettlement(sessionId: string, attemptId: string): void {

@@ -55,7 +55,7 @@ import {
 import type { MessageDeliveryMode } from '@hapi/protocol'
 import { isSteeringSupportedForSession } from '@hapi/protocol'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
-import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
+import { createAttachmentAdapter, type ChatAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { ShareSeedConsumer } from '@/components/ShareSeedConsumer'
 import {
     createScratchlistAttachmentAdapter,
@@ -567,6 +567,8 @@ type SessionChatProps = {
     // so the caller can surface the aborted text via the existing sendError path.
     onAbortRestore?: (text: string) => void
 }
+
+type ReleasableAttachmentAdapter = ChatAttachmentAdapter | ScratchlistAttachmentAdapter
 
 /**
  * Public entry point. Thin wrapper around `SessionChatInner` keyed by
@@ -1735,7 +1737,7 @@ function SessionChatInner(props: SessionChatProps) {
         }
     }, [agentFlavor, onSendForComposer, props.session.thinking, scratchlistMode, updatePendingSchedule])
 
-    const attachmentAdapter = useMemo(() => {
+    const attachmentAdapter = useMemo<ReleasableAttachmentAdapter | undefined>(() => {
         if (props.session.active && scratchlistMode) {
             const adapter = createScratchlistAttachmentAdapter(props.api, props.session.id)
             scratchlistAdapterRef.current = adapter
@@ -1782,6 +1784,10 @@ function SessionChatInner(props: SessionChatProps) {
             },
         )
     }, [props.api, props.session.id, props.session.active, props.resolveSessionIdForUpload, scratchlistMode, inactiveCanResume])
+
+    const releaseSentAttachments = useCallback((ids: readonly string[]) => {
+        attachmentAdapter?.releaseWithoutDelete(ids)
+    }, [attachmentAdapter])
 
 
     const runtime = useHappyRuntime({
@@ -1968,6 +1974,7 @@ function SessionChatInner(props: SessionChatProps) {
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
                         canRestoreAttachments={props.session.active}
+                        onReleaseSentAttachments={releaseSentAttachments}
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
