@@ -1172,7 +1172,6 @@ export class SessionCache {
             const {
                 getHapiHomeDir,
                 moveScratchlistAttachmentFilesForSession,
-                deleteScratchlistSessionAttachmentDir,
             } = await import('../scratchlistAttachments/storage')
             const hapiHome = getHapiHomeDir()
             for (const entry of this.store.scratchlist.list(newSessionId)) {
@@ -1188,13 +1187,17 @@ export class SessionCache {
                     this.store.scratchlist.update(newSessionId, entry.entryId, { attachments })
                 }
             }
-            // Collided SQL losers + orphan uploads still under the old dir.
-            await deleteScratchlistSessionAttachmentDir(hapiHome, namespace, oldSessionId)
             // Rows landed on the consolidated session - invalidate so
             // any client on the new id refetches.
             this.emitScratchlistChanged(newSessionId)
-        } else if (movedScratchlist.collided > 0) {
-            // Every old entry lost the PK race — drop leftover hub blobs.
+        }
+        if (options.deleteOldSession
+            || movedScratchlist.moved > 0
+            || movedScratchlist.collided > 0) {
+            // Drop collided SQL losers and any orphan uploads still under the
+            // old directory. A deleted source session can have no remaining
+            // scratchlist rows while still owning an attachment left behind
+            // by an already-removed scheduled draft.
             const { getHapiHomeDir, deleteScratchlistSessionAttachmentDir } = await import(
                 '../scratchlistAttachments/storage'
             )

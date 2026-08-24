@@ -204,6 +204,42 @@ describe('mergeSessions (deleteOldSession=true) - scratchlist transfer', () => {
         }
     })
 
+    it('removes orphaned source attachment files when deleting a merged session', async () => {
+        const { mkdtempSync, rmSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const hapiHome = mkdtempSync(join(tmpdir(), 'hapi-merge-orphan-att-'))
+        const prevHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = hapiHome
+        const { store, cache } = setup()
+        try {
+            const { oldSession, newSession } = makeSessions(cache)
+            const { sumScratchlistAttachmentBytesOnDisk, writeScratchlistAttachmentFile } =
+                await import('../scratchlistAttachments/storage')
+            await writeScratchlistAttachmentFile(
+                hapiHome,
+                'default',
+                oldSession.id,
+                'orphan.png',
+                'image/png',
+                Buffer.from('orphan'),
+            )
+
+            // The scheduled draft was already deleted, leaving only the Hub
+            // file under the old session directory.
+            expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', oldSession.id))
+                .toBe('orphan'.length)
+            await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+            expect(await sumScratchlistAttachmentBytesOnDisk(hapiHome, 'default', oldSession.id)).toBe(0)
+        } finally {
+            store.close()
+            if (prevHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = prevHome
+            rmSync(hapiHome, { recursive: true, force: true })
+        }
+    })
+
     it('handles entryId PK collision by keeping the dedup target row (operator-visible session wins)', async () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)
