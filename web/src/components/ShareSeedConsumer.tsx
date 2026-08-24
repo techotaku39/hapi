@@ -59,6 +59,9 @@ export function ShareSeedConsumer(props: {
                     .filter((part) => typeof part === 'string' && part.length > 0)
                     .join('\n')
                     .trim()
+                if (seedText.length > 0 || payload.files.length > 0) {
+                    props.onProgrammaticEdit?.()
+                }
                 if (seedText.length > 0) {
                     const existingText = composerTextRef.current.trim().length > 0
                         ? composerTextRef.current
@@ -67,7 +70,6 @@ export function ShareSeedConsumer(props: {
                         .filter((part) => part.length > 0)
                         .join('\n\n')
                     if (nextText.length > 0) {
-                        props.onProgrammaticEdit?.()
                         assistantApi.composer().setText(nextText)
                     }
                 }

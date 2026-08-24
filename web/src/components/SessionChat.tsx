@@ -328,14 +328,27 @@ function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
 /** Publish mutation acceptance before any best-effort post-send cleanup. */
 export async function runAcceptedSendCleanup<T>(
     send: () => Promise<T | false>,
-    onAccepted: (value: T) => void,
+    onAccepted: (value: T) => T,
     cleanup: () => Promise<void>,
 ): Promise<T | false> {
     const accepted = await send()
     if (!accepted) return false
-    onAccepted(accepted)
+    const result = onAccepted(accepted)
     await cleanup()
-    return accepted
+    return result
+}
+
+/** Keep edits made before async send staging newer than the submitted draft. */
+export function applyComposerAcceptanceRevision(
+    acceptance: SendMessageAcceptance,
+    sessionId: string,
+    submitted: Pick<SendMessageAcceptance, 'programmaticEditRevision' | 'draftRevision'>,
+): SendMessageAcceptance {
+    if (acceptance.sessionId !== sessionId) return acceptance
+    return {
+        ...acceptance,
+        ...submitted,
+    }
 }
 
 /**
@@ -873,6 +886,14 @@ function SessionChatInner(props: SessionChatProps) {
             scheduledAt?: number | null,
             deliveryMode: MessageDeliveryMode = 'queue',
         ): Promise<SendMessageAcceptance | false> => {
+            // assistant-ui has already cleared the live composer by the time
+            // this async route runs. Capture the original interaction
+            // boundary before hub-attachment staging can await blob work and
+            // the user can enter a replacement draft.
+            const submittedComposerRevision = {
+                programmaticEditRevision: getComposerProgrammaticEditRevision(props.session.id),
+                draftRevision: getComposerDraftRevision(props.session.id),
+            }
             if (
                 scratchlistMode
                 && scheduledAt == null
@@ -927,7 +948,15 @@ function SessionChatInner(props: SessionChatProps) {
                         scheduledAt,
                         deliveryMode,
                     ),
-                    (accepted) => props.onSendAccepted?.(accepted, text),
+                    (accepted) => {
+                        const composerAcceptance = applyComposerAcceptanceRevision(
+                            accepted,
+                            props.session.id,
+                            submittedComposerRevision,
+                        )
+                        props.onSendAccepted?.(composerAcceptance, text)
+                        return composerAcceptance
+                    },
                     async () => {
                         // Hub blobs were copied into the normal upload dir; drop the
                         // scratchlist copies so they stop counting against the session cap.
@@ -938,8 +967,14 @@ function SessionChatInner(props: SessionChatProps) {
                 )
             }
             const accepted = await props.onSend(text, attachments, scheduledAt, deliveryMode)
-            if (accepted) props.onSendAccepted?.(accepted, text)
-            return accepted
+            if (!accepted) return false
+            const composerAcceptance = applyComposerAcceptanceRevision(
+                accepted,
+                props.session.id,
+                submittedComposerRevision,
+            )
+            props.onSendAccepted?.(composerAcceptance, text)
+            return composerAcceptance
         },
         [props.onSend, props.onSendAccepted, props.api, props.programmaticEditRevision, props.session.id, scratchlist, scratchlistMode],
     )

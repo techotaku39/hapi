@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     applyGlobalSelectAll,
+    applyComposerAcceptanceRevision,
     applyModelChangeWithReasoningRollback,
     buildGoalStateMessages,
     isScratchlistHotkeyBlockedTarget,
@@ -62,7 +63,10 @@ describe('runAcceptedSendCleanup', () => {
                 order.push('send')
                 return 'accepted'
             },
-            (accepted) => order.push(accepted),
+            (accepted) => {
+                order.push(accepted)
+                return accepted
+            },
             async () => {
                 order.push('cleanup-start')
                 await cleanup
@@ -76,6 +80,40 @@ describe('runAcceptedSendCleanup', () => {
         releaseCleanup()
         await expect(resultPromise).resolves.toBe('accepted')
         expect(order).toEqual(['send', 'accepted', 'cleanup-start', 'cleanup-end'])
+    })
+})
+
+describe('applyComposerAcceptanceRevision', () => {
+    it('keeps the original same-session revision across async staging', () => {
+        const acceptance = {
+            attemptId: 'attempt-1',
+            sessionId: 'session-a',
+            programmaticEditRevision: 7,
+            draftRevision: 8,
+        }
+
+        expect(applyComposerAcceptanceRevision(acceptance, 'session-a', {
+            programmaticEditRevision: 1,
+            draftRevision: 2,
+        })).toEqual({
+            ...acceptance,
+            programmaticEditRevision: 1,
+            draftRevision: 2,
+        })
+    })
+
+    it('does not replace revisions from a different resolved session', () => {
+        const acceptance = {
+            attemptId: 'attempt-1',
+            sessionId: 'session-b',
+            programmaticEditRevision: 7,
+            draftRevision: 8,
+        }
+
+        expect(applyComposerAcceptanceRevision(acceptance, 'session-a', {
+            programmaticEditRevision: 1,
+            draftRevision: 2,
+        })).toBe(acceptance)
     })
 })
 
