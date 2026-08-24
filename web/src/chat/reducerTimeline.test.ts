@@ -203,6 +203,39 @@ describe('reduceTimeline', () => {
         expect(agentTextBlock.durationMs).toBe(1500)
     })
 
+    it('attaches marked top-level Codex usage as a one-turn Round summary', () => {
+        const assistant = makeAgentMessage('Codex answer', {
+            id: 'codex-answer',
+            model: 'gpt-5.4'
+        })
+        const tokenCount: TracedMessage = {
+            id: 'codex-token-count',
+            localId: null,
+            createdAt: 1_700_000_002_000,
+            role: 'event',
+            content: {
+                type: 'token-count',
+                provider: 'codex',
+                model: 'gpt-5.4',
+                info: {}
+            },
+            usage: { input_tokens: 100, output_tokens: 10 },
+            isSidechain: false
+        } as TracedMessage
+
+        const { blocks } = reduceTimeline([assistant, tokenCount], makeContext())
+        expect(blocks).toMatchObject([{
+            kind: 'agent-text',
+            roundSummary: {
+                usage: { input_tokens: 100, output_tokens: 10 },
+                modelUsage: {
+                    'gpt-5.4': { inputTokens: 100, outputTokens: 10 }
+                },
+                numTurns: 1
+            }
+        }])
+    })
+
     it('merges turn-duration event into the last assistant block as fallback', () => {
         const assistantMsg = makeAgentMessage('Hello')
         const durationEvent: TracedMessage = {
