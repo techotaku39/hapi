@@ -28,6 +28,9 @@ export class SessionCache {
     private readonly deduplicatePending: Set<string> = new Set()
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
+    /** Process-local creation order; SQLite timestamps can tie within one tick. */
+    private readonly sessionInsertionOrder = new Map<string, number>()
+    private nextSessionInsertionOrder = 0
 
     constructor(
         private readonly store: Store,
@@ -134,6 +137,7 @@ export class SessionCache {
         let stored = this.store.sessions.getSession(sessionId)
         if (!stored) {
             const existed = this.sessions.delete(sessionId)
+            this.sessionInsertionOrder.delete(sessionId)
             this.pendingThinkingUntilBySessionId.delete(sessionId)
             this.runtimeConfigUpdatedAtBySessionId.delete(sessionId)
             if (existed) {
@@ -143,6 +147,9 @@ export class SessionCache {
         }
 
         const existing = this.sessions.get(sessionId)
+        if (!this.sessionInsertionOrder.has(sessionId)) {
+            this.sessionInsertionOrder.set(sessionId, ++this.nextSessionInsertionOrder)
+        }
 
         if (stored.todos === null && !this.todoBackfillAttemptedSessionIds.has(sessionId)) {
             this.todoBackfillAttemptedSessionIds.add(sessionId)
@@ -1598,8 +1605,10 @@ export class SessionCache {
 
                 // Keep the same canonical session the sidebar is likely to show:
                 // active sessions win, then the most recently updated session wins.
-                // If timestamps tie, prefer the session that triggered this dedup run
-                // so callers can intentionally preserve the visible/resumed session.
+                // If timestamps and database sequence tie, prefer the session
+                // created later in this Hub process; SQLite millisecond
+                // timestamps otherwise let an older inactive duplicate delete
+                // a pre-created resume target before it becomes active.
                 candidates.sort((a, b) => {
                     if (a.session.active !== b.session.active) return a.session.active ? -1 : 1
                     const updatedDelta = b.session.updatedAt - a.session.updatedAt
@@ -1608,6 +1617,9 @@ export class SessionCache {
                     if (createdDelta !== 0) return createdDelta
                     const seqDelta = b.session.seq - a.session.seq
                     if (seqDelta !== 0) return seqDelta
+                    const insertionDelta = (this.sessionInsertionOrder.get(b.id) ?? 0)
+                        - (this.sessionInsertionOrder.get(a.id) ?? 0)
+                    if (insertionDelta !== 0) return insertionDelta
                     if (a.id === sessionId) return -1
                     if (b.id === sessionId) return 1
                     return b.session.activeAt - a.session.activeAt
