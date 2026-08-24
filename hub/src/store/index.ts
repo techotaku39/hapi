@@ -166,6 +166,11 @@ export class Store {
                 firstError ??= error
             }
         }
+        try {
+            deleted += await this.attachments.cleanupUntrackedFiles()
+        } catch (error) {
+            firstError ??= error
+        }
         if (firstError) throw firstError
         return deleted
     }

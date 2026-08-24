@@ -1375,7 +1375,10 @@ describe('Codex Desktop import routes', () => {
             mimeType: 'image/png',
             original: Buffer.from('durable-original')
         })
-        store.messages.addMessage(canonical.id, { role: 'user', content: { type: 'text', text: 'canonical' } }, 'canonical-1')
+        store.messages.addMessage(canonical.id, {
+            role: 'user',
+            content: { type: 'text', text: 'source with attachment' }
+        }, 'canonical-1')
         store.messages.addMessage(canonical.id, { role: 'agent', content: { type: 'text', text: 'canonical reply' } }, 'canonical-2')
         store.messages.addMessage(source.id, {
             role: 'user',
@@ -1405,12 +1408,17 @@ describe('Codex Desktop import routes', () => {
                 body: JSON.stringify({ sessionIds: ['codex-thread-attachments'] })
             })
             expect(response.status).toBe(200)
-            const copied = store.messages.getAllMessages(canonical.id)
-                .find((message) => message.localId === 'source-1')
-            const copiedId = ((copied?.content as any)?.content?.attachments?.[0] as any)?.attachmentId
+            const mergedMessages = store.messages.getAllMessages(canonical.id)
+            expect(mergedMessages).toHaveLength(2)
+            expect(mergedMessages.some((message) => message.localId === 'source-1')).toBe(false)
+            const merged = mergedMessages.find((message) => message.localId === 'canonical-1')
+            const mergedBody = (merged?.content as {
+                content?: { attachments?: Array<{ attachmentId?: string }> }
+            } | undefined)?.content
+            const copiedId = mergedBody?.attachments?.[0]?.attachmentId
             expect(copiedId).toBeDefined()
             expect(copiedId).not.toBe(attachment.id)
-            expect((await store.attachments.readForSessionAsync(copiedId, 'default', canonical.id))?.data)
+            expect((await store.attachments.readForSessionAsync(copiedId!, 'default', canonical.id))?.data)
                 .toEqual(Buffer.from('durable-original'))
             expect(await store.cleanupOrphanedAttachments()).toBe(1)
             expect(store.attachments.getForSession(attachment.id, 'default', source.id)).toBeNull()

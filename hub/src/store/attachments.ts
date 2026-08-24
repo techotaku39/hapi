@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Database } from 'bun:sqlite'
@@ -169,11 +169,48 @@ export class AttachmentStore {
         const attachment = this.getForSession(id, namespace, sessionId)
         if (!attachment) return false
 
-        await rm(attachment.originalPath, { force: true })
         const result = this.db.prepare(
-            'DELETE FROM attachments WHERE id = ? AND namespace = ?'
-        ).run(id, namespace)
-        return Number(result.changes) > 0
+            'DELETE FROM attachments WHERE id = ? AND namespace = ? AND session_id = ?'
+        ).run(id, namespace, sessionId)
+        if (Number(result.changes) === 0) return false
+
+        // Delete the row first. If the process exits before the file is removed,
+        // startup reconciliation can safely reclaim the now-untracked blob.
+        await rm(attachment.originalPath, { force: true })
+        return true
+    }
+
+    /** Remove files in the attachment root that are not referenced by SQLite. */
+    async cleanupUntrackedFiles(): Promise<number> {
+        let entries: Array<{ name: string; isDirectory(): boolean }>
+        try {
+            entries = await readdir(this.root, { withFileTypes: true })
+        } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+                return 0
+            }
+            throw error
+        }
+
+        const trackedPaths = new Set(
+            (this.db.prepare('SELECT original_path FROM attachments').all() as Array<{ original_path: string }>)
+                .map((row) => resolve(row.original_path))
+        )
+        let removed = 0
+        let firstError: unknown
+        for (const entry of entries) {
+            if (entry.isDirectory()) continue
+            const path = join(this.root, entry.name)
+            if (trackedPaths.has(resolve(path))) continue
+            try {
+                await rm(path, { force: true })
+                removed += 1
+            } catch (error) {
+                firstError ??= error
+            }
+        }
+        if (firstError) throw firstError
+        return removed
     }
 
     async cloneForSession(

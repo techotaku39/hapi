@@ -123,7 +123,7 @@ describe('SyncEngine.deleteAttachment', () => {
         }
     })
 
-    it('keeps deletion stable when ownership transfers during unlink', async () => {
+    it('deletes the row before unlink so ownership transfer cannot resurrect it', async () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-transfer-delete-'))
         tempDirs.push(root)
         const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
@@ -163,7 +163,7 @@ describe('SyncEngine.deleteAttachment', () => {
             try {
                 const deletion = engine.deleteAttachment(source.id, 'default', attachment.id)
                 await unlinkStartedPromise
-                expect(store.attachments.transferSession('default', source.id, target.id)).toBe(1)
+                expect(store.attachments.transferSession('default', source.id, target.id)).toBe(0)
                 expect(engine.hasAttachment(target.id, 'default', attachment.id)).toBe(false)
                 releaseUnlink()
                 await expect(deletion).resolves.toEqual({ success: true })

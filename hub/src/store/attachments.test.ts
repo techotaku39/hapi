@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './index'
@@ -120,6 +120,27 @@ describe('AttachmentStore', () => {
         expect(await reopened.cleanupOrphanedAttachments()).toBe(1)
         expect(reopened.attachments.getForSession(orphan.id, 'namespace-a', 'deleted-session')).toBeNull()
         expect(existsSync(orphan.originalPath)).toBe(false)
+        reopened.close()
+    })
+
+    it('removes untracked attachment files during reconciliation', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.sqlite')
+        const attachmentsRoot = join(dir, 'attachments')
+        const initial = new Store(dbPath, { attachmentsRoot })
+        initial.close()
+
+        mkdirSync(attachmentsRoot, { recursive: true })
+        const untrackedOriginal = join(attachmentsRoot, 'untracked.original')
+        const interruptedTemp = join(attachmentsRoot, '.interrupted.original.tmp')
+        writeFileSync(untrackedOriginal, 'untracked')
+        writeFileSync(interruptedTemp, 'interrupted')
+
+        const reopened = new Store(dbPath, { attachmentsRoot })
+        expect(await reopened.cleanupOrphanedAttachments()).toBe(2)
+        expect(existsSync(untrackedOriginal)).toBe(false)
+        expect(existsSync(interruptedTemp)).toBe(false)
         reopened.close()
     })
 
