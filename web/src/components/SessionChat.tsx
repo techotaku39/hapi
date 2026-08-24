@@ -313,6 +313,14 @@ export function shouldRouteToScratchlist(
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
 }
 
+export function mergeStagedAttachmentsInOrder(
+    attachments: readonly AttachmentMetadata[],
+    staged: readonly AttachmentMetadata[],
+): AttachmentMetadata[] {
+    const stagedById = new Map(staged.map((attachment) => [attachment.id, attachment]))
+    return attachments.map((attachment) => stagedById.get(attachment.id) ?? attachment)
+}
+
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
     return message.invokedAt == null && message.scheduledAt != null
 }
@@ -825,15 +833,15 @@ function SessionChatInner(props: SessionChatProps) {
             const list = attachments ?? []
             const hubItems = list.filter((att) => isHubScratchlistAttachmentPath(att.path))
             if (hubItems.length > 0) {
-                const normalItems = list.filter((att) => !isHubScratchlistAttachmentPath(att.path))
                 const staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,
                     props.session.id,
                     hubItems,
                 )
+                const ordered = mergeStagedAttachmentsInOrder(list, staged)
                 const accepted = await props.onSend(
                     text,
-                    [...normalItems, ...staged],
+                    ordered,
                     scheduledAt,
                     deliveryMode,
                 )
