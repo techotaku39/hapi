@@ -68,8 +68,8 @@ function Harness() {
         <SortableComposerAttachments
             attachments={attachments}
             orderedAttachmentIds={order}
-            onReorder={(activeId, targetId) => {
-                setOrder((current) => moveAttachmentId(current, activeId, targetId))
+            onReorder={(activeId, targetId, position) => {
+                setOrder((current) => moveAttachmentId(current, activeId, targetId, position))
             }}
         />
     )
@@ -106,6 +106,10 @@ describe('SortableComposerAttachments', () => {
         })
 
         const { container } = render(<Harness />)
+        vi.spyOn(
+            container.querySelector('[data-hapi-composer-attachment-id="c"]')!,
+            'getBoundingClientRect',
+        ).mockReturnValue({ left: 100, width: 100, right: 200, top: 0, bottom: 50, height: 50 } as DOMRect)
         const handle = screen.getByRole('button', { name: 'Reorder attachment a.png' })
 
         act(() => {
@@ -120,6 +124,33 @@ describe('SortableComposerAttachments', () => {
         ).map((element) => element.dataset.hapiComposerAttachmentId)).toEqual(['b', 'a', 'c'])
     })
 
+    it('moves the first attachment after the second when dragged across its midpoint', () => {
+        const elementsFromPoint = vi.fn(() => [
+            document.querySelector('[data-hapi-composer-attachment-id="b"]')!,
+        ])
+        Object.defineProperty(document, 'elementsFromPoint', {
+            configurable: true,
+            value: elementsFromPoint,
+        })
+
+        const { container } = render(<Harness />)
+        vi.spyOn(
+            container.querySelector('[data-hapi-composer-attachment-id="b"]')!,
+            'getBoundingClientRect',
+        ).mockReturnValue({ left: 0, width: 100, right: 100, top: 0, bottom: 50, height: 50 } as DOMRect)
+        const handle = screen.getByRole('button', { name: 'Reorder attachment a.png' })
+
+        act(() => {
+            dispatchPointerEvent(handle, 'pointerdown', { button: 0, pointerId: 3, clientX: 0, clientY: 0 })
+            dispatchPointerEvent(handle, 'pointermove', { pointerId: 3, clientX: 80, clientY: 0 })
+            dispatchPointerEvent(handle, 'pointerup', { pointerId: 3, clientX: 80, clientY: 0 })
+        })
+
+        expect(Array.from(
+            container.querySelectorAll<HTMLElement>('[data-hapi-composer-attachment-id]'),
+        ).map((element) => element.dataset.hapiComposerAttachmentId)).toEqual(['b', 'a', 'c'])
+    })
+
     it('supports keyboard movement through the same ordering path', () => {
         const { container } = render(<Harness />)
         fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder attachment b.txt' }), { key: 'ArrowLeft' })
@@ -127,6 +158,15 @@ describe('SortableComposerAttachments', () => {
         expect(Array.from(
             container.querySelectorAll<HTMLElement>('[data-hapi-composer-attachment-id]'),
         ).map((element) => element.dataset.hapiComposerAttachmentId)).toEqual(['b', 'a', 'c'])
+    })
+
+    it('moves an attachment right with the keyboard', () => {
+        const { container } = render(<Harness />)
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder attachment b.txt' }), { key: 'ArrowRight' })
+
+        expect(Array.from(
+            container.querySelectorAll<HTMLElement>('[data-hapi-composer-attachment-id]'),
+        ).map((element) => element.dataset.hapiComposerAttachmentId)).toEqual(['a', 'c', 'b'])
     })
 
     it('starts a drag from an image surface and suppresses its long-press menu', () => {
@@ -139,6 +179,10 @@ describe('SortableComposerAttachments', () => {
         })
 
         const { container } = render(<Harness />)
+        vi.spyOn(
+            container.querySelector('[data-hapi-composer-attachment-id="c"]')!,
+            'getBoundingClientRect',
+        ).mockReturnValue({ left: 100, width: 100, right: 200, top: 0, bottom: 50, height: 50 } as DOMRect)
         const surface = screen.getAllByTestId('attachment-surface')[0]!
         const contextMenu = new Event('contextmenu', { bubbles: true, cancelable: true })
 

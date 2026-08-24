@@ -63,7 +63,7 @@ import { useVoiceInputPreferences } from '@/hooks/useVoiceInputPreferences'
 import { useDictation } from '@/hooks/useDictation'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
 import type { MessageDeliveryMode } from '@hapi/protocol'
-import { moveAttachmentId, orderItemsById, reconcileAttachmentOrder } from '@/lib/attachmentOrder'
+import { moveAttachmentId, orderItemsById, reconcileAttachmentOrder, type AttachmentDropPosition } from '@/lib/attachmentOrder'
 
 export interface TextInputState {
     text: string
@@ -469,9 +469,9 @@ export function HappyComposer(props: {
     const orderedAttachmentIds = reconcileAttachmentOrder(attachmentOrderRef.current, attachmentIds)
     attachmentOrderRef.current = orderedAttachmentIds
     const [, setAttachmentOrderRevision] = useState(0)
-    const handleAttachmentReorder = useCallback((activeId: string, targetId: string) => {
+    const handleAttachmentReorder = useCallback((activeId: string, targetId: string, position: AttachmentDropPosition) => {
         const currentOrder = reconcileAttachmentOrder(attachmentOrderRef.current, attachmentIds)
-        const nextOrder = moveAttachmentId(currentOrder, activeId, targetId)
+        const nextOrder = moveAttachmentId(currentOrder, activeId, targetId, position)
         if (nextOrder.every((id, index) => id === currentOrder[index])) return
         attachmentOrderRef.current = nextOrder
         setAttachmentOrderRevision((revision) => revision + 1)

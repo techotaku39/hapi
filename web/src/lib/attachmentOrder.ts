@@ -21,22 +21,23 @@ export function reconcileAttachmentOrder(
     return next
 }
 
-/** Move an item immediately before the target item. */
+export type AttachmentDropPosition = 'before' | 'after'
+
 export function moveAttachmentId(
     order: readonly string[],
     activeId: string,
     targetId: string,
+    position: AttachmentDropPosition = 'before',
 ): string[] {
     if (activeId === targetId) return [...order]
 
     const next = [...order]
     const activeIndex = next.indexOf(activeId)
-    const targetIndex = next.indexOf(targetId)
-    if (activeIndex < 0 || targetIndex < 0) return next
+    if (activeIndex < 0 || next.indexOf(targetId) < 0) return next
 
     const [active] = next.splice(activeIndex, 1)
     const insertionIndex = next.indexOf(targetId)
-    next.splice(insertionIndex < 0 ? targetIndex : insertionIndex, 0, active!)
+    next.splice(insertionIndex + (position === 'after' ? 1 : 0), 0, active!)
     return next
 }
 

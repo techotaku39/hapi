@@ -9,6 +9,7 @@ describe('attachment order helpers', () => {
     it('moves an attachment immediately before the drop target', () => {
         expect(moveAttachmentId(['a', 'b', 'c'], 'a', 'c')).toEqual(['b', 'a', 'c'])
         expect(moveAttachmentId(['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'a', 'b'])
+        expect(moveAttachmentId(['a', 'b', 'c'], 'a', 'b', 'after')).toEqual(['b', 'a', 'c'])
     })
 
     it('orders objects without dropping ids unknown to the order list', () => {

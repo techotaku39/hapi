@@ -10,6 +10,7 @@ import {
     useRef,
     useState,
 } from 'react'
+import { type AttachmentDropPosition } from '@/lib/attachmentOrder'
 import { AttachmentItem, type AttachmentDragHandleProps } from './AttachmentItem'
 
 const DRAG_START_DISTANCE_PX = 6
@@ -33,13 +34,22 @@ type SortableComposerAttachmentProps = {
     onClick: (event: ReactMouseEvent<Element>, id: string) => void
 }
 
-function findAttachmentIdAtPoint(clientX: number, clientY: number): string | null {
+type AttachmentDropTarget = {
+    id: string
+    position: AttachmentDropPosition
+}
+
+function findAttachmentDropTarget(clientX: number, clientY: number): AttachmentDropTarget | null {
     if (typeof document.elementsFromPoint !== 'function') return null
 
     for (const element of document.elementsFromPoint(clientX, clientY)) {
         const target = element.closest<HTMLElement>('[data-hapi-composer-attachment-id]')
         const id = target?.dataset.hapiComposerAttachmentId
-        if (id) return id
+        if (id && target) {
+            const rect = target.getBoundingClientRect()
+            const position = clientX >= rect.left + rect.width / 2 ? 'after' : 'before'
+            return { id, position }
+        }
     }
     return null
 }
@@ -112,7 +122,7 @@ export function SortableComposerAttachments(props: {
     attachments: readonly Attachment[]
     orderedAttachmentIds: readonly string[]
     disabled?: boolean
-    onReorder: (activeId: string, targetId: string) => void
+    onReorder: (activeId: string, targetId: string, position: AttachmentDropPosition) => void
 }) {
     const { attachments, orderedAttachmentIds, onReorder, disabled = false } = props
     const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -132,9 +142,9 @@ export function SortableComposerAttachments(props: {
                 setDraggingId(drag.id)
             }
 
-            const targetId = findAttachmentIdAtPoint(event.clientX, event.clientY)
-            if (targetId && targetId !== drag.id) {
-                onReorder(drag.id, targetId)
+            const target = findAttachmentDropTarget(event.clientX, event.clientY)
+            if (target && target.id !== drag.id) {
+                onReorder(drag.id, target.id, target.position)
             }
         }
 
@@ -206,14 +216,17 @@ export function SortableComposerAttachments(props: {
             if (currentIndex < 0) return
 
             let targetIndex: number | null = null
+            let targetPosition: AttachmentDropPosition = 'before'
             if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
                 targetIndex = currentIndex - 1
             } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
                 targetIndex = currentIndex + 1
+                targetPosition = 'after'
             } else if (event.key === 'Home') {
                 targetIndex = 0
             } else if (event.key === 'End') {
                 targetIndex = orderedAttachmentIds.length - 1
+                targetPosition = 'after'
             }
 
             if (
@@ -226,7 +239,7 @@ export function SortableComposerAttachments(props: {
             }
 
             event.preventDefault()
-            onReorder(id, orderedAttachmentIds[targetIndex]!)
+            onReorder(id, orderedAttachmentIds[targetIndex]!, targetPosition)
         },
         [disabled, onReorder, orderedAttachmentIds],
     )
