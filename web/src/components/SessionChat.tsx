@@ -1858,7 +1858,11 @@ function SessionChatInner(props: SessionChatProps) {
             ) : null}
 
             <AssistantRuntimeProvider runtime={runtime}>
-                <ShareSeedConsumer sessionId={props.session.id} sessionActive={props.session.active} />
+                <ShareSeedConsumer
+                    sessionId={props.session.id}
+                    sessionActive={props.session.active}
+                    onProgrammaticEdit={props.onProgrammaticEdit}
+                />
                 <AbortRestoreConsumer messages={normalizedMessages} onAbortRestore={props.onAbortRestore ?? (() => {})} />
                 <DragDropZone disabled={(!props.session.active && !inactiveCanResume) || props.isSending || pendingSchedule != null || isScratchlistParking}>
                     <div className="relative flex min-h-0 flex-1 flex-col">

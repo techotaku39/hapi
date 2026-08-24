@@ -41,6 +41,7 @@ const runtime = vi.hoisted(() => ({
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
     restoredAttachmentIds: null as null | ((ids: readonly string[]) => void),
     attachmentRemove: null as null | (() => void),
+    dictationTextChange: null as null | ((text: string) => void),
     pendingSendIntentRef: null as null | { current: ComposerSendIntent },
     sentIntents: [] as ComposerSendIntent[],
     modelChanges: [] as Array<{ provider: string; modelId: string } | string | null>,
@@ -131,6 +132,18 @@ vi.mock('@/hooks/useComposerDraft', () => ({
         return { sessionId, complete: true, restoredAny: false, hasStoredAttachments: false }
     },
 }))
+vi.mock('@/hooks/useDictation', () => ({
+    useDictation: (config: { onTextChange: (text: string) => void }) => {
+        runtime.dictationTextChange = config.onTextChange
+        return {
+            supported: false,
+            status: 'disconnected',
+            error: null,
+            partialTranscript: '',
+            toggle: async () => {},
+        }
+    },
+}))
 vi.mock('@/components/AssistantChat/AttachmentItem', () => ({
     AttachmentItem: (props: { onRemove?: () => void }) => {
         runtime.attachmentRemove = props.onRemove ?? null
@@ -182,6 +195,7 @@ type HarnessControls = {
     queuedEditSetText: (text: string) => void
     scratchlistPromoteSetText: (text: string) => void
     hydrateSubmittedAttachment: () => void
+    dictationSetText: (text: string) => void
     acceptSend: () => void
     setSending: (sending: boolean) => void
     setThreadDisabled: (disabled: boolean) => void
@@ -281,6 +295,7 @@ function ComposerHarness(props: {
                 },
             }))
         },
+        dictationSetText: (text) => runtime.dictationTextChange?.(text),
         acceptSend: () => {
             setIsSending(true)
             setSendSettlement(null)
@@ -645,6 +660,19 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.acceptSend())
         act(() => controls.current!.programmaticSetText('foo'))
         act(() => controls.current!.addAttachment())
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
+    })
+
+    it('preserves a same-text dictation draft after a remount', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.dictationSetText('foo'))
         act(() => controls.current!.settleSend())
 
         await waitFor(() => expect(input()).toHaveValue('foo'))
