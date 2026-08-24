@@ -487,8 +487,10 @@ export function HappyComposer(props: {
         const nextOrder = moveAttachmentId(currentOrder, activeId, targetId, position)
         if (nextOrder.every((id, index) => id === currentOrder[index])) return
         attachmentOrderRef.current = nextOrder
+        userAttachmentGenerationRef.current += 1
+        if (sessionId) recordComposerDraftChange(sessionId)
         setAttachmentOrderRevision((revision) => revision + 1)
-    }, [attachmentIds, attachmentOrderRef])
+    }, [attachmentIds, attachmentOrderRef, sessionId])
     const orderedAttachments = orderItemsById(attachments, orderedAttachmentIds)
     const threadIsRunning = useAuiState((s) => s.thread.isRunning)
     const threadIsDisabled = useAuiState((s) => s.thread.isDisabled)

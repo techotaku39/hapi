@@ -41,6 +41,7 @@ const runtime = vi.hoisted(() => ({
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
     restoredAttachmentIds: null as null | ((ids: readonly string[]) => void),
     attachmentRemove: null as null | (() => void),
+    attachmentReorder: null as null | ((activeId: string, targetId: string, position: 'before' | 'after') => void),
     dictationTextChange: null as null | ((text: string) => void),
     pendingSendIntentRef: null as null | { current: ComposerSendIntent },
     sentIntents: [] as ComposerSendIntent[],
@@ -159,8 +160,12 @@ vi.mock('@/components/ChatInput/FloatingOverlay', () => ({ FloatingOverlay: ({ c
 vi.mock('@/components/ChatInput/Autocomplete', () => ({ Autocomplete: () => null }))
 vi.mock('@/components/AssistantChat/StatusBar', () => ({ StatusBar: () => null }))
 vi.mock('@/components/AssistantChat/SortableComposerAttachments', () => ({
-    SortableComposerAttachments: (props: { onRemove?: () => void }) => {
+    SortableComposerAttachments: (props: {
+        onRemove?: () => void
+        onReorder?: (activeId: string, targetId: string, position: 'before' | 'after') => void
+    }) => {
         runtime.attachmentRemove = props.onRemove ?? null
+        runtime.attachmentReorder = props.onReorder ?? null
         return null
     },
 }))
@@ -201,6 +206,8 @@ type HarnessControls = {
     queuedEditSetText: (text: string) => void
     scratchlistPromoteSetText: (text: string) => void
     hydrateSubmittedAttachment: () => void
+    hydrateReorderableAttachments: () => void
+    reorderAttachments: () => void
     dictationSetText: (text: string) => void
     acceptSend: () => void
     setSending: (sending: boolean) => void
@@ -301,6 +308,21 @@ function ComposerHarness(props: {
                 },
             }))
         },
+        hydrateReorderableAttachments: () => {
+            runtime.restoredAttachmentIds?.(['new-attachment', 'second-attachment'])
+            setSnapshot((current) => ({
+                ...current,
+                composer: {
+                    ...current.composer,
+                    text: 'foo',
+                    attachments: [
+                        { id: 'new-attachment', status: { type: 'complete' } },
+                        { id: 'second-attachment', status: { type: 'complete' } },
+                    ],
+                },
+            }))
+        },
+        reorderAttachments: () => runtime.attachmentReorder?.('new-attachment', 'second-attachment', 'after'),
         dictationSetText: (text) => runtime.dictationTextChange?.(text),
         acceptSend: () => {
             setIsSending(true)
@@ -696,6 +718,21 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue(''))
         expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
+    })
+
+    it('preserves a reordered restored attachment draft after a remount', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.hydrateReorderableAttachments())
+        act(() => controls.current!.reorderAttachments())
+        expect(getComposerDraftRevision('session-a')).toBe(1)
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
     })
 
     it('preserves a same-text schedule change after a remount', async () => {
