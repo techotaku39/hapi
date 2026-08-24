@@ -321,6 +321,14 @@ export function shouldRouteToScratchlist(
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
 }
 
+export function mergeStagedAttachmentsInOrder(
+    attachments: readonly AttachmentMetadata[],
+    staged: readonly AttachmentMetadata[],
+): AttachmentMetadata[] {
+    const stagedById = new Map(staged.map((attachment) => [attachment.id, attachment]))
+    return attachments.map((attachment) => stagedById.get(attachment.id) ?? attachment)
+}
+
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
     return message.invokedAt == null && message.scheduledAt != null
 }
@@ -935,16 +943,16 @@ function SessionChatInner(props: SessionChatProps) {
             const list = attachments ?? []
             const hubItems = list.filter((att) => isHubScratchlistAttachmentPath(att.path))
             if (hubItems.length > 0) {
-                const normalItems = list.filter((att) => !isHubScratchlistAttachmentPath(att.path))
                 const staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,
                     props.session.id,
                     hubItems,
                 )
+                const ordered = mergeStagedAttachmentsInOrder(list, staged)
                 return runAcceptedSendCleanup(
                     () => props.onSend(
                         text,
-                        [...normalItems, ...staged],
+                        ordered,
                         scheduledAt,
                         deliveryMode,
                     ),
@@ -1691,6 +1699,7 @@ function SessionChatInner(props: SessionChatProps) {
     // turn, so explicit or retry-safe queue intents never stick to later
     // ordinary sends.
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
+    const attachmentOrderRef = useRef<string[]>([])
     const restoredSendErrorIdRef = useRef<number | null>(null)
 
     useEffect(() => {
@@ -1836,6 +1845,7 @@ function SessionChatInner(props: SessionChatProps) {
         isSending: props.isSending,
         isRunning: props.session.thinking || hasRunningChildAgent,
         onSendMessage: handleSend,
+        attachmentOrderRef,
         onAbort: handleAbort,
         attachmentAdapter,
         allowSendWhenInactive: true,
@@ -2017,6 +2027,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
+                        attachmentOrderRef={attachmentOrderRef}
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
