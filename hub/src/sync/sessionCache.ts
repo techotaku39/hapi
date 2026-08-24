@@ -1604,6 +1604,10 @@ export class SessionCache {
                     if (a.session.active !== b.session.active) return a.session.active ? -1 : 1
                     const updatedDelta = b.session.updatedAt - a.session.updatedAt
                     if (updatedDelta !== 0) return updatedDelta
+                    const createdDelta = b.session.createdAt - a.session.createdAt
+                    if (createdDelta !== 0) return createdDelta
+                    const seqDelta = b.session.seq - a.session.seq
+                    if (seqDelta !== 0) return seqDelta
                     if (a.id === sessionId) return -1
                     if (b.id === sessionId) return 1
                     return b.session.activeAt - a.session.activeAt
