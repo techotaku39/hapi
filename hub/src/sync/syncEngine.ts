@@ -4373,11 +4373,16 @@ export class SyncEngine {
             return previous
         }
 
-        const next = (previous ?? Promise.resolve())
-            .then(() => this.sessionCache.deduplicateByAgentSessionId(sessionId))
-            .catch(() => {
-                // best-effort: web-side safety net hides remaining duplicates
-            })
+        // Preserve the original synchronous prefix for the first pass. The
+        // deduplication lock performs its database move before its first
+        // attachment await; deferring that prefix to a microtask lets an
+        // older inactive row delete a just-created resume target first.
+        const task = previous
+            ? previous.then(() => this.sessionCache.deduplicateByAgentSessionId(sessionId))
+            : this.sessionCache.deduplicateByAgentSessionId(sessionId)
+        const next = task.catch(() => {
+            // best-effort: web-side safety net hides remaining duplicates
+        })
         this.deduplicationTails.set(sessionId, next)
         void next.finally(() => {
             if (this.deduplicationTails.get(sessionId) === next) {
