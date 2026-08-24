@@ -1082,6 +1082,7 @@ export class SessionCache {
         }
 
         this.sessions.delete(sessionId)
+        this.sessionInsertionOrder.delete(sessionId)
         this.lastBroadcastAtBySessionId.delete(sessionId)
         this.todoBackfillAttemptedSessionIds.delete(sessionId)
         this.pendingThinkingUntilBySessionId.delete(sessionId)
@@ -1360,6 +1361,7 @@ export class SessionCache {
             }
 
             const existed = this.sessions.delete(oldSessionId)
+            this.sessionInsertionOrder.delete(oldSessionId)
             if (existed) {
                 this.publisher.emit({ type: 'session-removed', sessionId: oldSessionId, namespace })
             }
