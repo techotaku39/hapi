@@ -236,6 +236,28 @@ describe('reduceTimeline', () => {
         }])
     })
 
+    it('does not derive a Round summary from unmarked token usage', () => {
+        const assistant = makeAgentMessage('Imported Codex answer', {
+            id: 'imported-codex-answer',
+            model: 'gpt-5.4'
+        })
+        const tokenCount: TracedMessage = {
+            id: 'imported-codex-token-count',
+            localId: null,
+            createdAt: 1_700_000_002_000,
+            role: 'event',
+            content: {
+                type: 'token-count',
+                info: {}
+            },
+            usage: { input_tokens: 100, output_tokens: 10 },
+            isSidechain: false
+        } as TracedMessage
+
+        const { blocks } = reduceTimeline([assistant, tokenCount], makeContext())
+        expect(blocks[0]).not.toHaveProperty('roundSummary')
+    })
+
     it('merges turn-duration event into the last assistant block as fallback', () => {
         const assistantMsg = makeAgentMessage('Hello')
         const durationEvent: TracedMessage = {

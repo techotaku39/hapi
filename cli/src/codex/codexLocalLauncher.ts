@@ -217,7 +217,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                 const scopedMessage = message.type !== 'token_count'
                     ? message
                     : context.replayedHistory
-                        ? { ...message, flavor: 'codex', model: transcriptModel, hapiUsageScope: 'imported-history' }
+                        ? { ...message, model: transcriptModel, hapiUsageScope: 'imported-history' }
                         : primarySessionId
                             ? {
                                 ...message,
