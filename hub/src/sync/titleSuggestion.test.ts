@@ -99,16 +99,41 @@ describe('OpenAI-compatible title provider', () => {
         const provider = new OpenAICompatibleTitleProvider(
             {
                 baseUrl: 'https://example.test/v1',
-                apiKey: 'secret',
-                model: 'small-model'
-            },
+            apiKey: 'secret',
+            model: 'small-model'
+        },
             async () => new Response(JSON.stringify({
-                error: { message: 'Incorrect API key provided: sk-sensitive-value' }
+                error: 'sk-live-secret'
             }), { status: 401, statusText: 'Unauthorized' })
         )
 
         await expect(provider.suggest('Recent conversation')).rejects.toThrow(
-            'Title provider returned HTTP 401 Unauthorized: Incorrect API key provided: [credential redacted]'
+            'Title provider request failed (HTTP 401): authentication failed'
+        )
+    })
+
+    it('reports a timeout when the response body aborts after headers arrive', async () => {
+        const provider = new OpenAICompatibleTitleProvider(
+            {
+                baseUrl: 'https://example.test/v1',
+                apiKey: 'secret',
+                model: 'small-model',
+                timeoutMs: 50
+            },
+            async () => ({
+                ok: true,
+                status: 200,
+                statusText: 'OK',
+                text: async () => {
+                    const error = new Error('aborted while reading body')
+                    error.name = 'AbortError'
+                    throw error
+                }
+            } as unknown as Response)
+        )
+
+        await expect(provider.suggest('Recent conversation')).rejects.toThrow(
+            'Title provider request timed out after 50 ms'
         )
     })
 
@@ -258,7 +283,7 @@ describe('TitleSuggestionService', () => {
         })
     })
 
-    it('preserves a provider failure reason in the structured title error', async () => {
+    it('does not forward arbitrary provider errors from injected providers', async () => {
         const { store, sessionId } = makeStore()
         store.messages.addMessage(sessionId, {
             role: 'user',
@@ -276,7 +301,7 @@ describe('TitleSuggestionService', () => {
         await expect(service.suggestTitle(sessionId)).rejects.toMatchObject({
             code: 'provider',
             status: 502,
-            message: 'Title provider returned HTTP 404 Not Found: model not found'
+            message: 'The title suggestion provider failed'
         })
     })
 })

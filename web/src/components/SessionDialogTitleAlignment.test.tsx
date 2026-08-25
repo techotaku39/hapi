@@ -115,7 +115,7 @@ describe('session dialog title alignment', () => {
                         502,
                         'provider',
                         JSON.stringify({
-                            error: 'Title provider returned HTTP 404 Not Found: model not found',
+                            error: 'Title provider request failed (HTTP 404): endpoint or model not found',
                             code: 'provider'
                         })
                     )
@@ -127,7 +127,7 @@ describe('session dialog title alignment', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
         await waitFor(() => expect(screen.getByText(
-            'Failed to generate a title: Title provider returned HTTP 404 Not Found: model not found'
+            'Failed to generate a title: Title provider request failed (HTTP 404): endpoint or model not found'
         )).toBeInTheDocument())
     })
 

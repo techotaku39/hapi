@@ -213,7 +213,7 @@ describe('sessions routes', () => {
             suggestSessionTitle: async () => {
                 throw new TitleSuggestionError(
                     'provider',
-                    'Title provider returned HTTP 404 Not Found: model not found',
+                    'Title provider request failed (HTTP 404): endpoint or model not found',
                     502
                 )
             }
@@ -223,7 +223,7 @@ describe('sessions routes', () => {
 
         expect(response.status).toBe(502)
         expect(await response.json()).toEqual({
-            error: 'Title provider returned HTTP 404 Not Found: model not found',
+            error: 'Title provider request failed (HTTP 404): endpoint or model not found',
             code: 'provider'
         })
     })

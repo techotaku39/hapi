@@ -76,4 +76,21 @@ describe('redactSettingsForDisplay', () => {
         expect(JSON.stringify(displaySettings)).not.toContain('api-key-secret')
         expect(JSON.stringify(displaySettings)).not.toContain('model-secret')
     })
+
+    it('removes credentials from title provider URLs in diagnostic output', () => {
+        const displaySettings = redactSettingsForDisplay({
+            titleProvider: {
+                baseUrl: 'https://user:password@provider.example/v1?apiKey=query-secret#fragment',
+                apiKey: 'title-provider-secret',
+                model: 'small-model'
+            }
+        })
+
+        expect(displaySettings.titleProvider).toMatchObject({
+            baseUrl: 'https://provider.example/v1',
+            apiKey: '***'
+        })
+        expect(JSON.stringify(displaySettings)).not.toContain('password')
+        expect(JSON.stringify(displaySettings)).not.toContain('query-secret')
+    })
 })
