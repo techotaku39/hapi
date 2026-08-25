@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ContextDetails } from '@hapi/protocol'
+import type { ContextDetails, Metadata } from '@hapi/protocol'
 import {
     buildClaudeContextDetails,
     buildCodexContextDetails,
-    mergeContextDetails
+    mergeContextDetails,
+    publishContextDetails
 } from './contextDetails'
 
 describe('Claude context details', () => {
@@ -239,5 +240,35 @@ describe('mergeContextDetails', () => {
         const merged = mergeContextDetails(first, second)
 
         expect(merged.codex).toEqual({ slashCommands: [], skills: [], mcpServers: [] })
+    })
+
+    it('merges from the metadata value when queued publishers are applied later', () => {
+        const updates: Array<(metadata: Metadata) => Metadata> = []
+        const client = {
+            updateMetadata: (handler: (metadata: Metadata) => Metadata) => {
+                updates.push(handler)
+            }
+        }
+
+        publishContextDetails(client, buildClaudeContextDetails({
+            updatedAt: 100,
+            model: 'claude-opus',
+            system: { tools: ['Read'] }
+        })!)
+        publishContextDetails(client, buildClaudeContextDetails({
+            updatedAt: 200,
+            model: 'claude-opus',
+            messageUsage: { contextTokens: 12_000 }
+        })!)
+
+        let metadata = {} as Metadata
+        for (const update of updates) {
+            metadata = update(metadata)
+        }
+
+        expect(metadata.contextDetails).toMatchObject({
+            usage: { contextTokens: 12_000 },
+            claude: { systemTools: ['Read'] }
+        })
     })
 })

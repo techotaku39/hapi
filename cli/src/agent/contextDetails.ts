@@ -165,7 +165,7 @@ export function buildCodexContextDetails(args: {
     threadResponse?: unknown
     threadParams?: ThreadStartParams
     slashCommands?: readonly string[]
-    skills?: readonly SkillMetadata[]
+    skills?: readonly (Pick<SkillMetadata, 'name' | 'enabled'> | SkillMetadata)[]
     mcpServers?: McpServersConfig
     updatedAt?: number
 }): ContextDetails {
@@ -305,11 +305,14 @@ export interface ContextDetailsClient {
 
 export function publishContextDetails(client: ContextDetailsClient, next: ContextDetails): void {
     if (!client.updateMetadata) return
-    const current = client.getMetadata?.()?.contextDetails
-    const merged = mergeContextDetails(current, next)
-    if (merged === current) return
-    client.updateMetadata((metadata) => ({
-        ...metadata,
-        contextDetails: merged
-    }))
+    client.updateMetadata((metadata) => {
+        const current = metadata.contextDetails
+        const merged = mergeContextDetails(current, next)
+        return merged === current
+            ? metadata
+            : {
+                ...metadata,
+                contextDetails: merged
+            }
+    })
 }

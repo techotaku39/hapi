@@ -20,6 +20,7 @@ import { CodexToolHookBridge, isCodexToolHookEvent } from './utils/codexToolHook
 import { countHookCoveredExecCalls } from './utils/codexExecWrapper';
 import { buildCodexContextDetails, publishContextDetails } from '@/agent/contextDetails';
 import { listSlashCommands } from '@/modules/common/slashCommands';
+import { listSkills } from '@/modules/common/skills';
 
 type ProposedPlanMessage = Extract<CodexMessage, { type: 'proposed_plan' }>;
 type ToolCallMessage = Extract<CodexMessage, { type: 'tool-call' }>;
@@ -82,17 +83,37 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     const cwdOverride = parseCodexCliOverrides(session.codexArgs).cwd;
     const effectiveCodexCwd = cwdOverride ? resolve(session.path, cwdOverride) : session.path;
     let availableSlashCommands: string[] = [];
+    let availableSkills: Array<{ name: string; enabled: boolean }> = [];
+    let slashCommandsLoaded = false;
+    let skillsLoaded = false;
 
     // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
     logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
-    const slashCommandsTask = listSlashCommands('codex', effectiveCodexCwd)
-        .then((commands) => {
-            availableSlashCommands = commands.map((command) => command.name);
-        })
-        .catch((error) => {
-            logger.debug(`[codex-local]: Failed to list slash commands: ${error instanceof Error ? error.message : String(error)}`);
-        });
+    const inventoryTask = Promise.all([
+        listSlashCommands('codex', effectiveCodexCwd)
+            .then((commands) => {
+                availableSlashCommands = commands.map((command) => command.name);
+                slashCommandsLoaded = true;
+            })
+            .catch((error) => {
+                logger.debug(`[codex-local]: Failed to list slash commands: ${error instanceof Error ? error.message : String(error)}`);
+            }),
+        listSkills(effectiveCodexCwd, { flavor: 'codex' })
+            .then((skills) => {
+                availableSkills = skills.map((skill) => ({ name: skill.name, enabled: true }));
+                skillsLoaded = true;
+            })
+            .catch((error) => {
+                logger.debug(`[codex-local]: Failed to list skills: ${error instanceof Error ? error.message : String(error)}`);
+            })
+    ]).then(() => {
+        publishContextDetails(session.client, buildCodexContextDetails({
+            slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
+            skills: skillsLoaded ? availableSkills : undefined,
+            mcpServers
+        }));
+    });
 
     const reportTranscriptSyncFailure = (transcriptPath: string, error: unknown): void => {
         const detail = error instanceof Error ? error.message : String(error);
@@ -229,7 +250,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                         info: message.info,
                         model: transcriptModel,
                         threadId: primarySessionId,
-                        slashCommands: availableSlashCommands,
+                        slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
+                        skills: skillsLoaded ? availableSkills : undefined,
                         mcpServers
                     }));
                 }
@@ -463,7 +485,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     session.addTranscriptPathCallback(handleTranscriptPathCallback);
 
     try {
-        await slashCommandsTask;
+        await inventoryTask;
         return await launcher.run();
     } finally {
         shuttingDown = true;

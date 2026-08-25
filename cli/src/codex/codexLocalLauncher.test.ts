@@ -55,6 +55,14 @@ vi.mock('@/modules/common/launcher/BaseLocalLauncher', () => ({
     }
 }));
 
+vi.mock('@/modules/common/slashCommands', () => ({
+    listSlashCommands: async () => [{ name: '/compact' }]
+}));
+
+vi.mock('@/modules/common/skills', () => ({
+    listSkills: async () => [{ name: 'find-docs', description: 'Find docs' }]
+}));
+
 import { codexLocalLauncher } from './codexLocalLauncher';
 
 function createQueueStub() {
@@ -91,6 +99,7 @@ function createSessionStub(
     let transcriptPath: string | null = initialTranscriptPath;
     let transcriptHistoryReplayPending = replayTranscriptHistoryOnStart;
     let modelReasoningEffort: string | null = null;
+    let metadata: Record<string, unknown> = {};
     const modelReasoningEffortUpdates: Array<string | null> = [];
     const transcriptPathCallbacks: Array<(path: string) => void> = [];
 
@@ -112,6 +121,10 @@ function createSessionStub(
             },
             client: {
                 isPending: () => pendingClient,
+                getMetadata: () => metadata,
+                updateMetadata: (handler: (value: Record<string, unknown>) => Record<string, unknown>) => {
+                    metadata = handler(metadata);
+                },
                 rpcHandlerManager: {
                     registerHandler: () => {}
                 }
@@ -170,7 +183,8 @@ function createSessionStub(
         getUserActivityCount: () => userActivityCount,
         getLocalLaunchFailure: () => localLaunchFailure,
         getModelReasoningEffort: () => modelReasoningEffort,
-        getModelReasoningEffortUpdates: () => modelReasoningEffortUpdates
+        getModelReasoningEffortUpdates: () => modelReasoningEffortUpdates,
+        getContextDetails: () => metadata.contextDetails
     };
 }
 
@@ -341,6 +355,21 @@ describe('codexLocalLauncher', () => {
         expect(harness.launches[0]?.sessionHook).toEqual({
             port: 4242,
             token: 'hook-token'
+        });
+    });
+
+    it('publishes local Codex inventory before the first token count', async () => {
+        const { session, getContextDetails } = createSessionStub('default');
+
+        await codexLocalLauncher(session as never);
+
+        expect(getContextDetails()).toMatchObject({
+            provider: 'codex',
+            codex: {
+                slashCommands: ['/compact'],
+                skills: [{ name: 'find-docs' }],
+                mcpServers: []
+            }
         });
     });
 
