@@ -4,6 +4,7 @@ import { createSessionScanner } from "./utils/sessionScanner";
 import { isClaudeChatVisibleMessage } from "./utils/chatVisibility";
 import { BaseLocalLauncher } from "@/modules/common/launcher/BaseLocalLauncher";
 import { applySessionTitleFallback } from './utils/sessionTitleFallback';
+import { buildClaudeContextDetails, publishContextDetails } from '@/agent/contextDetails';
 
 export async function claudeLocalLauncher(session: Session): Promise<'switch' | 'exit'> {
 
@@ -12,6 +13,20 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
         sessionId: session.sessionId,
         workingDirectory: session.path,
         onMessage: (message) => {
+            const rawMessage = message as unknown as Record<string, unknown>;
+            if (rawMessage.type === 'assistant' || rawMessage.type === 'system' || rawMessage.type === 'result') {
+                const details = buildClaudeContextDetails({
+                    contextUsage: rawMessage.context_usage,
+                    system: rawMessage.type === 'system' ? rawMessage : undefined,
+                    result: rawMessage.type === 'result' ? rawMessage : undefined,
+                    messageUsage: (rawMessage.message as Record<string, unknown> | undefined)?.usage ?? rawMessage.usage,
+                    model: typeof rawMessage.model === 'string' ? rawMessage.model : session.getModel()
+                });
+                if (details) {
+                    publishContextDetails(session.client, details);
+                }
+            }
+
             // Preserve the AI-generated title emitted by Claude Code's native
             // interactive CLI. It is metadata, not a visible chat message.
             if (message.type === 'ai-title') {

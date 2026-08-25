@@ -18,6 +18,8 @@ import { BaseLocalLauncher } from '@/modules/common/launcher/BaseLocalLauncher';
 import { createCodexTranscriptLocator, type CodexTranscriptLocator } from './utils/codexTranscriptLocator';
 import { CodexToolHookBridge, isCodexToolHookEvent } from './utils/codexToolHookBridge';
 import { countHookCoveredExecCalls } from './utils/codexExecWrapper';
+import { buildCodexContextDetails, publishContextDetails } from '@/agent/contextDetails';
+import { listSlashCommands } from '@/modules/common/slashCommands';
 
 type ProposedPlanMessage = Extract<CodexMessage, { type: 'proposed_plan' }>;
 type ToolCallMessage = Extract<CodexMessage, { type: 'tool-call' }>;
@@ -79,10 +81,18 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
         : session.codexArgs;
     const cwdOverride = parseCodexCliOverrides(session.codexArgs).cwd;
     const effectiveCodexCwd = cwdOverride ? resolve(session.path, cwdOverride) : session.path;
+    let availableSlashCommands: string[] = [];
 
     // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
     logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
+    const slashCommandsTask = listSlashCommands('codex', effectiveCodexCwd)
+        .then((commands) => {
+            availableSlashCommands = commands.map((command) => command.name);
+        })
+        .catch((error) => {
+            logger.debug(`[codex-local]: Failed to list slash commands: ${error instanceof Error ? error.message : String(error)}`);
+        });
 
     const reportTranscriptSyncFailure = (transcriptPath: string, error: unknown): void => {
         const detail = error instanceof Error ? error.message : String(error);
@@ -214,6 +224,15 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                     flushPendingExecWrapper(message.callId, message);
                 }
             } else {
+                if (message.type === 'token_count') {
+                    publishContextDetails(session.client, buildCodexContextDetails({
+                        info: message.info,
+                        model: transcriptModel,
+                        threadId: primarySessionId,
+                        slashCommands: availableSlashCommands,
+                        mcpServers
+                    }));
+                }
                 const scopedMessage = message.type !== 'token_count'
                     ? message
                     : context.replayedHistory
@@ -444,6 +463,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     session.addTranscriptPathCallback(handleTranscriptPathCallback);
 
     try {
+        await slashCommandsTask;
         return await launcher.run();
     } finally {
         shuttingDown = true;

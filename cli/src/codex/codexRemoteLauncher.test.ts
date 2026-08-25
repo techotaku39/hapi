@@ -1090,6 +1090,7 @@ function createSessionStub(
         requests: {},
         completedRequests: {}
     };
+    let metadata: Record<string, unknown> = {};
 
     const rpcHandlers = new Map<string, (params: unknown) => unknown>();
     const client = {
@@ -1098,7 +1099,12 @@ function createSessionStub(
                 rpcHandlers.set(method, handler);
             }
         },
-        updateMetadata(_handler: (metadata: Record<string, unknown>) => Record<string, unknown>) {},
+        getMetadata() {
+            return metadata;
+        },
+        updateMetadata(handler: (current: Record<string, unknown>) => Record<string, unknown>) {
+            metadata = handler(metadata);
+        },
         updateAgentState(handler: (state: FakeAgentState) => FakeAgentState) {
             agentState = handler(agentState);
         },
@@ -1181,7 +1187,8 @@ function createSessionStub(
         getModelReasoningEffort: () => currentModelReasoningEffort,
         getCollaborationMode: () => currentCollaborationMode,
         collaborationModes,
-        getAgentState: () => agentState
+        getAgentState: () => agentState,
+        getMetadata: () => metadata
     };
 }
 
@@ -1311,7 +1318,7 @@ describe('codexRemoteLauncher', () => {
     });
 
     it('uses the native skill catalog for completion and structured turn input', async () => {
-        const { session, rpcHandlers } = createSessionStub(['$hapi inspect']);
+        const { session, rpcHandlers, getMetadata } = createSessionStub(['$hapi inspect']);
 
         await codexRemoteLauncher(session as never);
 
@@ -1324,6 +1331,9 @@ describe('codexRemoteLauncher', () => {
             success: true,
             skills: [{ name: 'hapi', description: 'Manage HAPI' }]
         });
+        expect((getMetadata().contextDetails as { codex?: { skills?: unknown[] } }).codex?.skills).toEqual([{
+            name: 'hapi'
+        }]);
         expect(harness.startTurnParams[0]?.input).toEqual([
             { type: 'skill', name: 'hapi', path: '/home/user/.agents/skills/hapi/SKILL.md' },
             { type: 'text', text: ' inspect' }
