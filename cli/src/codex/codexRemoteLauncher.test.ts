@@ -14,6 +14,7 @@ const harness = vi.hoisted(() => ({
     collaborationModeResponse: { data: [{ mode: 'default' }, { mode: 'plan' }] } as unknown,
     failListCollaborationModes: false,
     listSkillsCalls: [] as unknown[],
+    mcpServerStatusPromise: null as Promise<unknown> | null,
     skillsListResponse: {
         data: [{
             cwd: '/tmp/hapi-update',
@@ -141,7 +142,7 @@ vi.mock('./codexAppServerClient', () => {
         }
 
         async listMcpServerStatuses(): Promise<unknown> {
-            return { data: [] };
+            return harness.mcpServerStatusPromise ?? { data: [] };
         }
 
         async setExperimentalFeatureEnablement(params: unknown): Promise<unknown> {
@@ -1098,7 +1099,7 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
 }));
 
 vi.mock('./utils/codexMcpInventory', () => ({
-    listConfiguredCodexMcpServers: () => [],
+    listConfiguredCodexMcpServers: async () => [],
     mergeCodexMcpInventories: (...inventories: Array<Array<unknown>>) => inventories.flat(),
     parseCodexMcpStatusResponse: () => []
 }));
@@ -1269,6 +1270,21 @@ describe('codexRemoteLauncher', () => {
         expect(isCurrentSteerHandler(3, 3, true)).toBe(false);
     });
 
+    it('does not wait for MCP status enrichment before starting Codex', async () => {
+        let releaseStatus!: (value: unknown) => void;
+        harness.mcpServerStatusPromise = new Promise((resolve) => {
+            releaseStatus = resolve;
+        });
+
+        const { session } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.startThreadParams).toHaveLength(1);
+        releaseStatus({ data: [] });
+        await Promise.resolve();
+    });
+
     it('steers a queued message into the active turn and acks on dispatch', async () => {
         harness.suppressTurnCompletion = true;
         const { session, rpcHandlers, emitMessagesConsumed } = createSessionStub(['first'], createMode(), false, false);
@@ -1416,6 +1432,7 @@ describe('codexRemoteLauncher', () => {
         harness.collaborationModeResponse = { data: [{ mode: 'default' }, { mode: 'plan' }] };
         harness.failListCollaborationModes = false;
         harness.listSkillsCalls = [];
+        harness.mcpServerStatusPromise = null;
         harness.skillsListResponse = {
             data: [{
                 cwd: '/tmp/hapi-update',

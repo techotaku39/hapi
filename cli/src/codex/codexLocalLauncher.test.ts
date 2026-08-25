@@ -7,7 +7,10 @@ import { tmpdir } from 'node:os';
 const harness = {
     launches: [] as Array<Record<string, unknown>>,
     sessionHookHandlers: [] as Array<(sessionId: string, data: Record<string, unknown>) => void>,
-    runBarrier: null as Promise<void> | null
+    runBarrier: null as Promise<void> | null,
+    inventorySlashCommands: null as Promise<Array<{ name: string }>> | null,
+    inventorySkills: null as Promise<Array<{ name: string; description?: string }>> | null,
+    inventoryMcp: null as Promise<unknown[]> | null
 };
 
 vi.mock('./codexLocal', () => ({
@@ -56,15 +59,15 @@ vi.mock('@/modules/common/launcher/BaseLocalLauncher', () => ({
 }));
 
 vi.mock('@/modules/common/slashCommands', () => ({
-    listSlashCommands: async () => [{ name: '/compact' }]
+    listSlashCommands: async () => harness.inventorySlashCommands ?? [{ name: '/compact' }]
 }));
 
 vi.mock('@/modules/common/skills', () => ({
-    listSkills: async () => [{ name: 'find-docs', description: 'Find docs' }]
+    listSkills: async () => harness.inventorySkills ?? [{ name: 'find-docs', description: 'Find docs' }]
 }));
 
 vi.mock('./utils/codexMcpInventory', () => ({
-    listConfiguredCodexMcpServers: () => []
+    listConfiguredCodexMcpServers: async () => harness.inventoryMcp ?? []
 }));
 
 import { codexLocalLauncher } from './codexLocalLauncher';
@@ -220,6 +223,9 @@ describe('codexLocalLauncher', () => {
         harness.launches = [];
         harness.sessionHookHandlers = [];
         harness.runBarrier = null;
+        harness.inventorySlashCommands = null;
+        harness.inventorySkills = null;
+        harness.inventoryMcp = null;
     });
 
     afterEach(async () => {
@@ -375,6 +381,21 @@ describe('codexLocalLauncher', () => {
                 mcpServers: []
             }
         });
+    });
+
+    it('starts local Codex without waiting for slow capability discovery', async () => {
+        let releaseSkills!: (skills: Array<{ name: string; description?: string }>) => void;
+        harness.inventorySkills = new Promise((resolve) => {
+            releaseSkills = resolve;
+        });
+
+        const { session } = createSessionStub('default');
+
+        await codexLocalLauncher(session as never);
+
+        expect(harness.launches).toHaveLength(1);
+        releaseSkills([]);
+        await Promise.resolve();
     });
 
     it('creates scanner only after transcript path arrives from SessionStart hook', async () => {

@@ -87,12 +87,16 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     let availableSkills: Array<{ name: string; enabled: boolean }> = [];
     let slashCommandsLoaded = false;
     let skillsLoaded = false;
-    const mcpServerInventory = listConfiguredCodexMcpServers(effectiveCodexCwd);
+    let mcpServerInventory: Awaited<ReturnType<typeof listConfiguredCodexMcpServers>> = [];
 
     // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
     logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
     const inventoryTask = Promise.all([
+        listConfiguredCodexMcpServers(effectiveCodexCwd)
+            .then((inventory) => {
+                mcpServerInventory = inventory;
+            }),
         listSlashCommands('codex', effectiveCodexCwd)
             .then((commands) => {
                 availableSlashCommands = commands.map((command) => command.name);
@@ -110,12 +114,16 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                 logger.debug(`[codex-local]: Failed to list skills: ${error instanceof Error ? error.message : String(error)}`);
             })
     ]).then(() => {
+        if (shuttingDown) return;
         publishContextDetails(session.client, buildCodexContextDetails({
             slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
             skills: skillsLoaded ? availableSkills : undefined,
             mcpServers,
             mcpServerInventory
         }));
+    });
+    void inventoryTask.catch((error) => {
+        logger.debug(`[codex-local]: Failed to collect capability inventory: ${error instanceof Error ? error.message : String(error)}`);
     });
 
     const reportTranscriptSyncFailure = (transcriptPath: string, error: unknown): void => {
@@ -489,7 +497,6 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     session.addTranscriptPathCallback(handleTranscriptPathCallback);
 
     try {
-        await inventoryTask;
         return await launcher.run();
     } finally {
         shuttingDown = true;

@@ -3558,7 +3558,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             emitTitleSummary: false
         });
         this.happyServer = happyServer;
-        codexMcpServerInventory = listConfiguredCodexMcpServers(session.path);
         try {
             availableSlashCommands = (await listSlashCommands('codex', session.path)).map((command) => command.name);
         } catch (error) {
@@ -3604,6 +3603,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         if (initialCodexContextDetails.codex) {
             publishContextDetails(session.client, initialCodexContextDetails);
         }
+        void listConfiguredCodexMcpServers(session.path)
+            .then((inventory) => {
+                if (this.shouldExit) return;
+                codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, inventory);
+                publishCodexInventoryContext?.();
+            })
+            .catch((error) => {
+                logger.debug(`[Codex] failed to list configured MCP servers: ${errorMessage(error)}`);
+            });
 
         this.setupAbortHandlers(session.client.rpcHandlerManager, {
             onAbort: () => this.handleAbort(),
@@ -3637,15 +3645,17 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
         });
 
-        try {
-            const statusInventory = parseCodexMcpStatusResponse(await appServerClient.listMcpServerStatuses());
-            if (statusInventory.length > 0) {
+        void appServerClient.listMcpServerStatuses()
+            .then((response) => {
+                if (this.shouldExit) return;
+                const statusInventory = parseCodexMcpStatusResponse(response);
+                if (statusInventory.length === 0) return;
                 codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, statusInventory);
                 publishCodexInventoryContext?.();
-            }
-        } catch (error) {
-            logger.debug(`[Codex] mcpServerStatus/list failed: ${errorMessage(error)}`);
-        }
+            })
+            .catch((error) => {
+                logger.debug(`[Codex] mcpServerStatus/list failed: ${errorMessage(error)}`);
+            });
 
         const publishConversationHistoryCapabilities = async () => {
             const conversationHistory = this.conversationHistory.getCapabilitiesForMetadata()?.conversationHistory

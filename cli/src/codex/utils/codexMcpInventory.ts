@@ -92,22 +92,38 @@ export function mergeCodexMcpInventories(
     return Array.from(byName.values()).sort((left, right) => left.name.localeCompare(right.name))
 }
 
-export function listConfiguredCodexMcpServers(cwd?: string): CodexMcpServerInventory[] {
+export function listConfiguredCodexMcpServers(cwd?: string): Promise<CodexMcpServerInventory[]> {
     const resolved = resolveCodexCommand()
-    const result = spawn.sync(resolved.command, [
-        ...resolved.args,
-        'mcp',
-        'list',
-        '--json'
-    ], {
-        encoding: 'utf8',
-        env: withBunRuntimeEnv(),
-        ...(cwd ? { cwd } : {}),
-        timeout: CODEX_MCP_LIST_TIMEOUT_MS,
-        windowsHide: process.platform === 'win32'
+    return new Promise((resolveInventory) => {
+        let stdout = ''
+        let settled = false
+        const child = spawn(resolved.command, [
+            ...resolved.args,
+            'mcp',
+            'list',
+            '--json'
+        ], {
+            env: withBunRuntimeEnv(),
+            ...(cwd ? { cwd } : {}),
+            windowsHide: process.platform === 'win32'
+        })
+        const finish = (inventory: CodexMcpServerInventory[]): void => {
+            if (settled) return
+            settled = true
+            clearTimeout(timeout)
+            resolveInventory(inventory)
+        }
+        const timeout = setTimeout(() => {
+            child.kill()
+            finish([])
+        }, CODEX_MCP_LIST_TIMEOUT_MS)
+        child.stdout?.setEncoding('utf8')
+        child.stdout?.on('data', (chunk: string) => {
+            stdout += chunk
+        })
+        child.on('error', () => finish([]))
+        child.on('close', (code) => {
+            finish(code === 0 ? parseCodexMcpInventoryOutput(stdout) : [])
+        })
     })
-    if (result.error || result.status !== 0 || typeof result.stdout !== 'string') {
-        return []
-    }
-    return parseCodexMcpInventoryOutput(result.stdout)
 }
