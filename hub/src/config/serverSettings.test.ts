@@ -79,7 +79,8 @@ describe('loadServerSettings', () => {
             titleProvider: {
                 baseUrl: 'https://settings.example/v1',
                 apiKey: 'settings-secret',
-                model: 'settings-model'
+                model: 'settings-model',
+                timeoutMs: 20_000
             }
         }))
 
@@ -88,7 +89,8 @@ describe('loadServerSettings', () => {
         expect(result.settings.titleProvider).toEqual({
             baseUrl: 'https://settings.example/v1',
             apiKey: 'settings-secret',
-            model: 'settings-model'
+            model: 'settings-model',
+            timeoutMs: 20_000
         })
         expect(result.savedToFile).toBe(false)
     })

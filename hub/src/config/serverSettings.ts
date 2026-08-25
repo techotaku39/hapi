@@ -110,6 +110,9 @@ function normalizeTitleProviderSettings(value: unknown): TitleProviderSettings {
         baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : undefined,
         apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : undefined,
         model: typeof raw.model === 'string' ? raw.model : undefined,
+        timeoutMs: typeof raw.timeoutMs === 'number' && Number.isSafeInteger(raw.timeoutMs) && raw.timeoutMs > 0
+            ? raw.timeoutMs
+            : undefined,
     }
 }
 

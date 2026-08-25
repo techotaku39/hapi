@@ -121,6 +121,11 @@
         "model": {
           "type": "string",
           "description": "Lightweight model used for generated session titles. ENV: HAPI_TITLE_PROVIDER_MODEL"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Provider request timeout in milliseconds (default: 10000). ENV: HAPI_TITLE_PROVIDER_TIMEOUT_MS"
         }
       },
       "description": "Server-only OpenAI-compatible provider for on-demand session title suggestions. Environment variables override these fields per key."

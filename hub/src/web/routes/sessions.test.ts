@@ -208,6 +208,26 @@ describe('sessions routes', () => {
         })
     })
 
+    it('preserves the safe provider error reason for the web client', async () => {
+        const { app } = createApp(createSession(), {
+            suggestSessionTitle: async () => {
+                throw new TitleSuggestionError(
+                    'provider',
+                    'Title provider returned HTTP 404 Not Found: model not found',
+                    502
+                )
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/title-suggestion', { method: 'POST' })
+
+        expect(response.status).toBe(502)
+        expect(await response.json()).toEqual({
+            error: 'Title provider returned HTTP 404 Not Found: model not found',
+            code: 'provider'
+        })
+    })
+
     it('writes generated titles through the summary metadata endpoint', async () => {
         const updates: Array<[string, string, { clearName?: boolean }]> = []
         const { app } = createApp(createSession(), {

@@ -59,10 +59,16 @@ export function redactSettingsForDisplay(settings: Record<string, unknown>): Rec
         if (titleProvider && typeof titleProvider === 'object' && !Array.isArray(titleProvider)) {
             const titleProviderSettings = titleProvider as Record<string, unknown>
             const stringOrUndefined = (value: unknown) => typeof value === 'string' ? value : undefined
+            const timeoutMs = typeof titleProviderSettings.timeoutMs === 'number'
+                && Number.isSafeInteger(titleProviderSettings.timeoutMs)
+                && titleProviderSettings.timeoutMs > 0
+                ? titleProviderSettings.timeoutMs
+                : undefined
             displaySettings.titleProvider = {
                 baseUrl: stringOrUndefined(titleProviderSettings.baseUrl),
                 apiKey: titleProviderSettings.apiKey ? '***' : undefined,
-                model: stringOrUndefined(titleProviderSettings.model)
+                model: stringOrUndefined(titleProviderSettings.model),
+                ...(timeoutMs === undefined ? {} : { timeoutMs })
             }
         } else {
             displaySettings.titleProvider = '***'

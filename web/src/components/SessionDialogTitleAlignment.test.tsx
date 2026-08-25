@@ -102,6 +102,35 @@ describe('session dialog title alignment', () => {
         expect(screen.queryByText(/HAPI_TITLE_PROVIDER_BASE_URL/)).not.toBeInTheDocument()
     })
 
+    it('shows a safe provider failure reason returned by the Hub', async () => {
+        renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={async () => {
+                    throw new ApiError(
+                        'HTTP 502 Bad Gateway',
+                        502,
+                        'provider',
+                        JSON.stringify({
+                            error: 'Title provider returned HTTP 404 Not Found: model not found',
+                            code: 'provider'
+                        })
+                    )
+                }}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+        await waitFor(() => expect(screen.getByText(
+            'Failed to generate a title: Title provider returned HTTP 404 Not Found: model not found'
+        )).toBeInTheDocument())
+    })
+
     it('keeps Save disabled but does not show Saving while generating', async () => {
         let resolveSuggestion!: (title: string) => void
         const onSuggestTitle = vi.fn(() => new Promise<string>((resolve) => {

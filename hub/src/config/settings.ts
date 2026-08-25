@@ -8,6 +8,7 @@ export interface TitleProviderSettings {
     baseUrl?: string
     apiKey?: string
     model?: string
+    timeoutMs?: number
 }
 
 export interface Settings {

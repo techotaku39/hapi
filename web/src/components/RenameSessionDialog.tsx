@@ -19,6 +19,31 @@ type RenameSessionDialogProps = {
     isPending: boolean
 }
 
+function extractTitleSuggestionErrorDetail(error: ApiError): string | null {
+    if (!error.body) return null
+
+    let parsed: unknown
+    try {
+        parsed = JSON.parse(error.body) as unknown
+    } catch {
+        return null
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const message = (parsed as { error?: unknown }).error
+    if (typeof message !== 'string') return null
+
+    const detail = message
+        .replace(/\s+/g, ' ')
+        .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+        .replace(/([?&](?:api[-_ ]?key|token|secret|password)=)[^&\s]+/gi, '$1[redacted]')
+        .replace(/\b((?:api[-_ ]?key|token|secret|password)(?:\s+provided)?)\b\s*[:=]\s*["']?[^,\s}"']+/gi, '$1: [credential redacted]')
+        .trim()
+
+    if (!detail) return null
+    return detail.length > 240 ? `${detail.slice(0, 239)}…` : detail
+}
+
 export function RenameSessionDialog(props: RenameSessionDialogProps) {
     const { t } = useTranslation()
     const { isOpen, onClose, currentName, onRename, onSuggestTitle, onUpdateSummary, isPending } = props
@@ -71,11 +96,16 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
             setDraftSource('generated')
         } catch (error) {
             if (generation === generationRef.current) {
-                setError(
-                    error instanceof ApiError && error.code === 'unavailable'
-                        ? t('dialog.rename.generateUnavailable')
-                        : t('dialog.rename.generateError')
-                )
+                if (error instanceof ApiError && error.code === 'unavailable') {
+                    setError(t('dialog.rename.generateUnavailable'))
+                } else {
+                    const detail = error instanceof ApiError
+                        ? extractTitleSuggestionErrorDetail(error)
+                        : null
+                    setError(detail
+                        ? t('dialog.rename.generateErrorWithReason', { reason: detail })
+                        : t('dialog.rename.generateError'))
+                }
             }
         } finally {
             if (generation === generationRef.current) {

@@ -208,6 +208,7 @@ On first run, HAPI:
 | `HAPI_TITLE_PROVIDER_BASE_URL` | - | `titleProvider.baseUrl` | Server-only OpenAI-compatible Chat Completions base URL for generated session titles |
 | `HAPI_TITLE_PROVIDER_API_KEY` | - | `titleProvider.apiKey` | Server-only API key for generated session titles; never sent to the browser |
 | `HAPI_TITLE_PROVIDER_MODEL` | - | `titleProvider.model` | Server-only lightweight model used for generated session titles |
+| `HAPI_TITLE_PROVIDER_TIMEOUT_MS` | `10000` | `titleProvider.timeoutMs` | Provider request timeout in milliseconds |
 | `HAPI_TITLE_SUGGESTION_RATE_LIMIT` | `5` | - | Maximum title suggestions per session in the rate-limit window |
 | `HAPI_TITLE_SUGGESTION_RATE_WINDOW_MS` | `600000` | - | Title suggestion rate-limit window in milliseconds |
 </details>
@@ -242,7 +243,8 @@ after restarting the Hub.
   "titleProvider": {
     "baseUrl": "https://api.example.com/v1",
     "apiKey": "your-api-key",
-    "model": "your-lightweight-model"
+    "model": "your-lightweight-model",
+    "timeoutMs": 10000
   },
   "extraHeaders": {
     "Cookie": "CF_Authorization=..."

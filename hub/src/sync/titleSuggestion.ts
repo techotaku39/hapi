@@ -14,8 +14,11 @@ export const TITLE_SUGGESTION_MAX_TITLE_CHARS = 80
 export const TITLE_SUGGESTION_RATE_LIMIT = 5
 export const TITLE_SUGGESTION_RATE_WINDOW_MS = 10 * 60 * 1000
 export const TITLE_SUGGESTION_TIMEOUT_MS = 10_000
+const TITLE_SUGGESTION_MAX_ERROR_CHARS = 240
+const TITLE_PROVIDER_RESPONSE_MAX_CHARS = 16_000
 const TITLE_SUGGESTION_RATE_LIMIT_ENV = 'HAPI_TITLE_SUGGESTION_RATE_LIMIT'
 const TITLE_SUGGESTION_RATE_WINDOW_ENV = 'HAPI_TITLE_SUGGESTION_RATE_WINDOW_MS'
+const TITLE_PROVIDER_TIMEOUT_ENV = 'HAPI_TITLE_PROVIDER_TIMEOUT_MS'
 export const TITLE_SUGGESTION_UNAVAILABLE_MESSAGE =
     'Title suggestions are not configured on this Hub. Configure titleProvider.baseUrl, titleProvider.apiKey, and titleProvider.model in $HAPI_HOME/settings.json (default ~/.hapi/settings.json), or set HAPI_TITLE_PROVIDER_BASE_URL, HAPI_TITLE_PROVIDER_API_KEY, and HAPI_TITLE_PROVIDER_MODEL in the Hub environment, then restart the Hub.'
 
@@ -68,10 +71,18 @@ export function readTitleProviderConfig(
         return null
     }
 
-    return { baseUrl, apiKey, model }
+    return {
+        baseUrl,
+        apiKey,
+        model,
+        timeoutMs: readPositiveInteger(
+            env[TITLE_PROVIDER_TIMEOUT_ENV],
+            settings?.timeoutMs ?? TITLE_SUGGESTION_TIMEOUT_MS
+        )
+    }
 }
 
-function readPositiveInteger(value: string | undefined, fallback: number): number {
+function readPositiveInteger(value: unknown, fallback: number): number {
     const parsed = Number(value)
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
 }
@@ -229,6 +240,60 @@ function extractProviderText(value: unknown): string | null {
     return extractChatText(choice.message.content)
 }
 
+function sanitizeTitleProviderErrorText(value: string): string | null {
+    const sanitized = value
+        .replace(/\s+/g, ' ')
+        .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+        .replace(/([?&](?:api[-_ ]?key|token|secret|password)=)[^&\s]+/gi, '$1[redacted]')
+        .replace(/\b((?:api[-_ ]?key|token|secret|password)(?:\s+provided)?)\b\s*[:=]\s*["']?[^,\s}"']+/gi, '$1: [credential redacted]')
+        .trim()
+
+    if (!sanitized) return null
+    return sanitized.length > TITLE_SUGGESTION_MAX_ERROR_CHARS
+        ? `${sanitized.slice(0, TITLE_SUGGESTION_MAX_ERROR_CHARS - 1)}…`
+        : sanitized
+}
+
+function extractTitleProviderErrorDetail(value: unknown): string | null {
+    if (typeof value === 'string') return sanitizeTitleProviderErrorText(value)
+    if (!isObject(value)) return null
+
+    const nestedError = value.error
+    const candidates: unknown[] = []
+    if (isObject(nestedError)) {
+        candidates.push(nestedError.message, nestedError.detail, nestedError.code)
+    } else {
+        candidates.push(nestedError)
+    }
+    candidates.push(value.message, value.detail, value.code)
+
+    for (const candidate of candidates) {
+        if (typeof candidate !== 'string') continue
+        const detail = sanitizeTitleProviderErrorText(candidate)
+        if (detail) return detail
+    }
+    return null
+}
+
+async function readTitleProviderResponseBody(response: Response): Promise<unknown> {
+    const text = await response.text().catch(() => '')
+    const boundedText = text.slice(0, TITLE_PROVIDER_RESPONSE_MAX_CHARS)
+    if (!boundedText.trim()) return null
+
+    try {
+        return JSON.parse(boundedText) as unknown
+    } catch {
+        return boundedText
+    }
+}
+
+class TitleProviderRequestError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'TitleProviderRequestError'
+    }
+}
+
 export class OpenAICompatibleTitleProvider {
     private readonly timeoutMs: number
 
@@ -265,14 +330,33 @@ export class OpenAICompatibleTitleProvider {
                 signal: controller.signal
             })
 
-            const body: unknown = await response.json().catch(() => null)
+            const body = await readTitleProviderResponseBody(response)
             if (!response.ok) {
-                throw new Error(`Title provider returned HTTP ${response.status}`)
+                const statusText = response.statusText.trim()
+                const status = `HTTP ${response.status}${statusText ? ` ${statusText}` : ''}`
+                const detail = extractTitleProviderErrorDetail(body)
+                throw new TitleProviderRequestError(
+                    `Title provider returned ${status}${detail ? `: ${detail}` : ''}`
+                )
             }
 
             const text = extractProviderText(body)
-            if (!text) throw new Error('Title provider returned no text')
+            if (!text) throw new TitleProviderRequestError('Title provider returned no text')
             return text
+        } catch (error) {
+            if (error instanceof TitleProviderRequestError) throw error
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw new TitleProviderRequestError(
+                    `Title provider request timed out after ${this.timeoutMs} ms`
+                )
+            }
+
+            const detail = error instanceof Error
+                ? sanitizeTitleProviderErrorText(error.message)
+                : null
+            throw new TitleProviderRequestError(
+                detail ? `Title provider request failed: ${detail}` : 'Title provider request failed'
+            )
         } finally {
             clearTimeout(timeout)
         }
@@ -346,9 +430,12 @@ export class TitleSuggestionService {
             return title
         } catch (error) {
             if (error instanceof TitleSuggestionError) throw error
+            const detail = error instanceof Error
+                ? sanitizeTitleProviderErrorText(error.message)
+                : null
             throw new TitleSuggestionError(
                 'provider',
-                'The title suggestion provider failed',
+                detail ?? 'The title suggestion provider failed',
                 502
             )
         } finally {

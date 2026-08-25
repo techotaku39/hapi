@@ -13,7 +13,8 @@ describe('redactSettingsForDisplay', () => {
             titleProvider: {
                 baseUrl: 'https://provider.example.com/v1',
                 apiKey: 'title-provider-secret',
-                model: 'small-model'
+                model: 'small-model',
+                timeoutMs: 20_000
             }
         })
 
@@ -24,7 +25,8 @@ describe('redactSettingsForDisplay', () => {
             titleProvider: {
                 baseUrl: 'https://provider.example.com/v1',
                 apiKey: '***',
-                model: 'small-model'
+                model: 'small-model',
+                timeoutMs: 20_000
             }
         })
         expect(JSON.stringify(displaySettings)).not.toContain('cli-secret')
