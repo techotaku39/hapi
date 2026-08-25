@@ -218,8 +218,8 @@ function addLegacyClaudeLists(args: {
     const legacyTools = normalizeLegacyList(args.tools)
     const legacySlashCommands = normalizeLegacyList(args.slashCommands)
     const claude = args.details?.claude
-    const systemTools = claude?.systemTools?.length ? claude.systemTools : legacyTools
-    const slashCommands = claude?.slashCommands?.length ? claude.slashCommands : legacySlashCommands
+    const systemTools = claude && 'systemTools' in claude ? claude.systemTools : legacyTools
+    const slashCommands = claude && 'slashCommands' in claude ? claude.slashCommands : legacySlashCommands
     if (!systemTools && !slashCommands) return args.details
 
     return {

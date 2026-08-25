@@ -367,6 +367,37 @@ describe('StatusBar context details dialog', () => {
         expect(screen.queryByText('No detailed context information available.')).not.toBeInTheDocument()
     })
 
+    it('does not resurrect legacy Claude lists after an authoritative empty refresh', () => {
+        localStorage.setItem('hapi-lang', 'en')
+        render(
+            <I18nProvider>
+                <StatusBar
+                    active
+                    thinking={false}
+                    agentState={null}
+                    agentFlavor="claude"
+                    contextDetails={{
+                        version: 1,
+                        updatedAt: 100,
+                        provider: 'claude',
+                        claude: {
+                            systemTools: [],
+                            slashCommands: []
+                        }
+                    }}
+                    legacyTools={['Read']}
+                    legacySlashCommands={['/compact']}
+                />
+            </I18nProvider>
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: /Agent context details/ }))
+
+        expect(screen.queryByText('Read')).not.toBeInTheDocument()
+        expect(screen.queryByText('/compact')).not.toBeInTheDocument()
+        expect(screen.getByText('This agent has not reported additional context details yet.')).toBeInTheDocument()
+    })
+
     it('renders detailed Codex skills and MCP tools from the agent status entry', async () => {
         localStorage.setItem('hapi-lang', 'en')
         render(

@@ -36,7 +36,7 @@ function asStringList(value: unknown): string[] | undefined {
     const values = value
         .map(asString)
         .filter((value): value is string => value !== undefined)
-    return values.length > 0 ? values : undefined
+    return values
 }
 
 function normalizeUsageSnapshot(value: unknown): ContextUsageSnapshot | undefined {
@@ -90,7 +90,7 @@ function buildClaudeSkills(value: unknown): ClaudeContextDetails['skills'] {
         if (!name) return []
         return [{ name }]
     })
-    return skills.length > 0 ? skills : undefined
+    return skills
 }
 
 function buildClaudeMcpTools(value: unknown): ClaudeContextDetails['mcpTools'] {
@@ -104,7 +104,7 @@ function buildClaudeMcpTools(value: unknown): ClaudeContextDetails['mcpTools'] {
             serverName: asString(record?.server_name ?? record?.serverName ?? record?.server)
         }]
     })
-    return tools.length > 0 ? tools : undefined
+    return tools
 }
 
 export function buildClaudeContextDetails(args: {

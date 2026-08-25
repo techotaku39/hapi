@@ -276,6 +276,40 @@ describe('mergeContextDetails', () => {
         expect(merged.codex).toEqual({ slashCommands: [], skills: [], mcpServers: [] })
     })
 
+    it('allows Claude refreshes to clear authoritative empty inventories', () => {
+        const first = buildClaudeContextDetails({
+            updatedAt: 100,
+            model: 'claude-opus',
+            system: {
+                tools: ['Read'],
+                skills: ['find-docs'],
+                slash_commands: ['/compact']
+            },
+            contextUsage: {
+                mcp_tools: [{ name: 'mcp__qmd__search', server_name: 'qmd' }]
+            }
+        })!
+        const second = buildClaudeContextDetails({
+            updatedAt: 200,
+            model: 'claude-opus',
+            system: {
+                tools: [],
+                skills: [],
+                slash_commands: []
+            },
+            contextUsage: { mcp_tools: [] }
+        })!
+
+        const merged = mergeContextDetails(first, second)
+
+        expect(merged.claude).toEqual({
+            skills: [],
+            mcpTools: [],
+            systemTools: [],
+            slashCommands: []
+        })
+    })
+
     it('merges from the metadata value when queued publishers are applied later', () => {
         const updates: Array<(metadata: Metadata) => Metadata> = []
         const client = {

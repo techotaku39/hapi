@@ -15,6 +15,7 @@ const harness = vi.hoisted(() => ({
     failListCollaborationModes: false,
     listSkillsCalls: [] as unknown[],
     mcpServerStatusPromise: null as Promise<unknown> | null,
+    slashCommandsPromise: null as Promise<Array<{ name: string }>> | null,
     skillsListResponse: {
         data: [{
             cwd: '/tmp/hapi-update',
@@ -1104,6 +1105,10 @@ vi.mock('./utils/codexMcpInventory', () => ({
     parseCodexMcpStatusResponse: () => []
 }));
 
+vi.mock('@/modules/common/slashCommands', () => ({
+    listSlashCommands: async () => harness.slashCommandsPromise ?? []
+}));
+
 import { codexRemoteLauncher, isCurrentSteerHandler } from './codexRemoteLauncher';
 import { INDETERMINATE_SYMBOL } from './codexAppServerClient';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
@@ -1285,6 +1290,21 @@ describe('codexRemoteLauncher', () => {
         await Promise.resolve();
     });
 
+    it('does not wait for slash-command discovery before starting Codex', async () => {
+        let releaseCommands!: (commands: Array<{ name: string }>) => void;
+        harness.slashCommandsPromise = new Promise((resolve) => {
+            releaseCommands = resolve;
+        });
+
+        const { session } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.startThreadParams).toHaveLength(1);
+        releaseCommands([]);
+        await Promise.resolve();
+    });
+
     it('steers a queued message into the active turn and acks on dispatch', async () => {
         harness.suppressTurnCompletion = true;
         const { session, rpcHandlers, emitMessagesConsumed } = createSessionStub(['first'], createMode(), false, false);
@@ -1433,6 +1453,7 @@ describe('codexRemoteLauncher', () => {
         harness.failListCollaborationModes = false;
         harness.listSkillsCalls = [];
         harness.mcpServerStatusPromise = null;
+        harness.slashCommandsPromise = null;
         harness.skillsListResponse = {
             data: [{
                 cwd: '/tmp/hapi-update',

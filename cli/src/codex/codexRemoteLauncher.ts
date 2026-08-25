@@ -3558,12 +3558,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             emitTitleSummary: false
         });
         this.happyServer = happyServer;
-        try {
-            availableSlashCommands = (await listSlashCommands('codex', session.path)).map((command) => command.name);
-        } catch (error) {
-            logger.debug(`[Codex] failed to list slash commands: ${errorMessage(error)}`);
-        }
-
         const publishCodexThreadContext = (response: unknown, params: ThreadStartParams, threadId?: string): void => {
             latestCodexThreadResponse = response;
             latestCodexThreadParams = params;
@@ -3603,6 +3597,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         if (initialCodexContextDetails.codex) {
             publishContextDetails(session.client, initialCodexContextDetails);
         }
+        void listSlashCommands('codex', session.path)
+            .then((commands) => {
+                if (this.shouldExit) return;
+                availableSlashCommands = commands.map((command) => command.name);
+                publishCodexInventoryContext?.();
+            })
+            .catch((error) => {
+                logger.debug(`[Codex] failed to list slash commands: ${errorMessage(error)}`);
+            });
         void listConfiguredCodexMcpServers(session.path)
             .then((inventory) => {
                 if (this.shouldExit) return;
