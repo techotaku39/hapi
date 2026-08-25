@@ -21,8 +21,13 @@ import type { SkillMetadata, ThreadGoal, ThreadGoalStatus, ThreadStartParams } f
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
 import { extractErrorInfo } from '@/utils/errorUtils';
-import { buildCodexContextDetails, publishContextDetails } from '@/agent/contextDetails';
+import { buildCodexContextDetails, publishContextDetails, type CodexMcpServerInventory } from '@/agent/contextDetails';
 import { listSlashCommands } from '@/modules/common/slashCommands';
+import {
+    listConfiguredCodexMcpServers,
+    mergeCodexMcpInventories,
+    parseCodexMcpStatusResponse
+} from './utils/codexMcpInventory';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import {
     RemoteLauncherBase,
@@ -358,6 +363,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let latestCodexThreadResponse: unknown = null;
         let latestCodexThreadParams: ThreadStartParams | undefined;
         let availableSlashCommands: string[] = [];
+        let codexMcpServerInventory: CodexMcpServerInventory[] = [];
         let publishCodexInventoryContext: (() => void) | null = null;
 
         const normalizeCommand = (value: unknown): string | undefined => {
@@ -3242,7 +3248,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     threadParams: latestCodexThreadParams,
                     slashCommands: availableSlashCommands,
                     skills: nativeSkills,
-                    mcpServers
+                    mcpServers,
+                    mcpServerInventory: codexMcpServerInventory
                 });
                 publishContextDetails(session.client, details);
                 session.sendAgentMessage({
@@ -3551,6 +3558,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             emitTitleSummary: false
         });
         this.happyServer = happyServer;
+        codexMcpServerInventory = listConfiguredCodexMcpServers(session.path);
         try {
             availableSlashCommands = (await listSlashCommands('codex', session.path)).map((command) => command.name);
         } catch (error) {
@@ -3567,7 +3575,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 threadId: threadId ?? asString(asRecord(asRecord(response)?.thread)?.id),
                 slashCommands: availableSlashCommands,
                 skills: nativeSkills,
-                mcpServers
+                mcpServers,
+                mcpServerInventory: codexMcpServerInventory
             }));
         };
 
@@ -3580,7 +3589,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 threadId: this.currentThreadId,
                 slashCommands: availableSlashCommands,
                 skills: nativeSkills,
-                mcpServers
+                mcpServers,
+                mcpServerInventory: codexMcpServerInventory
             }));
         };
 
@@ -3588,7 +3598,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             threadParams: undefined,
             slashCommands: availableSlashCommands,
             skills: nativeSkills,
-            mcpServers
+            mcpServers,
+            mcpServerInventory: codexMcpServerInventory
         });
         if (initialCodexContextDetails.codex) {
             publishContextDetails(session.client, initialCodexContextDetails);
@@ -3625,6 +3636,16 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 experimentalApi: true
             }
         });
+
+        try {
+            const statusInventory = parseCodexMcpStatusResponse(await appServerClient.listMcpServerStatuses());
+            if (statusInventory.length > 0) {
+                codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, statusInventory);
+                publishCodexInventoryContext?.();
+            }
+        } catch (error) {
+            logger.debug(`[Codex] mcpServerStatus/list failed: ${errorMessage(error)}`);
+        }
 
         const publishConversationHistoryCapabilities = async () => {
             const conversationHistory = this.conversationHistory.getCapabilitiesForMetadata()?.conversationHistory

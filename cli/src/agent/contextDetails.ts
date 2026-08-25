@@ -10,6 +10,12 @@ import type { McpServersConfig } from '@/codex/utils/buildHapiMcpBridge'
 
 type JsonRecord = Record<string, unknown>
 
+export interface CodexMcpServerInventory {
+    name: string
+    toolNames?: string[]
+    status?: string
+}
+
 function asRecord(value: unknown): JsonRecord | null {
     return value && typeof value === 'object' && !Array.isArray(value)
         ? value as JsonRecord
@@ -49,6 +55,19 @@ function normalizeUsageSnapshot(value: unknown): ContextUsageSnapshot | undefine
 
     const hasValue = Object.values(usage).some((value) => value !== undefined)
     return hasValue ? usage : undefined
+}
+
+function normalizeCodexUsageSnapshot(value: unknown): ContextUsageSnapshot | undefined {
+    const record = asRecord(value)
+    if (!record) return undefined
+    return normalizeUsageSnapshot({
+        contextTokens: record.contextTokens
+            ?? record.context_tokens
+            ?? record.inputTokens
+            ?? record.input_tokens,
+        cachedInputTokens: record.cachedInputTokens ?? record.cached_input_tokens,
+        cacheReadInputTokens: record.cacheReadInputTokens ?? record.cache_read_input_tokens
+    })
 }
 
 function getClaudeModelUsageContextWindow(result: JsonRecord | null, model?: string): number | undefined {
@@ -146,7 +165,7 @@ export function buildClaudeContextDetails(args: {
 }
 
 function buildCodexUsage(value: unknown, fallbackContextTokens?: number): ContextUsageSnapshot | undefined {
-    const usage = normalizeUsageSnapshot(value)
+    const usage = normalizeCodexUsageSnapshot(value)
     if (!usage) return undefined
     if (usage.contextTokens === undefined && fallbackContextTokens !== undefined) {
         return { ...usage, contextTokens: fallbackContextTokens }
@@ -167,6 +186,7 @@ export function buildCodexContextDetails(args: {
     slashCommands?: readonly string[]
     skills?: readonly (Pick<SkillMetadata, 'name' | 'enabled'> | SkillMetadata)[]
     mcpServers?: McpServersConfig
+    mcpServerInventory?: readonly CodexMcpServerInventory[]
     updatedAt?: number
 }): ContextDetails {
     const info = asRecord(args.info)
@@ -196,12 +216,31 @@ export function buildCodexContextDetails(args: {
             .map((skill) => ({
                 name: skill.name
             }))
-    const mcpServers = args.mcpServers === undefined
-        ? undefined
-        : Object.entries(args.mcpServers).map(([name, server]) => ({
+    const mcpServerByName = new Map<string, CodexMcpServerInventory>()
+    for (const server of args.mcpServerInventory ?? []) {
+        const name = server.name.trim()
+        if (!name) continue
+        mcpServerByName.set(name, {
             name,
-            toolNames: server.tools ? Object.keys(server.tools) : undefined
-        }))
+            ...(server.toolNames ? { toolNames: [...server.toolNames] } : {}),
+            ...(server.status ? { status: server.status } : {})
+        })
+    }
+    for (const [name, server] of Object.entries(args.mcpServers ?? {})) {
+        const previous = mcpServerByName.get(name)
+        mcpServerByName.set(name, {
+            name,
+            ...(server.tools
+                ? { toolNames: Object.keys(server.tools) }
+                : previous?.toolNames
+                    ? { toolNames: previous.toolNames }
+                    : {}),
+            ...(previous?.status ? { status: previous.status } : {})
+        })
+    }
+    const mcpServers = args.mcpServers !== undefined || args.mcpServerInventory !== undefined
+        ? Array.from(mcpServerByName.values())
+        : undefined
     const codex: CodexContextDetails = {
         ...(slashCommands !== undefined ? { slashCommands } : {}),
         ...(skills !== undefined ? { skills } : {}),

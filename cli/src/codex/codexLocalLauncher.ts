@@ -21,6 +21,7 @@ import { countHookCoveredExecCalls } from './utils/codexExecWrapper';
 import { buildCodexContextDetails, publishContextDetails } from '@/agent/contextDetails';
 import { listSlashCommands } from '@/modules/common/slashCommands';
 import { listSkills } from '@/modules/common/skills';
+import { listConfiguredCodexMcpServers } from './utils/codexMcpInventory';
 
 type ProposedPlanMessage = Extract<CodexMessage, { type: 'proposed_plan' }>;
 type ToolCallMessage = Extract<CodexMessage, { type: 'tool-call' }>;
@@ -86,6 +87,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     let availableSkills: Array<{ name: string; enabled: boolean }> = [];
     let slashCommandsLoaded = false;
     let skillsLoaded = false;
+    const mcpServerInventory = listConfiguredCodexMcpServers(effectiveCodexCwd);
 
     // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
@@ -111,7 +113,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
         publishContextDetails(session.client, buildCodexContextDetails({
             slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
             skills: skillsLoaded ? availableSkills : undefined,
-            mcpServers
+            mcpServers,
+            mcpServerInventory
         }));
     });
 
@@ -252,7 +255,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                         threadId: primarySessionId,
                         slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
                         skills: skillsLoaded ? availableSkills : undefined,
-                        mcpServers
+                        mcpServers,
+                        mcpServerInventory
                     }));
                 }
                 const scopedMessage = message.type !== 'token_count'

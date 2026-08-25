@@ -358,7 +358,7 @@ export function StatusBar(props: {
             <div className="flex min-w-0 items-baseline gap-2">
                 <ContextDetailsDialog
                     details={displayContextDetails}
-                    triggerAriaLabel={t('misc.contextAgentDetails')}
+                    triggerAriaLabel={`${t('misc.contextAgentDetails')}: ${connectionStatus.text}`}
                     triggerClassName="relative top-px sm:top-0.5 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)]"
                     triggerContent={(
                         <>

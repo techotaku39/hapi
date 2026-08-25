@@ -162,6 +162,40 @@ describe('Codex context details', () => {
             }
         })
     })
+
+    it('normalizes the standard snake_case last token usage event', () => {
+        const details = buildCodexContextDetails({
+            updatedAt: 100,
+            info: {
+                last_token_usage: {
+                    input_tokens: 12_000,
+                    cached_input_tokens: 9_000
+                }
+            }
+        })
+
+        expect(details.usage).toEqual({
+            contextTokens: 12_000,
+            cacheReadTokens: 9_000
+        })
+    })
+
+    it('includes configured MCP inventories alongside the injected bridge', () => {
+        const details = buildCodexContextDetails({
+            updatedAt: 100,
+            mcpServers: { hapi: { command: 'hapi', args: ['mcp'], tools: { change_title: {} } } },
+            mcpServerInventory: [{
+                name: 'qmd',
+                status: 'ready',
+                toolNames: ['search']
+            }]
+        })
+
+        expect(details.codex?.mcpServers).toEqual([
+            { name: 'qmd', status: 'ready', toolNames: ['search'] },
+            { name: 'hapi', toolNames: ['change_title'] }
+        ])
+    })
 })
 
 describe('mergeContextDetails', () => {
@@ -182,8 +216,8 @@ describe('mergeContextDetails', () => {
         })
         const merged = mergeContextDetails(first, second)
 
-        expect(merged.updatedAt).toBe(100)
-        expect(merged.usage?.contextTokens).toBeUndefined()
+        expect(merged.updatedAt).toBe(200)
+        expect(merged.usage?.contextTokens).toBe(20)
         expect(merged.codex?.mcpServers).toEqual([{ name: 'hapi' }])
     })
 

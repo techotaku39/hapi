@@ -49,6 +49,25 @@ describe('StatusBar context details dialog', () => {
         expect(thinkingLabel.parentElement?.className.split(' ')).toContain('sm:top-0.5')
     })
 
+    it('keeps the connection state in the agent-details accessible name', () => {
+        localStorage.setItem('hapi-lang', 'en')
+        const { rerender } = render(
+            <I18nProvider>
+                <StatusBar active thinking={false} agentState={null} />
+            </I18nProvider>
+        )
+
+        expect(screen.getByRole('button', { name: 'Agent context details: online' })).toBeInTheDocument()
+
+        rerender(
+            <I18nProvider>
+                <StatusBar active={false} thinking={false} agentState={null} />
+            </I18nProvider>
+        )
+
+        expect(screen.getByRole('button', { name: 'Agent context details: offline' })).toBeInTheDocument()
+    })
+
     it('uses an effort-only reasoning label on mobile and the full label on desktop', () => {
         render(
             <I18nProvider>
@@ -270,7 +289,7 @@ describe('StatusBar context details dialog', () => {
             </I18nProvider>
         )
 
-        fireEvent.click(screen.getByRole('button', { name: 'Agent context details' }))
+        fireEvent.click(screen.getByRole('button', { name: /Agent context details/ }))
 
         expect(screen.getByRole('heading', { name: 'Agent details' })).toBeInTheDocument()
         const dialog = screen.getByRole('dialog')
@@ -339,7 +358,7 @@ describe('StatusBar context details dialog', () => {
             </I18nProvider>
         )
 
-        fireEvent.click(screen.getByRole('button', { name: 'Agent context details' }))
+        fireEvent.click(screen.getByRole('button', { name: /Agent context details/ }))
 
         expect(screen.getByText('System tools')).toBeInTheDocument()
         expect(screen.getByText('Read')).toBeInTheDocument()
@@ -376,7 +395,7 @@ describe('StatusBar context details dialog', () => {
             </I18nProvider>
         )
 
-        fireEvent.click(screen.getByRole('button', { name: 'Agent context details' }))
+        fireEvent.click(screen.getByRole('button', { name: /Agent context details/ }))
 
         expect(screen.getByText('Agent commands')).toBeInTheDocument()
         expect(screen.getByText('/clear')).toBeInTheDocument()

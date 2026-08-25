@@ -63,6 +63,10 @@ vi.mock('@/modules/common/skills', () => ({
     listSkills: async () => [{ name: 'find-docs', description: 'Find docs' }]
 }));
 
+vi.mock('./utils/codexMcpInventory', () => ({
+    listConfiguredCodexMcpServers: () => []
+}));
+
 import { codexLocalLauncher } from './codexLocalLauncher';
 
 function createQueueStub() {

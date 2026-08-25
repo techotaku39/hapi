@@ -140,6 +140,10 @@ vi.mock('./codexAppServerClient', () => {
             return harness.skillsListResponse;
         }
 
+        async listMcpServerStatuses(): Promise<unknown> {
+            return { data: [] };
+        }
+
         async setExperimentalFeatureEnablement(params: unknown): Promise<unknown> {
             harness.setFeatureEnablementCalls.push(params);
             if (harness.failSetFeatureEnablement) {
@@ -1091,6 +1095,12 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
         mcpServers: {}
         };
     }
+}));
+
+vi.mock('./utils/codexMcpInventory', () => ({
+    listConfiguredCodexMcpServers: () => [],
+    mergeCodexMcpInventories: (...inventories: Array<Array<unknown>>) => inventories.flat(),
+    parseCodexMcpStatusResponse: () => []
 }));
 
 import { codexRemoteLauncher, isCurrentSteerHandler } from './codexRemoteLauncher';
