@@ -83,6 +83,24 @@ describe('Claude context details', () => {
             usage: { cacheReadTokens: 3_000 }
         })
     })
+
+    it('selects the session model instead of the first subagent model', () => {
+        const details = buildClaudeContextDetails({
+            updatedAt: 100,
+            model: 'claude-opus',
+            result: {
+                modelUsage: {
+                    'claude-haiku-subagent': { contextWindow: 200_000 },
+                    'claude-opus': { contextWindow: 1_000_000 }
+                }
+            }
+        })
+
+        expect(details).toMatchObject({
+            model: 'claude-opus',
+            contextWindow: 1_000_000
+        })
+    })
 })
 
 describe('Codex context details', () => {
@@ -196,5 +214,30 @@ describe('mergeContextDetails', () => {
         expect(JSON.stringify(compacted)).not.toContain('workspace-write')
         expect(JSON.stringify(compacted)).not.toContain('AGENTS.md')
         expect(JSON.stringify(compacted)).not.toContain('Find docs')
+    })
+
+    it('allows Codex refreshes to clear authoritative empty inventories', () => {
+        const first = buildCodexContextDetails({
+            updatedAt: 100,
+            slashCommands: ['/compact'],
+            skills: [{
+                name: 'find-docs',
+                description: 'Find docs',
+                path: '/home/user/.codex/skills/find-docs/SKILL.md',
+                scope: 'user',
+                enabled: true
+            }],
+            mcpServers: { hapi: { command: 'node', args: ['mcp'], tools: { echo: {} } } }
+        })
+        const second = buildCodexContextDetails({
+            updatedAt: 200,
+            slashCommands: [],
+            skills: [],
+            mcpServers: {}
+        })
+
+        const merged = mergeContextDetails(first, second)
+
+        expect(merged.codex).toEqual({ slashCommands: [], skills: [], mcpServers: [] })
     })
 })

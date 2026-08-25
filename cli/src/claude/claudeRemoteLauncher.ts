@@ -160,10 +160,14 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
 
         let planModeToolCalls = new Set<string>();
         let ongoingToolCalls = new Map<string, { parentToolCallId: string | null }>();
+        let lastSystemModel = session.getModel();
 
         function onMessage(message: SDKMessage) {
             if (message.type === 'system') {
                 const systemMessage = message as SDKSystemMessage;
+                if (systemMessage.model) {
+                    lastSystemModel = systemMessage.model;
+                }
                 const details = buildClaudeContextDetails({ system: systemMessage, model: systemMessage.model });
                 if (details) {
                     publishContextDetails(session.client, details);
@@ -185,7 +189,7 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                 const details = buildClaudeContextDetails({
                     result: resultMessage,
                     messageUsage: resultMessage.usage,
-                    model: resultMessage.model
+                    model: resultMessage.model ?? lastSystemModel
                 });
                 if (details) {
                     publishContextDetails(session.client, details);

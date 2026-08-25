@@ -33,15 +33,6 @@ function asStringList(value: unknown): string[] | undefined {
     return values.length > 0 ? values : undefined
 }
 
-function firstRecord(value: unknown): JsonRecord | null {
-    if (!Array.isArray(value)) return null
-    for (const item of value) {
-        const record = asRecord(item)
-        if (record) return record
-    }
-    return null
-}
-
 function normalizeUsageSnapshot(value: unknown): ContextUsageSnapshot | undefined {
     const record = asRecord(value)
     if (!record) return undefined
@@ -60,14 +51,16 @@ function normalizeUsageSnapshot(value: unknown): ContextUsageSnapshot | undefine
     return hasValue ? usage : undefined
 }
 
-function getClaudeModelUsageContextWindow(result: JsonRecord | null): number | undefined {
+function getClaudeModelUsageContextWindow(result: JsonRecord | null, model?: string): number | undefined {
     const modelUsage = asRecord(result?.modelUsage ?? result?.model_usage)
     if (!modelUsage) return undefined
-    for (const usage of Object.values(modelUsage)) {
-        const contextWindow = asTokenCount(asRecord(usage)?.contextWindow ?? asRecord(usage)?.context_window)
-        if (contextWindow !== undefined) return contextWindow
-    }
-    return undefined
+    const entries = Object.entries(modelUsage)
+    const selectedUsage = model
+        ? asRecord(modelUsage[model])
+        : entries.length === 1
+            ? asRecord(entries[0][1])
+            : null
+    return asTokenCount(selectedUsage?.contextWindow ?? selectedUsage?.context_window)
 }
 
 function buildClaudeSkills(value: unknown): ClaudeContextDetails['skills'] {
@@ -106,15 +99,13 @@ export function buildClaudeContextDetails(args: {
     const contextUsage = asRecord(args.contextUsage)
     const system = asRecord(args.system)
     const result = asRecord(args.result)
-    const resultModelUsage = firstRecord(result?.modelUsage ?? result?.model_usage)
+    const model = asString(contextUsage?.model) ?? asString(args.model) ?? asString(system?.model) ?? asString(result?.model)
     const contextWindow = asTokenCount(
         contextUsage?.raw_max_tokens
         ?? contextUsage?.rawMaxTokens
         ?? contextUsage?.context_window
         ?? contextUsage?.contextWindow
-        ?? resultModelUsage?.contextWindow
-        ?? resultModelUsage?.context_window
-        ?? getClaudeModelUsageContextWindow(result)
+        ?? getClaudeModelUsageContextWindow(result, model)
     )
     const messageUsage = normalizeUsageSnapshot(args.messageUsage ?? result?.usage)
     const contextTokens = asTokenCount(
@@ -140,7 +131,6 @@ export function buildClaudeContextDetails(args: {
         ...(slashCommands ? { slashCommands } : {})
     }
     const hasClaudeDetails = Object.keys(claude).length > 0
-    const model = asString(contextUsage?.model) ?? asString(args.model) ?? asString(system?.model) ?? asString(result?.model)
 
     if (!model && contextWindow === undefined && !hasUsage && !hasClaudeDetails) return null
 
@@ -194,23 +184,28 @@ export function buildCodexContextDetails(args: {
         ?? thread?.model_context_window
     )
     const model = asString(args.model) ?? asString(response?.model) ?? asString(thread?.model)
-    const skills = args.skills
-        ?.filter((skill) => skill.enabled)
-        .map((skill) => ({
-            name: skill.name
-        }))
-    const mcpServers = args.mcpServers
-        ? Object.entries(args.mcpServers).map(([name, server]) => ({
+    const slashCommands = args.slashCommands === undefined
+        ? undefined
+        : Array.from(new Set(args.slashCommands
+            .filter((command) => command.trim())
+            .map((command) => command.trim())))
+    const skills = args.skills === undefined
+        ? undefined
+        : args.skills
+            .filter((skill) => skill.enabled)
+            .map((skill) => ({
+                name: skill.name
+            }))
+    const mcpServers = args.mcpServers === undefined
+        ? undefined
+        : Object.entries(args.mcpServers).map(([name, server]) => ({
             name,
             toolNames: server.tools ? Object.keys(server.tools) : undefined
         }))
-        : undefined
     const codex: CodexContextDetails = {
-        ...(args.slashCommands && args.slashCommands.length > 0
-            ? { slashCommands: Array.from(new Set(args.slashCommands.filter((command) => command.trim()).map((command) => command.trim()))) }
-            : {}),
-        ...(skills && skills.length > 0 ? { skills } : {}),
-        ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {})
+        ...(slashCommands !== undefined ? { slashCommands } : {}),
+        ...(skills !== undefined ? { skills } : {}),
+        ...(mcpServers !== undefined ? { mcpServers } : {})
     }
 
     return {
