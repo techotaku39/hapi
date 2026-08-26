@@ -485,7 +485,7 @@ html:has(.chat-scroll-y) #root {
     position: relative;
 }
 
-.aui-md-table-frame .aui-md-table > thead > tr > :last-child {
+.aui-md-table-frame:has(> .aui-md-table-actions) .aui-md-table > thead > tr > :last-child {
     padding-right: 5rem;
 }
 

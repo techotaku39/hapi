@@ -90,6 +90,7 @@ describe('MarkdownTable', () => {
         expect(table.parentElement?.parentElement).toHaveClass('aui-md-table-shell')
         const actions = table.parentElement?.parentElement?.querySelector('.aui-md-table-actions')
         expect(actions?.querySelectorAll('button')).toHaveLength(1)
+        expect(actions).toHaveAttribute('data-hapi-share-exclude', 'true')
         expect(screen.getByRole('button', { name: 'Open table full screen' })).toBeInTheDocument()
     })
 

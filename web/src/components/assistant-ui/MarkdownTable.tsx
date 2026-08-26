@@ -639,7 +639,7 @@ export function MarkdownTable(props: TableProps) {
                         {children}
                     </table>
                 </div>
-                <div className="aui-md-table-actions flex items-center">
+                <div data-hapi-share-exclude="true" className="aui-md-table-actions flex items-center">
                     <TableActionButton label={t('table.openFullscreen')} onClick={openViewer} variant="ghost">
                         <ExpandIcon className="h-4 w-4" />
                     </TableActionButton>
