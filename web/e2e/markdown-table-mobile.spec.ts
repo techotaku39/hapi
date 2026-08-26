@@ -80,8 +80,9 @@ test('mobile markdown table viewer requests landscape and releases orientation c
 })
 
 test('mobile markdown table viewer detects a phone that starts in landscape', async ({ page }) => {
-    await page.goto('/e2e-fixtures/markdown-table-fixture.html')
     await page.setViewportSize({ width: 915, height: 412 })
+    await page.goto('/e2e-fixtures/markdown-table-fixture.html')
+    await expect(page.getByRole('button', { name: 'Open table full screen' })).toBeVisible()
     await page.evaluate(() => {
         const state = { requestFullscreen: 0, locks: [] as string[] }
         Object.defineProperty(window, '__hapiTableViewerState', { configurable: true, value: state })
