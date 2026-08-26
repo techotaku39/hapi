@@ -426,6 +426,9 @@ test('keeps the mobile preview canvas margins symmetric before and after fullscr
     const context = await browser.newContext({ ...devices['iPhone 13'] })
     const page = await context.newPage()
     try {
+        await page.addInitScript(() => {
+            document.documentElement.style.setProperty('--tg-viewport-stable-height', '640px')
+        })
         await page.goto('/e2e-fixtures/share-turn-fixture.html')
         await page.getByRole('button', { name: 'Open share preview' }).click()
 
@@ -502,6 +505,18 @@ test('keeps the mobile preview canvas margins symmetric before and after fullscr
 
         await fullscreenButton.click()
         await expect(fullscreenButton).toHaveAttribute('aria-label', 'Exit full-screen preview')
+        const fullscreenDialogStyle = await dialog.evaluate((element) => ({
+            height: element.style.height,
+            paddingTop: element.style.paddingTop,
+            paddingBottom: element.style.paddingBottom,
+            fullscreenButtonTop: element.querySelector<HTMLElement>('[data-hapi-share-control="fullscreen"]')?.style.top,
+            closeButtonTop: element.querySelector<HTMLElement>('button[aria-label="Close"]')?.className
+        }))
+        expect(fullscreenDialogStyle.height).toContain('--tg-viewport-stable-height')
+        expect(fullscreenDialogStyle.paddingTop).toContain('safe-area-inset-top')
+        expect(fullscreenDialogStyle.paddingBottom).toContain('safe-area-inset-bottom')
+        expect(fullscreenDialogStyle.fullscreenButtonTop).toContain('safe-area-inset-top')
+        expect(fullscreenDialogStyle.closeButtonTop).toContain('safe-area-inset-top')
         const fullscreenGaps = await measureGaps()
         expect(fullscreenGaps.scrollbarGutter).toContain('stable both-edges')
         expect(fullscreenGaps.paddingInline).toBeCloseTo(4, 1)

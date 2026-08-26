@@ -29,6 +29,7 @@ const SHARE_EXPORT_SCALE = 2
 const MAX_EXPORT_PIXELS = 24_000_000
 const SHARE_HIDDEN_CONTENT_SELECTOR = '[data-hapi-share-exclude="true"], .aui-reasoning-group'
 const SHARE_FULLSCREEN_STORAGE_KEY = 'hapi-share-preview-fullscreen'
+const SHARE_FULLSCREEN_VIEWPORT_HEIGHT = 'var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh))'
 
 function readShareFullscreenPreference(): boolean {
     try {
@@ -744,18 +745,25 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
         <Dialog open={props.isOpen} onOpenChange={(open) => { if (!open) props.onClose() }}>
             <DialogContent
                 className={cn(
-                    'overflow-hidden p-4 [&>button:last-child]:top-2',
+                    'overflow-hidden p-4',
                     isFullScreen
                         ? 'flex flex-col rounded-none'
                         : 'max-h-[calc(100vh-24px)] max-w-3xl'
                 )}
+                closeButtonClassName={isFullScreen
+                    ? 'top-[calc(0.5rem+env(safe-area-inset-top))] right-[calc(0.75rem+env(safe-area-inset-right))]'
+                    : 'top-2'}
                 style={isFullScreen ? {
                     left: 0,
                     top: 0,
                     width: '100vw',
                     maxWidth: 'none',
-                    height: '100dvh',
-                    maxHeight: '100dvh',
+                    height: SHARE_FULLSCREEN_VIEWPORT_HEIGHT,
+                    maxHeight: SHARE_FULLSCREEN_VIEWPORT_HEIGHT,
+                    paddingTop: 'calc(1rem + env(safe-area-inset-top))',
+                    paddingRight: 'calc(1rem + env(safe-area-inset-right))',
+                    paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))',
+                    paddingLeft: 'calc(1rem + env(safe-area-inset-left))',
                     transform: 'none',
                     translate: '0 0'
                 } : undefined}
@@ -767,6 +775,10 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                     onClick={toggleFullScreen}
                     disabled={!ready || busy !== null}
                     className="absolute left-3 top-2 flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:pointer-events-none disabled:opacity-40"
+                    style={isFullScreen ? {
+                        top: 'calc(0.5rem + env(safe-area-inset-top))',
+                        left: 'calc(0.75rem + env(safe-area-inset-left))'
+                    } : undefined}
                     aria-label={t(isFullScreen ? 'shareTurn.exitFullscreenPreview' : 'shareTurn.fullscreenPreview')}
                     title={t(isFullScreen ? 'shareTurn.exitFullscreenPreview' : 'shareTurn.fullscreenPreview')}
                 >
