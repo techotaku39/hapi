@@ -32,8 +32,9 @@ import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
 
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
 
-function renderThread(onViewModeChange = vi.fn()) {
+function renderThread(onViewModeChange = vi.fn(), unseenCount = 0) {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } }
     })
@@ -54,7 +55,7 @@ function renderThread(onViewModeChange = vi.fn()) {
                     isLoadingMoreMessages={false}
                     onLoadMore={vi.fn().mockResolvedValue({ status: 'exhausted' })}
                     onCancelLoadMore={vi.fn()}
-                    unseenCount={0}
+                    unseenCount={unseenCount}
                     rawMessagesCount={1}
                     normalizedMessagesCount={1}
                     messagesVersion={1}
@@ -108,6 +109,11 @@ afterEach(() => {
         Object.defineProperty(HTMLElement.prototype, 'scrollTo', originalScrollTo)
     } else {
         Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+    }
+    if (originalScrollIntoView) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView)
+    } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
     }
 })
 
@@ -206,6 +212,31 @@ describe('mobile initial scroll settling', () => {
 })
 
 describe('explicit tail scrolling', () => {
+    it('renders the unread count inside the compact bottom control', () => {
+        const { container } = renderThread(vi.fn(), 7)
+        const button = container.querySelector<HTMLButtonElement>('button[aria-label*="7"]')
+
+        expect(button).not.toBeNull()
+        expect(button).toHaveClass('rounded-full', 'h-6', 'w-6')
+        expect(button).toHaveClass('bg-[var(--app-button)]', 'text-[var(--app-button-text)]')
+        expect(button?.querySelector('span')).toHaveClass('translate-y-px')
+        expect(button?.textContent).toContain('7')
+    })
+
+    it('uses the same smooth end-alignment scroll as outline navigation', () => {
+        const scrollIntoView = vi.fn()
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            writable: true,
+            value: scrollIntoView
+        })
+        const { rerenderThread } = renderThread()
+
+        rerenderThread(1)
+
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end', behavior: 'smooth' })
+    })
+
     it('stays in tail mode through smooth-scroll progress and content growth', () => {
         const { viewport, onViewModeChange, rerenderThread } = renderThread()
         act(() => {
