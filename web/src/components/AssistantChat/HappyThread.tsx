@@ -1109,6 +1109,19 @@ export function HappyThread(props: {
         }
     }, [])
 
+    const scrollToBottomSmooth = useCallback(() => {
+        const viewport = viewportRef.current
+        const content = contentRef.current
+        if (!viewport) {
+            return
+        }
+        if (content && typeof content.scrollIntoView === 'function') {
+            content.scrollIntoView({ block: 'end', behavior: 'smooth' })
+        } else {
+            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+        }
+    }, [])
+
     const handleNestedScrollFollowChange = useCallback((followLatest: boolean) => {
         if (!followLatest) {
             clearInitialScrollTimers()
@@ -1119,7 +1132,6 @@ export function HappyThread(props: {
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
         const viewport = viewportRef.current
-        const content = contentRef.current
         setShowScrollToBottom(false)
         if (viewport) {
             tailScrollInProgressRef.current = true
@@ -1128,18 +1140,14 @@ export function HappyThread(props: {
             // reaches the bottom, otherwise a resize/state update can snap
             // the viewport there before the animation is visible.
             autoScrollEnabledRef.current = false
-            if (content && typeof content.scrollIntoView === 'function') {
-                content.scrollIntoView({ block: 'end', behavior: 'smooth' })
-            } else {
-                viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
-            }
+            scrollToBottomSmooth()
             lastScrollTopRef.current = viewport.scrollTop
         }
         if (!atBottomRef.current) {
             atBottomRef.current = true
             onViewModeChangeRef.current('tail')
         }
-    }, [])
+    }, [scrollToBottomSmooth])
 
     // Reset state when session changes
     useLayoutEffect(() => {
@@ -1529,8 +1537,12 @@ export function HappyThread(props: {
         const observer = new ResizeObserver(() => {
             // Message DOM can grow after messagesVersion commits (assistant-ui
             // updates its external runtime in an effect, then markdown/tool
-            // content may resize). Keep following while the user is at bottom.
-            if (
+            // content may resize). Keep a smooth tail jump aligned with the
+            // newest content until it reaches the bottom; otherwise the
+            // browser's original smooth-scroll target can become stale.
+            if (tailScrollInProgressRef.current && !pendingScrollRef.current) {
+                scrollToBottomSmooth()
+            } else if (
                 autoScrollEnabledRef.current
                 && atBottomRef.current
                 && !pendingScrollRef.current
@@ -1552,6 +1564,7 @@ export function HappyThread(props: {
         return () => observer.disconnect()
     }, [
         scrollToBottomInstant,
+        scrollToBottomSmooth,
         isInitialScrollSettling,
         needsViewportCoverage,
         scheduleCoverageAfterSettling

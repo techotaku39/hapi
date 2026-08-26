@@ -33,6 +33,18 @@ import type { Session } from '@/types/api'
 
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
 const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+const originalResizeObserver = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver')
+let resizeCallbacks: Array<() => void> = []
+
+class TestResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(() => callback([], this as unknown as ResizeObserver))
+    }
+
+    observe() {}
+
+    disconnect() {}
+}
 
 function renderThread(onViewModeChange = vi.fn(), unseenCount = 0) {
     const queryClient = new QueryClient({
@@ -90,6 +102,11 @@ function renderThread(onViewModeChange = vi.fn(), unseenCount = 0) {
 
 beforeEach(() => {
     vi.useFakeTimers()
+    resizeCallbacks = []
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+        configurable: true,
+        value: TestResizeObserver
+    })
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
         configurable: true,
         writable: true,
@@ -114,6 +131,11 @@ afterEach(() => {
         Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView)
     } else {
         Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+    }
+    if (originalResizeObserver) {
+        Object.defineProperty(globalThis, 'ResizeObserver', originalResizeObserver)
+    } else {
+        Reflect.deleteProperty(globalThis, 'ResizeObserver')
     }
 })
 
@@ -235,6 +257,26 @@ describe('explicit tail scrolling', () => {
         rerenderThread(1)
 
         expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end', behavior: 'smooth' })
+    })
+
+    it('retargets the smooth tail jump when content grows during the animation', () => {
+        const scrollIntoView = vi.fn()
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            writable: true,
+            value: scrollIntoView
+        })
+        const { rerenderThread } = renderThread()
+
+        rerenderThread(1)
+        expect(scrollIntoView).toHaveBeenCalledTimes(1)
+
+        act(() => {
+            resizeCallbacks.at(-1)?.()
+        })
+
+        expect(scrollIntoView).toHaveBeenCalledTimes(2)
+        expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'end', behavior: 'smooth' })
     })
 
     it('stays in tail mode through smooth-scroll progress and content growth', () => {
