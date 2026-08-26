@@ -8,6 +8,8 @@ vi.mock('html2canvas-pro', () => ({ default: html2canvas }))
 
 import {
     downloadTableAsCsv,
+    isMobileTableViewerViewport,
+    MAX_TABLE_EXPORT_PIXELS,
     renderTableAsImage,
     saveTableAsImage,
     serializeTableToMarkdown,
@@ -32,6 +34,8 @@ describe('MarkdownTable', () => {
     const originalOrientation = window.screen.orientation
     const originalNavigatorShare = navigator.share
     const originalNavigatorCanShare = navigator.canShare
+    const originalInnerWidth = window.innerWidth
+    const originalInnerHeight = window.innerHeight
 
     beforeEach(() => {
         localStorage.clear()
@@ -50,6 +54,8 @@ describe('MarkdownTable', () => {
             configurable: true,
             value: originalOrientation,
         })
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
     })
 
     afterEach(() => {
@@ -66,6 +72,8 @@ describe('MarkdownTable', () => {
             configurable: true,
             value: originalOrientation,
         })
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
     })
 
     it('keeps the table header as the first row while exposing only a plain fullscreen action', () => {
@@ -180,6 +188,23 @@ describe('MarkdownTable', () => {
         expect(unlock).toHaveBeenCalledTimes(1)
     })
 
+    it('recognizes a coarse-pointer phone that starts in landscape', () => {
+        window.matchMedia = vi.fn((query: string) => ({
+            matches: query.includes('pointer: coarse'),
+            media: query,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false },
+        })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 915 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 412 })
+
+        expect(isMobileTableViewerViewport()).toBe(true)
+    })
+
     it('hides the viewer toolbar while scrolling down and restores it while scrolling up', async () => {
         window.matchMedia = vi.fn((query: string) => ({
             matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
@@ -262,6 +287,13 @@ describe('MarkdownTable', () => {
         expect(serializeTableToCsv(table)).toBe('\uFEFF"Project","Stars"\r\n"HAPI","128"\r\n"HAPI, local-first","42"\r\n')
     })
 
+    it('neutralizes formula-leading CSV cells', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<tr><td>=SUM(A1:A2)</td><td>+10</td><td>-1</td><td>@command</td></tr>'
+
+        expect(serializeTableToCsv(table)).toBe('\uFEFF"\'=SUM(A1:A2)","\'+10","\'-1","\'@command"\r\n')
+    })
+
     it('serializes the rendered table as Markdown', () => {
         const table = document.createElement('table')
         table.innerHTML = '<thead><tr><th>Project</th><th>Notes</th></tr></thead><tbody><tr><td>HAPI</td><td>Supports | tables</td></tr></tbody>'
@@ -335,6 +367,23 @@ describe('MarkdownTable', () => {
         expect(renderedTable?.querySelector('thead')?.getAttribute('style')).not.toContain('position: sticky')
         expect(document.querySelector('[data-hapi-table-image-render="true"]')).toBeNull()
         expect(table.querySelector('thead')).toHaveStyle({ position: 'sticky', top: '0px' })
+    })
+
+    it('caps large table PNG rasterization to the pixel budget', async () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<tr><td>HAPI</td></tr>'
+        Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 10_000 })
+        Object.defineProperty(table, 'scrollHeight', { configurable: true, value: 10_000 })
+        vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ width: 10_000, height: 10_000 } as DOMRect)
+        html2canvas.mockResolvedValue({
+            toBlob: (callback: BlobCallback) => callback(new Blob(['png'], { type: 'image/png' })),
+        })
+
+        await renderTableAsImage(table)
+
+        const options = html2canvas.mock.calls[0]?.[1] as { width: number; height: number; scale: number }
+        expect(options.scale).toBeLessThan(1)
+        expect(options.width * options.height * options.scale ** 2).toBeLessThanOrEqual(MAX_TABLE_EXPORT_PIXELS)
     })
 
     it('uses the same direct download path on touch devices as shared images', () => {

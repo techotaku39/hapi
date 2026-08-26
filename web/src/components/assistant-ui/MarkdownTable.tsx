@@ -123,7 +123,9 @@ function isCoarsePointerDevice(): boolean {
 /** Exported for responsive behavior tests and future table viewers. */
 export function isMobileTableViewerViewport(): boolean {
     if (typeof window === 'undefined') return false
-    return window.matchMedia('(max-width: 767px)').matches && isCoarsePointerDevice()
+    const shortSide = Math.min(window.innerWidth, window.innerHeight)
+    return (shortSide <= 767 || window.matchMedia('(max-width: 767px)').matches)
+        && isCoarsePointerDevice()
 }
 
 function getTableCellText(cell: HTMLTableCellElement): string {
@@ -133,7 +135,8 @@ function getTableCellText(cell: HTMLTableCellElement): string {
 }
 
 function escapeCsvCell(value: string): string {
-    return `"${value.replace(/"/g, '""')}"`
+    const safeValue = /^[\t\r\n ]*[=+\-@]/.test(value) ? `'${value}` : value
+    return `"${safeValue.replace(/"/g, '""')}"`
 }
 
 export function serializeTableToCsv(table: HTMLTableElement): string {
@@ -224,6 +227,8 @@ function createStaticTableImageClone(table: HTMLTableElement, tableWidth: number
     }
 }
 
+export const MAX_TABLE_EXPORT_PIXELS = 24_000_000
+
 export async function renderTableAsImage(table: HTMLTableElement): Promise<Blob> {
     if (typeof document === 'undefined') throw new Error('Cannot render a table outside the browser')
 
@@ -234,13 +239,18 @@ export async function renderTableAsImage(table: HTMLTableElement): Promise<Blob>
     const backgroundColor = tableBackground === 'rgba(0, 0, 0, 0)'
         ? getComputedStyle(document.body).backgroundColor
         : tableBackground
+    const scale = Math.min(
+        window.devicePixelRatio || 1,
+        2,
+        Math.sqrt(MAX_TABLE_EXPORT_PIXELS / (tableWidth * tableHeight)),
+    )
     const imageTable = createStaticTableImageClone(table, tableWidth)
     try {
         const canvas = await html2canvas(imageTable.table, {
             backgroundColor: backgroundColor || null,
             foreignObjectRendering: false,
             logging: false,
-            scale: Math.min(window.devicePixelRatio || 1, 2),
+            scale,
             useCORS: true,
             width: tableWidth,
             height: tableHeight,

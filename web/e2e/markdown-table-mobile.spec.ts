@@ -78,3 +78,36 @@ test('mobile markdown table viewer requests landscape and releases orientation c
         return state ? `${state.exitFullscreen}:${state.unlocks}` : ''
     })).toBe('1:1')
 })
+
+test('mobile markdown table viewer detects a phone that starts in landscape', async ({ page }) => {
+    await page.goto('/e2e-fixtures/markdown-table-fixture.html')
+    await page.setViewportSize({ width: 915, height: 412 })
+    await page.evaluate(() => {
+        const state = { requestFullscreen: 0, locks: [] as string[] }
+        Object.defineProperty(window, '__hapiTableViewerState', { configurable: true, value: state })
+        Object.defineProperty(document.documentElement, 'requestFullscreen', {
+            configurable: true,
+            value: () => {
+                state.requestFullscreen += 1
+                return Promise.resolve()
+            },
+        })
+        Object.defineProperty(window.screen, 'orientation', {
+            configurable: true,
+            value: {
+                lock: (value: string) => {
+                    state.locks.push(value)
+                    return Promise.resolve()
+                },
+                unlock: () => {},
+            },
+        })
+    })
+
+    await page.getByRole('button', { name: 'Open table full screen' }).click()
+    await expect(page.getByRole('dialog', { name: 'Table filename fixture' })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => {
+        const state = (window as Window & { __hapiTableViewerState?: { requestFullscreen: number; locks: string[] } }).__hapiTableViewerState
+        return state ? `${state.requestFullscreen}:${state.locks.join(',')}` : ''
+    })).toBe('1:landscape')
+})
