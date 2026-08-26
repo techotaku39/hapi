@@ -114,18 +114,18 @@ function isCoarsePointerDevice(): boolean {
 
     const coarsePointer = window.matchMedia('(pointer: coarse)').matches
     const touchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints : 0
-    const mobileUserAgent = typeof navigator !== 'undefined'
-        && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+    const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+    const mobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent)
+    const desktopModeIpad = /Macintosh/i.test(userAgent) && touchPoints > 1
 
-    return coarsePointer || touchPoints > 0 || mobileUserAgent
+    return coarsePointer || mobileUserAgent || desktopModeIpad
 }
 
 /** Exported for responsive behavior tests and future table viewers. */
 export function isMobileTableViewerViewport(): boolean {
     if (typeof window === 'undefined') return false
     const shortSide = Math.min(window.innerWidth, window.innerHeight)
-    return (shortSide <= 767 || window.matchMedia('(max-width: 767px)').matches)
-        && isCoarsePointerDevice()
+    return shortSide <= 767 && isCoarsePointerDevice()
 }
 
 function getTableCellText(cell: HTMLTableCellElement): string {
@@ -156,6 +156,19 @@ function formatMarkdownTableRow(cells: string[], width: number): string {
     return `| ${padded.map(escapeMarkdownTableCell).join(' | ')} |`
 }
 
+function getTableCellAlignment(cell: HTMLTableCellElement | undefined): 'left' | 'center' | 'right' | undefined {
+    const alignment = cell?.getAttribute('align') ?? cell?.style.textAlign
+    if (alignment === 'left' || alignment === 'center' || alignment === 'right') return alignment
+    return undefined
+}
+
+function formatMarkdownAlignment(alignment: 'left' | 'center' | 'right' | undefined): string {
+    if (alignment === 'left') return ':---'
+    if (alignment === 'center') return ':---:'
+    if (alignment === 'right') return '---:'
+    return '---'
+}
+
 export function serializeTableToMarkdown(table: HTMLTableElement): string {
     const rows = Array.from(table.rows).map((row) =>
         Array.from(row.cells).map(getTableCellText),
@@ -164,7 +177,8 @@ export function serializeTableToMarkdown(table: HTMLTableElement): string {
 
     const width = Math.max(...rows.map((row) => row.length), 1)
     const header = rows[0] ?? []
-    const separator = Array.from({ length: width }, () => '---')
+    const headerCells = Array.from(table.tHead?.rows[0]?.cells ?? table.rows[0]?.cells ?? [])
+    const separator = Array.from({ length: width }, (_, index) => formatMarkdownAlignment(getTableCellAlignment(headerCells[index])))
     return [
         formatMarkdownTableRow(header, width),
         formatMarkdownTableRow(separator, width),
@@ -338,7 +352,6 @@ function TableViewer(props: {
     const lastScrollTopRef = useRef(0)
     const reverseScrollDistanceRef = useRef(0)
     const toolbarVisibleRef = useRef(true)
-    const isMobileViewer = isMobileTableViewerViewport()
 
     const setToolbarState = useCallback((visible: boolean) => {
         if (toolbarVisibleRef.current === visible) return
@@ -399,21 +412,8 @@ function TableViewer(props: {
     }, [handleViewerScroll])
 
     useEffect(() => {
-        setPreparedImage(null)
-        if (!props.open || !isMobileViewer) return undefined
-
-        const table = props.tableRef.current
-        if (!table) return undefined
-
-        let cancelled = false
-        void renderTableAsImage(table).then((blob) => {
-            if (!cancelled) setPreparedImage(blob)
-        }).catch(() => undefined)
-
-        return () => {
-            cancelled = true
-        }
-    }, [isMobileViewer, props.open, props.tableRef])
+        if (!props.open) setPreparedImage(null)
+    }, [props.open])
 
     const handleDownload = useCallback(() => {
         if (props.tableRef.current) {
@@ -433,10 +433,14 @@ function TableViewer(props: {
 
         setSavingImage(true)
         const filename = getShareImageFileName(props.imageTitle, 'table')
-        const savePromise = preparedImage
-            ? downloadBlob(preparedImage, filename)
-            : saveTableAsImage(table, filename)
-        void Promise.resolve(savePromise)
+        const imagePromise = preparedImage
+            ? Promise.resolve(preparedImage)
+            : renderTableAsImage(table).then((blob) => {
+                setPreparedImage(blob)
+                return blob
+            })
+        void imagePromise
+            .then((blob) => downloadBlob(blob, filename))
             .catch(() => undefined)
             .finally(() => setSavingImage(false))
     }, [preparedImage, props.imageTitle, props.tableRef, savingImage])

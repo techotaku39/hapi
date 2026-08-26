@@ -34,6 +34,8 @@ describe('MarkdownTable', () => {
     const originalOrientation = window.screen.orientation
     const originalNavigatorShare = navigator.share
     const originalNavigatorCanShare = navigator.canShare
+    const originalMaxTouchPoints = navigator.maxTouchPoints
+    const originalUserAgent = navigator.userAgent
     const originalInnerWidth = window.innerWidth
     const originalInnerHeight = window.innerHeight
 
@@ -50,6 +52,8 @@ describe('MarkdownTable', () => {
             configurable: true,
             value: originalNavigatorCanShare,
         })
+        Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
+        Object.defineProperty(navigator, 'userAgent', { configurable: true, value: originalUserAgent })
         Object.defineProperty(window.screen, 'orientation', {
             configurable: true,
             value: originalOrientation,
@@ -68,6 +72,8 @@ describe('MarkdownTable', () => {
             configurable: true,
             value: originalNavigatorCanShare,
         })
+        Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
+        Object.defineProperty(navigator, 'userAgent', { configurable: true, value: originalUserAgent })
         Object.defineProperty(window.screen, 'orientation', {
             configurable: true,
             value: originalOrientation,
@@ -157,6 +163,8 @@ describe('MarkdownTable', () => {
             removeEventListener() {},
             dispatchEvent() { return false },
         })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
 
         const requestFullscreen = vi.fn().mockResolvedValue(undefined)
         const exitFullscreen = vi.fn().mockResolvedValue(undefined)
@@ -188,6 +196,35 @@ describe('MarkdownTable', () => {
         expect(unlock).toHaveBeenCalledTimes(1)
     })
 
+    it('defers PNG rendering until the user requests an image save', async () => {
+        window.matchMedia = vi.fn((query: string) => ({
+            matches: query.includes('pointer: coarse'),
+            media: query,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false },
+        })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+        html2canvas.mockResolvedValue({
+            toBlob: (callback: BlobCallback) => callback(new Blob(['png'], { type: 'image/png' })),
+        })
+        vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:hapi-table-image')
+        vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await screen.findByRole('dialog', { name: 'Table' })
+        expect(html2canvas).not.toHaveBeenCalled()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Save table as image' }))
+        await waitFor(() => expect(html2canvas).toHaveBeenCalledTimes(1))
+    })
+
     it('recognizes a coarse-pointer phone that starts in landscape', () => {
         window.matchMedia = vi.fn((query: string) => ({
             matches: query.includes('pointer: coarse'),
@@ -205,6 +242,25 @@ describe('MarkdownTable', () => {
         expect(isMobileTableViewerViewport()).toBe(true)
     })
 
+    it('does not classify a touch-enabled Windows laptop as mobile', () => {
+        window.matchMedia = vi.fn(() => ({
+            matches: false,
+            media: '',
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false },
+        })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1366 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
+        Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+        Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
+
+        expect(isMobileTableViewerViewport()).toBe(false)
+    })
+
     it('hides the viewer toolbar while scrolling down and restores it while scrolling up', async () => {
         window.matchMedia = vi.fn((query: string) => ({
             matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
@@ -216,6 +272,8 @@ describe('MarkdownTable', () => {
             removeEventListener() {},
             dispatchEvent() { return false },
         })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
 
         Object.defineProperty(document.documentElement, 'requestFullscreen', {
             configurable: true,
@@ -299,6 +357,13 @@ describe('MarkdownTable', () => {
         table.innerHTML = '<thead><tr><th>Project</th><th>Notes</th></tr></thead><tbody><tr><td>HAPI</td><td>Supports | tables</td></tr></tbody>'
 
         expect(serializeTableToMarkdown(table)).toBe('| Project | Notes |\n| --- | --- |\n| HAPI | Supports \\| tables |\n')
+    })
+
+    it('preserves Markdown column alignment when copying a table', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<thead><tr><th>Project</th><th align="right">Stars</th><th style="text-align: center">Status</th></tr></thead><tbody><tr><td>HAPI</td><td>128</td><td>Active</td></tr></tbody>'
+
+        expect(serializeTableToMarkdown(table)).toBe('| Project | Stars | Status |\n| --- | ---: | :---: |\n| HAPI | 128 | Active |\n')
     })
 
     it('downloads the rendered table as CSV and keeps its Blob URL alive briefly', () => {
