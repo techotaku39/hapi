@@ -31,6 +31,7 @@ import { classifyNoSchemeHref } from '@/lib/markdown-href-policy'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { buildSessionReferencePath, parseSessionPathHref } from '@/lib/sessionReference'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
+import { MarkdownTable } from '@/components/assistant-ui/MarkdownTable'
 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 
@@ -766,16 +767,6 @@ function Hr(props: ComponentPropsWithoutRef<'hr'>) {
     return <hr {...props} className={cn('aui-md-hr my-4 border-[var(--app-divider)]', props.className)} />
 }
 
-function Table(props: ComponentPropsWithoutRef<'table'>) {
-    const { className, ...rest } = props
-
-    return (
-        <div className="aui-md-table-wrapper my-3 max-w-full overflow-x-auto rounded-xl bg-[var(--app-md-table-bg)]">
-            <table {...rest} className={cn('aui-md-table w-full border-collapse text-sm', className)} />
-        </div>
-    )
-}
-
 function Thead(props: ComponentPropsWithoutRef<'thead'>) {
     return <thead {...props} className={cn('aui-md-thead bg-[var(--app-md-table-head-bg)]', props.className)} />
 }
@@ -868,7 +859,7 @@ export const defaultComponents: DefaultComponentsMap = memoizeMarkdownComponents
     ol: OrderedList,
     li: ListItem,
     hr: Hr,
-    table: Table,
+    table: MarkdownTable,
     thead: Thead,
     tbody: Tbody,
     tr: Tr,

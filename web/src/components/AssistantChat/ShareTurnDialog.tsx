@@ -5,6 +5,7 @@ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ZoomableLightbox } from '@/components/ZoomableLightbox'
 import { safeCopyToClipboard } from '@/lib/clipboard'
 import type { ShareTurnMetadataItem } from '@/lib/shareTurnMetadata'
+import { getShareImageFileName } from '@/lib/share-image-filename'
 
 type ShareTurnDialogProps = {
     isOpen: boolean
@@ -108,38 +109,6 @@ function setPreviewCodeWrap(control: HTMLElement, enabled: boolean): void {
         cell.style.whiteSpace = enabled ? 'pre-wrap' : 'pre'
         cell.style.wordBreak = enabled ? 'break-word' : ''
     }
-}
-
-function formatShareTimestamp(date = new Date()): string {
-    const pad = (value: number) => String(value).padStart(2, '0')
-    return [
-        date.getFullYear(),
-        pad(date.getMonth() + 1),
-        pad(date.getDate()),
-        pad(date.getHours()),
-        pad(date.getMinutes()),
-        pad(date.getSeconds())
-    ].join('')
-}
-
-function sanitizeShareFileNamePart(title: string): string {
-    const withoutControlCharacters = Array.from(title.normalize('NFKC'))
-        .filter((character) => {
-            const codePoint = character.codePointAt(0) ?? 0
-            return codePoint >= 32 && codePoint !== 127
-        })
-        .join('')
-    const sanitized = withoutControlCharacters
-        .replace(/[<>:"/\\|?*]+/g, '-')
-        .replace(/\s+/g, ' ')
-        .replace(/-+/g, '-')
-        .replace(/^[ .-]+|[ .-]+$/g, '')
-        .trim()
-    return Array.from(sanitized || 'Shared turn').slice(0, 80).join('').trim()
-}
-
-function getShareFileName(title: string): string {
-    return `HAPI-${sanitizeShareFileNamePart(title)}-${formatShareTimestamp()}.png`
 }
 
 function prepareExportElement(element: HTMLElement, exportWidth: number, preserveSourceLayout: boolean): HTMLElement {
@@ -818,7 +787,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                                 if (preparedBlob) {
                                     runBlobAction(
                                         preparedBlob,
-                                        (blob) => shareImageBlob(blob, getShareFileName(props.title)),
+                                        (blob) => shareImageBlob(blob, getShareImageFileName(props.title)),
                                         'share'
                                     )
                                 }
@@ -832,7 +801,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                     <button
                         type="button"
                         onClick={() => {
-                            void withPng((blob) => downloadBlob(blob, getShareFileName(props.title)), 'download')
+                            void withPng((blob) => downloadBlob(blob, getShareImageFileName(props.title)), 'download')
                         }}
                         disabled={busy !== null || !ready}
                         className="rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50 sm:w-32"

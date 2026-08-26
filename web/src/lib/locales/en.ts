@@ -320,6 +320,16 @@ export default {
   'mermaid.loading': 'Loading diagram…',
   'mermaid.renderError': 'Could not render diagram.',
 
+  // Markdown tables
+  'table.openFullscreen': 'Open table full screen',
+  'table.closeFullscreen': 'Close table full screen',
+  'table.viewerTitle': 'Table',
+  'table.copyMarkdown': 'Copy table as Markdown',
+  'table.copiedMarkdown': 'Table Markdown copied',
+  'table.saveImage': 'Save table as image',
+  'table.savingImage': 'Saving image…',
+  'table.download': 'Download table as CSV',
+
   // Common buttons
   'button.cancel': 'Cancel',
   'button.save': 'Save',

@@ -324,6 +324,16 @@ export default {
   'mermaid.loading': '正在加载图表…',
   'mermaid.renderError': '无法渲染图表。',
 
+  // Markdown tables
+  'table.openFullscreen': '横向全屏查看表格',
+  'table.closeFullscreen': '关闭表格全屏',
+  'table.viewerTitle': '表格',
+  'table.copyMarkdown': '复制表格 Markdown',
+  'table.copiedMarkdown': '表格 Markdown 已复制',
+  'table.saveImage': '保存表格为图片',
+  'table.savingImage': '保存图片中…',
+  'table.download': '下载表格（CSV）',
+
   // Common buttons
   'button.cancel': '取消',
   'button.save': '保存',

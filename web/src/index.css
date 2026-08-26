@@ -479,6 +479,61 @@ html:has(.chat-scroll-y) #root {
     margin-top: max(0px, calc((var(--app-chat-line-height) - var(--app-message-action-size)) / 2));
 }
 
+/* Markdown tables keep their header as the first table row. Table actions sit
+ * in the top-right corner of that row, so they do not create a blank shelf. */
+.aui-md-table-frame {
+    position: relative;
+}
+
+.aui-md-table-frame .aui-md-table > thead > tr > :last-child {
+    padding-right: 5rem;
+}
+
+.aui-md-table-actions {
+    position: absolute;
+    top: 0.1875rem;
+    right: 0.1875rem;
+    z-index: 2;
+    transition: opacity 150ms ease;
+}
+
+/* Desktop fonts make the Chinese title's visual center sit a pixel lower than
+ * the icon row; keep the mobile toolbar unchanged. */
+@media (hover: hover) and (pointer: fine) {
+    [data-hapi-table-viewer-heading="true"] {
+        transform: translateY(-1px);
+    }
+
+    [data-hapi-table-viewer-toolbar="true"] {
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .aui-md-table-actions {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .aui-md-table-shell:hover .aui-md-table-actions,
+    .aui-md-table-shell:focus-within .aui-md-table-actions {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+/* Keep the header cells sticky instead of the whole thead. Sticky table
+ * sections have inconsistent painting behavior across mobile WebViews; the
+ * cells also let the header cover the viewer's top padding without leaving a
+ * visible gap while the table is being scrolled. */
+[data-hapi-table-viewer="true"] .aui-md-thead > tr > :is(th, td) {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--app-md-table-head-bg);
+}
+
 @media (hover: hover) and (pointer: fine) {
     .happy-message-actions {
         opacity: 0;
