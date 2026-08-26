@@ -72,7 +72,10 @@ Both `start` and `start-sync` accept repeatable `--workspace-root <path>` (or `-
 - The runner refuses `list-directory` and `spawn-session` requests for paths outside the configured roots.
 - `~` and `~/foo` are expanded.
 
-Omitting the flag keeps the legacy behavior: no scoping, no `/browse` feature.
+Omitting the flag keeps manual session spawning unrestricted and leaves the
+web `/browse` feature disabled. Machine directory lookups used by session
+autocomplete and native pickers are still available, but are limited to the
+runner's home directory.
 
 See `src/runner/run.ts`.
 

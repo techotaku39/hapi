@@ -75,25 +75,23 @@ lands on the session UI. Three entry points:
 3. **Manual entry** — hub URL + access token, for hubs started without
    `--relay`.
 
-### Pairing against a local dev hub
+### Pairing against a development hub
 
 ```sh
-# repo root: start the hub (prints the access token + QR codes)
-bun run dev
+# Start a hub with the built-in HTTPS relay (prints the access token + QR codes).
+hapi hub --relay
 
-# emulator: the host machine is 10.0.2.2
-#   Hub URL:       http://10.0.2.2:3006
-#   Access token:  from the hub terminal / hub settings.json (CLI_API_TOKEN)
-# physical device: use the machine's LAN IP, e.g. http://192.168.1.10:3006
+# Use the printed https:// URL. For a source-tree `bun run dev` hub, put an
+# HTTPS reverse proxy or tunnel in front of localhost:3006 first.
 adb shell am start -a android.intent.action.VIEW \
-  -d "hapicompanion://bind?hub=http%3A%2F%2F10.0.2.2%3A3006&code=<accessToken>"  # optional: exercises the deep link
+  -d "hapicompanion://bind?hub=https%3A%2F%2Fhub.example.com&code=<accessToken>"  # optional: exercises the deep link
 ```
 
-Plain-`http` LAN/emulator hubs work in all build types: the manifest opts in
-to cleartext traffic (`android:usesCleartextTraffic="true"`), because
-self-hosted LAN hubs are the primary pairing target and Android cannot scope
-the exemption to local addresses only. Sign-out (home → Sign out) deletes the
-stored credentials for that hub and drops it from the roster.
+The app rejects plain-`http` hub URLs in manual entry, deep links, QR codes,
+and restored hub state. The manifest also sets
+`android:usesCleartextTraffic="false"`; there is no debug or LAN exemption.
+Sign-out (home → Sign out) deletes the stored credentials for that hub and
+drops it from the roster.
 
 ## Milestones (track B of the native-clients plan)
 

@@ -1945,7 +1945,7 @@ export class SyncEngine {
         collaborationMode?: CodexCollaborationMode,
         copilotAgentMode?: CopilotAgentMode,
         startingMode?: 'remote' | 'pty'
-    ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
+    ): ReturnType<RpcGateway['spawnSession']> {
         return await this.rpcGateway.spawnSession(
             machineId,
             directory,
@@ -3839,8 +3839,12 @@ export class SyncEngine {
         return false
     }
 
-    async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {
+    async checkPathsExist(machineId: string, paths: string[]): ReturnType<RpcGateway['checkPathsExist']> {
         return await this.rpcGateway.checkPathsExist(machineId, paths)
+    }
+
+    async getAgentAvailability(machineId: string): ReturnType<RpcGateway['getAgentAvailability']> {
+        return await this.rpcGateway.getAgentAvailability(machineId)
     }
 
     async listMachineDirectory(machineId: string, path: string, includeHidden?: boolean): Promise<RpcListDirectoryResponse> {
