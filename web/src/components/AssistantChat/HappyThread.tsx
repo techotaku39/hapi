@@ -290,7 +290,7 @@ function ScrollToBottomButton(props: { onClick: () => void; count?: number }) {
     const { t } = useTranslation()
     const hasCount = typeof props.count === 'number'
     const label = hasCount
-        ? `${t('misc.newMessage', { n: props.count })} — ${t('misc.scrollToBottom')}`
+        ? `${t('misc.newMessage', { n: props.count! })} — ${t('misc.scrollToBottom')}`
         : t('misc.scrollToBottom')
     const buttonClass = hasCount
         ? 'absolute bottom-0 right-2 z-10 h-6 w-6 rounded-full border-[var(--app-button)] bg-[var(--app-button)] px-0 text-[var(--app-button-text)] hover:opacity-90'
