@@ -305,6 +305,38 @@ describe('MarkdownTable', () => {
         await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     })
 
+    it('shows an error when PNG generation fails', async () => {
+        html2canvas.mockRejectedValue(new Error('render failed'))
+
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await screen.findByRole('dialog', { name: 'Table' })
+        fireEvent.click(screen.getByRole('button', { name: 'Download table' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Download PNG' }))
+
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not process table image.'))
+    })
+
+    it('shows an error when copying the generated table image fails', async () => {
+        html2canvas.mockResolvedValue({
+            toBlob: (callback: BlobCallback) => callback(new Blob(['png'], { type: 'image/png' })),
+        })
+        const write = vi.fn().mockRejectedValue(new Error('clipboard denied'))
+        class ClipboardItemStub {
+            constructor(public readonly data: Record<string, Blob | PromiseLike<Blob>>) {}
+        }
+        Object.defineProperty(window, 'ClipboardItem', { configurable: true, value: ClipboardItemStub })
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } })
+
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await screen.findByRole('dialog', { name: 'Table' })
+        fireEvent.click(screen.getByRole('button', { name: 'Copy table' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy image' }))
+
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not process table image.'))
+    })
+
     it('re-evaluates the automatic wrapping choice when the viewer width changes', async () => {
         let resizeCallback: ResizeObserverCallback | undefined
         class TestResizeObserver {

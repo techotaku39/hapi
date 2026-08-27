@@ -334,6 +334,7 @@ export default {
   'table.copy': '复制表格',
   'table.copyImage': '复制图片',
   'table.copyingImage': '复制图片中…',
+  'table.imageActionFailed': '表格图片处理失败。',
   'table.wrap.enable': '开启表格换行',
   'table.wrap.disable': '关闭表格换行',
   'table.saveImage': '保存表格为图片',

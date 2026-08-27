@@ -708,6 +708,7 @@ function TableViewer(props: {
     const { className, children, ...rest } = props.tableProps
     const { copied, copy, markCopied } = useCopyToClipboard()
     const [imageAction, setImageAction] = useState<'copy' | 'download' | null>(null)
+    const [imageError, setImageError] = useState(false)
     const [wrapEnabled, setWrapEnabled] = useState(false)
     const [toolbarVisible, setToolbarVisible] = useState(true)
     const viewerRef = useRef<HTMLDivElement>(null)
@@ -779,7 +780,10 @@ function TableViewer(props: {
     }, [handleViewerScroll])
 
     useEffect(() => {
-        if (!props.open) setWrapEnabled(false)
+        if (!props.open) {
+            setWrapEnabled(false)
+            setImageError(false)
+        }
     }, [props.open])
 
     useLayoutEffect(() => {
@@ -848,11 +852,12 @@ function TableViewer(props: {
         const table = props.tableRef.current
         if (!table || imageAction) return
 
+        setImageError(false)
         setImageAction('download')
         const filename = getShareImageFileName(props.imageTitle, 'table')
         void getPreparedImage(table)
             .then((blob) => downloadBlob(blob, filename))
-            .catch(() => undefined)
+            .catch(() => setImageError(true))
             .finally(() => setImageAction(null))
     }, [getPreparedImage, imageAction, props.imageTitle, props.tableRef])
 
@@ -860,11 +865,12 @@ function TableViewer(props: {
         const table = props.tableRef.current
         if (!table || imageAction) return
 
+        setImageError(false)
         setImageAction('copy')
         const imagePromise = getPreparedImage(table)
         void copyTableImagePromiseToClipboard(imagePromise)
             .then(() => markCopied())
-            .catch(() => undefined)
+            .catch(() => setImageError(true))
             .finally(() => setImageAction(null))
     }, [getPreparedImage, imageAction, markCopied, props.tableRef])
 
@@ -898,6 +904,15 @@ function TableViewer(props: {
                         >
                             <Spinner size="sm" label={null} className="text-current" />
                             <span>{t(imageAction === 'copy' ? 'table.copyingImage' : 'table.savingImage')}</span>
+                        </div>
+                    ) : null}
+                    {imageError ? (
+                        <div
+                            role="alert"
+                            aria-live="assertive"
+                            className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2.5 py-1 text-xs text-[var(--app-fg)] shadow-md"
+                        >
+                            {t('table.imageActionFailed')}
                         </div>
                     ) : null}
                     <DialogPrimitive.Title className="sr-only">

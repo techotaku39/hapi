@@ -330,6 +330,7 @@ export default {
   'table.copy': 'Copy table',
   'table.copyImage': 'Copy image',
   'table.copyingImage': 'Copying image…',
+  'table.imageActionFailed': 'Could not process table image.',
   'table.wrap.enable': 'Enable table wrapping',
   'table.wrap.disable': 'Disable table wrapping',
   'table.saveImage': 'Save table as image',
