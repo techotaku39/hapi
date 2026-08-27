@@ -224,7 +224,7 @@ describe('MarkdownTable', () => {
         }))
         const write = vi.fn().mockResolvedValue(undefined)
         class ClipboardItemStub {
-            constructor(public readonly data: Record<string, Blob>) {}
+            constructor(public readonly data: Record<string, Blob | PromiseLike<Blob>>) {}
         }
         Object.defineProperty(window, 'ClipboardItem', { configurable: true, value: ClipboardItemStub })
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } })
@@ -235,6 +235,9 @@ describe('MarkdownTable', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Copy table' }))
         fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy image' }))
 
+        expect(write).toHaveBeenCalledTimes(1)
+        const clipboardItem = write.mock.calls[0]?.[0]?.[0] as ClipboardItemStub | undefined
+        expect(clipboardItem?.data['image/png']).toBeInstanceOf(Promise)
         expect(screen.getByRole('status')).toHaveTextContent('Copying image…')
         expect(screen.getByRole('status')).toHaveAttribute('data-hapi-table-save-status-action', 'copy')
         expect(screen.getByRole('status')).toHaveClass(
@@ -249,6 +252,49 @@ describe('MarkdownTable', () => {
         await waitFor(() => expect(write).toHaveBeenCalledWith([expect.any(ClipboardItemStub)]))
         await waitFor(() => expect(screen.getByRole('button', { name: 'Copy table' }).querySelector('polyline')).toBeInTheDocument())
         await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    })
+
+    it('re-evaluates the automatic wrapping choice when the viewer width changes', async () => {
+        let resizeCallback: ResizeObserverCallback | undefined
+        class TestResizeObserver {
+            constructor(callback: ResizeObserverCallback) {
+                resizeCallback = callback
+            }
+            observe() {}
+            disconnect() {}
+        }
+        vi.stubGlobal('ResizeObserver', TestResizeObserver)
+
+        try {
+            renderTable()
+            fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+            const dialog = await screen.findByRole('dialog', { name: 'Table' })
+            const viewer = dialog.querySelector<HTMLElement>('[data-hapi-table-viewer="true"]')
+            const table = viewer?.querySelector<HTMLTableElement>('table')
+            if (!viewer || !table) throw new Error('Table viewer did not render')
+
+            let viewerWidth = 100
+            let tableWidth = 200
+            Object.defineProperty(viewer, 'clientWidth', {
+                configurable: true,
+                get: () => viewerWidth,
+            })
+            Object.defineProperty(table, 'scrollWidth', {
+                configurable: true,
+                get: () => tableWidth,
+            })
+
+            await waitFor(() => expect(resizeCallback).toBeDefined())
+            resizeCallback?.([], {} as ResizeObserver)
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Disable table wrapping' })).toHaveAttribute('aria-pressed', 'true'))
+
+            viewerWidth = 300
+            tableWidth = 200
+            resizeCallback?.([], {} as ResizeObserver)
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Enable table wrapping' })).toHaveAttribute('aria-pressed', 'false'))
+        } finally {
+            vi.unstubAllGlobals()
+        }
     })
 
     it('requests mobile browser fullscreen and landscape orientation, then releases both on close', async () => {

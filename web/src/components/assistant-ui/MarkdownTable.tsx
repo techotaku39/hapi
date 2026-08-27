@@ -599,14 +599,25 @@ export async function saveTableAsImage(table: HTMLTableElement, filename = getSh
     await downloadBlob(blob, filename)
 }
 
-export async function copyTableImageToClipboard(blob: Blob): Promise<void> {
+function writeTableImageToClipboard(
+    mimeType: string,
+    image: Blob | PromiseLike<Blob>,
+): Promise<void> {
     const ClipboardItemCtor = window.ClipboardItem
     if (!navigator.clipboard?.write || !ClipboardItemCtor) {
-        throw new Error('Image clipboard is not supported in this browser')
+        return Promise.reject(new Error('Image clipboard is not supported in this browser'))
     }
-    await navigator.clipboard.write([
-        new ClipboardItemCtor({ [blob.type]: blob }),
+    return navigator.clipboard.write([
+        new ClipboardItemCtor({ [mimeType]: image }),
     ])
+}
+
+export function copyTableImageToClipboard(blob: Blob): Promise<void> {
+    return writeTableImageToClipboard(blob.type, blob)
+}
+
+export function copyTableImagePromiseToClipboard(imagePromise: Promise<Blob>): Promise<void> {
+    return writeTableImageToClipboard('image/png', imagePromise)
 }
 
 /**
@@ -679,7 +690,7 @@ function TableViewer(props: {
     const lastScrollTopRef = useRef(0)
     const reverseScrollDistanceRef = useRef(0)
     const toolbarVisibleRef = useRef(true)
-    const automaticWrapRef = useRef(true)
+    const explicitWrapRef = useRef(false)
     const isMobileViewer = isMobileTableViewerViewport()
 
     const setToolbarState = useCallback((visible: boolean) => {
@@ -748,24 +759,23 @@ function TableViewer(props: {
 
     useLayoutEffect(() => {
         if (!props.open) {
-            automaticWrapRef.current = true
+            explicitWrapRef.current = false
             return undefined
         }
 
         const storedPreference = readTableWrapPreference(props.tableWrapPreferenceKey)
-        automaticWrapRef.current = storedPreference === null
+        explicitWrapRef.current = storedPreference !== null
         if (storedPreference !== null) {
             setWrapEnabled(storedPreference)
             return undefined
         }
 
         const measureOverflow = () => {
-            if (!automaticWrapRef.current) return
+            if (explicitWrapRef.current) return
             const viewer = viewerRef.current
             const table = props.tableRef.current
             if (!viewer || !table) return
             const shouldWrap = shouldWrapTableByDefault(table, viewer)
-            if (shouldWrap) automaticWrapRef.current = false
             setWrapEnabled(shouldWrap)
         }
 
@@ -788,7 +798,7 @@ function TableViewer(props: {
 
     const handleWrapToggle = useCallback(() => {
         const nextValue = !wrapEnabled
-        automaticWrapRef.current = false
+        explicitWrapRef.current = true
         setWrapEnabled(nextValue)
         writeTableWrapPreference(props.tableWrapPreferenceKey, nextValue)
     }, [props.tableWrapPreferenceKey, wrapEnabled])
@@ -826,11 +836,9 @@ function TableViewer(props: {
         if (!table || imageAction) return
 
         setImageAction('copy')
-        void getPreparedImage(table)
-            .then(async (blob) => {
-                await copyTableImageToClipboard(blob)
-                markCopied()
-            })
+        const imagePromise = getPreparedImage(table)
+        void copyTableImagePromiseToClipboard(imagePromise)
+            .then(() => markCopied())
             .catch(() => undefined)
             .finally(() => setImageAction(null))
     }, [getPreparedImage, imageAction, markCopied, props.tableRef])
