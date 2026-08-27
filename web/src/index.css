@@ -491,8 +491,10 @@ html:has(.chat-scroll-y) #root {
 
 .aui-md-table-actions {
     position: absolute;
-    top: 0.1875rem;
+    top: 0;
     right: 0.1875rem;
+    min-height: calc(1.25rem + 1rem);
+    align-items: center;
     z-index: 2;
     transition: opacity 150ms ease;
 }

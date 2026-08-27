@@ -672,7 +672,6 @@ function TableViewer(props: {
     const { className, children, ...rest } = props.tableProps
     const { copied, copy, markCopied } = useCopyToClipboard()
     const [imageAction, setImageAction] = useState<'copy' | 'download' | null>(null)
-    const [preparedImage, setPreparedImage] = useState<Blob | null>(null)
     const [wrapEnabled, setWrapEnabled] = useState(false)
     const [toolbarVisible, setToolbarVisible] = useState(true)
     const viewerRef = useRef<HTMLDivElement>(null)
@@ -744,16 +743,8 @@ function TableViewer(props: {
     }, [handleViewerScroll])
 
     useEffect(() => {
-        if (!props.open) setPreparedImage(null)
-    }, [props.open])
-
-    useEffect(() => {
         if (!props.open) setWrapEnabled(false)
     }, [props.open])
-
-    useEffect(() => {
-        setPreparedImage(null)
-    }, [wrapEnabled])
 
     useLayoutEffect(() => {
         if (!props.open) {
@@ -815,12 +806,8 @@ function TableViewer(props: {
     }, [copy, props.tableRef])
 
     const getPreparedImage = useCallback((table: HTMLTableElement): Promise<Blob> => {
-        if (preparedImage) return Promise.resolve(preparedImage)
-        return renderTableAsImage(table).then((blob) => {
-            setPreparedImage(blob)
-            return blob
-        })
-    }, [preparedImage])
+        return renderTableAsImage(table)
+    }, [])
 
     const handleSaveImage = useCallback(() => {
         const table = props.tableRef.current

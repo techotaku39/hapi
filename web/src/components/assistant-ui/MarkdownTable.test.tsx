@@ -325,6 +325,36 @@ describe('MarkdownTable', () => {
         await waitFor(() => expect(html2canvas).toHaveBeenCalledTimes(1))
     })
 
+    it('renders a fresh PNG after wrapping changes during an earlier render', async () => {
+        type CanvasStub = { toBlob: (callback: BlobCallback) => void }
+        const pending: Array<(value: CanvasStub | PromiseLike<CanvasStub>) => void> = []
+        html2canvas.mockImplementation(() => new Promise<CanvasStub>((resolve) => pending.push(resolve)))
+        vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:hapi-table-image')
+        vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        const dialog = await screen.findByRole('dialog', { name: 'Table' })
+        fireEvent.click(screen.getByRole('button', { name: 'Download table' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Download PNG' }))
+        await waitFor(() => expect(html2canvas).toHaveBeenCalledTimes(1))
+
+        fireEvent.click(screen.getByRole('button', { name: 'Enable table wrapping' }))
+        pending[0]?.({
+            toBlob: (callback: BlobCallback) => callback(new Blob(['first'], { type: 'image/png' })),
+        })
+        await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+
+        fireEvent.click(screen.getByRole('button', { name: 'Download table' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Download PNG' }))
+        await waitFor(() => expect(html2canvas).toHaveBeenCalledTimes(2))
+        pending[1]?.({
+            toBlob: (callback: BlobCallback) => callback(new Blob(['second'], { type: 'image/png' })),
+        })
+        await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    })
+
     it('recognizes a coarse-pointer phone that starts in landscape', () => {
         window.matchMedia = vi.fn((query: string) => ({
             matches: query.includes('pointer: coarse'),

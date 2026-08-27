@@ -23,7 +23,7 @@ test.describe('markdown table actions', () => {
         await expect.poll(() => actions.evaluate((element) => {
             const style = getComputedStyle(element)
             return `${style.top}:${style.right}`
-        })).toBe('3px:3px')
+        })).toBe('0px:3px')
         await expect.poll(() => actions.evaluate((element) => getComputedStyle(element).opacity)).toBe('0')
         await tableFrame.hover()
         await expect.poll(() => actions.evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
