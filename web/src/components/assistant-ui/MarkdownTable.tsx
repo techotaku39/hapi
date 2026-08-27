@@ -240,6 +240,7 @@ function serializeInlineMarkdown(node: Node): string {
         case 'a': {
             const href = element.dataset.hapiMarkdownHref ?? element.getAttribute('href')
             const label = children()
+            if (href?.startsWith('hapi-file:') || href?.startsWith('hapi-file-candidate:')) return label
             return href ? `[${label}](${href})` : label
         }
         case 'code':
@@ -257,7 +258,7 @@ function serializeInlineMarkdown(node: Node): string {
             return ' '
         case 'img': {
             const src = element.getAttribute('src')
-            const alt = element.getAttribute('alt') ?? ''
+            const alt = serializeMarkdownText(element.getAttribute('alt') ?? '')
             return src ? `![${alt}](${src})` : alt
         }
         case 'span': {

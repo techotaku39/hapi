@@ -820,6 +820,35 @@ describe('MarkdownTable', () => {
         expect(serializeTableToMarkdown(table)).toBe('| Path |\n| --- |\n| `C:\\tmp` |\n')
     })
 
+    it('omits internal HAPI file-link schemes when copying Markdown', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<thead><tr><th>Files</th></tr></thead><tbody><tr><td></td></tr></tbody>'
+        const cell = table.tBodies[0]!.rows[0]!.cells[0]!
+        const plainLink = document.createElement('a')
+        plainLink.setAttribute('href', 'hapi-file:docs%2Frouter.tsx')
+        plainLink.textContent = 'docs/router.tsx'
+        const codeLink = document.createElement('a')
+        codeLink.setAttribute('href', 'hapi-file-candidate:docs%2Fmain.ts')
+        const code = document.createElement('code')
+        code.textContent = 'docs/main.ts'
+        codeLink.append(code)
+        cell.append(plainLink, ' ', codeLink)
+
+        expect(serializeTableToMarkdown(table)).toBe('| Files |\n| --- |\n| docs/router.tsx `docs/main.ts` |\n')
+    })
+
+    it('escapes image alt text before rebuilding Markdown', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<thead><tr><th>Image</th></tr></thead><tbody><tr><td></td></tr></tbody>'
+        const image = document.createElement('img')
+        image.setAttribute('src', 'https://example.com/table.png')
+        image.setAttribute('alt', 'a]b' + '\\' + '|c')
+        table.tBodies[0]!.rows[0]!.cells[0]!.append(image)
+
+        const expectedAlt = 'a' + '\\]' + 'b' + '\\\\' + '\\|' + 'c'
+        expect(serializeTableToMarkdown(table)).toBe(`| Image |\n| --- |\n| ![${expectedAlt}](https://example.com/table.png) |\n`)
+    })
+
     it('keeps sanitized custom-link destinations available for Markdown copying', () => {
         render(
             <I18nProvider>
