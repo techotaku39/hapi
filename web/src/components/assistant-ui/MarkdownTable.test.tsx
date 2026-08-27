@@ -833,6 +833,26 @@ describe('MarkdownTable', () => {
         expect(serializeTableToMarkdown(screen.getByRole<HTMLTableElement>('table'))).toContain('[Open](custom://target)')
     })
 
+    it('round-trips literal Markdown metacharacters in plain table text', () => {
+        const source = '| Value |\n| --- |\n| \\*literal\\* \\_literal\\_ \\[brackets\\] \\`ticks\\` \\~\\~tilde\\~\\~ \\<angle\\> |'
+        const firstRender = render(
+            <I18nProvider>
+                <MarkdownRenderer standalone content={source} />
+            </I18nProvider>,
+        )
+
+        const copied = serializeTableToMarkdown(screen.getByRole<HTMLTableElement>('table'))
+        expect(copied).toBe(`${source}\n`)
+        firstRender.unmount()
+
+        render(
+            <I18nProvider>
+                <MarkdownRenderer standalone content={copied} />
+            </I18nProvider>,
+        )
+        expect(screen.getByRole<HTMLTableElement>('table').tBodies[0]?.rows[0]?.cells[0]).toHaveTextContent('*literal* _literal_ [brackets] `ticks` ~~tilde~~ <angle>')
+    })
+
     it('preserves Markdown column alignment when copying a table', () => {
         const table = document.createElement('table')
         table.innerHTML = '<thead><tr><th>Project</th><th align="right">Stars</th><th style="text-align: center">Status</th></tr></thead><tbody><tr><td>HAPI</td><td>128</td><td>Active</td></tr></tbody>'

@@ -222,7 +222,10 @@ function escapeMarkdownTableCell(value: string): string {
 }
 
 function serializeMarkdownText(value: string): string {
-    return value.replace(/\s+/g, ' ').replace(/\\/g, '\\\\')
+    return value
+        .replace(/\s+/g, ' ')
+        .replace(/\\/g, '\\\\')
+        .replace(/([`*_\[\]<>~])/g, '\\$1')
 }
 
 function serializeInlineMarkdown(node: Node): string {
