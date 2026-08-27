@@ -221,6 +221,50 @@ function escapeMarkdownTableCell(value: string): string {
     return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
 }
 
+function serializeInlineMarkdown(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+        return Array.from(node.childNodes, serializeInlineMarkdown).join('')
+    }
+
+    const element = node as HTMLElement
+    const children = () => Array.from(element.childNodes, serializeInlineMarkdown).join('')
+    switch (element.tagName.toLowerCase()) {
+        case 'a': {
+            const href = element.getAttribute('href')
+            const label = children()
+            return href ? `[${label}](${href})` : label
+        }
+        case 'code':
+            return `\`${element.textContent ?? ''}\``
+        case 'strong':
+        case 'b':
+            return `**${children()}**`
+        case 'em':
+        case 'i':
+            return `*${children()}*`
+        case 'del':
+        case 's':
+            return `~~${children()}~~`
+        case 'br':
+            return ' '
+        case 'img': {
+            const src = element.getAttribute('src')
+            const alt = element.getAttribute('alt') ?? ''
+            return src ? `![${alt}](${src})` : alt
+        }
+        default:
+            return children()
+    }
+}
+
+function getTableCellMarkdown(cell: HTMLTableCellElement): string {
+    return Array.from(cell.childNodes, serializeInlineMarkdown)
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
 function formatMarkdownTableRow(cells: string[], width: number): string {
     const padded = [...cells, ...Array.from({ length: Math.max(0, width - cells.length) }, () => '')]
     return `| ${padded.map(escapeMarkdownTableCell).join(' | ')} |`
@@ -241,7 +285,7 @@ function formatMarkdownAlignment(alignment: 'left' | 'center' | 'right' | undefi
 
 export function serializeTableToMarkdown(table: HTMLTableElement): string {
     const rows = Array.from(table.rows).map((row) =>
-        Array.from(row.cells).map(getTableCellText),
+        Array.from(row.cells).map(getTableCellMarkdown),
     )
     if (rows.length === 0) return ''
 

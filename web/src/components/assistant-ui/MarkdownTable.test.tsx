@@ -731,6 +731,13 @@ describe('MarkdownTable', () => {
         expect(serializeTableToMarkdown(table)).toBe('| Project | Notes |\n| --- | --- |\n| HAPI | Supports \\| tables |\n')
     })
 
+    it('preserves inline Markdown formatting when copying a table', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<thead><tr><th>Project</th><th>Notes</th></tr></thead><tbody><tr><td><a href="https://example.com">Docs</a></td><td><code>hapi</code> and <strong>fast</strong> <em>local</em></td></tr></tbody>'
+
+        expect(serializeTableToMarkdown(table)).toBe('| Project | Notes |\n| --- | --- |\n| [Docs](https://example.com) | `hapi` and **fast** *local* |\n')
+    })
+
     it('preserves Markdown column alignment when copying a table', () => {
         const table = document.createElement('table')
         table.innerHTML = '<thead><tr><th>Project</th><th align="right">Stars</th><th style="text-align: center">Status</th></tr></thead><tbody><tr><td>HAPI</td><td>128</td><td>Active</td></tr></tbody>'
