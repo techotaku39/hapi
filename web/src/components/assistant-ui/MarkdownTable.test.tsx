@@ -760,6 +760,26 @@ describe('MarkdownTable', () => {
         expect(serializeTableToMarkdown(table)).toBe('| Project | Notes |\n| --- | --- |\n| [Docs](https://example.com) | `hapi` and **fast** *local* |\n')
     })
 
+    it('preserves original link targets and safe code fences when copying Markdown', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<thead><tr><th>Project</th><th>Notes</th></tr></thead><tbody><tr><td><a href="#" data-hapi-markdown-href="custom://target">Open</a></td><td><code>a`b</code> <code> a  b </code></td></tr></tbody>'
+
+        expect(serializeTableToMarkdown(table)).toBe('| Project | Notes |\n| --- | --- |\n| [Open](custom://target) | ``a`b`` `  a  b  ` |\n')
+    })
+
+    it('keeps sanitized custom-link destinations available for Markdown copying', () => {
+        render(
+            <I18nProvider>
+                <MarkdownRenderer standalone content={'| Action |\n| --- |\n| [Open](custom://target) |'} />
+            </I18nProvider>,
+        )
+
+        const link = screen.getByRole('link', { name: 'Open' })
+        expect(link).toHaveAttribute('href', '#')
+        expect(link).toHaveAttribute('data-hapi-markdown-href', 'custom://target')
+        expect(serializeTableToMarkdown(screen.getByRole<HTMLTableElement>('table'))).toContain('[Open](custom://target)')
+    })
+
     it('preserves Markdown column alignment when copying a table', () => {
         const table = document.createElement('table')
         table.innerHTML = '<thead><tr><th>Project</th><th align="right">Stars</th><th style="text-align: center">Status</th></tr></thead><tbody><tr><td>HAPI</td><td>128</td><td>Active</td></tr></tbody>'

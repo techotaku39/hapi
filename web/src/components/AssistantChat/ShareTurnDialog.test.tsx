@@ -39,6 +39,17 @@ describe('ShareTurnDialog preview cleanup', () => {
         expect(root.querySelector('.aui-md-table-actions')).toBeNull()
     })
 
+    it('preserves the link target for Markdown copied from the share preview', () => {
+        const root = document.createElement('div')
+        root.innerHTML = '<a href="https://example.com/docs">Docs</a>'
+
+        stripCaptureOnlyControls(root)
+
+        const anchor = root.querySelector('a')
+        expect(anchor).not.toHaveAttribute('href')
+        expect(anchor).toHaveAttribute('data-hapi-markdown-href', 'https://example.com/docs')
+    })
+
     it('opens the shared table viewer from the preview action', async () => {
         render(
             <I18nProvider>

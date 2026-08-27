@@ -65,6 +65,10 @@ export function stripCaptureOnlyControls(root: HTMLElement): void {
         element.remove()
     }
     for (const anchor of Array.from(root.querySelectorAll('a'))) {
+        const href = anchor.getAttribute('href')
+        if (href && !anchor.dataset.hapiMarkdownHref) {
+            anchor.dataset.hapiMarkdownHref = href
+        }
         anchor.removeAttribute('href')
         anchor.removeAttribute('target')
         anchor.removeAttribute('rel')

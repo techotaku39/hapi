@@ -222,7 +222,7 @@ function escapeMarkdownTableCell(value: string): string {
 }
 
 function serializeInlineMarkdown(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+    if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? '').replace(/\s+/g, ' ')
     if (node.nodeType !== Node.ELEMENT_NODE) {
         return Array.from(node.childNodes, serializeInlineMarkdown).join('')
     }
@@ -231,12 +231,12 @@ function serializeInlineMarkdown(node: Node): string {
     const children = () => Array.from(element.childNodes, serializeInlineMarkdown).join('')
     switch (element.tagName.toLowerCase()) {
         case 'a': {
-            const href = element.getAttribute('href')
+            const href = element.dataset.hapiMarkdownHref ?? element.getAttribute('href')
             const label = children()
             return href ? `[${label}](${href})` : label
         }
         case 'code':
-            return `\`${element.textContent ?? ''}\``
+            return serializeCodeSpan(element.textContent ?? '')
         case 'strong':
         case 'b':
             return `**${children()}**`
@@ -258,10 +258,22 @@ function serializeInlineMarkdown(node: Node): string {
     }
 }
 
+function serializeCodeSpan(value: string): string {
+    const longestRun = Math.max(
+        0,
+        ...Array.from(value.matchAll(/`+/g), (match) => match[0].length),
+    )
+    const fence = '`'.repeat(longestRun + 1)
+    const needsPadding = value.startsWith('`')
+        || value.endsWith('`')
+        || (value.startsWith(' ') && value.endsWith(' ') && value.trim().length > 0)
+    const padding = needsPadding ? ' ' : ''
+    return `${fence}${padding}${value}${padding}${fence}`
+}
+
 function getTableCellMarkdown(cell: HTMLTableCellElement): string {
     return Array.from(cell.childNodes, serializeInlineMarkdown)
         .join('')
-        .replace(/\s+/g, ' ')
         .trim()
 }
 

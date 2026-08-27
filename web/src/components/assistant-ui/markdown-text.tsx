@@ -531,6 +531,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
         <a
             {...anchorProps}
             href={href}
+            data-hapi-markdown-href={anchorProps.href}
             rel={rel}
             onClick={handleClick}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', anchorProps.className)}
@@ -561,6 +562,7 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
         <a
             {...props}
             href={href}
+            data-hapi-markdown-href={props.href}
             rel={rel}
             onClick={handleClick}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
@@ -728,6 +730,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         <a
             {...rest}
             href={domHref}
+            data-hapi-markdown-href={href}
             rel={rel}
             onClick={handleClick}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
