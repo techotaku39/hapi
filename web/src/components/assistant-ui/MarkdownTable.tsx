@@ -511,6 +511,7 @@ function applyTableImageHeaderBackground(table: HTMLTableElement, clone: HTMLTab
     cloneHead.style.setProperty('background-color', background, 'important')
     cloneHead.querySelectorAll(':is(th, td)').forEach((cell) => {
         if (!(cell instanceof HTMLElement)) return
+        if (!isTransparentColor(cell.style.getPropertyValue('background-color'))) return
         cell.style.setProperty('background-color', background, 'important')
     })
 }

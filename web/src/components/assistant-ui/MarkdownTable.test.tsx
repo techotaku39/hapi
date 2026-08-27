@@ -962,6 +962,8 @@ describe('MarkdownTable', () => {
         table.innerHTML = '<thead><tr><th>Project</th><th>Status</th></tr></thead><tbody><tr><td>HAPI</td><td>Ready</td></tr></tbody>'
         table.style.backgroundColor = 'rgb(28, 28, 30)'
         table.tHead!.style.backgroundColor = 'rgb(53, 59, 67)'
+        table.tHead!.rows[0]!.cells[0]!.style.backgroundColor = 'rgb(70, 70, 70)'
+        table.tHead!.rows[0]!.cells[1]!.style.backgroundColor = 'rgb(80, 80, 80)'
         Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 1_200 })
         vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ top: 0, width: 1_200, height: 120 } as DOMRect)
         const rows = Array.from(table.rows)
@@ -986,7 +988,10 @@ describe('MarkdownTable', () => {
         expect(renderedTable?.style.tableLayout).toBe('fixed')
         expect(Array.from(renderedTable?.querySelectorAll('col') ?? []).map((col) => col.style.width)).toEqual(['600px', '600px'])
         expect(renderedTable?.tHead?.style.backgroundColor).toBe('rgb(53, 59, 67)')
-        expect(renderedTable?.tHead?.querySelector('th')?.style.backgroundColor).toBe('rgb(53, 59, 67)')
+        expect(Array.from(renderedTable?.tHead?.querySelectorAll('th') ?? []).map((cell) => cell.style.backgroundColor)).toEqual([
+            'rgb(70, 70, 70)',
+            'rgb(80, 80, 80)',
+        ])
     })
 
     it('crops trailing table box space from PNG exports', async () => {
