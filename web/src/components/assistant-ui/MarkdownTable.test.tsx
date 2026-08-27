@@ -20,6 +20,7 @@ import {
     shouldWrapTableByDefault,
     serializeTableToMarkdown,
     serializeTableToCsv,
+    TableViewerFromElement,
 } from './MarkdownTable'
 
 const TABLE_MARKDOWN = `| Project | Stars |
@@ -120,7 +121,7 @@ describe('MarkdownTable', () => {
 
         try {
             renderTable()
-            const table = screen.getByRole('table')
+            const table = screen.getByRole<HTMLTableElement>('table')
             const row = table.tHead?.rows[0]
             const actions = table.parentElement?.parentElement?.querySelector<HTMLElement>('.aui-md-table-actions')
             if (!row || !actions) throw new Error('Inline table action geometry is incomplete')
@@ -179,13 +180,35 @@ describe('MarkdownTable', () => {
         renderTable('zh-CN')
         fireEvent.click(screen.getByRole('button', { name: '横向全屏查看表格' }))
 
-        await screen.findByRole('dialog', { name: 'Table' })
+        await screen.findByRole('dialog', { name: '表格' })
         fireEvent.click(screen.getByRole('button', { name: '复制表格' }))
         expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['复制图片', '复制 Markdown'])
         fireEvent.click(screen.getByRole('menuitem', { name: '复制 Markdown' }))
 
         fireEvent.click(screen.getByRole('button', { name: '下载表格' }))
         expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['下载 PNG', '下载 CSV'])
+    })
+
+    it('keeps shared-preview tables at max-content width when the source uses w-full', async () => {
+        const sourceTable = document.createElement('table')
+        sourceTable.className = 'aui-md-table w-full border-collapse text-sm'
+        sourceTable.innerHTML = '<thead><tr><th>Project</th></tr></thead><tbody><tr><td>HAPI</td></tr></tbody>'
+
+        render(
+            <I18nProvider>
+                <TableViewerFromElement
+                    open
+                    onClose={() => {}}
+                    table={sourceTable}
+                    imageTitle="Shared table"
+                />
+            </I18nProvider>,
+        )
+
+        const dialog = await screen.findByRole('dialog', { name: 'Shared table' })
+        const viewerTable = dialog.querySelector('table')
+        expect(viewerTable).toHaveClass('w-max', 'min-w-full')
+        expect(viewerTable).not.toHaveClass('w-full')
     })
 
     it('remembers an explicit wrapping choice when the same table is reopened', async () => {

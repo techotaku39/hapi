@@ -1018,7 +1018,7 @@ export function TableViewerFromElement(props: {
 }) {
     const tableRef = useRef<HTMLTableElement | null>(null)
     const tableProps: TableProps = {
-        className: props.table.getAttribute('class') ?? undefined,
+        className: cn(props.table.getAttribute('class'), 'w-max min-w-full'),
         dangerouslySetInnerHTML: { __html: props.table.innerHTML },
     }
 
@@ -1046,7 +1046,7 @@ export function MarkdownTable(props: TableProps) {
     const openRef = useRef(false)
     const mobileViewerRef = useRef(false)
     const enteredFullscreenRef = useRef(false)
-    const imageTitle = chatContext?.sessionTitle ?? 'Table'
+    const imageTitle = chatContext?.sessionTitle?.trim() || t('table.viewerTitle')
     const tableWrapScope = chatContext?.sessionId ?? imageTitle
 
     const closeViewer = useCallback(() => {
