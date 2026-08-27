@@ -668,7 +668,7 @@ export async function enterMobileTableViewer(): Promise<boolean> {
         : undefined
     if (orientation && typeof orientation.lock === 'function') {
         try {
-            await orientation.lock('landscape')
+            void orientation.lock('landscape').catch(() => undefined)
         } catch {
             // Orientation lock is unavailable on some browsers and iOS versions.
         }

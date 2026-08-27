@@ -468,6 +468,48 @@ describe('MarkdownTable', () => {
         expect(screen.queryByRole('dialog', { name: 'Table' })).not.toBeInTheDocument()
     })
 
+    it('does not miss external fullscreen exit while orientation lock is pending', async () => {
+        window.matchMedia = vi.fn((query: string) => ({
+            matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
+            media: query,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false },
+        })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+
+        const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+        Object.defineProperty(document.documentElement, 'requestFullscreen', {
+            configurable: true,
+            value: requestFullscreen,
+        })
+        let resolveLock: (() => void) | undefined
+        const lock = vi.fn().mockImplementation(() => new Promise<void>((resolve) => {
+            resolveLock = resolve
+        }))
+        const unlock = vi.fn()
+        Object.defineProperty(window.screen, 'orientation', {
+            configurable: true,
+            value: { lock, unlock },
+        })
+
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await waitFor(() => {
+            expect(requestFullscreen).toHaveBeenCalledTimes(1)
+            expect(lock).toHaveBeenCalledWith('landscape')
+        })
+
+        document.dispatchEvent(new Event('fullscreenchange'))
+        await waitFor(() => expect(unlock).toHaveBeenCalledTimes(1))
+        expect(screen.queryByRole('dialog', { name: 'Table' })).not.toBeInTheDocument()
+        resolveLock?.()
+    })
+
     it('defers PNG rendering until the user requests an image save', async () => {
         window.matchMedia = vi.fn((query: string) => ({
             matches: query.includes('pointer: coarse'),
