@@ -8,10 +8,15 @@ vi.mock('html2canvas-pro', () => ({ default: html2canvas }))
 
 import {
     downloadTableAsCsv,
+    getTableExportScale,
+    getTableExportHeight,
+    getTableExportTileHeight,
     isMobileTableViewerViewport,
     MAX_TABLE_EXPORT_PIXELS,
+    MAX_TABLE_EXPORT_TILE_PIXELS,
     renderTableAsImage,
     saveTableAsImage,
+    shouldWrapTableByDefault,
     serializeTableToMarkdown,
     serializeTableToCsv,
 } from './MarkdownTable'
@@ -21,7 +26,8 @@ const TABLE_MARKDOWN = `| Project | Stars |
 | HAPI | 128 |
 | HAPI, local-first | 42 |`
 
-function renderTable() {
+function renderTable(locale: 'en' | 'zh-CN' = 'en') {
+    localStorage.setItem('hapi-lang', locale)
     return render(
         <I18nProvider>
             <MarkdownRenderer standalone content={TABLE_MARKDOWN} />
@@ -34,6 +40,8 @@ describe('MarkdownTable', () => {
     const originalOrientation = window.screen.orientation
     const originalNavigatorShare = navigator.share
     const originalNavigatorCanShare = navigator.canShare
+    const originalNavigatorClipboard = navigator.clipboard
+    const originalClipboardItem = window.ClipboardItem
     const originalMaxTouchPoints = navigator.maxTouchPoints
     const originalUserAgent = navigator.userAgent
     const originalInnerWidth = window.innerWidth
@@ -52,6 +60,8 @@ describe('MarkdownTable', () => {
             configurable: true,
             value: originalNavigatorCanShare,
         })
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalNavigatorClipboard })
+        Object.defineProperty(window, 'ClipboardItem', { configurable: true, value: originalClipboardItem })
         Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
         Object.defineProperty(navigator, 'userAgent', { configurable: true, value: originalUserAgent })
         Object.defineProperty(window.screen, 'orientation', {
@@ -72,6 +82,8 @@ describe('MarkdownTable', () => {
             configurable: true,
             value: originalNavigatorCanShare,
         })
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalNavigatorClipboard })
+        Object.defineProperty(window, 'ClipboardItem', { configurable: true, value: originalClipboardItem })
         Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
         Object.defineProperty(navigator, 'userAgent', { configurable: true, value: originalUserAgent })
         Object.defineProperty(window.screen, 'orientation', {
@@ -90,7 +102,7 @@ describe('MarkdownTable', () => {
         expect(table.parentElement?.parentElement).toHaveClass('aui-md-table-shell')
         const actions = table.parentElement?.parentElement?.querySelector('.aui-md-table-actions')
         expect(actions?.querySelectorAll('button')).toHaveLength(1)
-        expect(actions).toHaveAttribute('data-hapi-share-exclude', 'true')
+        expect(actions).toHaveAttribute('data-hapi-share-export-exclude', 'true')
         expect(screen.getByRole('button', { name: 'Open table full screen' })).toBeInTheDocument()
     })
 
@@ -112,18 +124,69 @@ describe('MarkdownTable', () => {
         expect(await screen.findByRole('dialog', { name: 'Table' })).toBeInTheDocument()
         const dialog = screen.getByRole('dialog', { name: 'Table' })
         expect(dialog).toContainElement(screen.getByRole('table'))
-        expect(screen.getByRole('button', { name: 'Copy table as Markdown' })).toBeInTheDocument()
-        const saveButton = screen.getByRole('button', { name: 'Save table as image' })
-        expect(saveButton).toBeInTheDocument()
-        expect(saveButton.querySelector('svg rect')).toHaveAttribute('width', '18')
-        expect(saveButton.querySelector('svg rect')).toHaveAttribute('height', '18')
-        expect(saveButton.querySelectorAll('svg path')).toHaveLength(1)
-        expect(screen.getByRole('button', { name: 'Download table as CSV' })).toBeInTheDocument()
+        const wrapButton = screen.getByRole('button', { name: 'Enable table wrapping' })
+        expect(wrapButton).toHaveAttribute('aria-pressed', 'false')
+        const copyMenuTrigger = screen.getByRole('button', { name: 'Copy table' })
+        expect(copyMenuTrigger).toHaveAttribute('aria-haspopup', 'menu')
+        fireEvent.click(copyMenuTrigger)
+        expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Copy image', 'Copy Markdown'])
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Markdown' }))
+        const downloadMenuTrigger = screen.getByRole('button', { name: 'Download table' })
+        expect(downloadMenuTrigger).toHaveAttribute('aria-haspopup', 'menu')
+        fireEvent.click(downloadMenuTrigger)
+        expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Download PNG', 'Download CSV'])
         expect(requestFullscreen).not.toHaveBeenCalled()
         expect(lock).not.toHaveBeenCalled()
 
+        fireEvent.click(wrapButton)
+        expect(screen.getByRole('button', { name: 'Disable table wrapping' })).toHaveAttribute('aria-pressed', 'true')
+        expect(dialog.querySelector('[data-hapi-table-viewer="true"]')).toHaveClass('overflow-x-hidden', 'overflow-y-auto')
+        expect(dialog.querySelector('[data-hapi-table-wrap="true"]')).toBeInTheDocument()
+
         fireEvent.click(screen.getByRole('button', { name: 'Close table full screen' }))
         await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Table' })).not.toBeInTheDocument())
+    })
+
+    it('uses concise Chinese labels for the copy and download menus', async () => {
+        renderTable('zh-CN')
+        fireEvent.click(screen.getByRole('button', { name: '横向全屏查看表格' }))
+
+        await screen.findByRole('dialog', { name: 'Table' })
+        fireEvent.click(screen.getByRole('button', { name: '复制表格' }))
+        expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['复制图片', '复制 Markdown'])
+        fireEvent.click(screen.getByRole('menuitem', { name: '复制 Markdown' }))
+
+        fireEvent.click(screen.getByRole('button', { name: '下载表格' }))
+        expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['下载 PNG', '下载 CSV'])
+    })
+
+    it('remembers an explicit wrapping choice when the same table is reopened', async () => {
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await screen.findByRole('dialog', { name: 'Table' })
+        fireEvent.click(screen.getByRole('button', { name: 'Enable table wrapping' }))
+        expect(screen.getByRole('button', { name: 'Disable table wrapping' })).toHaveAttribute('aria-pressed', 'true')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Close table full screen' }))
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Table' })).not.toBeInTheDocument())
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+
+        const reopenedDialog = await screen.findByRole('dialog', { name: 'Table' })
+        expect(screen.getByRole('button', { name: 'Disable table wrapping' })).toHaveAttribute('aria-pressed', 'true')
+        fireEvent.click(screen.getByRole('button', { name: 'Close table full screen' }))
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Table' })).not.toBeInTheDocument())
+        expect(reopenedDialog).toBeTruthy()
+    })
+
+    it('uses horizontal overflow to choose the first-open default', () => {
+        const table = document.createElement('table')
+        const viewer = document.createElement('div')
+        Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 901 })
+        Object.defineProperty(viewer, 'clientWidth', { configurable: true, value: 900 })
+        expect(shouldWrapTableByDefault(table, viewer)).toBe(false)
+
+        Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 902 })
+        expect(shouldWrapTableByDefault(table, viewer)).toBe(true)
     })
 
     it('shows a saving status while the PNG is being generated', async () => {
@@ -138,18 +201,53 @@ describe('MarkdownTable', () => {
 
         renderTable()
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
-        fireEvent.click(await screen.findByRole('button', { name: 'Save table as image' }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Download table' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Download PNG' }))
 
         const savingStatus = screen.getByRole('status')
         expect(savingStatus).toHaveTextContent('Saving image…')
         expect(savingStatus).toHaveAttribute('data-hapi-table-save-status', 'true')
         expect(savingStatus).toHaveClass('left-1/2', '-translate-x-1/2', 'rounded-full')
         expect(savingStatus.querySelector('svg')).toHaveClass('animate-spin')
-        expect(screen.getByRole('button', { name: 'Saving image…' })).toBeDisabled()
 
         resolveCanvas?.({
             toBlob: (callback: BlobCallback) => callback(new Blob(['png'], { type: 'image/png' })),
         })
+        await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    })
+
+    it('copies a generated table image from the PC copy menu', async () => {
+        type CanvasStub = { toBlob: (callback: BlobCallback) => void }
+        let resolveCanvas: ((value: CanvasStub | PromiseLike<CanvasStub>) => void) | undefined
+        html2canvas.mockReturnValue(new Promise<CanvasStub>((resolve) => {
+            resolveCanvas = resolve
+        }))
+        const write = vi.fn().mockResolvedValue(undefined)
+        class ClipboardItemStub {
+            constructor(public readonly data: Record<string, Blob>) {}
+        }
+        Object.defineProperty(window, 'ClipboardItem', { configurable: true, value: ClipboardItemStub })
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } })
+
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await screen.findByRole('dialog', { name: 'Table' })
+        fireEvent.click(screen.getByRole('button', { name: 'Copy table' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy image' }))
+
+        expect(screen.getByRole('status')).toHaveTextContent('Copying image…')
+        expect(screen.getByRole('status')).toHaveAttribute('data-hapi-table-save-status-action', 'copy')
+        expect(screen.getByRole('status')).toHaveClass(
+            'border-[var(--app-fg)]',
+            'bg-[var(--app-fg)]',
+            'text-[var(--app-bg)]',
+            'shadow-md',
+        )
+        resolveCanvas?.({
+            toBlob: (callback: BlobCallback) => callback(new Blob(['png'], { type: 'image/png' })),
+        })
+        await waitFor(() => expect(write).toHaveBeenCalledWith([expect.any(ClipboardItemStub)]))
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Copy table' }).querySelector('polyline')).toBeInTheDocument())
         await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     })
 
@@ -222,7 +320,8 @@ describe('MarkdownTable', () => {
         await screen.findByRole('dialog', { name: 'Table' })
         expect(html2canvas).not.toHaveBeenCalled()
 
-        fireEvent.click(screen.getByRole('button', { name: 'Save table as image' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Download table' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Download PNG' }))
         await waitFor(() => expect(html2canvas).toHaveBeenCalledTimes(1))
     })
 
@@ -339,6 +438,33 @@ describe('MarkdownTable', () => {
         await waitFor(() => expect(toolbar).toHaveAttribute('aria-hidden', 'false'))
     })
 
+    it('keeps the toolbar visible when collapsing it would clamp the bottom scroll position', async () => {
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        const dialog = await screen.findByRole('dialog', { name: 'Table' })
+        const toolbar = dialog.querySelector('[data-hapi-table-viewer-toolbar="true"]') as HTMLDivElement
+        const viewer = dialog.querySelector('[data-hapi-table-viewer="true"]') as HTMLDivElement
+        vi.spyOn(toolbar, 'getBoundingClientRect').mockReturnValue({ height: 36 } as DOMRect)
+
+        let scrollTop = 0
+        Object.defineProperty(viewer, 'scrollTop', {
+            configurable: true,
+            get: () => scrollTop,
+        })
+        Object.defineProperty(viewer, 'scrollHeight', {
+            configurable: true,
+            get: () => 100,
+        })
+        Object.defineProperty(viewer, 'clientHeight', {
+            configurable: true,
+            get: () => 64,
+        })
+
+        scrollTop = 36
+        fireEvent.scroll(viewer)
+        await waitFor(() => expect(toolbar).toHaveAttribute('aria-hidden', 'false'))
+    })
+
     it('serializes table cells as an Excel-friendly CSV', () => {
         const table = document.createElement('table')
         table.innerHTML = '<thead><tr><th>Project</th><th>Stars</th></tr></thead><tbody><tr><td>HAPI</td><td>128</td></tr><tr><td>HAPI, local-first</td><td>42</td></tr></tbody>'
@@ -435,21 +561,108 @@ describe('MarkdownTable', () => {
         expect(table.querySelector('thead')).toHaveStyle({ position: 'sticky', top: '0px' })
     })
 
-    it('caps large table PNG rasterization to the pixel budget', async () => {
+    it('preserves source column widths and header styling in the image clone', async () => {
         const table = document.createElement('table')
-        table.innerHTML = '<tr><td>HAPI</td></tr>'
-        Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 10_000 })
-        Object.defineProperty(table, 'scrollHeight', { configurable: true, value: 10_000 })
-        vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ width: 10_000, height: 10_000 } as DOMRect)
+        table.innerHTML = '<thead><tr><th>Project</th><th>Status</th></tr></thead><tbody><tr><td>HAPI</td><td>Ready</td></tr></tbody>'
+        table.style.backgroundColor = 'rgb(28, 28, 30)'
+        table.tHead!.style.backgroundColor = 'rgb(53, 59, 67)'
+        Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 1_200 })
+        vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ top: 0, width: 1_200, height: 120 } as DOMRect)
+        const rows = Array.from(table.rows)
+        rows.forEach((row, rowIndex) => {
+            vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: rowIndex * 60, bottom: (rowIndex + 1) * 60, height: 60 } as DOMRect)
+            Array.from(row.cells).forEach((cell, cellIndex) => {
+                vi.spyOn(cell, 'getBoundingClientRect').mockReturnValue({
+                    width: 600,
+                    height: 60,
+                    left: cellIndex * 600,
+                    right: (cellIndex + 1) * 600,
+                } as DOMRect)
+            })
+        })
         html2canvas.mockResolvedValue({
             toBlob: (callback: BlobCallback) => callback(new Blob(['png'], { type: 'image/png' })),
         })
 
         await renderTableAsImage(table)
 
-        const options = html2canvas.mock.calls[0]?.[1] as { width: number; height: number; scale: number }
-        expect(options.scale).toBeLessThan(1)
-        expect(options.width * options.height * options.scale ** 2).toBeLessThanOrEqual(MAX_TABLE_EXPORT_PIXELS)
+        const renderedTable = html2canvas.mock.calls[0]?.[0] as HTMLTableElement | undefined
+        expect(renderedTable?.style.tableLayout).toBe('fixed')
+        expect(Array.from(renderedTable?.querySelectorAll('col') ?? []).map((col) => col.style.width)).toEqual(['600px', '600px'])
+        expect(renderedTable?.tHead?.style.backgroundColor).toBe('rgb(53, 59, 67)')
+        expect(renderedTable?.tHead?.querySelector('th')?.style.backgroundColor).toBe('rgb(53, 59, 67)')
+    })
+
+    it('crops trailing table box space from PNG exports', async () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<tbody><tr><td>HAPI</td></tr></tbody>'
+        Object.defineProperty(table, 'scrollHeight', { configurable: true, value: 844 })
+        vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({
+            top: 120,
+            width: 1_851,
+            height: 844,
+        } as DOMRect)
+        const row = table.querySelector('tr')
+        vi.spyOn(row!, 'getBoundingClientRect').mockReturnValue({
+            top: 120,
+            bottom: 720,
+            height: 600,
+        } as DOMRect)
+        html2canvas.mockResolvedValue({
+            toBlob: (callback: BlobCallback) => callback(new Blob(['png'], { type: 'image/png' })),
+        })
+
+        expect(getTableExportHeight(table)).toBe(600)
+        await renderTableAsImage(table)
+
+        const renderedTable = html2canvas.mock.calls[0]?.[0] as HTMLTableElement | undefined
+        const options = html2canvas.mock.calls[0]?.[1] as { height: number } | undefined
+        expect(options?.height).toBe(600)
+        expect(renderedTable?.style.height).toBe('600px')
+    })
+
+    it('keeps export scale bounded and calculates safe vertical tiles', () => {
+        const scale = getTableExportScale(10_000, 10_000, 1)
+        expect(scale).toBeLessThan(1)
+        expect(10_000 * 10_000 * scale ** 2).toBeLessThanOrEqual(MAX_TABLE_EXPORT_PIXELS)
+
+        const tileHeight = getTableExportTileHeight(3_000, 2)
+        expect(3_000 * tileHeight * 2 ** 2).toBeLessThanOrEqual(MAX_TABLE_EXPORT_TILE_PIXELS)
+        expect(3_000 * (tileHeight + 1) * 2 ** 2).toBeGreaterThan(MAX_TABLE_EXPORT_TILE_PIXELS)
+    })
+
+    it('stitches oversized exports from bounded vertical tiles', async () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<tr><td>HAPI</td></tr>'
+        Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 3_000 })
+        Object.defineProperty(table, 'scrollHeight', { configurable: true, value: 4_000 })
+        vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ width: 3_000, height: 4_000 } as DOMRect)
+
+        const originalDevicePixelRatio = window.devicePixelRatio
+        Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 })
+        const drawImage = vi.fn()
+        const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D)
+        const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => {
+            callback(new Blob(['png'], { type: 'image/png' }))
+        })
+        html2canvas.mockImplementation(async (_element: HTMLElement, options: { width: number; height: number; scale: number }) => ({
+            width: Math.ceil(options.width * options.scale),
+            height: Math.ceil(options.height * options.scale),
+            toBlob: (callback: BlobCallback) => callback(new Blob(['tile'], { type: 'image/png' })),
+        }))
+
+        try {
+            await renderTableAsImage(table)
+
+            const expectedTiles = Math.ceil(4_000 / getTableExportTileHeight(3_000, getTableExportScale(3_000, 4_000, 2)))
+            expect(html2canvas).toHaveBeenCalledTimes(expectedTiles)
+            expect(drawImage).toHaveBeenCalledTimes(expectedTiles)
+            expect(toBlob).toHaveBeenCalledTimes(1)
+            expect(getContext).toHaveBeenCalledWith('2d')
+            expect(document.querySelector('[data-hapi-table-image-render="true"]')).toBeNull()
+        } finally {
+            Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: originalDevicePixelRatio })
+        }
     })
 
     it('uses the same direct download path on touch devices as shared images', () => {

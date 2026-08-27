@@ -1,6 +1,7 @@
 import {
     useCallback,
     useEffect,
+    useLayoutEffect,
     useRef,
     useState,
     type ComponentPropsWithoutRef,
@@ -8,7 +9,8 @@ import {
     type ReactNode,
 } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { CheckIcon, CloseIcon, CopyIcon } from '@/components/icons'
+import * as Popover from '@radix-ui/react-popover'
+import { CheckIcon, CloseIcon, CopyIcon, WrapIcon } from '@/components/icons'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
 import { Spinner } from '@/components/Spinner'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -64,25 +66,6 @@ function DownloadIcon(props: IconProps) {
     )
 }
 
-function ImageIcon(props: IconProps) {
-    return (
-        <svg
-            className={props.className ?? 'h-4 w-4'}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-        >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="m3 16 5-5 4 4 3-3 6 6" />
-        </svg>
-    )
-}
-
 function TableActionButton(props: {
     label: string
     onClick: () => void
@@ -119,6 +102,93 @@ function isCoarsePointerDevice(): boolean {
     const desktopModeIpad = /Macintosh/i.test(userAgent) && touchPoints > 1
 
     return coarsePointer || mobileUserAgent || desktopModeIpad
+}
+
+function TableActionMenu(props: {
+    label: string
+    children: ReactNode
+    tabIndex?: number
+    items: Array<{
+        label: string
+        onSelect: () => void
+        disabled?: boolean
+    }>
+}) {
+    const [open, setOpen] = useState(false)
+    const closeTimerRef = useRef<number | null>(null)
+
+    const clearCloseTimer = useCallback(() => {
+        if (closeTimerRef.current == null) return
+        window.clearTimeout(closeTimerRef.current)
+        closeTimerRef.current = null
+    }, [])
+
+    const scheduleClose = useCallback(() => {
+        clearCloseTimer()
+        closeTimerRef.current = window.setTimeout(() => {
+            closeTimerRef.current = null
+            setOpen(false)
+        }, 140)
+    }, [clearCloseTimer])
+
+    useEffect(() => () => clearCloseTimer(), [clearCloseTimer])
+
+    return (
+        <Popover.Root open={open} onOpenChange={setOpen}>
+            <div
+                className="shrink-0"
+                onMouseEnter={clearCloseTimer}
+                onMouseLeave={scheduleClose}
+            >
+                <Popover.Trigger asChild>
+                    <button
+                        type="button"
+                        aria-label={props.label}
+                        title={props.label}
+                        tabIndex={props.tabIndex}
+                        aria-haspopup="menu"
+                        aria-expanded={open}
+                        onMouseEnter={() => {
+                            clearCloseTimer()
+                            setOpen(true)
+                        }}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    >
+                        {props.children}
+                    </button>
+                </Popover.Trigger>
+                <Popover.Portal>
+                    <Popover.Content
+                        side="bottom"
+                        align="end"
+                        sideOffset={4}
+                        collisionPadding={8}
+                        onMouseEnter={clearCloseTimer}
+                        onMouseLeave={scheduleClose}
+                        className="z-[60] w-max min-w-0 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg"
+                    >
+                        <div role="menu" aria-label={props.label} className="flex w-max flex-col gap-0.5">
+                            {props.items.map((item) => (
+                                <button
+                                    key={item.label}
+                                    type="button"
+                                    role="menuitem"
+                                    disabled={item.disabled}
+                                    onClick={() => {
+                                        setOpen(false)
+                                        item.onSelect()
+                                    }}
+                                    className="w-full whitespace-nowrap rounded px-2.5 py-1.5 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-wait disabled:opacity-50"
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                    </Popover.Content>
+                </Popover.Portal>
+            </div>
+        </Popover.Root>
+    )
 }
 
 /** Exported for responsive behavior tests and future table viewers. */
@@ -186,6 +256,47 @@ export function serializeTableToMarkdown(table: HTMLTableElement): string {
     ].join('\n') + '\n'
 }
 
+const TABLE_WRAP_PREFERENCE_PREFIX = 'hapi-table-wrap:v1'
+
+function hashTableWrapIdentity(value: string): string {
+    let hash = 2166136261
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index)
+        hash = Math.imul(hash, 16777619)
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+export function getTableWrapPreferenceKey(table: HTMLTableElement, scope = 'Table'): string {
+    const identity = `${scope.trim() || 'Table'}\n${serializeTableToMarkdown(table)}`
+    return `${TABLE_WRAP_PREFERENCE_PREFIX}:${hashTableWrapIdentity(identity)}`
+}
+
+export function shouldWrapTableByDefault(table: HTMLTableElement, viewer: HTMLElement): boolean {
+    return table.scrollWidth > viewer.clientWidth + 1
+}
+
+function readTableWrapPreference(key: string | undefined): boolean | null {
+    if (!key || typeof window === 'undefined') return null
+    try {
+        const value = window.localStorage.getItem(key)
+        if (value === '1') return true
+        if (value === '0') return false
+    } catch {
+        // Private browsing and blocked storage should not affect the viewer.
+    }
+    return null
+}
+
+function writeTableWrapPreference(key: string | undefined, value: boolean): void {
+    if (!key || typeof window === 'undefined') return
+    try {
+        window.localStorage.setItem(key, value ? '1' : '0')
+    } catch {
+        // Ignore storage quota and privacy-mode failures.
+    }
+}
+
 export function downloadTableAsCsv(table: HTMLTableElement, filename = 'hapi-table.csv'): void {
     if (typeof document === 'undefined' || typeof URL.createObjectURL !== 'function') return
 
@@ -207,8 +318,136 @@ function downloadBlob(blob: Blob, filename: string): void {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-function createStaticTableImageClone(table: HTMLTableElement, tableWidth: number): {
+const TABLE_IMAGE_STYLE_PROPERTIES = [
+    'background-color',
+    'border-bottom-color',
+    'border-bottom-style',
+    'border-bottom-width',
+    'border-collapse',
+    'border-left-color',
+    'border-left-style',
+    'border-left-width',
+    'border-right-color',
+    'border-right-style',
+    'border-right-width',
+    'border-spacing',
+    'border-top-color',
+    'border-top-style',
+    'border-top-width',
+    'box-sizing',
+    'color',
+    'font-family',
+    'font-size',
+    'font-style',
+    'font-weight',
+    'letter-spacing',
+    'line-height',
+    'overflow-wrap',
+    'padding-bottom',
+    'padding-left',
+    'padding-right',
+    'padding-top',
+    'text-align',
+    'text-decoration',
+    'text-transform',
+    'vertical-align',
+    'white-space',
+    'word-break',
+] as const
+
+function copyTableImageStyles(source: HTMLTableElement, clone: HTMLTableElement): void {
+    const sourceElements = [source, ...Array.from(source.querySelectorAll('*'))]
+    const cloneElements = [clone, ...Array.from(clone.querySelectorAll('*'))]
+
+    sourceElements.forEach((sourceElement, index) => {
+        const cloneElement = cloneElements[index]
+        if (!cloneElement) return
+        const cloneStyle = (cloneElement as Element & { style?: CSSStyleDeclaration }).style
+        if (!cloneStyle) return
+        const computedStyle = getComputedStyle(sourceElement)
+        for (const property of TABLE_IMAGE_STYLE_PROPERTIES) {
+            cloneStyle.setProperty(property, computedStyle.getPropertyValue(property), 'important')
+        }
+    })
+}
+
+function getTableColumnWidths(table: HTMLTableElement): number[] {
+    const widths: number[] = []
+    for (const row of Array.from(table.rows)) {
+        let columnIndex = 0
+        for (const cell of Array.from(row.cells)) {
+            const span = Math.max(1, cell.colSpan || 1)
+            const cellWidth = cell.getBoundingClientRect().width
+            if (cellWidth > 0 && Number.isFinite(cellWidth)) {
+                const columnWidth = cellWidth / span
+                for (let offset = 0; offset < span; offset += 1) {
+                    const index = columnIndex + offset
+                    widths[index] = Math.max(widths[index] ?? 0, columnWidth)
+                }
+            }
+            columnIndex += span
+        }
+    }
+    return widths
+}
+
+function applyTableImageColumnWidths(table: HTMLTableElement, clone: HTMLTableElement, tableWidth: number): void {
+    const measuredWidths = getTableColumnWidths(table)
+    const totalMeasuredWidth = measuredWidths.reduce((total, width) => total + width, 0)
+    if (measuredWidths.length === 0 || totalMeasuredWidth <= 0) return
+
+    const widthScale = tableWidth / totalMeasuredWidth
+    const colgroup = document.createElement('colgroup')
+    for (const measuredWidth of measuredWidths) {
+        const col = document.createElement('col')
+        col.style.width = `${measuredWidth * widthScale}px`
+        colgroup.appendChild(col)
+    }
+    clone.querySelectorAll(':scope > colgroup').forEach((existing) => existing.remove())
+    clone.insertBefore(colgroup, clone.firstChild)
+    clone.style.setProperty('table-layout', 'fixed', 'important')
+}
+
+function isTransparentColor(value: string): boolean {
+    return value === '' || value === 'transparent' || /rgba\([^)]*,\s*0\s*\)$/i.test(value)
+}
+
+function getTableHeaderBackground(table: HTMLTableElement): string | null {
+    const head = table.tHead
+    if (!head) return null
+    const computedBackground = getComputedStyle(head).backgroundColor
+    if (!isTransparentColor(computedBackground)) return computedBackground
+
+    let element: Element | null = head
+    while (element) {
+        const value = getComputedStyle(element).getPropertyValue('--app-md-table-head-bg').trim()
+        if (value) return value
+        element = element.parentElement
+    }
+    return getComputedStyle(document.documentElement).getPropertyValue('--app-md-table-head-bg').trim() || null
+}
+
+function applyTableImageHeaderBackground(table: HTMLTableElement, clone: HTMLTableElement): void {
+    const background = getTableHeaderBackground(table)
+    const cloneHead = clone.tHead
+    if (!background || !cloneHead) return
+
+    cloneHead.style.setProperty('background-color', background, 'important')
+    cloneHead.querySelectorAll(':is(th, td)').forEach((cell) => {
+        if (!(cell instanceof HTMLElement)) return
+        cell.style.setProperty('background-color', background, 'important')
+    })
+}
+
+function createStaticTableImageClone(
+    table: HTMLTableElement,
+    tableWidth: number,
+    tableHeight: number,
+    tileTop = 0,
+    tileHeight?: number,
+): {
     table: HTMLTableElement
+    capture: HTMLElement
     cleanup: () => void
 } {
     const wrapper = document.createElement('div')
@@ -219,13 +458,21 @@ function createStaticTableImageClone(table: HTMLTableElement, tableWidth: number
         top: '0',
         width: `${tableWidth}px`,
         maxWidth: 'none',
-        overflow: 'visible',
+        height: tileHeight == null ? 'auto' : `${tileHeight}px`,
+        overflow: tileHeight == null ? 'visible' : 'hidden',
         pointerEvents: 'none',
     })
 
     const clone = table.cloneNode(true) as HTMLTableElement
     clone.style.setProperty('width', `${tableWidth}px`, 'important')
     clone.style.setProperty('min-width', `${tableWidth}px`, 'important')
+    clone.style.setProperty('height', `${tableHeight}px`, 'important')
+    copyTableImageStyles(table, clone)
+    applyTableImageColumnWidths(table, clone, tableWidth)
+    applyTableImageHeaderBackground(table, clone)
+    if (tileHeight != null && tileTop > 0) {
+        clone.style.setProperty('transform', `translateY(-${tileTop}px)`, 'important')
+    }
     clone.querySelectorAll('thead, thead *').forEach((element) => {
         if (!(element instanceof HTMLElement)) return
         element.style.setProperty('position', 'static', 'important')
@@ -237,51 +484,129 @@ function createStaticTableImageClone(table: HTMLTableElement, tableWidth: number
     document.body.appendChild(wrapper)
     return {
         table: clone,
+        capture: tileHeight == null ? clone : wrapper,
         cleanup: () => wrapper.remove(),
     }
 }
 
-export const MAX_TABLE_EXPORT_PIXELS = 24_000_000
+export const MAX_TABLE_EXPORT_PIXELS = 36_000_000
+export const MAX_TABLE_EXPORT_TILE_PIXELS = 12_000_000
+
+export function getTableExportScale(
+    tableWidth: number,
+    tableHeight: number,
+    devicePixelRatio = typeof window === 'undefined' ? 1 : window.devicePixelRatio,
+): number {
+    const area = Math.max(1, tableWidth) * Math.max(1, tableHeight)
+    return Math.min(
+        devicePixelRatio || 1,
+        2,
+        Math.sqrt(MAX_TABLE_EXPORT_PIXELS / area),
+    )
+}
+
+export function getTableExportTileHeight(tableWidth: number, scale: number): number {
+    return Math.max(1, Math.floor(
+        MAX_TABLE_EXPORT_TILE_PIXELS / Math.max(1, tableWidth * scale * scale),
+    ))
+}
+
+export function getTableExportHeight(table: HTMLTableElement): number {
+    const tableRect = table.getBoundingClientRect()
+    const fallbackHeight = Math.max(table.scrollHeight, Math.ceil(tableRect.height), 1)
+    const rowBottoms = Array.from(table.rows)
+        .map((row) => row.getBoundingClientRect())
+        .filter((rowRect) => rowRect.height > 0 && Number.isFinite(rowRect.bottom))
+        .map((rowRect) => rowRect.bottom - tableRect.top)
+    if (rowBottoms.length === 0) return fallbackHeight
+
+    const contentHeight = Math.ceil(Math.max(...rowBottoms))
+    return contentHeight > 0 ? Math.min(fallbackHeight, contentHeight) : fallbackHeight
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+    return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png')).then((blob) => {
+        if (!blob) throw new Error('Failed to encode table image')
+        return blob
+    })
+}
 
 export async function renderTableAsImage(table: HTMLTableElement): Promise<Blob> {
     if (typeof document === 'undefined') throw new Error('Cannot render a table outside the browser')
 
     const { default: html2canvas } = await import('html2canvas-pro')
-    const tableWidth = Math.max(table.scrollWidth, Math.ceil(table.getBoundingClientRect().width), 1)
-    const tableHeight = Math.max(table.scrollHeight, Math.ceil(table.getBoundingClientRect().height), 1)
+    const tableRect = table.getBoundingClientRect()
+    const tableWidth = Math.max(table.scrollWidth, Math.ceil(tableRect.width), 1)
+    const tableHeight = getTableExportHeight(table)
     const tableBackground = getComputedStyle(table).backgroundColor
     const backgroundColor = tableBackground === 'rgba(0, 0, 0, 0)'
         ? getComputedStyle(document.body).backgroundColor
         : tableBackground
-    const scale = Math.min(
-        window.devicePixelRatio || 1,
-        2,
-        Math.sqrt(MAX_TABLE_EXPORT_PIXELS / (tableWidth * tableHeight)),
-    )
-    const imageTable = createStaticTableImageClone(table, tableWidth)
-    try {
-        const canvas = await html2canvas(imageTable.table, {
-            backgroundColor: backgroundColor || null,
-            foreignObjectRendering: false,
-            logging: false,
-            scale,
-            useCORS: true,
-            width: tableWidth,
-            height: tableHeight,
-            windowWidth: Math.max(document.documentElement.clientWidth, tableWidth),
-            windowHeight: Math.max(document.documentElement.clientHeight, tableHeight),
-        })
-        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
-        if (!blob) throw new Error('Failed to encode table image')
-        return blob
-    } finally {
-        imageTable.cleanup()
+    const scale = getTableExportScale(tableWidth, tableHeight)
+    const rasterPixels = tableWidth * tableHeight * scale * scale
+    const renderOptions = {
+        backgroundColor: backgroundColor || null,
+        foreignObjectRendering: false,
+        logging: false,
+        scale,
+        useCORS: true,
+        windowWidth: Math.max(document.documentElement.clientWidth, tableWidth),
+        windowHeight: Math.max(document.documentElement.clientHeight, tableHeight),
     }
+
+    if (rasterPixels <= MAX_TABLE_EXPORT_TILE_PIXELS) {
+        const imageTable = createStaticTableImageClone(table, tableWidth, tableHeight)
+        try {
+            const canvas = await html2canvas(imageTable.capture, {
+                ...renderOptions,
+                width: tableWidth,
+                height: tableHeight,
+            })
+            return canvasToPngBlob(canvas)
+        } finally {
+            imageTable.cleanup()
+        }
+    }
+
+    const outputCanvas = document.createElement('canvas')
+    outputCanvas.width = Math.max(1, Math.ceil(tableWidth * scale))
+    outputCanvas.height = Math.max(1, Math.ceil(tableHeight * scale))
+    const outputContext = outputCanvas.getContext('2d')
+    if (!outputContext) throw new Error('Failed to create table image canvas')
+
+    const tileHeight = getTableExportTileHeight(tableWidth, scale)
+    for (let tileTop = 0; tileTop < tableHeight; tileTop += tileHeight) {
+        const currentTileHeight = Math.min(tileHeight, tableHeight - tileTop)
+        const imageTable = createStaticTableImageClone(table, tableWidth, tableHeight, tileTop, currentTileHeight)
+        try {
+            const tileCanvas = await html2canvas(imageTable.capture, {
+                ...renderOptions,
+                width: tableWidth,
+                height: currentTileHeight,
+                windowHeight: Math.max(document.documentElement.clientHeight, currentTileHeight),
+            })
+            outputContext.drawImage(tileCanvas, 0, Math.round(tileTop * scale))
+        } finally {
+            imageTable.cleanup()
+        }
+    }
+
+    return canvasToPngBlob(outputCanvas)
 }
 
 export async function saveTableAsImage(table: HTMLTableElement, filename = getShareImageFileName('Table', 'table')): Promise<void> {
     const blob = await renderTableAsImage(table)
     await downloadBlob(blob, filename)
+}
+
+export async function copyTableImageToClipboard(blob: Blob): Promise<void> {
+    const ClipboardItemCtor = window.ClipboardItem
+    if (!navigator.clipboard?.write || !ClipboardItemCtor) {
+        throw new Error('Image clipboard is not supported in this browser')
+    }
+    await navigator.clipboard.write([
+        new ClipboardItemCtor({ [blob.type]: blob }),
+    ])
 }
 
 /**
@@ -341,17 +666,22 @@ function TableViewer(props: {
     tableProps: TableProps
     tableRef: RefObject<HTMLTableElement | null>
     imageTitle: string
+    tableWrapPreferenceKey?: string
 }) {
     const { t } = useTranslation()
     const { className, children, ...rest } = props.tableProps
-    const { copied, copy } = useCopyToClipboard()
-    const [savingImage, setSavingImage] = useState(false)
+    const { copied, copy, markCopied } = useCopyToClipboard()
+    const [imageAction, setImageAction] = useState<'copy' | 'download' | null>(null)
     const [preparedImage, setPreparedImage] = useState<Blob | null>(null)
+    const [wrapEnabled, setWrapEnabled] = useState(false)
     const [toolbarVisible, setToolbarVisible] = useState(true)
     const viewerRef = useRef<HTMLDivElement>(null)
+    const toolbarRef = useRef<HTMLDivElement>(null)
     const lastScrollTopRef = useRef(0)
     const reverseScrollDistanceRef = useRef(0)
     const toolbarVisibleRef = useRef(true)
+    const automaticWrapRef = useRef(true)
+    const isMobileViewer = isMobileTableViewerViewport()
 
     const setToolbarState = useCallback((visible: boolean) => {
         if (toolbarVisibleRef.current === visible) return
@@ -373,7 +703,9 @@ function TableViewer(props: {
             setToolbarState(true)
         } else if (delta > 0) {
             reverseScrollDistanceRef.current = 0
-            setToolbarState(false)
+            const toolbarHeight = toolbarRef.current?.getBoundingClientRect().height ?? 0
+            const distanceToBottom = Math.max(0, viewer.scrollHeight - viewer.clientHeight - scrollTop)
+            setToolbarState(toolbarHeight > 0 && distanceToBottom < toolbarHeight)
         } else if (delta < 0 && !toolbarVisibleRef.current) {
             reverseScrollDistanceRef.current += -delta
             const distanceToBottom = Math.max(0, viewer.scrollHeight - viewer.clientHeight - scrollTop)
@@ -415,6 +747,61 @@ function TableViewer(props: {
         if (!props.open) setPreparedImage(null)
     }, [props.open])
 
+    useEffect(() => {
+        if (!props.open) setWrapEnabled(false)
+    }, [props.open])
+
+    useEffect(() => {
+        setPreparedImage(null)
+    }, [wrapEnabled])
+
+    useLayoutEffect(() => {
+        if (!props.open) {
+            automaticWrapRef.current = true
+            return undefined
+        }
+
+        const storedPreference = readTableWrapPreference(props.tableWrapPreferenceKey)
+        automaticWrapRef.current = storedPreference === null
+        if (storedPreference !== null) {
+            setWrapEnabled(storedPreference)
+            return undefined
+        }
+
+        const measureOverflow = () => {
+            if (!automaticWrapRef.current) return
+            const viewer = viewerRef.current
+            const table = props.tableRef.current
+            if (!viewer || !table) return
+            const shouldWrap = shouldWrapTableByDefault(table, viewer)
+            if (shouldWrap) automaticWrapRef.current = false
+            setWrapEnabled(shouldWrap)
+        }
+
+        let observer: ResizeObserver | undefined
+        const frame = window.requestAnimationFrame(() => {
+            measureOverflow()
+            const viewer = viewerRef.current
+            if (viewer && typeof ResizeObserver !== 'undefined') {
+                observer = new ResizeObserver(measureOverflow)
+                observer.observe(viewer)
+            }
+        })
+        window.addEventListener('resize', measureOverflow)
+        return () => {
+            window.cancelAnimationFrame(frame)
+            observer?.disconnect()
+            window.removeEventListener('resize', measureOverflow)
+        }
+    }, [props.open, props.tableRef, props.tableWrapPreferenceKey])
+
+    const handleWrapToggle = useCallback(() => {
+        const nextValue = !wrapEnabled
+        automaticWrapRef.current = false
+        setWrapEnabled(nextValue)
+        writeTableWrapPreference(props.tableWrapPreferenceKey, nextValue)
+    }, [props.tableWrapPreferenceKey, wrapEnabled])
+
     const handleDownload = useCallback(() => {
         if (props.tableRef.current) {
             downloadTableAsCsv(props.tableRef.current, getShareTableFileName(props.imageTitle, 'csv'))
@@ -427,23 +814,39 @@ function TableViewer(props: {
         }
     }, [copy, props.tableRef])
 
+    const getPreparedImage = useCallback((table: HTMLTableElement): Promise<Blob> => {
+        if (preparedImage) return Promise.resolve(preparedImage)
+        return renderTableAsImage(table).then((blob) => {
+            setPreparedImage(blob)
+            return blob
+        })
+    }, [preparedImage])
+
     const handleSaveImage = useCallback(() => {
         const table = props.tableRef.current
-        if (!table || savingImage) return
+        if (!table || imageAction) return
 
-        setSavingImage(true)
+        setImageAction('download')
         const filename = getShareImageFileName(props.imageTitle, 'table')
-        const imagePromise = preparedImage
-            ? Promise.resolve(preparedImage)
-            : renderTableAsImage(table).then((blob) => {
-                setPreparedImage(blob)
-                return blob
-            })
-        void imagePromise
+        void getPreparedImage(table)
             .then((blob) => downloadBlob(blob, filename))
             .catch(() => undefined)
-            .finally(() => setSavingImage(false))
-    }, [preparedImage, props.imageTitle, props.tableRef, savingImage])
+            .finally(() => setImageAction(null))
+    }, [getPreparedImage, imageAction, props.imageTitle, props.tableRef])
+
+    const handleCopyImage = useCallback(() => {
+        const table = props.tableRef.current
+        if (!table || imageAction) return
+
+        setImageAction('copy')
+        void getPreparedImage(table)
+            .then(async (blob) => {
+                await copyTableImageToClipboard(blob)
+                markCopied()
+            })
+            .catch(() => undefined)
+            .finally(() => setImageAction(null))
+    }, [getPreparedImage, imageAction, markCopied, props.tableRef])
 
     const viewerTitle = props.imageTitle.trim() || t('table.viewerTitle')
 
@@ -460,15 +863,21 @@ function TableViewer(props: {
                     aria-label={viewerTitle}
                     className="fixed inset-0 z-50 flex h-[100dvh] w-screen flex-col bg-[var(--app-bg)] p-0 outline-none"
                 >
-                    {savingImage ? (
+                    {imageAction ? (
                         <div
                             data-hapi-table-save-status="true"
+                            data-hapi-table-save-status-action={imageAction}
                             role="status"
                             aria-live="polite"
-                            className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)]/90 px-2.5 py-1 text-xs text-[var(--app-hint)] shadow-sm backdrop-blur"
+                            className={cn(
+                                'pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs',
+                                imageAction === 'copy'
+                                    ? 'border border-[var(--app-fg)] bg-[var(--app-fg)] text-[var(--app-bg)] shadow-md'
+                                    : 'border border-[var(--app-border)] bg-[var(--app-bg)]/90 text-[var(--app-hint)] shadow-sm backdrop-blur',
+                            )}
                         >
                             <Spinner size="sm" label={null} className="text-current" />
-                            <span>{t('table.savingImage')}</span>
+                            <span>{t(imageAction === 'copy' ? 'table.copyingImage' : 'table.savingImage')}</span>
                         </div>
                     ) : null}
                     <DialogPrimitive.Title className="sr-only">
@@ -479,6 +888,7 @@ function TableViewer(props: {
                     </DialogPrimitive.Description>
 
                     <div
+                        ref={toolbarRef}
                         data-hapi-table-viewer-toolbar="true"
                         aria-hidden={!toolbarVisible}
                         className={cn(
@@ -507,46 +917,67 @@ function TableViewer(props: {
                         <div className="ml-auto flex items-center gap-1">
                             <button
                                 type="button"
+                                data-hapi-table-wrap-toggle="true"
                                 tabIndex={toolbarVisible ? 0 : -1}
-                                aria-label={copied ? t('table.copiedMarkdown') : t('table.copyMarkdown')}
-                                title={copied ? t('table.copiedMarkdown') : t('table.copyMarkdown')}
-                                onClick={handleCopyMarkdown}
-                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                aria-label={t(wrapEnabled ? 'table.wrap.disable' : 'table.wrap.enable')}
+                                title={t(wrapEnabled ? 'table.wrap.disable' : 'table.wrap.enable')}
+                                aria-pressed={wrapEnabled}
+                                onClick={handleWrapToggle}
+                                className={cn(
+                                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                                    wrapEnabled ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]',
+                                )}
                             >
-                                {copied ? <CheckIcon className="h-5 w-5" /> : <CopyIcon className="h-5 w-5" />}
+                                <WrapIcon className="h-5 w-5" />
                             </button>
-                            <button
-                                type="button"
+                            {isMobileViewer ? (
+                                <button
+                                    type="button"
+                                    tabIndex={toolbarVisible ? 0 : -1}
+                                    aria-label={copied ? t('table.copiedMarkdown') : t('table.copyMarkdownButton')}
+                                    title={copied ? t('table.copiedMarkdown') : t('table.copyMarkdownButton')}
+                                    onClick={handleCopyMarkdown}
+                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                >
+                                    {copied ? <CheckIcon className="h-5 w-5" /> : <CopyIcon className="h-5 w-5" />}
+                                </button>
+                            ) : (
+                                <TableActionMenu
+                                    label={t('table.copy')}
+                                    tabIndex={toolbarVisible ? 0 : -1}
+                                    items={[
+                                        { label: t('table.copyImage'), onSelect: handleCopyImage, disabled: imageAction !== null },
+                                        { label: t('table.copyMarkdown'), onSelect: handleCopyMarkdown },
+                                    ]}
+                                >
+                                    {copied ? <CheckIcon className="h-5 w-5" /> : <CopyIcon className="h-5 w-5" />}
+                                </TableActionMenu>
+                            )}
+                            <TableActionMenu
+                                label={t('table.download')}
                                 tabIndex={toolbarVisible ? 0 : -1}
-                                aria-label={savingImage ? t('table.savingImage') : t('table.saveImage')}
-                                title={savingImage ? t('table.savingImage') : t('table.saveImage')}
-                                onClick={handleSaveImage}
-                                disabled={savingImage}
-                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:opacity-50"
-                            >
-                                <ImageIcon className="h-5 w-5" />
-                            </button>
-                            <button
-                                type="button"
-                                tabIndex={toolbarVisible ? 0 : -1}
-                                aria-label={t('table.download')}
-                                title={t('table.download')}
-                                onClick={handleDownload}
-                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                items={[
+                                    { label: t('table.downloadPng'), onSelect: handleSaveImage, disabled: imageAction !== null },
+                                    { label: t('table.downloadCsv'), onSelect: handleDownload },
+                                ]}
                             >
                                 <DownloadIcon className="h-5 w-5" />
-                            </button>
+                            </TableActionMenu>
                         </div>
                     </div>
 
                     <div
                         ref={setViewerElement}
                         data-hapi-table-viewer="true"
-                        className="min-h-0 flex-1 overflow-auto overscroll-contain pb-0 pl-0 pr-0 pt-0"
+                        className={cn(
+                            'min-h-0 flex-1 overscroll-contain pb-0 pl-0 pr-0 pt-0',
+                            wrapEnabled ? 'overflow-x-hidden overflow-y-auto' : 'overflow-auto',
+                        )}
                     >
                         <table
                             {...rest}
                             ref={props.tableRef}
+                            data-hapi-table-wrap={wrapEnabled ? 'true' : undefined}
                             className={cn('aui-md-table w-max min-w-full border-collapse text-sm', className)}
                         >
                             {children}
@@ -558,16 +989,44 @@ function TableViewer(props: {
     )
 }
 
+/** Reuse the same table viewer for tables rendered inside a share preview. */
+export function TableViewerFromElement(props: {
+    open: boolean
+    onClose: () => void
+    table: HTMLTableElement
+    imageTitle: string
+}) {
+    const tableRef = useRef<HTMLTableElement | null>(null)
+    const tableProps: TableProps = {
+        className: props.table.getAttribute('class') ?? undefined,
+        dangerouslySetInnerHTML: { __html: props.table.innerHTML },
+    }
+
+    return (
+        <TableViewer
+            open={props.open}
+            onClose={props.onClose}
+            tableProps={tableProps}
+            tableRef={tableRef}
+            imageTitle={props.imageTitle}
+            tableWrapPreferenceKey={getTableWrapPreferenceKey(props.table, props.imageTitle)}
+        />
+    )
+}
+
 export function MarkdownTable(props: TableProps) {
     const { t } = useTranslation()
     const chatContext = useOptionalHappyChatContext()
     const { className, children, ...rest } = props
     const inlineTableRef = useRef<HTMLTableElement>(null)
     const viewerTableRef = useRef<HTMLTableElement>(null)
+    const tableWrapPreferenceKeyRef = useRef<string | undefined>(undefined)
     const [viewerOpen, setViewerOpen] = useState(false)
     const openRef = useRef(false)
     const mobileViewerRef = useRef(false)
     const enteredFullscreenRef = useRef(false)
+    const imageTitle = chatContext?.sessionTitle ?? 'Table'
+    const tableWrapScope = chatContext?.sessionId ?? imageTitle
 
     const closeViewer = useCallback(() => {
         openRef.current = false
@@ -583,6 +1042,10 @@ export function MarkdownTable(props: TableProps) {
 
     const openViewer = useCallback(() => {
         openRef.current = true
+        const table = inlineTableRef.current
+        tableWrapPreferenceKeyRef.current = table
+            ? getTableWrapPreferenceKey(table, tableWrapScope)
+            : undefined
         setViewerOpen(true)
 
         const isMobile = isMobileTableViewerViewport()
@@ -596,7 +1059,7 @@ export function MarkdownTable(props: TableProps) {
             }
             enteredFullscreenRef.current = enteredFullscreen
         })
-    }, [])
+    }, [tableWrapScope])
 
     useEffect(() => {
         if (typeof document === 'undefined') return undefined
@@ -622,7 +1085,6 @@ export function MarkdownTable(props: TableProps) {
     }, [])
 
     const tableProps = { ...rest, className, children }
-    const imageTitle = chatContext?.sessionTitle ?? 'Table'
 
     return (
         <>
@@ -639,7 +1101,7 @@ export function MarkdownTable(props: TableProps) {
                         {children}
                     </table>
                 </div>
-                <div data-hapi-share-exclude="true" className="aui-md-table-actions flex items-center">
+                <div data-hapi-share-export-exclude="true" className="aui-md-table-actions flex items-center">
                     <TableActionButton label={t('table.openFullscreen')} onClick={openViewer} variant="ghost">
                         <ExpandIcon className="h-4 w-4" />
                     </TableActionButton>
@@ -652,6 +1114,7 @@ export function MarkdownTable(props: TableProps) {
                 tableProps={tableProps}
                 tableRef={viewerTableRef}
                 imageTitle={imageTitle}
+                tableWrapPreferenceKey={tableWrapPreferenceKeyRef.current}
             />
         </>
     )

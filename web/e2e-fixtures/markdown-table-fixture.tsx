@@ -13,11 +13,22 @@ const TABLE_MARKDOWN = `# Repository activity
 | HAPI, local-first | 42 | TypeScript | 0.27.3 | Community | A deliberately long description for horizontal table scrolling |
 | Example | 7 | Rust | 1.2.0 | Open source | Stable fixture row |`
 
+const NEAR_BOTTOM_VERTICAL_TABLE_MARKDOWN = `# Near bottom table
+
+| Item | Status |
+| --- | --- |
+${Array.from({ length: 14 }, (_, index) => `| Item ${index + 1} | Ready |`).join('\n')}`
+
 function MarkdownTableFixture() {
+    const query = new URLSearchParams(window.location.search)
+    const content = query.has('near-bottom-scroll')
+        ? NEAR_BOTTOM_VERTICAL_TABLE_MARKDOWN
+        : TABLE_MARKDOWN
+
     return (
         <HappyChatProvider value={{ sessionTitle: 'Table filename fixture' } as HappyChatContextValue}>
             <main data-testid="markdown-table-fixture">
-                <MarkdownRenderer standalone content={TABLE_MARKDOWN} />
+                <MarkdownRenderer standalone content={content} />
             </main>
         </HappyChatProvider>
     )

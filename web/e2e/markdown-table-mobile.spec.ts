@@ -44,9 +44,15 @@ test('mobile markdown table viewer requests landscape and releases orientation c
     // A real mobile browser can rotate to a landscape CSS viewport. Keep the
     // mobile title unshifted even when its width becomes desktop-sized.
     await page.setViewportSize({ width: 915, height: 412 })
+    const wrapButton = dialog.locator('button[data-hapi-table-wrap-toggle="true"]')
+    await expect(wrapButton).toBeVisible()
+    await expect(wrapButton).toHaveAttribute('aria-pressed', /true|false/)
     await expect(dialog.getByRole('button', { name: 'Copy table as Markdown' })).toBeVisible()
-    await expect(dialog.getByRole('button', { name: 'Save table as image' })).toBeVisible()
-    await expect(dialog.getByRole('button', { name: 'Download table as CSV' })).toBeVisible()
+    const downloadButton = dialog.getByRole('button', { name: 'Download table' })
+    await expect(downloadButton).toBeVisible()
+    const initiallyWrapped = await wrapButton.getAttribute('aria-pressed')
+    await wrapButton.click()
+    await expect(wrapButton).toHaveAttribute('aria-pressed', initiallyWrapped === 'true' ? 'false' : 'true')
     await expect.poll(() => dialog.locator('[data-hapi-table-viewer-toolbar="true"]').evaluate((element) => {
         const style = getComputedStyle(element)
         return `${style.paddingLeft}:${style.paddingRight}:${style.paddingTop}:${style.paddingBottom}`
@@ -62,13 +68,17 @@ test('mobile markdown table viewer requests landscape and releases orientation c
         return state ? `${state.requestFullscreen}:${state.locks.join(',')}` : ''
     })).toBe('1:landscape')
 
+    await downloadButton.click()
+    await expect(page.getByRole('menuitem', { name: 'Download PNG' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Download CSV' })).toBeVisible()
     const imageDownloadPromise = page.waitForEvent('download')
-    await dialog.getByRole('button', { name: 'Save table as image' }).click()
+    await page.getByRole('menuitem', { name: 'Download PNG' }).click()
     const imageDownload = await imageDownloadPromise
     expect(imageDownload.suggestedFilename()).toMatch(/^HAPI Table-Table filename fixture-\d{14}\.png$/)
 
     const csvDownloadPromise = page.waitForEvent('download')
-    await dialog.getByRole('button', { name: 'Download table as CSV' }).click()
+    await downloadButton.click()
+    await page.getByRole('menuitem', { name: 'Download CSV' }).click()
     const csvDownload = await csvDownloadPromise
     expect(csvDownload.suggestedFilename()).toMatch(/^HAPI Table-Table filename fixture-\d{14}\.csv$/)
 
