@@ -31,6 +31,17 @@ describe('parseSessionHeaderMetadata', () => {
         })
     })
 
+    it('migrates the previous Agent visibility choice to the icon preference', () => {
+        expect(parseSessionHeaderMetadata(JSON.stringify({ agent: false }))).toMatchObject({
+            agent: false,
+            agentIcon: false,
+        })
+        expect(parseSessionHeaderMetadata(JSON.stringify({ agent: true }))).toMatchObject({
+            agent: true,
+            agentIcon: true,
+        })
+    })
+
     it('ignores invalid stored values', () => {
         expect(parseSessionHeaderMetadata('{')).toEqual(DEFAULT_SESSION_HEADER_METADATA)
         expect(parseSessionHeaderMetadata('[]')).toEqual(DEFAULT_SESSION_HEADER_METADATA)
