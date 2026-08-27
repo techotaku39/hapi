@@ -596,7 +596,21 @@ export async function renderTableAsImage(table: HTMLTableElement): Promise<Blob>
                 height: currentTileHeight,
                 windowHeight: Math.max(document.documentElement.clientHeight, currentTileHeight),
             })
-            outputContext.drawImage(tileCanvas, 0, Math.round(tileTop * scale))
+            const destinationTop = Math.round(tileTop * scale)
+            const destinationBottom = tileTop + currentTileHeight >= tableHeight
+                ? outputCanvas.height
+                : Math.round((tileTop + currentTileHeight) * scale)
+            outputContext.drawImage(
+                tileCanvas,
+                0,
+                0,
+                tileCanvas.width,
+                tileCanvas.height,
+                0,
+                destinationTop,
+                outputCanvas.width,
+                Math.max(1, destinationBottom - destinationTop),
+            )
         } finally {
             imageTable.cleanup()
         }
@@ -1025,6 +1039,7 @@ export function MarkdownTable(props: TableProps) {
     const chatContext = useOptionalHappyChatContext()
     const { className, children, ...rest } = props
     const inlineTableRef = useRef<HTMLTableElement>(null)
+    const inlineActionsRef = useRef<HTMLDivElement>(null)
     const viewerTableRef = useRef<HTMLTableElement>(null)
     const tableWrapPreferenceKeyRef = useRef<string | undefined>(undefined)
     const [viewerOpen, setViewerOpen] = useState(false)
@@ -1074,6 +1089,7 @@ export function MarkdownTable(props: TableProps) {
             if (!openRef.current || !mobileViewerRef.current || !enteredFullscreenRef.current) return
             if (document.fullscreenElement) return
 
+            leaveMobileTableViewer(false)
             enteredFullscreenRef.current = false
             mobileViewerRef.current = false
             openRef.current = false
@@ -1089,6 +1105,23 @@ export function MarkdownTable(props: TableProps) {
             leaveMobileTableViewer(enteredFullscreenRef.current)
         }
     }, [])
+
+    useLayoutEffect(() => {
+        const row = inlineTableRef.current?.tHead?.rows[0]
+        const actions = inlineActionsRef.current
+        if (!row || !actions) return undefined
+
+        const syncHeight = () => {
+            const height = row.getBoundingClientRect().height
+            if (height > 0) actions.style.height = `${height}px`
+        }
+
+        syncHeight()
+        if (typeof ResizeObserver === 'undefined') return undefined
+        const observer = new ResizeObserver(syncHeight)
+        observer.observe(row)
+        return () => observer.disconnect()
+    }, [children])
 
     const tableProps = { ...rest, className, children }
 
@@ -1107,7 +1140,7 @@ export function MarkdownTable(props: TableProps) {
                         {children}
                     </table>
                 </div>
-                <div data-hapi-share-export-exclude="true" className="aui-md-table-actions flex items-center">
+                <div ref={inlineActionsRef} data-hapi-share-export-exclude="true" className="aui-md-table-actions flex items-center">
                     <TableActionButton label={t('table.openFullscreen')} onClick={openViewer} variant="ghost">
                         <ExpandIcon className="h-4 w-4" />
                     </TableActionButton>

@@ -12,9 +12,9 @@ import {
     getTableExportHeight,
     getTableExportTileHeight,
     isMobileTableViewerViewport,
+    MAX_TABLE_EXPORT_DIMENSION,
     MAX_TABLE_EXPORT_PIXELS,
     MAX_TABLE_EXPORT_TILE_PIXELS,
-    MAX_TABLE_EXPORT_DIMENSION,
     renderTableAsImage,
     saveTableAsImage,
     shouldWrapTableByDefault,
@@ -105,6 +105,33 @@ describe('MarkdownTable', () => {
         expect(actions?.querySelectorAll('button')).toHaveLength(1)
         expect(actions).toHaveAttribute('data-hapi-share-export-exclude', 'true')
         expect(screen.getByRole('button', { name: 'Open table full screen' })).toBeInTheDocument()
+    })
+
+    it('keeps inline table actions as tall as a wrapped header row', async () => {
+        let resizeCallback: ResizeObserverCallback | undefined
+        class TestResizeObserver {
+            constructor(callback: ResizeObserverCallback) {
+                resizeCallback = callback
+            }
+            observe() {}
+            disconnect() {}
+        }
+        vi.stubGlobal('ResizeObserver', TestResizeObserver)
+
+        try {
+            renderTable()
+            const table = screen.getByRole('table')
+            const row = table.tHead?.rows[0]
+            const actions = table.parentElement?.parentElement?.querySelector<HTMLElement>('.aui-md-table-actions')
+            if (!row || !actions) throw new Error('Inline table action geometry is incomplete')
+
+            vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ height: 56 } as DOMRect)
+            await waitFor(() => expect(resizeCallback).toBeDefined())
+            resizeCallback?.([], {} as ResizeObserver)
+            expect(actions).toHaveStyle({ height: '56px' })
+        } finally {
+            vi.unstubAllGlobals()
+        }
     })
 
     it('opens an enlarged PC viewer without requesting browser fullscreen or orientation lock', async () => {
@@ -346,6 +373,44 @@ describe('MarkdownTable', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close table full screen' }))
         await waitFor(() => expect(exitFullscreen).toHaveBeenCalledTimes(1))
         expect(unlock).toHaveBeenCalledTimes(1)
+    })
+
+    it('releases orientation when the browser exits fullscreen externally', async () => {
+        window.matchMedia = vi.fn((query: string) => ({
+            matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
+            media: query,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false },
+        })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+
+        const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+        Object.defineProperty(document.documentElement, 'requestFullscreen', {
+            configurable: true,
+            value: requestFullscreen,
+        })
+        const lock = vi.fn().mockResolvedValue(undefined)
+        const unlock = vi.fn()
+        Object.defineProperty(window.screen, 'orientation', {
+            configurable: true,
+            value: { lock, unlock },
+        })
+
+        renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await waitFor(() => {
+            expect(requestFullscreen).toHaveBeenCalledTimes(1)
+            expect(lock).toHaveBeenCalledWith('landscape')
+        })
+
+        document.dispatchEvent(new Event('fullscreenchange'))
+        await waitFor(() => expect(unlock).toHaveBeenCalledTimes(1))
+        expect(screen.queryByRole('dialog', { name: 'Table' })).not.toBeInTheDocument()
     })
 
     it('defers PNG rendering until the user requests an image save', async () => {
@@ -758,6 +823,15 @@ describe('MarkdownTable', () => {
             const expectedTiles = Math.ceil(4_000 / getTableExportTileHeight(3_000, getTableExportScale(3_000, 4_000, 2)))
             expect(html2canvas).toHaveBeenCalledTimes(expectedTiles)
             expect(drawImage).toHaveBeenCalledTimes(expectedTiles)
+            const scale = getTableExportScale(3_000, 4_000, 2)
+            const destinationRanges = drawImage.mock.calls.map((call) => ({
+                top: call[6] as number,
+                bottom: (call[6] as number) + (call[8] as number),
+            }))
+            for (let index = 1; index < destinationRanges.length; index += 1) {
+                expect(destinationRanges[index - 1]?.bottom).toBe(destinationRanges[index]?.top)
+            }
+            expect(destinationRanges.at(-1)?.bottom).toBe(Math.ceil(4_000 * scale))
             expect(toBlob).toHaveBeenCalledTimes(1)
             expect(getContext).toHaveBeenCalledWith('2d')
             expect(document.querySelector('[data-hapi-table-image-render="true"]')).toBeNull()
