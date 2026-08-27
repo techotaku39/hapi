@@ -14,6 +14,7 @@ import {
     isMobileTableViewerViewport,
     MAX_TABLE_EXPORT_PIXELS,
     MAX_TABLE_EXPORT_TILE_PIXELS,
+    MAX_TABLE_EXPORT_DIMENSION,
     renderTableAsImage,
     saveTableAsImage,
     shouldWrapTableByDefault,
@@ -281,10 +282,16 @@ describe('MarkdownTable', () => {
             })
             Object.defineProperty(table, 'scrollWidth', {
                 configurable: true,
-                get: () => tableWidth,
+                get: () => table.hasAttribute('data-hapi-table-wrap')
+                    ? Math.min(tableWidth, viewerWidth)
+                    : tableWidth,
             })
 
             await waitFor(() => expect(resizeCallback).toBeDefined())
+            resizeCallback?.([], {} as ResizeObserver)
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Disable table wrapping' })).toHaveAttribute('aria-pressed', 'true'))
+
+            viewerWidth = 150
             resizeCallback?.([], {} as ResizeObserver)
             await waitFor(() => expect(screen.getByRole('button', { name: 'Disable table wrapping' })).toHaveAttribute('aria-pressed', 'true'))
 
@@ -702,9 +709,27 @@ describe('MarkdownTable', () => {
         expect(scale).toBeLessThan(1)
         expect(10_000 * 10_000 * scale ** 2).toBeLessThanOrEqual(MAX_TABLE_EXPORT_PIXELS)
 
+        const tallScale = getTableExportScale(100, 100_000, 2)
+        expect(Math.ceil(100 * tallScale)).toBeLessThanOrEqual(MAX_TABLE_EXPORT_DIMENSION)
+        expect(Math.ceil(100_000 * tallScale)).toBeLessThanOrEqual(MAX_TABLE_EXPORT_DIMENSION)
+
         const tileHeight = getTableExportTileHeight(3_000, 2)
         expect(3_000 * tileHeight * 2 ** 2).toBeLessThanOrEqual(MAX_TABLE_EXPORT_TILE_PIXELS)
         expect(3_000 * (tileHeight + 1) * 2 ** 2).toBeGreaterThan(MAX_TABLE_EXPORT_TILE_PIXELS)
+    })
+
+    it('measures intrinsic width while a table is currently wrapped', () => {
+        const table = document.createElement('table')
+        const viewer = document.createElement('div')
+        table.setAttribute('data-hapi-table-wrap', 'true')
+        Object.defineProperty(viewer, 'clientWidth', { configurable: true, value: 150 })
+        Object.defineProperty(table, 'scrollWidth', {
+            configurable: true,
+            get: () => table.hasAttribute('data-hapi-table-wrap') ? 150 : 200,
+        })
+
+        expect(shouldWrapTableByDefault(table, viewer)).toBe(true)
+        expect(table.getAttribute('data-hapi-table-wrap')).toBe('true')
     })
 
     it('stitches oversized exports from bounded vertical tiles', async () => {
@@ -739,6 +764,36 @@ describe('MarkdownTable', () => {
         } finally {
             Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: originalDevicePixelRatio })
         }
+    })
+
+    it('keeps the stitched PNG canvas within the browser dimension limit', async () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<tr><td>HAPI</td></tr>'
+        Object.defineProperty(table, 'scrollWidth', { configurable: true, value: 1_000 })
+        Object.defineProperty(table, 'scrollHeight', { configurable: true, value: 20_000 })
+        vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ width: 1_000, height: 20_000 } as DOMRect)
+
+        const createdCanvases: HTMLCanvasElement[] = []
+        const createElement = document.createElement.bind(document)
+        vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+            const element = createElement(tagName, options)
+            if (tagName === 'canvas') createdCanvases.push(element as HTMLCanvasElement)
+            return element
+        })
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D)
+        vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => {
+            callback(new Blob(['png'], { type: 'image/png' }))
+        })
+        html2canvas.mockImplementation(async (_element: HTMLElement, options: { width: number; height: number; scale: number }) => ({
+            width: Math.ceil(options.width * options.scale),
+            height: Math.ceil(options.height * options.scale),
+            toBlob: (callback: BlobCallback) => callback(new Blob(['tile'], { type: 'image/png' })),
+        }))
+
+        await renderTableAsImage(table)
+
+        expect(createdCanvases).toHaveLength(1)
+        expect(Math.max(createdCanvases[0]?.width ?? 0, createdCanvases[0]?.height ?? 0)).toBeLessThanOrEqual(MAX_TABLE_EXPORT_DIMENSION)
     })
 
     it('uses the same direct download path on touch devices as shared images', () => {

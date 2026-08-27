@@ -273,7 +273,15 @@ export function getTableWrapPreferenceKey(table: HTMLTableElement, scope = 'Tabl
 }
 
 export function shouldWrapTableByDefault(table: HTMLTableElement, viewer: HTMLElement): boolean {
-    return table.scrollWidth > viewer.clientWidth + 1
+    const wrappedValue = table.getAttribute('data-hapi-table-wrap')
+    if (wrappedValue === null) return table.scrollWidth > viewer.clientWidth + 1
+
+    table.removeAttribute('data-hapi-table-wrap')
+    try {
+        return table.scrollWidth > viewer.clientWidth + 1
+    } finally {
+        table.setAttribute('data-hapi-table-wrap', wrappedValue)
+    }
 }
 
 function readTableWrapPreference(key: string | undefined): boolean | null {
@@ -491,6 +499,7 @@ function createStaticTableImageClone(
 
 export const MAX_TABLE_EXPORT_PIXELS = 36_000_000
 export const MAX_TABLE_EXPORT_TILE_PIXELS = 12_000_000
+export const MAX_TABLE_EXPORT_DIMENSION = 16_384
 
 export function getTableExportScale(
     tableWidth: number,
@@ -498,10 +507,12 @@ export function getTableExportScale(
     devicePixelRatio = typeof window === 'undefined' ? 1 : window.devicePixelRatio,
 ): number {
     const area = Math.max(1, tableWidth) * Math.max(1, tableHeight)
+    const dimensionScale = MAX_TABLE_EXPORT_DIMENSION / Math.max(tableWidth, tableHeight)
     return Math.min(
         devicePixelRatio || 1,
         2,
         Math.sqrt(MAX_TABLE_EXPORT_PIXELS / area),
+        dimensionScale,
     )
 }
 

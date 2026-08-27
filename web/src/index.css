@@ -493,7 +493,7 @@ html:has(.chat-scroll-y) #root {
     position: absolute;
     top: 0;
     right: 0.1875rem;
-    line-height: 1.25rem;
+    line-height: normal;
     min-height: calc(1lh + 1rem);
     align-items: center;
     z-index: 2;
