@@ -505,6 +505,7 @@ function Code(props: ComponentPropsWithoutRef<'code'>) {
 
 function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: string; sessionId: string }) {
     const { filePath, sessionId, ...anchorProps } = props
+    const markdownHref = getMarkdownSourceHref(anchorProps, anchorProps.href)
     const navigate = useNavigate()
     const rel = anchorProps.target === '_blank' ? (anchorProps.rel ?? 'noreferrer') : anchorProps.rel
     const search = new URLSearchParams({ path: encodeBase64(filePath), origin: 'chat' }).toString()
@@ -531,7 +532,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
         <a
             {...anchorProps}
             href={href}
-            data-hapi-markdown-href={anchorProps.href}
+            data-hapi-markdown-href={markdownHref}
             rel={rel}
             onClick={handleClick}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', anchorProps.className)}
@@ -542,6 +543,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
 function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessionId: string }) {
     const navigate = useNavigate()
     const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
+    const markdownHref = getMarkdownSourceHref(props, props.href)
     // Preserve Vite BASE_URL for copy / open-in-new-tab (SPA click uses navigate).
     const href = buildSessionReferencePath(props.targetSessionId)
 
@@ -562,7 +564,7 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
         <a
             {...props}
             href={href}
-            data-hapi-markdown-href={props.href}
+            data-hapi-markdown-href={markdownHref}
             rel={rel}
             onClick={handleClick}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
@@ -589,12 +591,18 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
  *   which uses useNavigate for SPA routing.
  * - Session citation paths (`/sessions/<id>`): SessionPathAnchor SPA navigation.
  */
-function InertMarkdownHref(props: { href: string; children?: ReactNode; className?: string }) {
+function getMarkdownSourceHref(props: object, fallback: string | undefined): string | undefined {
+    const sourceHref = (props as Record<string, unknown>)['data-hapi-markdown-href']
+    return typeof sourceHref === 'string' ? sourceHref : fallback
+}
+
+function InertMarkdownHref(props: { href: string; markdownHref?: string; children?: ReactNode; className?: string }) {
     // Plain/muted — intentionally not an <a>, so middle-click / copy-link can't
     // invent a dead SPA route either.
     return (
         <span
             title={props.href}
+            data-hapi-markdown-href={props.markdownHref ?? props.href}
             className={cn('aui-md-a-inert text-[var(--app-hint)]', props.className)}
         >
             {props.children}
@@ -633,6 +641,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     }
 
     const { onClick, href, ...rest } = props
+    const markdownHref = getMarkdownSourceHref(rest, href)
 
     // Windows candidate (or raw / %5C-normalized drive path): classify with workspace
     // before painting FilePathAnchor or treating `C:` as a custom URI scheme.
@@ -641,7 +650,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     const isCandidateHref = href ? normalizedScheme(href) === 'hapi-file-candidate' : false
     if (isCandidateHref && (!candidatePath || !/^[A-Za-z]:[\\/]/.test(candidatePath))) {
         return (
-            <InertMarkdownHref href={href ?? ''} className={props.className}>
+            <InertMarkdownHref href={href ?? ''} markdownHref={markdownHref} className={props.className}>
                 {props.children}
             </InertMarkdownHref>
         )
@@ -668,12 +677,12 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         })
         if (decision.action === 'file') {
             if (!chat) {
-                return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} className={props.className}>{props.children}</InertMarkdownHref>
+                return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} markdownHref={markdownHref} className={props.className}>{props.children}</InertMarkdownHref>
             }
             return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />
         }
         if (decision.action === 'inert') {
-            return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} className={props.className}>{props.children}</InertMarkdownHref>
+            return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} markdownHref={markdownHref} className={props.className}>{props.children}</InertMarkdownHref>
         }
         // action === 'navigate' → fall through (only for non-Windows scheme-less SPA)
     }
@@ -730,7 +739,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         <a
             {...rest}
             href={domHref}
-            data-hapi-markdown-href={href}
+            data-hapi-markdown-href={markdownHref}
             rel={rel}
             onClick={handleClick}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}

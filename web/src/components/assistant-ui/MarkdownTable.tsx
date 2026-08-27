@@ -253,6 +253,10 @@ function serializeInlineMarkdown(node: Node): string {
             const alt = element.getAttribute('alt') ?? ''
             return src ? `![${alt}](${src})` : alt
         }
+        case 'span': {
+            const href = element.dataset.hapiMarkdownHref
+            return href ? `[${children()}](${href})` : children()
+        }
         default:
             return children()
     }
