@@ -9,6 +9,7 @@ describe('parseSessionHeaderMetadata', () => {
         expect(DEFAULT_SESSION_HEADER_METADATA).toMatchObject({
             showLabels: true,
             agent: true,
+            agentIcon: true,
             model: true,
             reasoning: true,
             fastMode: true,
@@ -21,9 +22,10 @@ describe('parseSessionHeaderMetadata', () => {
     })
 
     it('merges stored booleans with defaults for forward compatibility', () => {
-        expect(parseSessionHeaderMetadata(JSON.stringify({ showLabels: false, reasoning: false, createdAt: true, model: 'nope' }))).toEqual({
+        expect(parseSessionHeaderMetadata(JSON.stringify({ showLabels: false, agentIcon: false, reasoning: false, createdAt: true, model: 'nope' }))).toEqual({
             ...DEFAULT_SESSION_HEADER_METADATA,
             showLabels: false,
+            agentIcon: false,
             reasoning: false,
             createdAt: true,
         })
