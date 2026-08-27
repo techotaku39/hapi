@@ -218,11 +218,15 @@ export function serializeTableToCsv(table: HTMLTableElement): string {
 }
 
 function escapeMarkdownTableCell(value: string): string {
-    return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+    return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+}
+
+function serializeMarkdownText(value: string): string {
+    return value.replace(/\s+/g, ' ').replace(/\\/g, '\\\\')
 }
 
 function serializeInlineMarkdown(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? '').replace(/\s+/g, ' ')
+    if (node.nodeType === Node.TEXT_NODE) return serializeMarkdownText(node.textContent ?? '')
     if (node.nodeType !== Node.ELEMENT_NODE) {
         return Array.from(node.childNodes, serializeInlineMarkdown).join('')
     }
@@ -1180,9 +1184,12 @@ export function MarkdownTable(props: TableProps) {
     }, [])
 
     useEffect(() => () => {
-        if (mobileViewerRef.current) {
-            leaveMobileTableViewer(enteredFullscreenRef.current)
-        }
+        const wasMobile = mobileViewerRef.current
+        const enteredFullscreen = enteredFullscreenRef.current
+        openRef.current = false
+        mobileViewerRef.current = false
+        enteredFullscreenRef.current = false
+        if (wasMobile) leaveMobileTableViewer(enteredFullscreen)
     }, [])
 
     useLayoutEffect(() => {

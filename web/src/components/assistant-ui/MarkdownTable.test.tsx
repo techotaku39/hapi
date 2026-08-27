@@ -532,6 +532,49 @@ describe('MarkdownTable', () => {
         resolveLock?.()
     })
 
+    it('cleans up a pending mobile fullscreen request when the table unmounts', async () => {
+        window.matchMedia = vi.fn((query: string) => ({
+            matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
+            media: query,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false },
+        })) as typeof window.matchMedia
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+
+        let resolveFullscreen: (() => void) | undefined
+        const requestFullscreen = vi.fn().mockImplementation(() => new Promise<void>((resolve) => {
+            resolveFullscreen = resolve
+        }))
+        const exitFullscreen = vi.fn().mockResolvedValue(undefined)
+        Object.defineProperty(document.documentElement, 'requestFullscreen', {
+            configurable: true,
+            value: requestFullscreen,
+        })
+        Object.defineProperty(document, 'exitFullscreen', {
+            configurable: true,
+            value: exitFullscreen,
+        })
+        const unlock = vi.fn()
+        Object.defineProperty(window.screen, 'orientation', {
+            configurable: true,
+            value: { lock: vi.fn().mockResolvedValue(undefined), unlock },
+        })
+
+        const rendered = renderTable()
+        fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
+        await waitFor(() => expect(requestFullscreen).toHaveBeenCalledTimes(1))
+
+        rendered.unmount()
+        resolveFullscreen?.()
+        await waitFor(() => expect(exitFullscreen).toHaveBeenCalledTimes(1))
+        expect(unlock).toHaveBeenCalled()
+    })
+
     it('defers PNG rendering until the user requests an image save', async () => {
         window.matchMedia = vi.fn((query: string) => ({
             matches: query.includes('pointer: coarse'),
@@ -765,6 +808,16 @@ describe('MarkdownTable', () => {
         table.innerHTML = '<thead><tr><th>Project</th><th>Notes</th></tr></thead><tbody><tr><td><a href="#" data-hapi-markdown-href="custom://target">Open</a></td><td><code>a`b</code> <code> a  b </code></td></tr></tbody>'
 
         expect(serializeTableToMarkdown(table)).toBe('| Project | Notes |\n| --- | --- |\n| [Open](custom://target) | ``a`b`` `  a  b  ` |\n')
+    })
+
+    it('preserves backslashes inside inline code when copying Markdown', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<thead><tr><th>Path</th></tr></thead><tbody><tr><td></td></tr></tbody>'
+        const code = document.createElement('code')
+        code.textContent = 'C:\\tmp'
+        table.tBodies[0]!.rows[0]!.cells[0]!.append(code)
+
+        expect(serializeTableToMarkdown(table)).toBe('| Path |\n| --- |\n| `C:\\tmp` |\n')
     })
 
     it('keeps sanitized custom-link destinations available for Markdown copying', () => {
