@@ -672,13 +672,17 @@ function writeTableImageToClipboard(
     mimeType: string,
     image: Blob | PromiseLike<Blob>,
 ): Promise<void> {
-    const ClipboardItemCtor = window.ClipboardItem
-    if (!navigator.clipboard?.write || !ClipboardItemCtor) {
-        return Promise.reject(new Error('Image clipboard is not supported in this browser'))
+    try {
+        const ClipboardItemCtor = window.ClipboardItem
+        if (!navigator.clipboard?.write || !ClipboardItemCtor) {
+            throw new Error('Image clipboard is not supported in this browser')
+        }
+        return Promise.resolve(navigator.clipboard.write([
+            new ClipboardItemCtor({ [mimeType]: image }),
+        ]))
+    } catch (error) {
+        return Promise.reject(error)
     }
-    return navigator.clipboard.write([
-        new ClipboardItemCtor({ [mimeType]: image }),
-    ])
 }
 
 export function copyTableImageToClipboard(blob: Blob): Promise<void> {
