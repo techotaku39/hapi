@@ -225,7 +225,9 @@ export class CodexConversationHistory {
             return {
                 success: false,
                 error: AMBIGUOUS_REWIND_ERROR,
-                code: 'ambiguous_native_boundary',
+                code: this.isForkFallbackSafe(messageLocalId, turns, index)
+                    ? 'ambiguous_native_boundary_fork_safe'
+                    : 'ambiguous_native_boundary',
                 outcome: 'rejected'
             }
         }
@@ -267,6 +269,60 @@ export class CodexConversationHistory {
             }
         }
         throw new Error(`No native history point for message ${localId}`)
+    }
+
+    private isForkFallbackSafe(messageLocalId: string, turns: TurnInfo[], index: number): boolean {
+        const selected = turns[index]
+        if (
+            !selected
+            || !selected.id
+            || !selected.hasCompleteItems
+            || selected.hasContextCompaction
+            || selected.clientIds[0] !== messageLocalId
+        ) {
+            return false
+        }
+
+        if (turns.flatMap((turn) => turn.clientIds).filter((clientId) => clientId === messageLocalId).length !== 1) {
+            return false
+        }
+        if (turns.filter((turn) => turn.id === selected.id).length !== 1) {
+            return false
+        }
+
+        const previousId = index > 0 ? turns[index - 1]?.id : null
+        if (index > 0 && !previousId) {
+            return false
+        }
+        if (previousId && turns.filter((turn) => turn.id === previousId).length !== 1) {
+            return false
+        }
+
+        // The child transcript excludes the selected HAPI message. Native Fork
+        // excludes the whole selected native turn, so the selected message must
+        // be the first user item in that turn. Also require the retained prefix
+        // to be unambiguous; otherwise the child could inherit a different
+        // projection even though this particular boundary is exact.
+        const retainedTurnIds = new Set<string>()
+        const retainedClientIds = new Set<string>()
+        for (const turn of turns.slice(0, index)) {
+            const clientId = turn.clientIds[0]
+            if (
+                !turn.id
+                || !turn.hasCompleteItems
+                || turn.hasContextCompaction
+                || turn.userMessageCount !== 1
+                || turn.clientIds.length !== 1
+                || !clientId
+                || retainedTurnIds.has(turn.id)
+                || retainedClientIds.has(clientId)
+            ) {
+                return false
+            }
+            retainedTurnIds.add(turn.id)
+            retainedClientIds.add(clientId)
+        }
+        return true
     }
 
     private async listTurns(): Promise<TurnInfo[]> {

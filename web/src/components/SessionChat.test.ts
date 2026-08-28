@@ -11,24 +11,28 @@ import {
     resolveLatestCompletedBoundaryIdForView,
     shouldAutoClearPendingSchedule,
     shouldRouteToScratchlist,
-    isAmbiguousRewindError,
+    isRewindForkFallbackError,
 } from './SessionChat'
 import { ApiError } from '@/api/client'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
 
-describe('isAmbiguousRewindError', () => {
-    it('recognizes the structured Rewind boundary code', () => {
-        expect(isAmbiguousRewindError(new ApiError(
+describe('isRewindForkFallbackError', () => {
+    it('recognizes the structured safe-Fork boundary code', () => {
+        expect(isRewindForkFallbackError(new ApiError(
             'native boundary is ambiguous',
             409,
-            'ambiguous_native_boundary'
+            'ambiguous_native_boundary_fork_safe'
         ))).toBe(true)
     })
 
-    it('does not classify unrelated or message-only errors as fallback candidates', () => {
-        expect(isAmbiguousRewindError(new ApiError('native boundary is ambiguous', 409))).toBe(false)
-        expect(isAmbiguousRewindError(new Error('ambiguous native boundary'))).toBe(false)
+    it('does not classify unsafe or message-only errors as fallback candidates', () => {
+        expect(isRewindForkFallbackError(new ApiError(
+            'native boundary is ambiguous',
+            409,
+            'ambiguous_native_boundary'
+        ))).toBe(false)
+        expect(isRewindForkFallbackError(new Error('ambiguous native boundary'))).toBe(false)
     })
 })
 

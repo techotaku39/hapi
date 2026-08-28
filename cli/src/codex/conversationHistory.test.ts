@@ -90,7 +90,7 @@ describe('CodexConversationHistory', () => {
         expect(rollback).toHaveBeenCalledTimes(1)
     })
 
-    it('rejects rewind before native mutation when steering adds another user message', async () => {
+    it('returns a safe-Fork code when the selected message starts a steered turn', async () => {
         const rollback = vi.fn(async () => ({}))
         const history = new CodexConversationHistory(() => createClient({
             rollback,
@@ -117,10 +117,43 @@ describe('CodexConversationHistory', () => {
         expect(result).toMatchObject({
             success: false,
             outcome: 'rejected',
-            code: 'ambiguous_native_boundary'
+            code: 'ambiguous_native_boundary_fork_safe'
         })
         if (result.success) throw new Error('Expected rewind to be rejected')
         expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
+    it('does not offer the Fork fallback for the second message in a steered turn', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        {
+                            id: 'turn-b',
+                            items: [
+                                { type: 'userMessage', clientId: 'local-b' },
+                                { type: 'userMessage', clientId: 'local-steer' }
+                            ]
+                        }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+        history.restoreTurns({ localSteer: 'turn-b' })
+
+        const result = await history.rewind('local-steer')
+
+        expect(result).toMatchObject({
+            success: false,
+            outcome: 'rejected',
+            code: 'ambiguous_native_boundary'
+        })
         expect(rollback).not.toHaveBeenCalled()
     })
 

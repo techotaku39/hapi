@@ -116,8 +116,8 @@ import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
 
-export function isAmbiguousRewindError(error: unknown): boolean {
-    return error instanceof ApiError && error.code === 'ambiguous_native_boundary'
+export function isRewindForkFallbackError(error: unknown): boolean {
+    return error instanceof ApiError && error.code === 'ambiguous_native_boundary_fork_safe'
 }
 
 export function resolvePiContextWindow(
@@ -596,7 +596,7 @@ function SessionChatInner(props: SessionChatProps) {
             await props.api.rewindConversation(props.session.id, messageLocalId)
             props.onRefresh()
         } catch (error) {
-            if (isAmbiguousRewindError(error)) {
+            if (isRewindForkFallbackError(error)) {
                 setRewindForkFallback(messageLocalId)
                 return
             }

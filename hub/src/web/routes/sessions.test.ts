@@ -1505,7 +1505,7 @@ describe('sessions routes', () => {
             rewindConversation: async () => ({
                 type: 'error',
                 message: 'Rewind is unavailable for this Codex history',
-                code: 'ambiguous_native_boundary'
+                code: 'ambiguous_native_boundary_fork_safe'
             })
         })
 
@@ -1518,7 +1518,7 @@ describe('sessions routes', () => {
         expect(response.status).toBe(409)
         expect(await response.json()).toEqual({
             error: 'Rewind is unavailable for this Codex history',
-            code: 'ambiguous_native_boundary',
+            code: 'ambiguous_native_boundary_fork_safe',
             hydrateFailed: false
         })
     })

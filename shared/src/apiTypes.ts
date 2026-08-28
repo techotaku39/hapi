@@ -575,7 +575,9 @@ export type ForkConversationRpcResult = {
     forkSession?: boolean
 }
 
-export type RewindConversationErrorCode = 'ambiguous_native_boundary'
+export type RewindConversationErrorCode =
+    | 'ambiguous_native_boundary'
+    | 'ambiguous_native_boundary_fork_safe'
 
 export type RewindConversationRpcResult = {
     success: true

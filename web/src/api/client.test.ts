@@ -62,7 +62,7 @@ describe('ApiClient error mapping', () => {
             new Response(
                 JSON.stringify({
                     error: 'Rewind is unavailable for this Codex history',
-                    code: 'ambiguous_native_boundary',
+                    code: 'ambiguous_native_boundary_fork_safe',
                     hydrateFailed: false
                 }),
                 { status: 409, statusText: 'Conflict' }
@@ -72,7 +72,7 @@ describe('ApiClient error mapping', () => {
         const api = new ApiClient('test-token')
         await expect(api.rewindConversation('session-1', 'local-1')).rejects.toMatchObject({
             status: 409,
-            code: 'ambiguous_native_boundary'
+            code: 'ambiguous_native_boundary_fork_safe'
         })
     })
 
