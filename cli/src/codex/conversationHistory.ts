@@ -201,13 +201,26 @@ export class CodexConversationHistory {
         // turn is known to contain exactly one identified user message. Steering,
         // compaction, and incomplete item data can otherwise leave the model
         // context out of sync with the transcript after a successful rollback.
-        const hasAmbiguousBoundary = turns.some(
-            (turn) =>
+        const seenTurnIds = new Set<string>()
+        const seenClientIds = new Set<string>()
+        const hasAmbiguousBoundary = turns.some((turn) => {
+            const clientId = turn.clientIds[0]
+            if (
+                !turn.id ||
                 !turn.hasCompleteItems ||
                 turn.userMessageCount !== 1 ||
                 turn.clientIds.length !== 1 ||
-                turn.hasContextCompaction
-        )
+                !clientId ||
+                turn.hasContextCompaction ||
+                seenTurnIds.has(turn.id) ||
+                seenClientIds.has(clientId)
+            ) {
+                return true
+            }
+            seenTurnIds.add(turn.id)
+            seenClientIds.add(clientId)
+            return false
+        })
         if (hasAmbiguousBoundary) {
             return {
                 success: false,
