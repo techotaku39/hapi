@@ -11,9 +11,26 @@ import {
     resolveLatestCompletedBoundaryIdForView,
     shouldAutoClearPendingSchedule,
     shouldRouteToScratchlist,
+    isAmbiguousRewindError,
 } from './SessionChat'
+import { ApiError } from '@/api/client'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
+
+describe('isAmbiguousRewindError', () => {
+    it('recognizes the structured Rewind boundary code', () => {
+        expect(isAmbiguousRewindError(new ApiError(
+            'native boundary is ambiguous',
+            409,
+            'ambiguous_native_boundary'
+        ))).toBe(true)
+    })
+
+    it('does not classify unrelated or message-only errors as fallback candidates', () => {
+        expect(isAmbiguousRewindError(new ApiError('native boundary is ambiguous', 409))).toBe(false)
+        expect(isAmbiguousRewindError(new Error('ambiguous native boundary'))).toBe(false)
+    })
+})
 
 describe('applyModelChangeWithReasoningRollback', () => {
     it('restores the previous effort when the model switch fails after clearing it', async () => {

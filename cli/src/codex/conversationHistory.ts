@@ -225,6 +225,7 @@ export class CodexConversationHistory {
             return {
                 success: false,
                 error: AMBIGUOUS_REWIND_ERROR,
+                code: 'ambiguous_native_boundary',
                 outcome: 'rejected'
             }
         }

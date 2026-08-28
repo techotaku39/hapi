@@ -114,7 +114,11 @@ describe('CodexConversationHistory', () => {
 
         const result = await history.rewind('local-b')
 
-        expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        expect(result).toMatchObject({
+            success: false,
+            outcome: 'rejected',
+            code: 'ambiguous_native_boundary'
+        })
         if (result.success) throw new Error('Expected rewind to be rejected')
         expect(result.error).toContain('ambiguous')
         expect(rollback).not.toHaveBeenCalled()
