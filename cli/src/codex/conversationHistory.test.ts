@@ -90,6 +90,116 @@ describe('CodexConversationHistory', () => {
         expect(rollback).toHaveBeenCalledTimes(1)
     })
 
+    it('rejects rewind before native mutation when steering adds another user message', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        {
+                            id: 'turn-b',
+                            items: [
+                                { type: 'userMessage', clientId: 'local-b' },
+                                { type: 'userMessage', clientId: 'local-steer' }
+                            ]
+                        }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+
+        const result = await history.rewind('local-b')
+
+        expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        if (result.success) throw new Error('Expected rewind to be rejected')
+        expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
+    it('rejects rewind before native mutation when compaction is present', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        {
+                            id: 'turn-b',
+                            items: [
+                                { type: 'userMessage', clientId: 'local-b' },
+                                { type: 'contextCompaction' }
+                            ]
+                        }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+
+        const result = await history.rewind('local-b')
+
+        expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        if (result.success) throw new Error('Expected rewind to be rejected')
+        expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
+    it('rejects rewind before native mutation when native items are incomplete', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        { id: 'turn-b' }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+        history.restoreTurns({ localB: 'turn-b' })
+
+        const result = await history.rewind('localB')
+
+        expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        if (result.success) throw new Error('Expected rewind to be rejected')
+        expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
+    it('rejects rewind before native mutation when a user message has no client id', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        { id: 'turn-b', items: [{ type: 'userMessage' }] }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+        history.restoreTurns({ localB: 'turn-b' })
+
+        const result = await history.rewind('localB')
+
+        expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        if (result.success) throw new Error('Expected rewind to be rejected')
+        expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
     it('marks rewind unsupported on method-not-found without affecting fork', async () => {
         const rollback = vi.fn(async () => {
             throw new Error('thread/rollback is unsupported')

@@ -32,7 +32,13 @@ type TurnInfo = {
     id: string
     status?: string
     clientIds: string[]
+    userMessageCount: number
+    hasCompleteItems: boolean
+    hasContextCompaction: boolean
 }
+
+const AMBIGUOUS_REWIND_ERROR =
+    'Rewind is unavailable for this Codex history because native turn boundaries are ambiguous (steering, compaction, or incomplete history)'
 
 export class CodexConversationHistory {
     private states: ConversationHistoryCapabilityStates = { ...CODEX_CONVERSATION_HISTORY_INITIAL }
@@ -185,6 +191,27 @@ export class CodexConversationHistory {
         if (turns[index]?.status === 'inProgress' || turns[index]?.status === 'in_progress') {
             throw new Error('Cannot rewind an in-progress turn')
         }
+
+        // thread/rollback takes a raw native-turn count, while the Web transcript
+        // exposes user-message boundaries. Only use that count when every native
+        // turn is known to contain exactly one identified user message. Steering,
+        // compaction, and incomplete item data can otherwise leave the model
+        // context out of sync with the transcript after a successful rollback.
+        const hasAmbiguousBoundary = turns.some(
+            (turn) =>
+                !turn.hasCompleteItems ||
+                turn.userMessageCount !== 1 ||
+                turn.clientIds.length !== 1 ||
+                turn.hasContextCompaction
+        )
+        if (hasAmbiguousBoundary) {
+            return {
+                success: false,
+                error: AMBIGUOUS_REWIND_ERROR,
+                outcome: 'rejected'
+            }
+        }
+
         const numTurns = turns.length - index
         if (numTurns <= 0) throw new Error('Invalid rewind count')
 
@@ -233,16 +260,32 @@ export class CodexConversationHistory {
             const response = await client.readThread({ threadId, includeTurns: true })
             const thread = asRecord(response.thread)
             const turns = Array.isArray(thread?.turns) ? thread.turns : []
-            return turns.flatMap((entry) => {
+            return turns.flatMap((entry): TurnInfo[] => {
                 const record = asRecord(entry)
                 const id = asString(record?.id)
                 if (!id) return []
                 const clientIds: string[] = []
-                const items = Array.isArray(record?.items) ? record.items : []
+                const items = Array.isArray(record?.items) ? record.items : null
+                if (!items) {
+                    return [{
+                        id,
+                        status: asString(record?.status) ?? undefined,
+                        clientIds,
+                        userMessageCount: 0,
+                        hasCompleteItems: false,
+                        hasContextCompaction: false
+                    }]
+                }
+                let userMessageCount = 0
+                let hasContextCompaction = false
                 for (const item of items) {
                     const itemRecord = asRecord(item)
                     const type = asString(itemRecord?.type) ?? asString(itemRecord?.itemType)
+                    if (type === 'contextCompaction' || type === 'context_compaction') {
+                        hasContextCompaction = true
+                    }
                     if (type === 'userMessage' || type === 'user_message') {
+                        userMessageCount += 1
                         const clientId = asString(itemRecord?.clientId) ?? asString(itemRecord?.client_id)
                         if (clientId) clientIds.push(clientId)
                     }
@@ -250,7 +293,10 @@ export class CodexConversationHistory {
                 return [{
                     id,
                     status: asString(record?.status) ?? undefined,
-                    clientIds
+                    clientIds,
+                    userMessageCount,
+                    hasCompleteItems: true,
+                    hasContextCompaction
                 }]
             })
         } catch (error) {
@@ -258,7 +304,10 @@ export class CodexConversationHistory {
             // Fall back to in-memory mapping only
             return Array.from(this.turnByLocalId.entries()).map(([localId, id]) => ({
                 id,
-                clientIds: [localId]
+                clientIds: [localId],
+                userMessageCount: 1,
+                hasCompleteItems: false,
+                hasContextCompaction: false
             }))
         }
     }
