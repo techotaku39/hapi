@@ -4,7 +4,7 @@ import { CodexConversationHistory } from './conversationHistory'
 function createClient(overrides?: {
     fork?: (params: Record<string, unknown>) => Promise<{ thread: { id: string } }>
     rollback?: (params: { threadId: string; numTurns: number }) => Promise<unknown>
-    read?: () => Promise<{ thread: { id: string; turns: Array<Record<string, unknown>> } }>
+    read?: () => Promise<{ thread: { id: string; turns?: Array<Record<string, unknown>> } }>
 }) {
     return {
         supportsMethod: async () => true,
@@ -257,6 +257,27 @@ describe('CodexConversationHistory', () => {
         const result = await history.rewind('local-a')
 
         expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        if (result.success) throw new Error('Expected rewind to be rejected')
+        expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
+    it('returns a deterministic rejection when the selected native turn cannot be resolved', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({ thread: { id: 'thread-1' } })
+        }) as never)
+        history.setThreadId('thread-1')
+        history.restoreTurns({ localB: 'turn-b' })
+
+        const result = await history.rewind('localB')
+
+        expect(result).toMatchObject({
+            success: false,
+            code: 'ambiguous_native_boundary',
+            outcome: 'rejected'
+        })
         if (result.success) throw new Error('Expected rewind to be rejected')
         expect(result.error).toContain('ambiguous')
         expect(rollback).not.toHaveBeenCalled()

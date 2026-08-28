@@ -189,9 +189,16 @@ export class CodexConversationHistory {
         }
 
         const turns = await this.listTurns()
-        const turnId = await this.resolveTurnId(messageLocalId, turns)
-        const index = turns.findIndex((turn) => turn.id === turnId)
-        if (index < 0) throw new Error('Selected turn not found')
+        const turnId = await this.resolveTurnId(messageLocalId, turns).catch(() => null)
+        const index = turnId ? turns.findIndex((turn) => turn.id === turnId) : -1
+        if (index < 0) {
+            return {
+                success: false,
+                error: AMBIGUOUS_REWIND_ERROR,
+                code: 'ambiguous_native_boundary',
+                outcome: 'rejected'
+            }
+        }
         if (turns[index]?.status === 'inProgress' || turns[index]?.status === 'in_progress') {
             throw new Error('Cannot rewind an in-progress turn')
         }
