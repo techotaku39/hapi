@@ -29,7 +29,7 @@ function isMethodNotFound(error: unknown): boolean {
 }
 
 type TurnInfo = {
-    id: string
+    id: string | null
     status?: string
     clientIds: string[]
     userMessageCount: number
@@ -133,9 +133,13 @@ export class CodexConversationHistory {
             // Prefer stable inclusive lastTurnId of the previous turn. The first
             // turn has no predecessor, so fall back to experimental beforeTurnId
             // (exclusive) for that single boundary.
+            const previousTurnId = selectedIndex > 0 ? turns[selectedIndex - 1]?.id : null
+            if (selectedIndex > 0 && !previousTurnId) {
+                throw new Error(AMBIGUOUS_REWIND_ERROR)
+            }
             const boundary = selectedIndex === 0
                 ? { beforeTurnId: selectedTurnId }
-                : { lastTurnId: turns[selectedIndex - 1]!.id }
+                : { lastTurnId: previousTurnId! }
             try {
                 const response = await client.forkThread({
                     threadId,
@@ -243,7 +247,7 @@ export class CodexConversationHistory {
 
         const list = turns ?? await this.listTurns()
         for (const turn of list) {
-            if (turn.clientIds.includes(localId)) {
+            if (turn.id && turn.clientIds.includes(localId)) {
                 this.turnByLocalId.set(localId, turn.id)
                 return turn.id
             }
@@ -263,7 +267,16 @@ export class CodexConversationHistory {
             return turns.flatMap((entry): TurnInfo[] => {
                 const record = asRecord(entry)
                 const id = asString(record?.id)
-                if (!id) return []
+                if (!record || !id) {
+                    return [{
+                        id: null,
+                        status: asString(record?.status) ?? undefined,
+                        clientIds: [],
+                        userMessageCount: 0,
+                        hasCompleteItems: false,
+                        hasContextCompaction: false
+                    }]
+                }
                 const clientIds: string[] = []
                 const items = Array.isArray(record?.items) ? record.items : null
                 if (!items) {
@@ -277,10 +290,15 @@ export class CodexConversationHistory {
                     }]
                 }
                 let userMessageCount = 0
+                let hasCompleteItems = true
                 let hasContextCompaction = false
                 for (const item of items) {
                     const itemRecord = asRecord(item)
                     const type = asString(itemRecord?.type) ?? asString(itemRecord?.itemType)
+                    if (!itemRecord || !type) {
+                        hasCompleteItems = false
+                        continue
+                    }
                     if (type === 'contextCompaction' || type === 'context_compaction') {
                         hasContextCompaction = true
                     }
@@ -295,7 +313,7 @@ export class CodexConversationHistory {
                     status: asString(record?.status) ?? undefined,
                     clientIds,
                     userMessageCount,
-                    hasCompleteItems: true,
+                    hasCompleteItems,
                     hasContextCompaction
                 }]
             })

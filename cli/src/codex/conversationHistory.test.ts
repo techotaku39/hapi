@@ -200,6 +200,55 @@ describe('CodexConversationHistory', () => {
         expect(rollback).not.toHaveBeenCalled()
     })
 
+    it('rejects rewind before native mutation when a native turn has no id', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        { items: [{ type: 'assistantMessage' }] },
+                        { id: 'turn-c', items: [{ type: 'userMessage', clientId: 'local-c' }] }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+
+        const result = await history.rewind('local-a')
+
+        expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        if (result.success) throw new Error('Expected rewind to be rejected')
+        expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
+    it('rejects rewind before native mutation when a native item is malformed', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        { id: 'turn-b', items: [{}] }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+
+        const result = await history.rewind('local-a')
+
+        expect(result).toMatchObject({ success: false, outcome: 'rejected' })
+        if (result.success) throw new Error('Expected rewind to be rejected')
+        expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
     it('marks rewind unsupported on method-not-found without affecting fork', async () => {
         const rollback = vi.fn(async () => {
             throw new Error('thread/rollback is unsupported')
