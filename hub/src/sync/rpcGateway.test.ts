@@ -124,7 +124,7 @@ describe('RpcGateway Recycle Bin methods', () => {
         await gateway.readRecycleBinEntry('session-1', entryId)
         await gateway.restoreRecycleBinEntry('session-1', entryId, 'overwrite')
         await gateway.purgeRecycleBinEntry('session-1', entryId)
-        await gateway.emptyRecycleBin('session-1')
+        await gateway.emptyRecycleBin('session-1', [entryId])
 
         expect(calls).toEqual([
             { method: 'session-1:moveFileToRecycleBin', params: JSON.stringify({ path: 'src/notes.md' }) },
@@ -132,7 +132,7 @@ describe('RpcGateway Recycle Bin methods', () => {
             { method: 'session-1:readRecycleBinEntry', params: JSON.stringify({ entryId }) },
             { method: 'session-1:restoreRecycleBinEntry', params: JSON.stringify({ entryId, conflict: 'overwrite' }) },
             { method: 'session-1:purgeRecycleBinEntry', params: JSON.stringify({ entryId }) },
-            { method: 'session-1:emptyRecycleBin', params: JSON.stringify({}) },
+            { method: 'session-1:emptyRecycleBin', params: JSON.stringify({ entryIds: [entryId] }) },
         ])
         expect(timeouts).toEqual([600_000, 30_000, 30_000, 600_000, 600_000, 600_000])
     })

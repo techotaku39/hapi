@@ -394,11 +394,11 @@ export class RpcGateway {
         ) as PurgeRecycleBinEntryResponse
     }
 
-    async emptyRecycleBin(sessionId: string): Promise<EmptyRecycleBinResponse> {
+    async emptyRecycleBin(sessionId: string, entryIds: string[]): Promise<EmptyRecycleBinResponse> {
         return await this.sessionRpc(
             sessionId,
             RPC_METHODS.EmptyRecycleBin,
-            {},
+            { entryIds },
             RECYCLE_BIN_MUTATION_RPC_TIMEOUT_MS,
         ) as EmptyRecycleBinResponse
     }

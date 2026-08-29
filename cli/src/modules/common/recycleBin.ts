@@ -240,7 +240,12 @@ async function hashFile(path: string): Promise<string> {
     }
 }
 
-async function copyFileWithoutReplacing(sourcePath: string, destinationPath: string, expected: FileStats): Promise<void> {
+async function copyFileWithoutReplacing(
+    sourcePath: string,
+    destinationPath: string,
+    expected: FileStats,
+    mode?: number,
+): Promise<void> {
     const sourceHandle = await open(sourcePath, READ_FILE_FLAGS)
     let destinationCreated = false
     const buffer = Buffer.allocUnsafe(1024 * 1024)
@@ -250,7 +255,8 @@ async function copyFileWithoutReplacing(sourcePath: string, destinationPath: str
         if (!isSameFileStats(openedStats, expected)) {
             throw new Error('File changed before the recycle-bin operation completed')
         }
-        const destinationHandle = await open(destinationPath, 'wx', openedStats.mode & 0o7777)
+        const desiredMode = (mode ?? openedStats.mode) & 0o7777
+        const destinationHandle = await open(destinationPath, 'wx', desiredMode)
         destinationCreated = true
         try {
             while (offset < openedStats.size) {
@@ -266,6 +272,7 @@ async function copyFileWithoutReplacing(sourcePath: string, destinationPath: str
             await destinationHandle.close()
         }
 
+        await chmod(destinationPath, desiredMode)
         await assertFileUnchanged(sourcePath, openedStats)
         await unlink(sourcePath)
     } catch (error) {
@@ -281,6 +288,8 @@ async function copyFileWithoutReplacing(sourcePath: string, destinationPath: str
 type MoveFileOptions = {
     /** Copy first with an exclusive destination instead of rename replacement. */
     copyOnly?: boolean
+    /** Mode to apply after copying, preserving bits that the process umask masks at creation. */
+    mode?: number
 }
 
 async function moveRegularFile(
@@ -304,7 +313,7 @@ async function moveRegularFile(
         }
     }
 
-    await copyFileWithoutReplacing(sourcePath, destinationPath, sourceStats)
+    await copyFileWithoutReplacing(sourcePath, destinationPath, sourceStats, options.mode)
 }
 
 export function resolveRecycleBinRetentionDays(value: unknown): number {
@@ -338,11 +347,11 @@ export function getRecycleBinLockPath(homeDir: string = configuration.happyHomeD
 async function withRecycleBinLock<T>(homeDir: string, work: () => Promise<T>): Promise<T> {
     const root = getRecycleBinRoot(homeDir)
     await mkdir(root, { recursive: true, mode: 0o700 })
-    await chmod(root, 0o700).catch(() => {})
     const rootStats = await lstat(root)
     if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
         throw new Error('HAPI Recycle Bin storage is invalid')
     }
+    await chmod(root, 0o700).catch(() => {})
 
     const lockPath = getRecycleBinLockPath(homeDir)
     await ensureFile(lockPath)
@@ -750,7 +759,10 @@ export class RecycleBinManager {
                     await rename(target, backupPath)
                 }
 
-                await moveRegularFile(payloadPath, target, payloadStats, { copyOnly: true })
+                await moveRegularFile(payloadPath, target, payloadStats, {
+                    copyOnly: true,
+                    mode: entry.mode & 0o7777,
+                })
                 await rm(join(root, entry.id), { recursive: true, force: true })
                 if (backupPath) {
                     await rm(backupPath, { force: true })
@@ -799,7 +811,7 @@ export class RecycleBinManager {
         }))
     }
 
-    async empty(workingDirectory: string): Promise<EmptyRecycleBinResponse> {
+    async empty(workingDirectory: string, entryIds: string[]): Promise<EmptyRecycleBinResponse> {
         return await withRecycleBinLock(this.homeDir, async () => {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = resolve(root)
@@ -807,7 +819,9 @@ export class RecycleBinManager {
             await cleanupExpiredUnlocked(root, currentTime)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entries = await listStoredEntriesUnlocked(root, currentTime)
-            const visible = entries.filter((entry) => isEntryVisible(entry, scopeRoot, protectedRoot))
+            const requestedEntryIds = new Set(entryIds)
+            const visible = entries.filter((entry) => requestedEntryIds.has(entry.id)
+                && isEntryVisible(entry, scopeRoot, protectedRoot))
             for (const entry of visible) {
                 await rm(join(root, entry.id), { recursive: true, force: true })
             }

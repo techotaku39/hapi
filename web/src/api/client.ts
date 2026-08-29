@@ -519,10 +519,10 @@ export class ApiClient {
         )
     }
 
-    async emptyRecycleBin(sessionId: string): Promise<EmptyRecycleBinResponse> {
+    async emptyRecycleBin(sessionId: string, entryIds: string[]): Promise<EmptyRecycleBinResponse> {
         return await this.request<EmptyRecycleBinResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/recycle-bin/empty`,
-            { method: 'POST', body: '{}' }
+            { method: 'POST', body: JSON.stringify({ entryIds }) }
         )
     }
 

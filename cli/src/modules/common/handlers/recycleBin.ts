@@ -1,4 +1,5 @@
 import type {
+    EmptyRecycleBinRequest,
     EmptyRecycleBinResponse,
     MoveFileToRecycleBinResponse,
     ReadRecycleBinEntryResponse,
@@ -6,6 +7,7 @@ import type {
     RestoreRecycleBinEntryResponse,
     PurgeRecycleBinEntryResponse,
 } from '@hapi/protocol/apiTypes'
+import { EmptyRecycleBinRequestSchema } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import {
@@ -80,6 +82,10 @@ export function registerRecycleBinHandlers(
 
     rpcHandlerManager.registerHandler<unknown, EmptyRecycleBinResponse>(
         RPC_METHODS.EmptyRecycleBin,
-        async () => await manager.empty(workingDirectory),
+        async (raw) => {
+            const parsed = EmptyRecycleBinRequestSchema.safeParse(raw as EmptyRecycleBinRequest)
+            if (!parsed.success) return { success: false, error: 'Recycle-bin entry ids are required' }
+            return await manager.empty(workingDirectory, parsed.data.entryIds)
+        },
     )
 }

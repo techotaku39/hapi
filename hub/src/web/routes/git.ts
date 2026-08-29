@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { isWildcardSearch, matchesSearchQuery, toSearchGlob } from '@hapi/protocol'
-import { RecycleBinRestoreConflictSchema } from '@hapi/protocol/apiTypes'
+import { EmptyRecycleBinRequestSchema, RecycleBinRestoreConflictSchema } from '@hapi/protocol/apiTypes'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -281,7 +281,13 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return sessionResult
         }
 
-        const result = await runRpc(() => engine.emptyRecycleBin(sessionResult.sessionId))
+        const body = await c.req.json().catch(() => null)
+        const parsed = EmptyRecycleBinRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid empty recycle-bin request' }, 400)
+        }
+
+        const result = await runRpc(() => engine.emptyRecycleBin(sessionResult.sessionId, parsed.data.entryIds))
         return c.json(result)
     })
 

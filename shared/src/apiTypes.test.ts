@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
     ClearOpencodeSessionCallbackRequestSchema,
     ClearOpencodeSessionResponseSchema,
+    EmptyRecycleBinRequestSchema,
     ListCodexSessionsRpcResponseSchema,
     ListPiSessionsRpcResponseSchema,
     MessagesQuerySchema,
@@ -145,6 +146,14 @@ describe('SendMessageRequestSchema deliveryMode', () => {
             expect(parsed.error.issues.some((issue) => issue.path[0] === 'deliveryMode')).toBe(true)
             expect(parsed.error.issues.some((issue) => issue.message.includes('cannot use steer'))).toBe(true)
         }
+    })
+})
+
+describe('EmptyRecycleBinRequestSchema', () => {
+    it('requires the entry snapshot used for a confirmed empty operation', () => {
+        const entryId = '00000000-0000-4000-8000-000000000001'
+        expect(EmptyRecycleBinRequestSchema.parse({ entryIds: [entryId] })).toEqual({ entryIds: [entryId] })
+        expect(EmptyRecycleBinRequestSchema.safeParse({}).success).toBe(false)
     })
 })
 

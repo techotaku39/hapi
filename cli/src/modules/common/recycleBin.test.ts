@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { basename, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -148,6 +148,24 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('restores the recorded permission bits after a copy-based restore', async () => {
+        try {
+            const filePath = join(workspaceDir, 'permissions.txt')
+            await writeFile(filePath, 'permissions')
+            await chmod(filePath, 0o764)
+            const originalMode = (await stat(filePath)).mode & 0o7777
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toEqual({ success: true, restoredPath: filePath })
+            expect((await stat(filePath)).mode & 0o7777).toBe(originalMode)
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('refuses to restore a recycle entry whose payload was changed', async () => {
         try {
             const filePath = join(workspaceDir, 'tampered.txt')
@@ -212,10 +230,35 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('rejects a symlinked recycle-bin root before changing the target mode', async () => {
+        let outsideDir = ''
+        try {
+            outsideDir = await createTempDir('hapi-recycle-symlink-target')
+            const recycleRoot = getRecycleBinRoot(homeDir)
+            try {
+                await symlink(outsideDir, recycleRoot, process.platform === 'win32' ? 'junction' : undefined)
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code
+                if (code === 'EPERM' || code === 'EACCES' || code === 'ENOSYS') return
+                throw error
+            }
+
+            const beforeMode = (await stat(outsideDir)).mode
+            const result = await createManager(homeDir).list(workspaceDir)
+            expect(result).toMatchObject({ success: false, error: 'HAPI Recycle Bin storage is invalid' })
+            expect((await stat(outsideDir)).mode).toBe(beforeMode)
+        } finally {
+            if (outsideDir) await rm(outsideDir, { recursive: true, force: true })
+            await rm(getRecycleBinRoot(homeDir), { recursive: true, force: true })
+            await cleanup()
+        }
+    })
+
     it('supports permanent purge and emptying only entries visible from the current scope', async () => {
         try {
             const firstPath = join(workspaceDir, 'first.txt')
             const secondPath = join(workspaceDir, 'second.txt')
+            const thirdPath = join(workspaceDir, 'third.txt')
             await writeFile(firstPath, 'first')
             await writeFile(secondPath, 'second')
             const manager = createManager(homeDir)
@@ -225,7 +268,13 @@ describe('RecycleBinManager', () => {
 
             expect(await manager.purge(first.entry.id, workspaceDir)).toEqual({ success: true })
             expect((await manager.list(workspaceDir)).entries).toEqual([second.entry])
-            expect(await manager.empty(workspaceDir)).toEqual({ success: true, deletedCount: 1 })
+            const confirmedEntryIds = [second.entry.id]
+            await writeFile(thirdPath, 'third')
+            const third = await manager.moveFile(thirdPath, workspaceDir)
+            if (!third.success || !third.entry) throw new Error('move did not return a third entry')
+            expect(await manager.empty(workspaceDir, confirmedEntryIds)).toEqual({ success: true, deletedCount: 1 })
+            expect((await manager.list(workspaceDir)).entries).toEqual([third.entry])
+            expect(await manager.empty(workspaceDir, [third.entry.id])).toEqual({ success: true, deletedCount: 1 })
             expect((await manager.list(workspaceDir)).entries).toHaveLength(0)
         } finally {
             await cleanup()

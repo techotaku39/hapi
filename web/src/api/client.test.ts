@@ -278,7 +278,7 @@ describe('ApiClient error mapping', () => {
         await api.readRecycleBinEntry(sessionId, entryId)
         await api.restoreRecycleBinEntry(sessionId, entryId, 'new-name')
         await api.purgeRecycleBinEntry(sessionId, entryId)
-        await api.emptyRecycleBin(sessionId)
+        await api.emptyRecycleBin(sessionId, [entryId])
 
         expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
             '/api/sessions/session%20%2F%3F%23/recycle-bin',
@@ -295,6 +295,10 @@ describe('ApiClient error mapping', () => {
         expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({
             method: 'POST',
             body: JSON.stringify({ entryId, conflict: 'new-name' }),
+        })
+        expect(fetchMock.mock.calls[5]?.[1]).toMatchObject({
+            method: 'POST',
+            body: JSON.stringify({ entryIds: [entryId] }),
         })
     })
 

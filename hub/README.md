@@ -137,7 +137,7 @@ See `src/web/routes/` for all endpoints.
 - `GET /api/sessions/:id/recycle-bin/:entryId` - Read a Recycle Bin entry for preview.
 - `POST /api/sessions/:id/recycle-bin/restore` - Restore an entry to its original path.
 - `POST /api/sessions/:id/recycle-bin/purge` - Permanently delete one entry.
-- `POST /api/sessions/:id/recycle-bin/empty` - Permanently delete visible entries.
+- `POST /api/sessions/:id/recycle-bin/empty` - Permanently delete the confirmed entry IDs.
 
 ### Events (`src/web/routes/events.ts`)
 

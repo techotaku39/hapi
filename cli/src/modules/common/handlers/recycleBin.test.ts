@@ -45,7 +45,7 @@ describe('recycle-bin RPC handlers', () => {
         })
         await rpc.handleRequest({
             method: `session-test:${RPC_METHODS.EmptyRecycleBin}`,
-            params: JSON.stringify({}),
+            params: JSON.stringify({ entryIds: ['00000000-0000-4000-8000-000000000001'] }),
         })
 
         expect(manager.moveFile).toHaveBeenCalledWith('file.txt', '/workspace')
@@ -53,7 +53,7 @@ describe('recycle-bin RPC handlers', () => {
         expect(manager.read).toHaveBeenCalledWith('entry-1', '/workspace')
         expect(manager.restore).toHaveBeenCalledWith('entry-1', '/workspace', 'new-name')
         expect(manager.purge).toHaveBeenCalledWith('entry-1', '/workspace')
-        expect(manager.empty).toHaveBeenCalledWith('/workspace')
+        expect(manager.empty).toHaveBeenCalledWith('/workspace', ['00000000-0000-4000-8000-000000000001'])
     })
 
     it('defaults restore requests to a preflight conflict check', async () => {

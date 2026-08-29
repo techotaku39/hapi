@@ -138,6 +138,7 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
     const [pendingAction, setPendingAction] = useState<'restore' | 'purge' | 'empty' | null>(null)
     const [purgeEntry, setPurgeEntry] = useState<RecycleBinEntry | null>(null)
     const [emptyConfirmOpen, setEmptyConfirmOpen] = useState(false)
+    const [emptyEntryIds, setEmptyEntryIds] = useState<string[]>([])
     const [conflictEntry, setConflictEntry] = useState<RecycleBinEntry | null>(null)
     const [preview, setPreview] = useState<PreviewState | null>(null)
     const [previewLoading, setPreviewLoading] = useState(false)
@@ -219,9 +220,10 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
         setPendingAction('empty')
         setError(null)
         try {
-            const response = await props.api.emptyRecycleBin(props.sessionId)
+            const response = await props.api.emptyRecycleBin(props.sessionId, emptyEntryIds)
             if (!response.success) throw new Error(response.error ?? t('recycleBin.error.empty'))
             setEmptyConfirmOpen(false)
+            setEmptyEntryIds([])
             await refreshAfterChange()
         } catch (emptyError) {
             const message = emptyError instanceof Error ? emptyError.message : t('recycleBin.error.empty')
@@ -230,7 +232,12 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
         } finally {
             setPendingAction(null)
         }
-    }, [props.api, props.sessionId, refreshAfterChange, t])
+    }, [emptyEntryIds, props.api, props.sessionId, refreshAfterChange, t])
+
+    const handleOpenEmptyConfirm = useCallback(() => {
+        setEmptyEntryIds(entries.map((entry) => entry.id))
+        setEmptyConfirmOpen(true)
+    }, [entries])
 
     const handlePreview = useCallback(async (entry: RecycleBinEntry) => {
         if (!props.api || pendingEntryId || previewLoading) return
@@ -274,7 +281,7 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
                                 variant="destructive"
                                 size="sm"
                                 disabled={pendingAction !== null}
-                                onClick={() => setEmptyConfirmOpen(true)}
+                                onClick={handleOpenEmptyConfirm}
                             >
                                 <TrashIcon className="mr-1.5 h-3.5 w-3.5" />
                                 {t('recycleBin.empty')}
@@ -347,9 +354,12 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
 
             <ConfirmDialog
                 isOpen={emptyConfirmOpen}
-                onClose={() => setEmptyConfirmOpen(false)}
+                onClose={() => {
+                    setEmptyConfirmOpen(false)
+                    setEmptyEntryIds([])
+                }}
                 title={t('recycleBin.emptyConfirmTitle')}
-                description={t('recycleBin.emptyConfirmDescription', { count: entries.length })}
+                description={t('recycleBin.emptyConfirmDescription', { count: emptyEntryIds.length })}
                 confirmLabel={t('recycleBin.emptyConfirm')}
                 confirmingLabel={t('recycleBin.emptyConfirming')}
                 onConfirm={handleEmpty}

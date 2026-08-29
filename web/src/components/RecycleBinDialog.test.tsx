@@ -98,7 +98,7 @@ describe('RecycleBinDialog', () => {
             currentEntries = [secondEntry]
             return { success: true }
         })
-        const emptyRecycleBin = vi.fn(async () => {
+        const emptyRecycleBin = vi.fn(async (_sessionId: string, _entryIds: string[]) => {
             currentEntries = []
             return { success: true, deletedCount: 1 }
         })
@@ -118,7 +118,7 @@ describe('RecycleBinDialog', () => {
         const emptyConfirm = screen.getAllByRole('button', { name: 'Empty Recycle Bin' }).at(-1)
         expect(emptyConfirm).toBeDefined()
         fireEvent.click(emptyConfirm!)
-        await waitFor(() => expect(emptyRecycleBin).toHaveBeenCalledWith('session-1'))
+        await waitFor(() => expect(emptyRecycleBin).toHaveBeenCalledWith('session-1', [secondEntry.id]))
     })
 
     it('uses the same vertical spacing as loading for an empty bin', async () => {

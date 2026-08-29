@@ -116,8 +116,8 @@ describe('recycle bin routes', () => {
                 calls.push({ method: 'purge', value: { sessionId, id } })
                 return { success: true }
             },
-            emptyRecycleBin: async (sessionId: string) => {
-                calls.push({ method: 'empty', value: sessionId })
+            emptyRecycleBin: async (sessionId: string, entryIds: string[]) => {
+                calls.push({ method: 'empty', value: { sessionId, entryIds } })
                 return { success: true, deletedCount: 1 }
             },
         } as unknown as Partial<SyncEngine>
@@ -140,7 +140,11 @@ describe('recycle bin routes', () => {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ entryId }),
         })
-        const empty = await app.request('/api/sessions/session-1/recycle-bin/empty', { method: 'POST' })
+        const empty = await app.request('/api/sessions/session-1/recycle-bin/empty', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ entryIds: [entryId] }),
+        })
 
         expect(list.status).toBe(200)
         expect(move.status).toBe(200)
@@ -154,7 +158,7 @@ describe('recycle bin routes', () => {
             { method: 'read', value: { sessionId: 'session-1', id: entryId } },
             { method: 'restore', value: { sessionId: 'session-1', id: entryId, conflict: 'new-name' } },
             { method: 'purge', value: { sessionId: 'session-1', id: entryId } },
-            { method: 'empty', value: 'session-1' },
+            { method: 'empty', value: { sessionId: 'session-1', entryIds: [entryId] } },
         ])
     })
 

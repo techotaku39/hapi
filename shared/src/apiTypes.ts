@@ -724,6 +724,11 @@ export type PurgeRecycleBinEntryResponse = {
     error?: string
 }
 
+export const EmptyRecycleBinRequestSchema = z.object({
+    entryIds: z.array(z.string().uuid()).max(10_000),
+})
+export type EmptyRecycleBinRequest = z.infer<typeof EmptyRecycleBinRequestSchema>
+
 export type EmptyRecycleBinResponse = {
     success: boolean
     deletedCount?: number

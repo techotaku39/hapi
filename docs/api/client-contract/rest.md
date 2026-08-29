@@ -149,7 +149,7 @@ Source: `hub/src/web/routes/git.ts`. Git endpoints return the **raw command outp
 | `GET /api/sessions/:id/recycle-bin/:entryId` | — | `{success, name?, content?, size?, modified?, error?}`; `content` is **base64** |
 | `POST /api/sessions/:id/recycle-bin/restore` | `{entryId, conflict?: 'fail'\|'cancel'\|'overwrite'\|'new-name'}` | `{success, restoredPath?, cancelled?, code?: 'target_exists'\|'entry_not_found', targetPath?, error?}` |
 | `POST /api/sessions/:id/recycle-bin/purge` | `{entryId}` | `{success, error?}`; permanently deletes one entry |
-| `POST /api/sessions/:id/recycle-bin/empty` | `{}` | `{success, deletedCount?, error?}`; permanently deletes visible entries |
+| `POST /api/sessions/:id/recycle-bin/empty` | `{entryIds}` | `{success, deletedCount?, error?}`; permanently deletes only the confirmed entry IDs |
 
 When the session has no `metadata.path` yet, these return HTTP 200 `{success: false, error: 'Session path not available'}`.
 

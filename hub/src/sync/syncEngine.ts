@@ -3921,8 +3921,8 @@ export class SyncEngine {
         return await this.rpcGateway.purgeRecycleBinEntry(sessionId, entryId)
     }
 
-    async emptyRecycleBin(sessionId: string): Promise<EmptyRecycleBinResponse> {
-        return await this.rpcGateway.emptyRecycleBin(sessionId)
+    async emptyRecycleBin(sessionId: string, entryIds: string[]): Promise<EmptyRecycleBinResponse> {
+        return await this.rpcGateway.emptyRecycleBin(sessionId, entryIds)
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
