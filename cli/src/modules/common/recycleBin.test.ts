@@ -553,6 +553,29 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('does not publish a partial restore target when staged copying fails', async () => {
+        try {
+            const filePath = join(workspaceDir, 'staged-restore-failure.txt')
+            await writeFile(filePath, 'keep the payload')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.rejectSync = true
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin sync failure' })
+            await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
+            await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-restore-/))
+            recycleBinIoHarness.rejectSync = false
+            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                success: true,
+                content: Buffer.from('keep the payload').toString('base64'),
+            })
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('keeps the existing target until a staged overwrite restore is ready', async () => {
         try {
             const filePath = join(workspaceDir, 'staged-overwrite.txt')

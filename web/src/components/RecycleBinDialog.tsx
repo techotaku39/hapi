@@ -206,6 +206,7 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
             setPurgeEntry(null)
             await refreshAfterChange()
         } catch (purgeError) {
+            await load()
             const message = purgeError instanceof Error ? purgeError.message : t('recycleBin.error.purge')
             setError(message)
             throw purgeError instanceof Error ? purgeError : new Error(message)
@@ -226,6 +227,7 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
             setEmptyEntryIds([])
             await refreshAfterChange()
         } catch (emptyError) {
+            await load()
             const message = emptyError instanceof Error ? emptyError.message : t('recycleBin.error.empty')
             setError(message)
             throw emptyError instanceof Error ? emptyError : new Error(message)

@@ -2,6 +2,7 @@ import { constants, type Stats } from 'node:fs'
 import {
     chmod,
     lstat,
+    link,
     mkdir,
     open,
     readdir,
@@ -845,18 +846,21 @@ export class RecycleBinManager {
 
             let stagedPath: string | null = null
             try {
+                stagedPath = join(dirname(target), `.hapi-restore-${randomUUID()}.tmp`)
+                await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
+                    mode: entry.mode & 0o7777,
+                    unlinkSource: false,
+                })
                 if (targetExists && conflict === 'overwrite') {
-                    stagedPath = join(dirname(target), `.hapi-restore-${randomUUID()}.tmp`)
-                    await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
-                        mode: entry.mode & 0o7777,
-                        unlinkSource: false,
-                    })
                     await rename(stagedPath, target)
                     await syncParentDirectory(target)
                 } else {
-                    await moveRegularFile(payloadPath, target, payloadStats, {
-                        mode: entry.mode & 0o7777,
-                    })
+                    // Publish a complete staged file without replacing a
+                    // target that appeared after the conflict check.
+                    await link(stagedPath, target)
+                    await syncParentDirectory(target)
+                    await unlink(stagedPath)
+                    await syncParentDirectory(target)
                 }
                 await rm(join(root, entry.id), { recursive: true, force: true })
                 await syncDirectory(root)

@@ -121,6 +121,48 @@ describe('RecycleBinDialog', () => {
         await waitFor(() => expect(emptyRecycleBin).toHaveBeenCalledWith('session-1', [secondEntry.id]))
     })
 
+    it('reloads the list after a purge failure that already removed the entry', async () => {
+        let currentEntries = [entry]
+        const listRecycleBin = vi.fn(async () => ({ success: true, entries: currentEntries, retentionDays: 30 }))
+        const purgeRecycleBinEntry = vi.fn(async () => {
+            currentEntries = []
+            return { success: false, error: 'The entry was removed before synchronization completed' }
+        })
+
+        renderDialog({ listRecycleBin, purgeRecycleBinEntry })
+        expect(await screen.findByText('notes.md')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Delete permanently' }))
+
+        await waitFor(() => {
+            expect(purgeRecycleBinEntry).toHaveBeenCalledWith('session-1', entry.id)
+            expect(listRecycleBin).toHaveBeenCalledTimes(2)
+        })
+        expect(screen.queryByText('notes.md')).not.toBeInTheDocument()
+    })
+
+    it('reloads the list after an empty-bin failure that already removed entries', async () => {
+        let currentEntries = [entry]
+        const listRecycleBin = vi.fn(async () => ({ success: true, entries: currentEntries, retentionDays: 30 }))
+        const emptyRecycleBin = vi.fn(async () => {
+            currentEntries = []
+            return { success: false, error: 'The entries were removed before synchronization completed' }
+        })
+
+        renderDialog({ listRecycleBin, emptyRecycleBin })
+        expect(await screen.findByText('notes.md')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Empty' }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Empty Recycle Bin' }))
+
+        await waitFor(() => {
+            expect(emptyRecycleBin).toHaveBeenCalledWith('session-1', [entry.id])
+            expect(listRecycleBin).toHaveBeenCalledTimes(2)
+        })
+        expect(screen.queryByText('notes.md')).not.toBeInTheDocument()
+    })
+
     it('uses the same vertical spacing as loading for an empty bin', async () => {
         const listRecycleBin = vi.fn(async () => ({
             success: true,
