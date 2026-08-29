@@ -7,6 +7,7 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     directorySyncCalls: 0,
     directorySyncFailureAt: undefined as number | undefined,
     replaceSourceBeforeDetach: undefined as { path: string; replacementPath: string } | undefined,
+    rejectDetachedUnlink: false,
 }))
 
 vi.mock('node:fs/promises', async () => {
@@ -22,6 +23,14 @@ vi.mock('node:fs/promises', async () => {
                 await actual.rename(replacement.replacementPath, replacement.path)
             }
             return await actual.rename(sourcePath, destinationPath)
+        }),
+        unlink: vi.fn(async (path: string) => {
+            if (recycleBinIoHarness.rejectDetachedUnlink && path.includes('.hapi-source-')) {
+                const error = new Error('Simulated detached-source unlink failure') as NodeJS.ErrnoException
+                error.code = 'EIO'
+                throw error
+            }
+            return await actual.unlink(path)
         }),
         open: vi.fn(async (...args: [string, string | number, number?]) => {
             const handle = await actual.open(...args)
@@ -101,6 +110,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.directorySyncCalls = 0
         recycleBinIoHarness.directorySyncFailureAt = undefined
         recycleBinIoHarness.replaceSourceBeforeDetach = undefined
+        recycleBinIoHarness.rejectDetachedUnlink = false
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -439,6 +449,37 @@ describe('RecycleBinManager', () => {
             }
             await expect(stat(rollbackStage)).rejects.toMatchObject({ code: 'ENOENT' })
         } finally {
+            await cleanup()
+        }
+    })
+
+    it('keeps the recycle entry when detached-source cleanup is temporarily unavailable', async () => {
+        try {
+            const filePath = join(workspaceDir, 'detached-cleanup-failure.txt')
+            await writeFile(filePath, 'retain the recoverable payload')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDetachedUnlink = true
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            const stagingPath = join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`)
+            expect(moved.success).toBe(true)
+            await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
+            await expect(stat(stagingPath)).resolves.toBeDefined()
+
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({
+                success: true,
+                entries: [moved.entry],
+            })
+            await expect(stat(stagingPath)).rejects.toMatchObject({ code: 'ENOENT' })
+            await expect(manager.restore(moved.entry.id, workspaceDir, 'fail')).resolves.toEqual({
+                success: true,
+                restoredPath: filePath,
+            })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('retain the recoverable payload')
+        } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
             await cleanup()
         }
     })
@@ -785,6 +826,41 @@ describe('RecycleBinManager', () => {
             expect(result).toMatchObject({ success: false, error: 'File path is outside the authorized working directory' })
             await expect(readFile(settingsPath, 'utf8')).resolves.toBe('{"secret":true}')
         } finally {
+            await cleanup()
+        }
+    })
+
+    it('does not reconcile staging files through a replaced parent symlink', async () => {
+        let outsideDir = ''
+        const parentPath = join(workspaceDir, 'replaceable-parent')
+        try {
+            outsideDir = await createTempDir('hapi-recycle-replaced-parent')
+            await mkdir(parentPath)
+            const filePath = join(parentPath, 'original.txt')
+            await writeFile(filePath, 'original contents')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            await rm(parentPath, { recursive: true, force: true })
+            try {
+                await symlink(outsideDir, parentPath, process.platform === 'win32' ? 'junction' : undefined)
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code
+                if (code === 'EPERM' || code === 'EACCES' || code === 'ENOSYS') return
+                throw error
+            }
+
+            const stagingPath = join(outsideDir, `.hapi-restore-${moved.entry.id}.tmp`)
+            await writeFile(stagingPath, 'unrelated outside file')
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({
+                success: true,
+                entries: [moved.entry],
+            })
+            await expect(readFile(stagingPath, 'utf8')).resolves.toBe('unrelated outside file')
+        } finally {
+            await rm(parentPath, { recursive: true, force: true })
+            if (outsideDir) await rm(outsideDir, { recursive: true, force: true })
             await cleanup()
         }
     })

@@ -346,8 +346,12 @@ async function copyFileWithoutReplacing(
                 }
                 throw new Error('File changed before the recycle-bin operation completed')
             }
-            await unlink(detachedPath)
             sourceRemoved = true
+            try {
+                await unlink(detachedPath)
+            } catch (error) {
+                logger.debug('[RECYCLE BIN] Deferring detached-source cleanup', { detachedPath, error })
+            }
             await syncParentDirectory(sourcePath)
         }
     } catch (error) {
@@ -587,16 +591,18 @@ async function reconcileEntryStagingFiles(
     entry: StoredRecycleBinEntry,
     protectedRoot?: string,
 ): Promise<void> {
+    const workspaceDirectory = await realpath(dirname(entry.originalPath)).catch(() => null)
     if (
-        !isPathWithin(entry.originalPath, entry.scopeRoot)
-        || hasGitMetadataSegment(entry.originalPath)
-        || (protectedRoot && isPathWithin(entry.originalPath, protectedRoot))
+        !workspaceDirectory
+        || !isPathWithin(workspaceDirectory, entry.scopeRoot)
+        || hasGitMetadataSegment(workspaceDirectory)
+        || (protectedRoot && isPathWithin(workspaceDirectory, protectedRoot))
     ) {
         return
     }
 
     const stagingDirectories = new Set([
-        dirname(entry.originalPath),
+        workspaceDirectory,
         join(root, entry.id),
     ])
     const stagingNames = [
