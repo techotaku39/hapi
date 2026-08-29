@@ -635,6 +635,10 @@ export function ComposerButtons(props: {
     // The composer must surface that constraint at UI time so the user never
     // builds a submission the hub will reject — see hub/web/routes/messages.ts.
     hasAttachments?: boolean
+    // SessionChat omits the attachment adapter when an inactive session cannot
+    // resume. Keep the custom mobile picker disabled in that state instead of
+    // accepting a file that assistant-ui cannot attach.
+    attachmentsEnabled?: boolean
     // Generic model/effort value buttons
     modelValueLabel?: string
     modelValueButtonRef?: Ref<HTMLButtonElement>
@@ -674,6 +678,7 @@ export function ComposerButtons(props: {
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
+    const attachmentsEnabled = props.attachmentsEnabled ?? true
     const toolbarJustifyContent = getComposerToolbarJustifyContent(layout.mode)
     const api = useAui()
     const handleAttachmentFiles = useCallback(async (files: readonly File[]) => {
@@ -697,7 +702,7 @@ export function ComposerButtons(props: {
                 <ToolbarItemSlot item="attachment">
                 {isNarrowViewport ? (
                     <AttachmentPicker
-                        disabled={props.controlsDisabled || hasSchedule}
+                        disabled={props.controlsDisabled || hasSchedule || !attachmentsEnabled}
                         onFilesSelected={handleAttachmentFiles}
                     />
                 ) : (

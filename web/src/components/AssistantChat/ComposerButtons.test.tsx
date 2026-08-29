@@ -63,7 +63,7 @@ function stubViewport(matches: boolean) {
     vi.spyOn(window, 'matchMedia').mockReturnValue(mediaQueryList)
 }
 
-function renderAttachmentToolbar() {
+function renderAttachmentToolbar(overrides: Partial<ComponentProps<typeof ComposerButtons>> = {}) {
     const noop = () => {}
     render(
         <RuntimeProviders>
@@ -90,6 +90,7 @@ function renderAttachmentToolbar() {
                 voiceStatus="disconnected"
                 onVoiceToggle={noop}
                 onSend={noop}
+                {...overrides}
             />
         </RuntimeProviders>,
     )
@@ -334,5 +335,12 @@ describe('ComposerButtons attachment entrypoint', () => {
 
         expect(screen.getByRole('dialog', { name: 'Add attachment' })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Photos' })).toBeInTheDocument()
+    })
+
+    it('disables the mobile entry when the session has no attachment adapter', () => {
+        stubViewport(true)
+        renderAttachmentToolbar({ attachmentsEnabled: false })
+
+        expect(screen.getByTestId('composer-attachment-picker-trigger')).toBeDisabled()
     })
 })
