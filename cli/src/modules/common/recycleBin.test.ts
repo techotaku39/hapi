@@ -371,6 +371,47 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('cleans expired entries even when their payload is missing or truncated', async () => {
+        try {
+            const root = getRecycleBinRoot(homeDir)
+            await mkdir(root, { recursive: true })
+            const contentHash = createHash('sha256').update('expected payload').digest('hex')
+            const entries = [
+                { id: randomUUID(), payload: null as string | null },
+                { id: randomUUID(), payload: 'short' },
+            ]
+            for (const [index, item] of entries.entries()) {
+                const directory = join(root, item.id)
+                await mkdir(directory)
+                await writeFile(join(directory, 'metadata.json'), JSON.stringify({
+                    version: 2,
+                    id: item.id,
+                    name: `incomplete-${index}.txt`,
+                    originalPath: join(workspaceDir, `incomplete-${index}.txt`),
+                    ownerNamespace: 'default',
+                    scopeRoot: workspaceDir,
+                    type: 'file',
+                    size: 'expected payload'.length,
+                    mode: 0o100644,
+                    contentHash,
+                    deletedAt: 0,
+                    expiresAt: 0,
+                }))
+                if (item.payload !== null) await writeFile(join(directory, 'payload'), item.payload)
+            }
+
+            await expect(createManager(homeDir, () => DAY_MS).list(workspaceDir)).resolves.toMatchObject({
+                success: true,
+                entries: [],
+            })
+            for (const item of entries) {
+                await expect(stat(join(root, item.id))).rejects.toMatchObject({ code: 'ENOENT' })
+            }
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('keeps the source when the new recycle entry cannot be committed to disk', async () => {
         try {
             const filePath = join(workspaceDir, 'metadata-durability.txt')
@@ -673,6 +714,22 @@ describe('RecycleBinManager', () => {
             } finally {
                 await rm(outsideDir, { recursive: true, force: true })
             }
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('protects all HAPI home state when the home is nested in the working directory', async () => {
+        try {
+            const nestedHome = join(workspaceDir, '.hapi-home')
+            await mkdir(nestedHome)
+            const settingsPath = join(nestedHome, 'settings.json')
+            await writeFile(settingsPath, '{"secret":true}')
+            const manager = createManager(nestedHome)
+
+            const result = await manager.moveFile(join('.hapi-home', 'settings.json'), workspaceDir)
+            expect(result).toMatchObject({ success: false, error: 'File path is outside the authorized working directory' })
+            await expect(readFile(settingsPath, 'utf8')).resolves.toBe('{"secret":true}')
         } finally {
             await cleanup()
         }
