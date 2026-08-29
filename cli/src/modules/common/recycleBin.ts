@@ -614,7 +614,10 @@ async function reconcileEntryStagingFiles(
             const stagingPath = join(directory, name)
             try {
                 const stats = await lstat(stagingPath)
-                if (stats.isFile() && !stats.isSymbolicLink()) {
+                if (stats.isFile() && !stats.isSymbolicLink() && stats.size === entry.size) {
+                    const contentHash = await hashFile(stagingPath)
+                    const finalStats = await lstat(stagingPath)
+                    if (contentHash !== entry.contentHash || !isSameFileStats(stats, finalStats)) continue
                     await rm(stagingPath, { force: true })
                 }
             } catch (error) {
@@ -895,12 +898,14 @@ export class RecycleBinManager {
             await assertPayloadIntegrity(entry, payloadPath)
 
             let stagedPath: string | null = null
+            let stagedCreated = false
             try {
                 stagedPath = join(dirname(target), `.hapi-restore-${entry.id}.tmp`)
                 await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
                 })
+                stagedCreated = true
                 if (targetExists && conflict === 'overwrite') {
                     await rename(stagedPath, target)
                     await syncParentDirectory(target)
@@ -916,7 +921,7 @@ export class RecycleBinManager {
                 await syncDirectory(root)
                 return { success: true, restoredPath: target }
             } catch (error) {
-                if (stagedPath) {
+                if (stagedCreated && stagedPath) {
                     await rm(stagedPath, { force: true }).catch(() => {})
                 }
                 throw error

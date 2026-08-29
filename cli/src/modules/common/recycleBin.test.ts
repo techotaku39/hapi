@@ -435,10 +435,10 @@ describe('RecycleBinManager', () => {
                 `.hapi-restore-${moved.entry.id}.tmp`,
             ]
             for (const name of stagingNames) {
-                await writeFile(join(workspaceDir, name), 'interrupted staging data')
+                await writeFile(join(workspaceDir, name), 'reconcile staging files')
             }
             const rollbackStage = join(getRecycleBinRoot(homeDir), moved.entry.id, `.hapi-source-${moved.entry.id}.tmp`)
-            await writeFile(rollbackStage, 'interrupted rollback data')
+            await writeFile(rollbackStage, 'reconcile staging files')
 
             await expect(manager.list(workspaceDir)).resolves.toMatchObject({
                 success: true,
@@ -448,6 +448,53 @@ describe('RecycleBinManager', () => {
                 await expect(stat(join(workspaceDir, name))).rejects.toMatchObject({ code: 'ENOENT' })
             }
             await expect(stat(rollbackStage)).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('does not remove unrelated files that reuse staging names', async () => {
+        try {
+            const filePath = join(workspaceDir, 'staging-name-collision.txt')
+            await writeFile(filePath, 'original contents')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const sourceStage = join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`)
+            const restoreStage = join(workspaceDir, `.hapi-restore-${moved.entry.id}.tmp`)
+            await writeFile(sourceStage, 'unrelated source-stage file')
+            await writeFile(restoreStage, 'unrelated restore-stage file')
+
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({
+                success: true,
+                entries: [moved.entry],
+            })
+            await expect(readFile(sourceStage, 'utf8')).resolves.toBe('unrelated source-stage file')
+            await expect(readFile(restoreStage, 'utf8')).resolves.toBe('unrelated restore-stage file')
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('does not remove a pre-existing restore staging file when staging fails', async () => {
+        try {
+            const filePath = join(workspaceDir, 'restore-stage-collision.txt')
+            await writeFile(filePath, 'original contents')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const stagingPath = join(workspaceDir, `.hapi-restore-${moved.entry.id}.tmp`)
+            await writeFile(stagingPath, 'pre-existing user file')
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+
+            expect(restored).toMatchObject({ success: false })
+            await expect(readFile(stagingPath, 'utf8')).resolves.toBe('pre-existing user file')
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({
+                success: true,
+                entries: [moved.entry],
+            })
         } finally {
             await cleanup()
         }
