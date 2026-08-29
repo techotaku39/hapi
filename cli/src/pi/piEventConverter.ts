@@ -7,7 +7,7 @@ import {
     PiToolExecutionStartEventSchema,
     PiToolExecutionUpdateEventSchema,
 } from './schemas';
-import type { PiAgentEvent, PiContextUsage, PiToolExecutionEndEvent, PiTurnEndEvent, PiUsage } from './types';
+import type { PiAgentEvent, PiContextUsage, PiTurnEndEvent, PiUsage } from './types';
 
 function hasMeaningfulUsage(usage: PiUsage | undefined): usage is PiUsage {
     return usage !== undefined && Number.isFinite(usage.totalTokens) && usage.totalTokens > 0;
@@ -120,9 +120,9 @@ export function extractPiGeneratedImages(
     resolveArgs: (toolCallId: string) => unknown,
 ): AgentMessage[] {
     if (event.type !== 'tool_execution_end') return [];
-    // PiAgentEvent's trailing `{ type: string }` fallback defeats discriminant
-    // narrowing, so cast through the explicit end-event interface.
-    const endEvent = event as PiToolExecutionEndEvent;
+    const parsed = PiToolExecutionEndEventSchema.safeParse(event);
+    if (!parsed.success) return [];
+    const endEvent = parsed.data;
     const result = endEvent.result;
     const content = result !== null && typeof result === 'object'
         ? (result as { content?: unknown }).content

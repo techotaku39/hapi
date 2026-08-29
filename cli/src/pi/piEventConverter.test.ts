@@ -53,6 +53,18 @@ describe('extractPiGeneratedImages', () => {
         ]), () => null);
         expect(messages).toEqual([]);
     });
+
+    it('rejects malformed tool_execution_end events missing required fields', () => {
+        clearGeneratedImages();
+        const event = {
+            type: 'tool_execution_end',
+            // toolCallId / toolName / isError 均缺失 —— 同类事件在 convertPiEvent
+            // 的 schema 安检里也会被拒收，这里不能给孤儿图片开绿灯
+            result: { content: [{ type: 'image', mimeType: 'image/png', data: PNG_HEADER.toString('base64') }] },
+        } as PiAgentEvent;
+        const messages = extractPiGeneratedImages(event, () => null);
+        expect(messages).toEqual([]);
+    });
 });
 
 describe('convertPiEvent', () => {
