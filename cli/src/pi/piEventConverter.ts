@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from '@/ui/logger';
-import { registerGeneratedImage } from '@/modules/common/generatedImages';
+import { decodeGeneratedImageBase64, detectImageMimeType, registerGeneratedImage } from '@/modules/common/generatedImages';
 import type { AgentMessage } from '@/agent/types';
 import {
     PiToolExecutionEndEventSchema,
@@ -143,12 +143,16 @@ export function extractPiGeneratedImages(
         const mimeType = typeof record.mimeType === 'string' ? record.mimeType : undefined;
         if (!data || !mimeType || !mimeType.toLowerCase().startsWith('image/')) continue;
         try {
+            const bytes = decodeGeneratedImageBase64(data);
+            if (!bytes) continue;
+            const detectedMimeType = detectImageMimeType(bytes);
+            if (!detectedMimeType || detectedMimeType !== mimeType.toLowerCase()) continue;
             const media = registerGeneratedImage({
                 id: randomUUID(),
-                path: sourcePath ?? `${endEvent.toolCallId}${PI_IMAGE_EXTENSIONS[mimeType.toLowerCase()] ?? '.bin'}`,
+                path: sourcePath ?? `${endEvent.toolCallId}${PI_IMAGE_EXTENSIONS[detectedMimeType] ?? '.bin'}`,
                 fileName: sourcePath ? undefined : null,
-                mimeType,
-                bytes: Buffer.from(data, 'base64'),
+                mimeType: detectedMimeType,
+                bytes,
             });
             messages.push({
                 type: 'generated_image',
