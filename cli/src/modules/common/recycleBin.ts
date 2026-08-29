@@ -554,7 +554,7 @@ async function readStoredEntry(root: string, entryId: string): Promise<StoredRec
     }
 }
 
-async function cleanupExpiredUnlocked(root: string, now: number, ownerNamespace: string): Promise<void> {
+async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> {
     let entries: string[]
     try {
         entries = await readdir(root)
@@ -568,7 +568,7 @@ async function cleanupExpiredUnlocked(root: string, now: number, ownerNamespace:
         if (!RECYCLE_ENTRY_ID_PATTERN.test(entryId)) return
         try {
             const entry = await readStoredEntry(root, entryId)
-            if (entry.ownerNamespace === ownerNamespace && entry.expiresAt <= now) {
+            if (entry.expiresAt <= now) {
                 await rm(join(root, entryId), { recursive: true, force: true })
                 removedAny = true
             }
@@ -644,7 +644,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
+            await cleanupExpiredUnlocked(root, currentTime)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const source = await resolveExistingFile(rawPath, scopeRoot, protectedRoot)
             const retentionDays = await this.readRetentionDays()
@@ -708,7 +708,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
+            await cleanupExpiredUnlocked(root, currentTime)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entries = await listStoredEntriesUnlocked(root, currentTime)
             const retentionDays = await this.readRetentionDays()
@@ -728,7 +728,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
+            await cleanupExpiredUnlocked(root, currentTime)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
@@ -771,7 +771,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
+            await cleanupExpiredUnlocked(root, currentTime)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
@@ -857,7 +857,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
+            await cleanupExpiredUnlocked(root, currentTime)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
@@ -877,7 +877,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
+            await cleanupExpiredUnlocked(root, currentTime)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entries = await listStoredEntriesUnlocked(root, currentTime)
             const requestedEntryIds = new Set(entryIds)

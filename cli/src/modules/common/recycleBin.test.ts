@@ -251,6 +251,24 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('cleans expired entries from retired namespaces without exposing live entries', async () => {
+        try {
+            let aliceNow = 0
+            const filePath = join(workspaceDir, 'retired-namespace.txt')
+            await writeFile(filePath, 'retired namespace')
+            const alice = createManager(homeDir, () => aliceNow, 1, 'alice')
+            const bob = createManager(homeDir, () => DAY_MS, 1, 'bob')
+            const moved = await alice.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            aliceNow = DAY_MS
+
+            await expect(bob.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('keeps the source when the new recycle entry cannot be committed to disk', async () => {
         try {
             const filePath = join(workspaceDir, 'metadata-durability.txt')
