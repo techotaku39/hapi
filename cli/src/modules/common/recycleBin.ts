@@ -281,6 +281,8 @@ type RecycleBinCopyOptions = {
     mode?: number
     /** Keep the source in place when the destination is only a staging copy. */
     unlinkSource?: boolean
+    /** Stable entry id used to name a recoverable source-detach staging file. */
+    stageId?: string
 }
 
 async function copyFileWithoutReplacing(
@@ -331,7 +333,10 @@ async function copyFileWithoutReplacing(
 
         await syncParentDirectory(destinationPath)
         if (options.unlinkSource !== false) {
-            const detachedPath = join(dirname(sourcePath), `.hapi-source-${randomUUID()}.tmp`)
+            if (!options.stageId) {
+                throw new Error('Recycle-bin staging id is required when removing the source')
+            }
+            const detachedPath = join(dirname(sourcePath), `.hapi-source-${options.stageId}.tmp`)
             await rename(sourcePath, detachedPath)
             const detachedStats = await lstat(detachedPath)
             if (!isSameFileStats(detachedStats, openedStats)) {
@@ -577,7 +582,45 @@ async function removeConservativelyStaleEntry(root: string, entryId: string, now
     return true
 }
 
-async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> {
+async function reconcileEntryStagingFiles(
+    root: string,
+    entry: StoredRecycleBinEntry,
+    protectedRoot?: string,
+): Promise<void> {
+    if (
+        !isPathWithin(entry.originalPath, entry.scopeRoot)
+        || hasGitMetadataSegment(entry.originalPath)
+        || (protectedRoot && isPathWithin(entry.originalPath, protectedRoot))
+    ) {
+        return
+    }
+
+    const stagingDirectories = new Set([
+        dirname(entry.originalPath),
+        join(root, entry.id),
+    ])
+    const stagingNames = [
+        `.hapi-source-${entry.id}.tmp`,
+        `.hapi-restore-${entry.id}.tmp`,
+    ]
+    for (const directory of stagingDirectories) {
+        for (const name of stagingNames) {
+            const stagingPath = join(directory, name)
+            try {
+                const stats = await lstat(stagingPath)
+                if (stats.isFile() && !stats.isSymbolicLink()) {
+                    await rm(stagingPath, { force: true })
+                }
+            } catch (error) {
+                if (!isNotFound(error)) {
+                    logger.debug('[RECYCLE BIN] Failed to reconcile staging file', { stagingPath, error })
+                }
+            }
+        }
+    }
+}
+
+async function cleanupExpiredUnlocked(root: string, now: number, protectedRoot?: string): Promise<void> {
     let entries: string[]
     try {
         entries = await readdir(root)
@@ -591,6 +634,7 @@ async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> 
         if (!RECYCLE_ENTRY_ID_PATTERN.test(entryId)) continue
         try {
             const entry = await readStoredEntryMetadata(root, entryId)
+            await reconcileEntryStagingFiles(root, entry, protectedRoot)
             if (entry.expiresAt <= now) {
                 await rm(join(root, entryId), { recursive: true, force: true })
                 removedAny = true
@@ -673,7 +717,7 @@ export class RecycleBinManager {
             // only the recycle-bin directory itself.
             const protectedRoot = await realpath(this.homeDir)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, protectedRoot)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const source = await resolveExistingFile(rawPath, scopeRoot, protectedRoot)
             const retentionDays = await this.readRetentionDays()
@@ -701,13 +745,13 @@ export class RecycleBinManager {
             try {
                 await writeJsonAtomically(metadataPath, entry)
                 await syncParentDirectory(entryDirectory)
-                await moveRegularFile(source.path, payloadPath, source.stats)
+                await moveRegularFile(source.path, payloadPath, source.stats, { stageId: entryId })
                 await assertPayloadIntegrity(entry, payloadPath)
             } catch (error) {
                 let rollbackError: unknown = null
                 if (await pathExists(payloadPath)) {
                     try {
-                        await moveRegularFile(payloadPath, source.path)
+                        await moveRegularFile(payloadPath, source.path, undefined, { stageId: entryId })
                     } catch (error) {
                         rollbackError = error
                         logger.debug('[RECYCLE BIN] Failed to roll back a failed move', { rollbackError })
@@ -737,7 +781,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(this.homeDir)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, protectedRoot)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entries = await listStoredEntriesUnlocked(root, currentTime)
             const retentionDays = await this.readRetentionDays()
@@ -757,7 +801,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(this.homeDir)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, protectedRoot)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
@@ -800,7 +844,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(this.homeDir)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, protectedRoot)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
@@ -846,7 +890,7 @@ export class RecycleBinManager {
 
             let stagedPath: string | null = null
             try {
-                stagedPath = join(dirname(target), `.hapi-restore-${randomUUID()}.tmp`)
+                stagedPath = join(dirname(target), `.hapi-restore-${entry.id}.tmp`)
                 await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
@@ -888,7 +932,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(this.homeDir)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, protectedRoot)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
@@ -908,7 +952,7 @@ export class RecycleBinManager {
             const root = getRecycleBinRoot(this.homeDir)
             const protectedRoot = await realpath(this.homeDir)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, protectedRoot)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entries = await listStoredEntriesUnlocked(root, currentTime)
             const requestedEntryIds = new Set(entryIds)

@@ -163,6 +163,26 @@ describe('RecycleBinDialog', () => {
         expect(screen.queryByText('notes.md')).not.toBeInTheDocument()
     })
 
+    it('reloads the list after a restore failure that already removed the entry', async () => {
+        let currentEntries = [entry]
+        const listRecycleBin = vi.fn(async () => ({ success: true, entries: currentEntries, retentionDays: 30 }))
+        const restoreRecycleBinEntry = vi.fn(async () => {
+            currentEntries = []
+            return { success: false, error: 'The entry was removed before synchronization completed' }
+        })
+
+        renderDialog({ listRecycleBin, restoreRecycleBinEntry })
+        expect(await screen.findByText('notes.md')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Restore' }))
+
+        await waitFor(() => {
+            expect(restoreRecycleBinEntry).toHaveBeenCalledWith('session-1', entry.id, 'fail')
+            expect(listRecycleBin).toHaveBeenCalledTimes(2)
+        })
+        expect(screen.queryByText('notes.md')).not.toBeInTheDocument()
+    })
+
     it('uses the same vertical spacing as loading for an empty bin', async () => {
         const listRecycleBin = vi.fn(async () => ({
             success: true,

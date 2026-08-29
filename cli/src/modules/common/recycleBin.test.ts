@@ -412,6 +412,37 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('reconciles owned staging files on the next recycle-bin access', async () => {
+        try {
+            const filePath = join(workspaceDir, 'staging-reconciliation.txt')
+            await writeFile(filePath, 'reconcile staging files')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const stagingNames = [
+                `.hapi-source-${moved.entry.id}.tmp`,
+                `.hapi-restore-${moved.entry.id}.tmp`,
+            ]
+            for (const name of stagingNames) {
+                await writeFile(join(workspaceDir, name), 'interrupted staging data')
+            }
+            const rollbackStage = join(getRecycleBinRoot(homeDir), moved.entry.id, `.hapi-source-${moved.entry.id}.tmp`)
+            await writeFile(rollbackStage, 'interrupted rollback data')
+
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({
+                success: true,
+                entries: [moved.entry],
+            })
+            for (const name of stagingNames) {
+                await expect(stat(join(workspaceDir, name))).rejects.toMatchObject({ code: 'ENOENT' })
+            }
+            await expect(stat(rollbackStage)).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('keeps the source when the new recycle entry cannot be committed to disk', async () => {
         try {
             const filePath = join(workspaceDir, 'metadata-durability.txt')

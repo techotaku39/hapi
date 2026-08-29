@@ -188,6 +188,7 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
                 await refreshAfterChange()
             }
         } catch (restoreError) {
+            await load()
             setError(restoreError instanceof Error ? restoreError.message : t('recycleBin.error.restore'))
         } finally {
             setPendingEntryId(null)
