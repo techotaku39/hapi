@@ -7,6 +7,7 @@ import {
     readdir,
     realpath,
     rename,
+    rmdir,
     rm,
     unlink,
     writeFile,
@@ -264,15 +265,27 @@ async function copyFileWithoutReplacing(
                 if (result.bytesRead === 0) {
                     throw new Error('File changed while it was being moved')
                 }
-                await destinationHandle.write(buffer, 0, result.bytesRead, offset)
-                offset += result.bytesRead
+                let written = 0
+                while (written < result.bytesRead) {
+                    const writeResult = await destinationHandle.write(
+                        buffer,
+                        written,
+                        result.bytesRead - written,
+                        offset + written,
+                    )
+                    if (writeResult.bytesWritten === 0) {
+                        throw new Error('Failed to write recycle-bin destination')
+                    }
+                    written += writeResult.bytesWritten
+                }
+                offset += written
             }
-            await destinationHandle.sync().catch(() => {})
+            await destinationHandle.chmod(desiredMode)
+            await destinationHandle.sync()
         } finally {
             await destinationHandle.close()
         }
 
-        await chmod(destinationPath, desiredMode)
         await assertFileUnchanged(sourcePath, openedStats)
         await unlink(sourcePath)
     } catch (error) {
@@ -768,7 +781,7 @@ export class RecycleBinManager {
                     await rm(backupPath, { force: true })
                 }
                 if (backupDirectory) {
-                    await rm(backupDirectory, { force: true }).catch(() => {})
+                    await rmdir(backupDirectory).catch(() => {})
                 }
                 return { success: true, restoredPath: target }
             } catch (error) {
@@ -776,7 +789,7 @@ export class RecycleBinManager {
                     await rename(backupPath, target).catch(() => {})
                 }
                 if (backupDirectory) {
-                    await rm(backupDirectory, { force: true }).catch(() => {})
+                    await rmdir(backupDirectory).catch(() => {})
                 }
                 throw error
             }
