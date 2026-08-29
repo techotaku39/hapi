@@ -6,12 +6,23 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     rejectDirectorySync: false,
     directorySyncCalls: 0,
     directorySyncFailureAt: undefined as number | undefined,
+    replaceSourceBeforeDetach: undefined as { path: string; replacementPath: string } | undefined,
 }))
 
 vi.mock('node:fs/promises', async () => {
     const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
     return {
         ...actual,
+        rename: vi.fn(async (sourcePath: string, destinationPath: string) => {
+            const replacement = recycleBinIoHarness.replaceSourceBeforeDetach
+            if (replacement && sourcePath === replacement.path && destinationPath.includes('.hapi-source-')) {
+                recycleBinIoHarness.replaceSourceBeforeDetach = undefined
+                await actual.writeFile(replacement.replacementPath, 'concurrent replacement')
+                await actual.rm(replacement.path, { force: true })
+                await actual.rename(replacement.replacementPath, replacement.path)
+            }
+            return await actual.rename(sourcePath, destinationPath)
+        }),
         open: vi.fn(async (...args: [string, string | number, number?]) => {
             const handle = await actual.open(...args)
             const isDestinationHandle = args[1] === 'wx'
@@ -53,6 +64,7 @@ vi.mock('node:fs/promises', async () => {
 })
 
 import { chmod, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
 import { basename, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -88,6 +100,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.rejectDirectorySync = false
         recycleBinIoHarness.directorySyncCalls = 0
         recycleBinIoHarness.directorySyncFailureAt = undefined
+        recycleBinIoHarness.replaceSourceBeforeDetach = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -227,6 +240,26 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('does not unlink a replacement installed before the copy-path removal', async () => {
+        try {
+            const filePath = join(workspaceDir, 'replacement.txt')
+            const linkedPath = join(workspaceDir, 'replacement-alias.txt')
+            const replacementPath = join(workspaceDir, 'replacement-staging.txt')
+            await writeFile(filePath, 'original contents')
+            await link(filePath, linkedPath)
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.replaceSourceBeforeDetach = { path: filePath, replacementPath }
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            expect(moved).toMatchObject({ success: false, error: 'File changed before the recycle-bin operation completed' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('concurrent replacement')
+            await expect(readFile(linkedPath, 'utf8')).resolves.toBe('original contents')
+            await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-source-/))
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('isolates recycle entries when the same HAPI home is reused by another namespace', async () => {
         try {
             const filePath = join(workspaceDir, 'namespace.txt')
@@ -264,6 +297,44 @@ describe('RecycleBinManager', () => {
 
             await expect(bob.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
             await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('cleans a large expired bin without opening all entries at once', async () => {
+        try {
+            const root = getRecycleBinRoot(homeDir)
+            const payload = Buffer.from('expired payload')
+            const contentHash = createHash('sha256').update(payload).digest('hex')
+            const entryCount = 512
+            await mkdir(root, { recursive: true })
+            for (let index = 0; index < entryCount; index += 1) {
+                const id = randomUUID()
+                const directory = join(root, id)
+                await mkdir(directory)
+                await writeFile(join(directory, 'payload'), payload)
+                await writeFile(join(directory, 'metadata.json'), JSON.stringify({
+                    version: 2,
+                    id,
+                    name: `expired-${index}.txt`,
+                    originalPath: join(workspaceDir, `expired-${index}.txt`),
+                    ownerNamespace: index % 2 === 0 ? 'alice' : 'retired',
+                    scopeRoot: workspaceDir,
+                    type: 'file',
+                    size: payload.length,
+                    mode: 0o100644,
+                    contentHash,
+                    deletedAt: 0,
+                    expiresAt: 0,
+                }))
+            }
+
+            await expect(createManager(homeDir).list(workspaceDir)).resolves.toMatchObject({
+                success: true,
+                entries: [],
+            })
+            await expect(readdir(root)).resolves.toEqual([])
         } finally {
             await cleanup()
         }

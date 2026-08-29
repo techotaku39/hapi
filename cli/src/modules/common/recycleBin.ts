@@ -333,9 +333,18 @@ async function copyFileWithoutReplacing(
         }
 
         await syncParentDirectory(destinationPath)
-        await assertFileUnchanged(sourcePath, openedStats)
         if (options.unlinkSource !== false) {
-            await unlink(sourcePath)
+            const detachedPath = join(dirname(sourcePath), `.hapi-source-${randomUUID()}.tmp`)
+            await rename(sourcePath, detachedPath)
+            const detachedStats = await lstat(detachedPath)
+            if (!isSameFileStats(detachedStats, openedStats)) {
+                if (!(await pathExists(sourcePath))) {
+                    await rename(detachedPath, sourcePath)
+                    await syncParentDirectory(sourcePath)
+                }
+                throw new Error('File changed before the recycle-bin operation completed')
+            }
+            await unlink(detachedPath)
             sourceRemoved = true
             await syncParentDirectory(sourcePath)
         }
@@ -564,8 +573,8 @@ async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> 
     }
 
     let removedAny = false
-    await Promise.all(entries.map(async (entryId) => {
-        if (!RECYCLE_ENTRY_ID_PATTERN.test(entryId)) return
+    for (const entryId of entries) {
+        if (!RECYCLE_ENTRY_ID_PATTERN.test(entryId)) continue
         try {
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= now) {
@@ -577,7 +586,7 @@ async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> 
                 logger.debug('[RECYCLE BIN] Failed to inspect entry during cleanup', { entryId, error })
             }
         }
-    }))
+    }
     if (removedAny) await syncDirectory(root)
 }
 
