@@ -150,4 +150,25 @@ describe('RecycleBinDialog', () => {
         expect(await screen.findByText('空')).toBeInTheDocument()
         expect(screen.queryByText('回收站为空')).not.toBeInTheDocument()
     })
+
+    it('renders a valid empty-file preview instead of treating it as unavailable', async () => {
+        const emptyEntry = { ...entry, id: '00000000-0000-4000-8000-000000000003', name: 'empty.txt', size: 0 }
+        const listRecycleBin = vi.fn(async () => ({ success: true, entries: [emptyEntry], retentionDays: 30 }))
+        const readRecycleBinEntry = vi.fn(async () => ({
+            success: true,
+            name: emptyEntry.name,
+            content: '',
+            size: 0,
+            modified: emptyEntry.deletedAt,
+        }))
+
+        renderDialog({ listRecycleBin, readRecycleBinEntry })
+
+        expect(await screen.findByText('empty.txt')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+        expect(await screen.findByRole('heading', { name: 'empty.txt' })).toBeInTheDocument()
+        expect(readRecycleBinEntry).toHaveBeenCalledWith('session-1', emptyEntry.id)
+        expect(document.querySelector('pre')).toBeInTheDocument()
+        expect(screen.queryByText('Preview unavailable')).not.toBeInTheDocument()
+    })
 })

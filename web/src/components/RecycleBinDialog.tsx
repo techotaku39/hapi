@@ -257,7 +257,7 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
     }, [pendingEntryId, previewLoading, props.api, props.sessionId, t])
 
     const previewContent = useMemo(() => {
-        if (!preview?.result.content) return null
+        if (preview?.result.content === undefined) return null
         return decodeBase64(preview.result.content)
     }, [preview])
 
@@ -376,7 +376,7 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
                     </DialogHeader>
                     {previewLoading ? (
                         <div className="py-10 text-center text-sm text-[var(--app-hint)]">{t('recycleBin.previewLoading')}</div>
-                    ) : preview?.result.success && preview.result.content ? (
+                    ) : preview?.result.success && preview.result.content !== undefined ? (
                         imageMimeType(preview.entry.name) ? (
                             <img
                                 src={`data:${imageMimeType(preview.entry.name)};base64,${preview.result.content}`}

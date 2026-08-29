@@ -36,7 +36,7 @@ vi.mock('node:fs/promises', async () => {
     }
 })
 
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { basename, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -132,6 +132,33 @@ describe('RecycleBinManager', () => {
             await expect(readFile(filePath, 'utf8')).resolves.toBe('restore me')
             await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
             await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('copies files with additional hard links before moving them to the recycle bin', async () => {
+        try {
+            const filePath = join(workspaceDir, 'hard-link.txt')
+            const linkedPath = join(workspaceDir, 'hard-link-alias.txt')
+            await writeFile(filePath, 'preserve this snapshot')
+            await link(filePath, linkedPath)
+            const manager = createManager(homeDir)
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await writeFile(linkedPath, 'mutated through the remaining hard link')
+
+            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                success: true,
+                content: Buffer.from('preserve this snapshot').toString('base64'),
+            })
+            await expect(manager.restore(moved.entry.id, workspaceDir, 'fail')).resolves.toEqual({
+                success: true,
+                restoredPath: filePath,
+            })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('preserve this snapshot')
+            await expect(readFile(linkedPath, 'utf8')).resolves.toBe('mutated through the remaining hard link')
         } finally {
             await cleanup()
         }
@@ -241,6 +268,26 @@ describe('RecycleBinManager', () => {
                 success: true,
                 content: Buffer.from('keep the payload').toString('base64'),
             })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('keeps the existing target until a staged overwrite restore is ready', async () => {
+        try {
+            const filePath = join(workspaceDir, 'staged-overwrite.txt')
+            await writeFile(filePath, 'original')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await writeFile(filePath, 'current')
+
+            recycleBinIoHarness.rejectSync = true
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
+            expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin sync failure' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('current')
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [moved.entry] })
+            await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-restore-/))
         } finally {
             await cleanup()
         }

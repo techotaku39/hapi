@@ -241,11 +241,18 @@ async function hashFile(path: string): Promise<string> {
     }
 }
 
+type RecycleBinCopyOptions = {
+    /** Mode to apply after copying, preserving bits that the process umask masks at creation. */
+    mode?: number
+    /** Keep the source in place when the destination is only a staging copy. */
+    unlinkSource?: boolean
+}
+
 async function copyFileWithoutReplacing(
     sourcePath: string,
     destinationPath: string,
     expected: FileStats,
-    mode?: number,
+    options: RecycleBinCopyOptions = {},
 ): Promise<void> {
     const sourceHandle = await open(sourcePath, READ_FILE_FLAGS)
     let destinationCreated = false
@@ -256,7 +263,7 @@ async function copyFileWithoutReplacing(
         if (!isSameFileStats(openedStats, expected)) {
             throw new Error('File changed before the recycle-bin operation completed')
         }
-        const desiredMode = (mode ?? openedStats.mode) & 0o7777
+        const desiredMode = (options.mode ?? openedStats.mode) & 0o7777
         const destinationHandle = await open(destinationPath, 'wx', desiredMode)
         destinationCreated = true
         try {
@@ -287,7 +294,9 @@ async function copyFileWithoutReplacing(
         }
 
         await assertFileUnchanged(sourcePath, openedStats)
-        await unlink(sourcePath)
+        if (options.unlinkSource !== false) {
+            await unlink(sourcePath)
+        }
     } catch (error) {
         if (destinationCreated) {
             await rm(destinationPath, { force: true }).catch(() => {})
@@ -301,9 +310,7 @@ async function copyFileWithoutReplacing(
 type MoveFileOptions = {
     /** Copy first with an exclusive destination instead of rename replacement. */
     copyOnly?: boolean
-    /** Mode to apply after copying, preserving bits that the process umask masks at creation. */
-    mode?: number
-}
+} & RecycleBinCopyOptions
 
 async function moveRegularFile(
     sourcePath: string,
@@ -317,7 +324,7 @@ async function moveRegularFile(
         throw new Error('Recycle-bin operation destination already exists')
     }
 
-    if (!options.copyOnly) {
+    if (!options.copyOnly && sourceStats.nlink === 1) {
         try {
             await rename(sourcePath, destinationPath)
             return
@@ -326,7 +333,7 @@ async function moveRegularFile(
         }
     }
 
-    await copyFileWithoutReplacing(sourcePath, destinationPath, sourceStats, options.mode)
+    await copyFileWithoutReplacing(sourcePath, destinationPath, sourceStats, options)
 }
 
 export function resolveRecycleBinRetentionDays(value: unknown): number {
@@ -764,18 +771,27 @@ export class RecycleBinManager {
 
             let backupDirectory: string | null = null
             let backupPath: string | null = null
+            let stagedPath: string | null = null
             try {
                 if (targetExists && conflict === 'overwrite') {
-                    backupDirectory = join(dirname(target), `.hapi-restore-${randomUUID()}`)
-                    await mkdir(backupDirectory, { recursive: false, mode: 0o700 })
-                    backupPath = join(backupDirectory, basename(target))
-                    await rename(target, backupPath)
+                    stagedPath = join(dirname(target), `.hapi-restore-${randomUUID()}.tmp`)
+                    await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
+                        mode: entry.mode & 0o7777,
+                        unlinkSource: false,
+                    })
+                    if (process.platform === 'win32') {
+                        backupDirectory = join(dirname(target), `.hapi-restore-${randomUUID()}`)
+                        await mkdir(backupDirectory, { recursive: false, mode: 0o700 })
+                        backupPath = join(backupDirectory, basename(target))
+                        await rename(target, backupPath)
+                    }
+                    await rename(stagedPath, target)
+                } else {
+                    await moveRegularFile(payloadPath, target, payloadStats, {
+                        copyOnly: true,
+                        mode: entry.mode & 0o7777,
+                    })
                 }
-
-                await moveRegularFile(payloadPath, target, payloadStats, {
-                    copyOnly: true,
-                    mode: entry.mode & 0o7777,
-                })
                 await rm(join(root, entry.id), { recursive: true, force: true })
                 if (backupPath) {
                     await rm(backupPath, { force: true })
@@ -785,6 +801,9 @@ export class RecycleBinManager {
                 }
                 return { success: true, restoredPath: target }
             } catch (error) {
+                if (stagedPath) {
+                    await rm(stagedPath, { force: true }).catch(() => {})
+                }
                 if (backupPath && !(await pathExists(target)) && await pathExists(backupPath)) {
                     await rename(backupPath, target).catch(() => {})
                 }
