@@ -7,7 +7,6 @@ import {
     readdir,
     realpath,
     rename,
-    rmdir,
     rm,
     unlink,
     writeFile,
@@ -109,6 +108,25 @@ function isExdev(error: unknown): boolean {
 
 function isNotFound(error: unknown): boolean {
     return error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+function isUnsupportedDirectorySync(error: unknown): boolean {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined
+    return code === 'EINVAL' || code === 'EISDIR' || code === 'ENOTSUP' || code === 'EPERM'
+}
+
+async function syncParentDirectory(path: string): Promise<void> {
+    let handle: Awaited<ReturnType<typeof open>> | null = null
+    try {
+        handle = await open(dirname(path), constants.O_RDONLY | (constants.O_DIRECTORY ?? 0))
+        await handle.sync()
+    } catch (error) {
+        if (!isUnsupportedDirectorySync(error) || process.platform !== 'win32') {
+            throw error
+        }
+    } finally {
+        if (handle) await handle.close()
+    }
 }
 
 function publicEntry(entry: StoredRecycleBinEntry): RecycleBinEntry {
@@ -293,9 +311,11 @@ async function copyFileWithoutReplacing(
             await destinationHandle.close()
         }
 
+        await syncParentDirectory(destinationPath)
         await assertFileUnchanged(sourcePath, openedStats)
         if (options.unlinkSource !== false) {
             await unlink(sourcePath)
+            await syncParentDirectory(sourcePath)
         }
     } catch (error) {
         if (destinationCreated) {
@@ -327,6 +347,8 @@ async function moveRegularFile(
     if (!options.copyOnly && sourceStats.nlink === 1) {
         try {
             await rename(sourcePath, destinationPath)
+            await syncParentDirectory(destinationPath)
+            await syncParentDirectory(sourcePath)
             return
         } catch (error) {
             if (!isExdev(error)) throw error
@@ -769,8 +791,6 @@ export class RecycleBinManager {
             }
             await assertPayloadIntegrity(entry, payloadPath)
 
-            let backupDirectory: string | null = null
-            let backupPath: string | null = null
             let stagedPath: string | null = null
             try {
                 if (targetExists && conflict === 'overwrite') {
@@ -779,13 +799,8 @@ export class RecycleBinManager {
                         mode: entry.mode & 0o7777,
                         unlinkSource: false,
                     })
-                    if (process.platform === 'win32') {
-                        backupDirectory = join(dirname(target), `.hapi-restore-${randomUUID()}`)
-                        await mkdir(backupDirectory, { recursive: false, mode: 0o700 })
-                        backupPath = join(backupDirectory, basename(target))
-                        await rename(target, backupPath)
-                    }
                     await rename(stagedPath, target)
+                    await syncParentDirectory(target)
                 } else {
                     await moveRegularFile(payloadPath, target, payloadStats, {
                         copyOnly: true,
@@ -793,22 +808,11 @@ export class RecycleBinManager {
                     })
                 }
                 await rm(join(root, entry.id), { recursive: true, force: true })
-                if (backupPath) {
-                    await rm(backupPath, { force: true })
-                }
-                if (backupDirectory) {
-                    await rmdir(backupDirectory).catch(() => {})
-                }
+                await syncParentDirectory(join(root, entry.id))
                 return { success: true, restoredPath: target }
             } catch (error) {
                 if (stagedPath) {
                     await rm(stagedPath, { force: true }).catch(() => {})
-                }
-                if (backupPath && !(await pathExists(target)) && await pathExists(backupPath)) {
-                    await rename(backupPath, target).catch(() => {})
-                }
-                if (backupDirectory) {
-                    await rmdir(backupDirectory).catch(() => {})
                 }
                 throw error
             }
