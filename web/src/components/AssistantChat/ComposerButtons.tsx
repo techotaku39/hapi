@@ -1,12 +1,13 @@
-import { ComposerPrimitive } from '@assistant-ui/react'
+import { ComposerPrimitive, useAui } from '@assistant-ui/react'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
+import { AttachmentPicker } from './AttachmentPicker'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
-import { Children, isValidElement, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react'
+import { Children, isValidElement, useCallback, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react'
 import { useComposerToolbarLayout, type ComposerToolbarItemId, type ComposerToolbarLayout } from '@/hooks/useComposerToolbarLayout'
 import { useNarrowViewport } from '@/hooks/useNarrowViewport'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
@@ -674,6 +675,16 @@ export function ComposerButtons(props: {
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
     const toolbarJustifyContent = getComposerToolbarJustifyContent(layout.mode)
+    const api = useAui()
+    const handleAttachmentFiles = useCallback(async (files: readonly File[]) => {
+        for (const file of files) {
+            try {
+                await api.composer().addAttachment(file)
+            } catch (error) {
+                console.error('Error adding selected attachment:', error)
+            }
+        }
+    }, [api])
 
     return (
         <div className="flex shrink-0 items-center gap-1 px-2 pb-2">
@@ -684,14 +695,21 @@ export function ComposerButtons(props: {
             >
                 <OrderedToolbarItems layout={effectiveLayout}>
                 <ToolbarItemSlot item="attachment">
-                <ComposerPrimitive.AddAttachment
-                    aria-label={t('composer.attach')}
-                    title={t('composer.attach')}
-                    disabled={props.controlsDisabled || hasSchedule}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                    <AttachmentIcon />
-                </ComposerPrimitive.AddAttachment>
+                {isNarrowViewport ? (
+                    <AttachmentPicker
+                        disabled={props.controlsDisabled || hasSchedule}
+                        onFilesSelected={handleAttachmentFiles}
+                    />
+                ) : (
+                    <ComposerPrimitive.AddAttachment
+                        aria-label={t('composer.attach')}
+                        title={t('composer.attach')}
+                        disabled={props.controlsDisabled || hasSchedule}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <AttachmentIcon />
+                    </ComposerPrimitive.AddAttachment>
+                )}
                 </ToolbarItemSlot>
 
                 <ToolbarItemSlot item="settings">
