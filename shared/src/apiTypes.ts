@@ -678,6 +678,58 @@ export type FileReadResponse = {
     error?: string
 }
 
+export const RecycleBinRestoreConflictSchema = z.enum(['fail', 'cancel', 'overwrite', 'new-name'])
+export type RecycleBinRestoreConflict = z.infer<typeof RecycleBinRestoreConflictSchema>
+
+export const RecycleBinEntrySchema = z.object({
+    id: z.string().uuid(),
+    name: z.string().min(1),
+    originalPath: z.string().min(1),
+    type: z.literal('file'),
+    size: z.number().int().nonnegative(),
+    deletedAt: z.number().int().nonnegative(),
+    expiresAt: z.number().int().nonnegative(),
+})
+export type RecycleBinEntry = z.infer<typeof RecycleBinEntrySchema>
+
+export type RecycleBinListResponse = {
+    success: boolean
+    entries?: RecycleBinEntry[]
+    retentionDays?: number
+    error?: string
+}
+
+export type MoveFileToRecycleBinResponse = {
+    success: boolean
+    entry?: RecycleBinEntry
+    retentionDays?: number
+    error?: string
+}
+
+export type ReadRecycleBinEntryResponse = FileReadResponse & {
+    name?: string
+}
+
+export type RestoreRecycleBinEntryResponse = {
+    success: boolean
+    restoredPath?: string
+    cancelled?: boolean
+    code?: 'target_exists' | 'entry_not_found' | 'invalid_path'
+    targetPath?: string
+    error?: string
+}
+
+export type PurgeRecycleBinEntryResponse = {
+    success: boolean
+    error?: string
+}
+
+export type EmptyRecycleBinResponse = {
+    success: boolean
+    deletedCount?: number
+    error?: string
+}
+
 export type GeneratedImageResponse = {
     success: boolean
     content?: string

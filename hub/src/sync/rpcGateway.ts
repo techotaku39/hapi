@@ -18,8 +18,10 @@ import type {
     CursorChatStoreStatus,
     DeleteUploadResponse,
     DirectoryEntry,
+    EmptyRecycleBinResponse,
     FileReadResponse,
     GeneratedImageResponse,
+    MoveFileToRecycleBinResponse,
     CopilotModelsResponse,
     GrokModelsResponse,
     GrokReasoningEffortResponse,
@@ -32,6 +34,11 @@ import type {
     OpencodeReasoningEffortResponse,
     PathExistsResponse,
     PiModelsResponse,
+    PurgeRecycleBinEntryResponse,
+    ReadRecycleBinEntryResponse,
+    RecycleBinListResponse,
+    RecycleBinRestoreConflict,
+    RestoreRecycleBinEntryResponse,
     SlashCommandsResponse,
     StatFilesResponse,
     UploadFileResponse
@@ -345,6 +352,34 @@ export class RpcGateway {
 
     async statFiles(sessionId: string, paths: string[]): Promise<RpcStatFilesResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.StatFiles, { paths }) as RpcStatFilesResponse
+    }
+
+    async moveFileToRecycleBin(sessionId: string, path: string): Promise<MoveFileToRecycleBinResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.MoveFileToRecycleBin, { path }) as MoveFileToRecycleBinResponse
+    }
+
+    async listRecycleBin(sessionId: string): Promise<RecycleBinListResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListRecycleBin, {}) as RecycleBinListResponse
+    }
+
+    async readRecycleBinEntry(sessionId: string, entryId: string): Promise<ReadRecycleBinEntryResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ReadRecycleBinEntry, { entryId }) as ReadRecycleBinEntryResponse
+    }
+
+    async restoreRecycleBinEntry(
+        sessionId: string,
+        entryId: string,
+        conflict: RecycleBinRestoreConflict,
+    ): Promise<RestoreRecycleBinEntryResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.RestoreRecycleBinEntry, { entryId, conflict }) as RestoreRecycleBinEntryResponse
+    }
+
+    async purgeRecycleBinEntry(sessionId: string, entryId: string): Promise<PurgeRecycleBinEntryResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.PurgeRecycleBinEntry, { entryId }) as PurgeRecycleBinEntryResponse
+    }
+
+    async emptyRecycleBin(sessionId: string): Promise<EmptyRecycleBinResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.EmptyRecycleBin, {}) as EmptyRecycleBinResponse
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {

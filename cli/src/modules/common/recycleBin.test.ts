@@ -1,0 +1,247 @@
+import { beforeEach, describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { basename, join, sep } from 'node:path'
+import { tmpdir } from 'node:os'
+import {
+    DEFAULT_RECYCLE_BIN_RETENTION_DAYS,
+    getRecycleBinRoot,
+    MAX_RECYCLE_BIN_PREVIEW_BYTES,
+    RecycleBinManager,
+    resolveRecycleBinRetentionDays,
+} from './recycleBin'
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+async function createTempDir(prefix: string): Promise<string> {
+    return await mkdtemp(join(tmpdir(), `${prefix}-`))
+}
+
+function createManager(homeDir: string, now: () => number = () => 0, retentionDays = DEFAULT_RECYCLE_BIN_RETENTION_DAYS): RecycleBinManager {
+    return new RecycleBinManager(homeDir, now, async () => retentionDays)
+}
+
+describe('RecycleBinManager', () => {
+    let homeDir: string
+    let workspaceDir: string
+
+    beforeEach(async () => {
+        homeDir = await createTempDir('hapi-recycle-home')
+        workspaceDir = await createTempDir('hapi-recycle-workspace')
+    })
+
+    async function cleanup(): Promise<void> {
+        await rm(homeDir, { recursive: true, force: true })
+        await rm(workspaceDir, { recursive: true, force: true })
+    }
+
+    it('accepts bounded positive retention values and falls back for invalid settings', () => {
+        expect(resolveRecycleBinRetentionDays(7)).toBe(7)
+        expect(resolveRecycleBinRetentionDays(1)).toBe(1)
+        expect(resolveRecycleBinRetentionDays(undefined)).toBe(DEFAULT_RECYCLE_BIN_RETENTION_DAYS)
+        expect(resolveRecycleBinRetentionDays(0)).toBe(DEFAULT_RECYCLE_BIN_RETENTION_DAYS)
+        expect(resolveRecycleBinRetentionDays(3651)).toBe(DEFAULT_RECYCLE_BIN_RETENTION_DAYS)
+        expect(resolveRecycleBinRetentionDays('7')).toBe(DEFAULT_RECYCLE_BIN_RETENTION_DAYS)
+    })
+
+    it('moves a file into local storage and lists/reads its metadata without exposing contents in the list', async () => {
+        try {
+            const filePath = join(workspaceDir, 'notes.md')
+            await writeFile(filePath, '# notes')
+            const manager = createManager(homeDir, () => 1_000, 7)
+
+            const moved = await manager.moveFile('notes.md', workspaceDir)
+            expect(moved.success).toBe(true)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            expect(moved.retentionDays).toBe(7)
+            expect(moved.entry).toMatchObject({
+                name: 'notes.md',
+                type: 'file',
+                size: 7,
+                deletedAt: 1_000,
+                expiresAt: 1_000 + 7 * DAY_MS,
+            })
+            await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+            const listed = await manager.list(workspaceDir)
+            expect(listed).toMatchObject({ success: true, retentionDays: 7 })
+            expect(listed.entries).toEqual([moved.entry])
+            expect(JSON.stringify(listed)).not.toContain('# notes')
+
+            const preview = await manager.read(moved.entry.id, workspaceDir)
+            expect(preview).toMatchObject({
+                success: true,
+                name: 'notes.md',
+                size: 7,
+                modified: 1_000,
+                content: Buffer.from('# notes').toString('base64'),
+            })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('restores a file to its original path and removes the recycle entry', async () => {
+        try {
+            const filePath = join(workspaceDir, 'restore.txt')
+            await writeFile(filePath, 'restore me')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toEqual({ success: true, restoredPath: filePath })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('restore me')
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('supports cancel, overwrite, and restore-with-new-name conflict choices', async () => {
+        try {
+            const filePath = join(workspaceDir, 'conflict.txt')
+            await writeFile(filePath, 'original')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await writeFile(filePath, 'current')
+
+            const failed = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(failed).toMatchObject({ success: false, code: 'target_exists', targetPath: filePath })
+            expect(await readFile(filePath, 'utf8')).toBe('current')
+
+            const cancelled = await manager.restore(moved.entry.id, workspaceDir, 'cancel')
+            expect(cancelled).toMatchObject({ success: true, cancelled: true, targetPath: filePath })
+            expect((await manager.list(workspaceDir)).entries).toHaveLength(1)
+
+            const newName = await manager.restore(moved.entry.id, workspaceDir, 'new-name')
+            expect(newName.success).toBe(true)
+            if (!newName.success || !newName.restoredPath) throw new Error('new-name restore did not return a path')
+            expect(basename(newName.restoredPath)).toBe('conflict (restored).txt')
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('current')
+            await expect(readFile(newName.restoredPath, 'utf8')).resolves.toBe('original')
+            expect((await manager.list(workspaceDir)).entries).toHaveLength(0)
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('overwrites an existing regular file only when explicitly requested', async () => {
+        try {
+            const filePath = join(workspaceDir, 'overwrite.txt')
+            await writeFile(filePath, 'old')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await writeFile(filePath, 'new')
+
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
+            expect(restored).toEqual({ success: true, restoredPath: filePath })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('old')
+            expect((await manager.list(workspaceDir)).entries).toHaveLength(0)
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('refuses to restore a recycle entry whose payload was changed', async () => {
+        try {
+            const filePath = join(workspaceDir, 'tampered.txt')
+            await writeFile(filePath, 'original')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            await writeFile(join(getRecycleBinRoot(homeDir), moved.entry.id, 'payload'), 'tampered')
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({ success: false, error: 'Recycle-bin entry payload changed' })
+            await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('expires entries during normal access and removes their local payloads', async () => {
+        try {
+            let now = 0
+            const filePath = join(workspaceDir, 'expired.txt')
+            await writeFile(filePath, 'expired')
+            const manager = createManager(homeDir, () => now, 1)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            now = DAY_MS
+            const listed = await manager.list(workspaceDir)
+            expect(listed).toMatchObject({ success: true, entries: [] })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('rejects out-of-scope, directory, protected .git, and escaping symlink paths', async () => {
+        try {
+            const outsideDir = await createTempDir('hapi-recycle-outside')
+            try {
+                await writeFile(join(outsideDir, 'outside.txt'), 'outside')
+                await mkdir(join(workspaceDir, '.git'), { recursive: true })
+                await writeFile(join(workspaceDir, '.git', 'config'), 'secret')
+                await writeFile(join(workspaceDir, 'folder.txt'), 'not a directory')
+                await mkdir(join(workspaceDir, 'directory'))
+                const manager = createManager(homeDir)
+
+                expect((await manager.moveFile(join('..', outsideDir.split(sep).pop() ?? 'outside', 'outside.txt'), workspaceDir)).success).toBe(false)
+                expect((await manager.moveFile('directory', workspaceDir)).success).toBe(false)
+                expect((await manager.moveFile('.git/config', workspaceDir)).success).toBe(false)
+
+                try {
+                    await symlink(join(outsideDir, 'outside.txt'), join(workspaceDir, 'escape.txt'))
+                } catch {
+                    return
+                }
+                expect((await manager.moveFile('escape.txt', workspaceDir)).success).toBe(false)
+            } finally {
+                await rm(outsideDir, { recursive: true, force: true })
+            }
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('supports permanent purge and emptying only entries visible from the current scope', async () => {
+        try {
+            const firstPath = join(workspaceDir, 'first.txt')
+            const secondPath = join(workspaceDir, 'second.txt')
+            await writeFile(firstPath, 'first')
+            await writeFile(secondPath, 'second')
+            const manager = createManager(homeDir)
+            const first = await manager.moveFile(firstPath, workspaceDir)
+            const second = await manager.moveFile(secondPath, workspaceDir)
+            if (!first.success || !first.entry || !second.success || !second.entry) throw new Error('move did not return entries')
+
+            expect(await manager.purge(first.entry.id, workspaceDir)).toEqual({ success: true })
+            expect((await manager.list(workspaceDir)).entries).toEqual([second.entry])
+            expect(await manager.empty(workspaceDir)).toEqual({ success: true, deletedCount: 1 })
+            expect((await manager.list(workspaceDir)).entries).toHaveLength(0)
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('rejects preview reads above the bounded preview size', async () => {
+        try {
+            const filePath = join(workspaceDir, 'large.bin')
+            await writeFile(filePath, Buffer.alloc(MAX_RECYCLE_BIN_PREVIEW_BYTES + 1, 1))
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const preview = await manager.read(moved.entry.id, workspaceDir)
+            expect(preview).toMatchObject({ success: false, size: MAX_RECYCLE_BIN_PREVIEW_BYTES + 1 })
+            expect(preview.content).toBeUndefined()
+        } finally {
+            await cleanup()
+        }
+    })
+})

@@ -5,6 +5,8 @@ import {
     ListCodexSessionsRpcResponseSchema,
     ListPiSessionsRpcResponseSchema,
     MessagesQuerySchema,
+    RecycleBinEntrySchema,
+    RecycleBinRestoreConflictSchema,
     SendMessageRequestSchema
 } from './apiTypes'
 
@@ -143,5 +145,22 @@ describe('SendMessageRequestSchema deliveryMode', () => {
             expect(parsed.error.issues.some((issue) => issue.path[0] === 'deliveryMode')).toBe(true)
             expect(parsed.error.issues.some((issue) => issue.message.includes('cannot use steer'))).toBe(true)
         }
+    })
+})
+
+describe('Recycle Bin API contracts', () => {
+    it('validates public file entry metadata and supported restore policies', () => {
+        const entry = RecycleBinEntrySchema.parse({
+            id: '00000000-0000-4000-8000-000000000001',
+            name: 'notes.md',
+            originalPath: '/workspace/notes.md',
+            type: 'file',
+            size: 10,
+            deletedAt: 1_700_000_000_000,
+            expiresAt: 1_700_000_000_000 + 30 * 24 * 60 * 60 * 1000,
+        })
+        expect(entry.name).toBe('notes.md')
+        expect(RecycleBinRestoreConflictSchema.options).toEqual(['fail', 'cancel', 'overwrite', 'new-name'])
+        expect(RecycleBinEntrySchema.safeParse({ ...entry, size: -1 }).success).toBe(false)
     })
 })
