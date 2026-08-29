@@ -109,6 +109,13 @@ function isNotFound(error: unknown): boolean {
     return error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
+function recycleBinEntryNotFound(): Error {
+    const error = new Error('Recycle-bin entry not found') as NodeJS.ErrnoException
+    error.name = 'RecycleBinEntryNotFoundError'
+    error.code = 'ENOENT'
+    return error
+}
+
 function isUnsupportedDirectorySync(error: unknown): boolean {
     const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined
     return code === 'EINVAL' || code === 'EISDIR' || code === 'ENOTSUP' || code === 'EPERM'
@@ -406,6 +413,7 @@ async function withRecycleBinLock<T>(homeDir: string, work: () => Promise<T>): P
         throw new Error('HAPI Recycle Bin storage is invalid')
     }
     await chmod(root, 0o700).catch(() => {})
+    await syncParentDirectory(root)
 
     const lockPath = getRecycleBinLockPath(homeDir)
     await ensureFile(lockPath)
@@ -510,43 +518,37 @@ function getEntryDirectory(root: string, entryId: string): string {
 }
 
 async function readStoredEntry(root: string, entryId: string): Promise<StoredRecycleBinEntry> {
-    const directory = getEntryDirectory(root, entryId)
-    const metadataPath = join(directory, ENTRY_METADATA_FILE)
-    const directoryStats = await lstat(directory)
-    if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
-        throw new Error('Recycle-bin entry directory is invalid')
-    }
-    const metadataStats = await lstat(metadataPath)
-    if (!metadataStats.isFile() || metadataStats.isSymbolicLink()) {
-        throw new Error('Recycle-bin entry metadata is invalid')
-    }
-    let raw: string
     try {
-        raw = await readUtf8FileNoFollow(metadataPath)
-    } catch (error) {
-        if (isNotFound(error)) {
-            const missing = new Error('Recycle-bin entry not found')
-            missing.name = 'RecycleBinEntryNotFoundError'
-            throw missing
+        const directory = getEntryDirectory(root, entryId)
+        const metadataPath = join(directory, ENTRY_METADATA_FILE)
+        const directoryStats = await lstat(directory)
+        if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
+            throw new Error('Recycle-bin entry directory is invalid')
         }
+        const metadataStats = await lstat(metadataPath)
+        if (!metadataStats.isFile() || metadataStats.isSymbolicLink()) {
+            throw new Error('Recycle-bin entry metadata is invalid')
+        }
+        const raw = await readUtf8FileNoFollow(metadataPath)
+        const parsed = StoredRecycleBinEntrySchema.safeParse(JSON.parse(raw) as unknown)
+        if (!parsed.success || parsed.data.id !== entryId) {
+            throw new Error('Recycle-bin entry metadata is invalid')
+        }
+
+        const payloadPath = join(directory, ENTRY_PAYLOAD_FILE)
+        const payloadStats = await lstat(payloadPath)
+        if (!payloadStats.isFile() || payloadStats.isSymbolicLink()) {
+            throw new Error('Recycle-bin entry payload is invalid')
+        }
+        if (payloadStats.size !== parsed.data.size) {
+            throw new Error('Recycle-bin entry payload changed')
+        }
+
+        return parsed.data
+    } catch (error) {
+        if (isNotFound(error)) throw recycleBinEntryNotFound()
         throw error
     }
-
-    const parsed = StoredRecycleBinEntrySchema.safeParse(JSON.parse(raw) as unknown)
-    if (!parsed.success || parsed.data.id !== entryId) {
-        throw new Error('Recycle-bin entry metadata is invalid')
-    }
-
-    const payloadPath = join(directory, ENTRY_PAYLOAD_FILE)
-    const payloadStats = await lstat(payloadPath)
-    if (!payloadStats.isFile() || payloadStats.isSymbolicLink()) {
-        throw new Error('Recycle-bin entry payload is invalid')
-    }
-    if (payloadStats.size !== parsed.data.size) {
-        throw new Error('Recycle-bin entry payload changed')
-    }
-
-    return parsed.data
 }
 
 async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> {
@@ -724,7 +726,7 @@ export class RecycleBinManager {
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot)) {
-                throw new Error('Recycle-bin entry not found')
+                throw recycleBinEntryNotFound()
             }
             if (entry.size > MAX_RECYCLE_BIN_PREVIEW_BYTES) {
                 return {
@@ -767,7 +769,7 @@ export class RecycleBinManager {
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot)) {
-                throw new Error('Recycle-bin entry not found')
+                throw recycleBinEntryNotFound()
             }
             const originalTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
             let target = originalTarget

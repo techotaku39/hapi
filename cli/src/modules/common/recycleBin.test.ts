@@ -156,6 +156,45 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('returns a stable not-found code when restoring a purged entry', async () => {
+        try {
+            const filePath = join(workspaceDir, 'purged.txt')
+            await writeFile(filePath, 'purged')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            expect(await manager.purge(moved.entry.id, workspaceDir)).toEqual({ success: true })
+
+            await expect(manager.restore(moved.entry.id, workspaceDir, 'fail')).resolves.toMatchObject({
+                success: false,
+                code: 'entry_not_found',
+                error: 'Recycle-bin entry not found',
+            })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('returns a stable not-found code when restoring an expired entry', async () => {
+        try {
+            let now = 0
+            const filePath = join(workspaceDir, 'expired-restore.txt')
+            await writeFile(filePath, 'expired')
+            const manager = createManager(homeDir, () => now, 1)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            now = DAY_MS
+
+            await expect(manager.restore(moved.entry.id, workspaceDir, 'fail')).resolves.toMatchObject({
+                success: false,
+                code: 'entry_not_found',
+                error: 'Recycle-bin entry not found',
+            })
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('copies files with additional hard links before moving them to the recycle bin', async () => {
         try {
             const filePath = join(workspaceDir, 'hard-link.txt')
@@ -189,7 +228,23 @@ describe('RecycleBinManager', () => {
             await writeFile(filePath, 'keep the source')
             const manager = createManager(homeDir)
             recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 2
+            recycleBinIoHarness.directorySyncFailureAt = 3
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            expect(moved).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('keep the source')
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('keeps the source when the recycle-bin root cannot be committed to the HAPI home', async () => {
+        try {
+            const filePath = join(workspaceDir, 'root-durability.txt')
+            await writeFile(filePath, 'keep the source')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDirectorySync = true
+            recycleBinIoHarness.directorySyncFailureAt = 1
 
             const moved = await manager.moveFile(filePath, workspaceDir)
             expect(moved).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
@@ -338,7 +393,7 @@ describe('RecycleBinManager', () => {
 
             recycleBinIoHarness.directorySyncCalls = 0
             recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 2
+            recycleBinIoHarness.directorySyncFailureAt = 3
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
             expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('restore destination')
@@ -358,10 +413,11 @@ describe('RecycleBinManager', () => {
 
             recycleBinIoHarness.directorySyncCalls = 0
             recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 2
+            recycleBinIoHarness.directorySyncFailureAt = 3
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
             expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('original')
+            recycleBinIoHarness.rejectDirectorySync = false
             await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
                 success: true,
                 content: Buffer.from('original').toString('base64'),
@@ -415,9 +471,10 @@ describe('RecycleBinManager', () => {
             if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
 
             recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 1
+            recycleBinIoHarness.directorySyncFailureAt = 2
             const purged = await manager.purge(moved.entry.id, workspaceDir)
             expect(purged).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            recycleBinIoHarness.rejectDirectorySync = false
             await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
         } finally {
             await cleanup()
@@ -433,9 +490,10 @@ describe('RecycleBinManager', () => {
             if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
 
             recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 1
+            recycleBinIoHarness.directorySyncFailureAt = 2
             const emptied = await manager.empty(workspaceDir, [moved.entry.id])
             expect(emptied).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            recycleBinIoHarness.rejectDirectorySync = false
             await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
         } finally {
             await cleanup()
