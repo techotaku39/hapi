@@ -16,11 +16,12 @@ import { registerRecycleBinHandlers } from './handlers/recycleBin'
 import { registerSlashCommandHandlers } from './handlers/slashCommands'
 import { registerSkillsHandlers } from './handlers/skills'
 import { registerUploadHandlers } from './handlers/uploads'
+import { RecycleBinManager } from './recycleBin'
 
 export function registerCommonHandlers(
     rpcHandlerManager: RpcHandlerManager,
     workingDirectory: string,
-    options: { enableRecycleBin?: boolean } = {},
+    options: { enableRecycleBin?: boolean; recycleBinNamespace?: string } = {},
 ): void {
     registerAgyModelHandlers(rpcHandlerManager)
     registerBashHandlers(rpcHandlerManager, workingDirectory)
@@ -39,6 +40,10 @@ export function registerCommonHandlers(
     registerGitHandlers(rpcHandlerManager, workingDirectory)
     registerUploadHandlers(rpcHandlerManager)
     if (options.enableRecycleBin) {
-        registerRecycleBinHandlers(rpcHandlerManager, workingDirectory)
+        registerRecycleBinHandlers(
+            rpcHandlerManager,
+            workingDirectory,
+            new RecycleBinManager(undefined, undefined, undefined, options.recycleBinNamespace),
+        )
     }
 }

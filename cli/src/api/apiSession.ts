@@ -297,7 +297,10 @@ export class ApiSessionClient extends EventEmitter {
         })
 
         if (this.metadata?.path) {
-            registerCommonHandlers(this.rpcHandlerManager, this.metadata.path, { enableRecycleBin: true })
+            registerCommonHandlers(this.rpcHandlerManager, this.metadata.path, {
+                enableRecycleBin: true,
+                recycleBinNamespace: session.namespace,
+            })
         }
 
         this.socket = io(`${configuration.apiUrl}/cli`, {

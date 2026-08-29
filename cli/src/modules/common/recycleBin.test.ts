@@ -69,8 +69,13 @@ async function createTempDir(prefix: string): Promise<string> {
     return await mkdtemp(join(tmpdir(), `${prefix}-`))
 }
 
-function createManager(homeDir: string, now: () => number = () => 0, retentionDays = DEFAULT_RECYCLE_BIN_RETENTION_DAYS): RecycleBinManager {
-    return new RecycleBinManager(homeDir, now, async () => retentionDays)
+function createManager(
+    homeDir: string,
+    now: () => number = () => 0,
+    retentionDays = DEFAULT_RECYCLE_BIN_RETENTION_DAYS,
+    ownerNamespace = 'default',
+): RecycleBinManager {
+    return new RecycleBinManager(homeDir, now, async () => retentionDays, ownerNamespace)
 }
 
 describe('RecycleBinManager', () => {
@@ -217,6 +222,30 @@ describe('RecycleBinManager', () => {
             })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('preserve this snapshot')
             await expect(readFile(linkedPath, 'utf8')).resolves.toBe('mutated through the remaining hard link')
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('isolates recycle entries when the same HAPI home is reused by another namespace', async () => {
+        try {
+            const filePath = join(workspaceDir, 'namespace.txt')
+            await writeFile(filePath, 'namespace-owned')
+            const alice = createManager(homeDir, () => 0, DEFAULT_RECYCLE_BIN_RETENTION_DAYS, 'alice')
+            const bob = createManager(homeDir, () => 0, DEFAULT_RECYCLE_BIN_RETENTION_DAYS, 'bob')
+            const moved = await alice.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            await expect(bob.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+            await expect(bob.restore(moved.entry.id, workspaceDir, 'fail')).resolves.toMatchObject({
+                success: false,
+                code: 'entry_not_found',
+            })
+            await expect(bob.empty(workspaceDir, [moved.entry.id])).resolves.toEqual({
+                success: true,
+                deletedCount: 0,
+            })
+            await expect(alice.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [moved.entry] })
         } finally {
             await cleanup()
         }
@@ -549,6 +578,38 @@ describe('RecycleBinManager', () => {
         } finally {
             if (outsideDir) await rm(outsideDir, { recursive: true, force: true })
             await rm(getRecycleBinRoot(homeDir), { recursive: true, force: true })
+            await cleanup()
+        }
+    })
+
+    it('protects the physical recycle root when HAPI home is a directory symlink', async () => {
+        let realHome = ''
+        let linkParent = ''
+        let linkedHome = ''
+        try {
+            realHome = await createTempDir('hapi-recycle-real-home')
+            linkParent = await createTempDir('hapi-recycle-home-link-parent')
+            linkedHome = join(linkParent, 'home')
+            try {
+                await symlink(realHome, linkedHome, process.platform === 'win32' ? 'junction' : undefined)
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code
+                if (code === 'EPERM' || code === 'EACCES' || code === 'ENOSYS') return
+                throw error
+            }
+
+            const protectedWorkspace = join(realHome, 'recycle-bin', 'workspace')
+            await mkdir(protectedWorkspace, { recursive: true })
+            const filePath = join(protectedWorkspace, 'protected.txt')
+            await writeFile(filePath, 'protected')
+
+            const result = await createManager(linkedHome).moveFile(filePath, protectedWorkspace)
+            expect(result).toMatchObject({ success: false, error: 'HAPI Recycle Bin storage is protected' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('protected')
+        } finally {
+            if (linkedHome) await rm(linkedHome, { recursive: true, force: true })
+            if (realHome) await rm(realHome, { recursive: true, force: true })
+            if (linkParent) await rm(linkParent, { recursive: true, force: true })
             await cleanup()
         }
     })

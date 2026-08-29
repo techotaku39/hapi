@@ -38,6 +38,7 @@ const RECYCLE_BIN_DIRECTORY = 'recycle-bin'
 const RECYCLE_BIN_LOCK_FILE = 'recycle-bin.lock'
 const ENTRY_METADATA_FILE = 'metadata.json'
 const ENTRY_PAYLOAD_FILE = 'payload'
+const RECYCLE_BIN_METADATA_VERSION = 2
 const RECYCLE_ENTRY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const READ_FILE_FLAGS = process.platform === 'win32'
     ? 'r'
@@ -46,17 +47,19 @@ const READ_FILE_FLAGS = process.platform === 'win32'
 type FileStats = Stats
 
 type StoredRecycleBinEntry = RecycleBinEntry & {
-    version: 1
+    version: typeof RECYCLE_BIN_METADATA_VERSION
+    ownerNamespace: string
     scopeRoot: string
     mode: number
     contentHash: string
 }
 
 const StoredRecycleBinEntrySchema = z.object({
-    version: z.literal(1),
+    version: z.literal(RECYCLE_BIN_METADATA_VERSION),
     id: z.string().regex(RECYCLE_ENTRY_ID_PATTERN),
     name: z.string().min(1),
     originalPath: z.string().min(1),
+    ownerNamespace: z.string().min(1),
     scopeRoot: z.string().min(1),
     type: z.literal('file'),
     size: z.number().int().nonnegative(),
@@ -551,7 +554,7 @@ async function readStoredEntry(root: string, entryId: string): Promise<StoredRec
     }
 }
 
-async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> {
+async function cleanupExpiredUnlocked(root: string, now: number, ownerNamespace: string): Promise<void> {
     let entries: string[]
     try {
         entries = await readdir(root)
@@ -565,7 +568,7 @@ async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> 
         if (!RECYCLE_ENTRY_ID_PATTERN.test(entryId)) return
         try {
             const entry = await readStoredEntry(root, entryId)
-            if (entry.expiresAt <= now) {
+            if (entry.ownerNamespace === ownerNamespace && entry.expiresAt <= now) {
                 await rm(join(root, entryId), { recursive: true, force: true })
                 removedAny = true
             }
@@ -603,8 +606,9 @@ async function listStoredEntriesUnlocked(root: string, now: number): Promise<Sto
     return entries.sort((left, right) => right.deletedAt - left.deletedAt)
 }
 
-function isEntryVisible(entry: StoredRecycleBinEntry, root: string, protectedRoot?: string): boolean {
-    return isPathWithin(entry.originalPath, root)
+function isEntryVisible(entry: StoredRecycleBinEntry, root: string, protectedRoot: string | undefined, ownerNamespace: string): boolean {
+    return entry.ownerNamespace === ownerNamespace
+        && isPathWithin(entry.originalPath, root)
         && isPathWithin(entry.scopeRoot, root)
         && !hasGitMetadataSegment(entry.originalPath)
         && !(protectedRoot && isPathWithin(entry.originalPath, protectedRoot))
@@ -632,14 +636,15 @@ export class RecycleBinManager {
         private readonly homeDir: string = configuration.happyHomeDir,
         private readonly now: () => number = Date.now,
         private readonly readRetentionDays: () => Promise<number> = loadRetentionDays,
+        private readonly ownerNamespace: string = 'default',
     ) {}
 
     async moveFile(rawPath: string, workingDirectory: string): Promise<MoveFileToRecycleBinResponse> {
         return await withRecycleBinLock(this.homeDir, async () => {
             const root = getRecycleBinRoot(this.homeDir)
-            const protectedRoot = resolve(root)
+            const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const source = await resolveExistingFile(rawPath, scopeRoot, protectedRoot)
             const retentionDays = await this.readRetentionDays()
@@ -649,10 +654,11 @@ export class RecycleBinManager {
             const metadataPath = join(entryDirectory, ENTRY_METADATA_FILE)
             const deletedAt = currentTime
             const entry: StoredRecycleBinEntry = {
-                version: 1,
+                version: RECYCLE_BIN_METADATA_VERSION,
                 id: entryId,
                 name: basename(source.path),
                 originalPath: source.path,
+                ownerNamespace: this.ownerNamespace,
                 scopeRoot,
                 type: 'file',
                 size: source.stats.size,
@@ -700,15 +706,15 @@ export class RecycleBinManager {
     async list(workingDirectory: string): Promise<RecycleBinListResponse> {
         return await withRecycleBinLock(this.homeDir, async () => {
             const root = getRecycleBinRoot(this.homeDir)
-            const protectedRoot = resolve(root)
+            const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entries = await listStoredEntriesUnlocked(root, currentTime)
             const retentionDays = await this.readRetentionDays()
             return {
                 success: true,
-                entries: entries.filter((entry) => isEntryVisible(entry, scopeRoot, protectedRoot)).map(publicEntry),
+                entries: entries.filter((entry) => isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)).map(publicEntry),
                 retentionDays,
             }
         }).catch((error) => ({
@@ -720,12 +726,12 @@ export class RecycleBinManager {
     async read(entryId: string, workingDirectory: string): Promise<ReadRecycleBinEntryResponse> {
         return await withRecycleBinLock(this.homeDir, async () => {
             const root = getRecycleBinRoot(this.homeDir)
-            const protectedRoot = resolve(root)
+            const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
-            if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot)) {
+            if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
                 throw recycleBinEntryNotFound()
             }
             if (entry.size > MAX_RECYCLE_BIN_PREVIEW_BYTES) {
@@ -763,12 +769,12 @@ export class RecycleBinManager {
     ): Promise<RestoreRecycleBinEntryResponse> {
         return await withRecycleBinLock<RestoreRecycleBinEntryResponse>(this.homeDir, async (): Promise<RestoreRecycleBinEntryResponse> => {
             const root = getRecycleBinRoot(this.homeDir)
-            const protectedRoot = resolve(root)
+            const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
-            if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot)) {
+            if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
                 throw recycleBinEntryNotFound()
             }
             const originalTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
@@ -849,12 +855,12 @@ export class RecycleBinManager {
     async purge(entryId: string, workingDirectory: string): Promise<PurgeRecycleBinEntryResponse> {
         return await withRecycleBinLock(this.homeDir, async () => {
             const root = getRecycleBinRoot(this.homeDir)
-            const protectedRoot = resolve(root)
+            const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entry = await readStoredEntry(root, entryId)
-            if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot)) {
+            if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
                 throw new Error('Recycle-bin entry not found')
             }
             await rm(join(root, entry.id), { recursive: true, force: true })
@@ -869,14 +875,14 @@ export class RecycleBinManager {
     async empty(workingDirectory: string, entryIds: string[]): Promise<EmptyRecycleBinResponse> {
         return await withRecycleBinLock(this.homeDir, async () => {
             const root = getRecycleBinRoot(this.homeDir)
-            const protectedRoot = resolve(root)
+            const protectedRoot = await realpath(root)
             const currentTime = this.now()
-            await cleanupExpiredUnlocked(root, currentTime)
+            await cleanupExpiredUnlocked(root, currentTime, this.ownerNamespace)
             const { root: scopeRoot } = await resolveWorkingRoot(workingDirectory, protectedRoot)
             const entries = await listStoredEntriesUnlocked(root, currentTime)
             const requestedEntryIds = new Set(entryIds)
             const visible = entries.filter((entry) => requestedEntryIds.has(entry.id)
-                && isEntryVisible(entry, scopeRoot, protectedRoot))
+                && isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace))
             let deletedCount = 0
             try {
                 for (const entry of visible) {
