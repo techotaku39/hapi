@@ -740,10 +740,13 @@ export class RecycleBinManager {
             }
             await assertPayloadIntegrity(entry, payloadPath)
 
+            let backupDirectory: string | null = null
             let backupPath: string | null = null
             try {
                 if (targetExists && conflict === 'overwrite') {
-                    backupPath = join(dirname(target), `.${basename(target)}.${entry.id}.hapi-restore-backup`)
+                    backupDirectory = join(dirname(target), `.hapi-restore-${randomUUID()}`)
+                    await mkdir(backupDirectory, { recursive: false, mode: 0o700 })
+                    backupPath = join(backupDirectory, basename(target))
                     await rename(target, backupPath)
                 }
 
@@ -752,10 +755,16 @@ export class RecycleBinManager {
                 if (backupPath) {
                     await rm(backupPath, { force: true })
                 }
+                if (backupDirectory) {
+                    await rm(backupDirectory, { force: true }).catch(() => {})
+                }
                 return { success: true, restoredPath: target }
             } catch (error) {
                 if (backupPath && !(await pathExists(target)) && await pathExists(backupPath)) {
                     await rename(backupPath, target).catch(() => {})
+                }
+                if (backupDirectory) {
+                    await rm(backupDirectory, { force: true }).catch(() => {})
                 }
                 throw error
             }

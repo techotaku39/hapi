@@ -242,6 +242,8 @@ export default function FilePage() {
     const fileName = filePath.split('/').pop() || filePath || t('file.page.fallbackName')
     const imageMimeType = useMemo(() => resolveImageMimeType(filePath), [filePath])
     const markdownFile = useMemo(() => isMarkdownFile(filePath), [filePath])
+    const [recycleBinConfirmOpen, setRecycleBinConfirmOpen] = useState(false)
+    const [isMovingToRecycleBin, setIsMovingToRecycleBin] = useState(false)
 
     const diffQuery = useQuery({
         queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged),
@@ -273,7 +275,7 @@ export default function FilePage() {
             }
             return await api.listRecycleBin(sessionId)
         },
-        enabled: Boolean(api && sessionId),
+        enabled: Boolean(api && sessionId && recycleBinConfirmOpen),
     })
 
     const diffContent = diffQuery.data?.success ? (diffQuery.data.stdout ?? '') : ''
@@ -345,8 +347,6 @@ export default function FilePage() {
         })
 
     const [displayMode, setDisplayMode] = useState<'diff' | 'file'>('diff')
-    const [recycleBinConfirmOpen, setRecycleBinConfirmOpen] = useState(false)
-    const [isMovingToRecycleBin, setIsMovingToRecycleBin] = useState(false)
     const fileScrollRef = useRef<HTMLDivElement>(null)
     const restoredScrollKeyRef = useRef<string | null>(null)
     const fileScrollKey = useMemo(

@@ -116,7 +116,7 @@ describe('RpcGateway RPC timeouts', () => {
 
 describe('RpcGateway Recycle Bin methods', () => {
     it('uses session-scoped RPC names and forwards recycle-bin payloads', async () => {
-        const { gateway, calls } = createGateway()
+        const { gateway, calls, timeouts } = createGateway()
         const entryId = '00000000-0000-4000-8000-000000000001'
 
         await gateway.moveFileToRecycleBin('session-1', 'src/notes.md')
@@ -134,6 +134,7 @@ describe('RpcGateway Recycle Bin methods', () => {
             { method: 'session-1:purgeRecycleBinEntry', params: JSON.stringify({ entryId }) },
             { method: 'session-1:emptyRecycleBin', params: JSON.stringify({}) },
         ])
+        expect(timeouts).toEqual([600_000, 30_000, 30_000, 600_000, 600_000, 600_000])
     })
 })
 

@@ -155,7 +155,11 @@ describe('FilePage markdown preview', () => {
             expect(screen.getByTestId('markdown-preview')).toBeInTheDocument()
         })
 
+        expect(listRecycleBinMock).not.toHaveBeenCalled()
         fireEvent.click(screen.getByRole('button', { name: 'Move file to Recycle Bin' }))
+        await waitFor(() => {
+            expect(listRecycleBinMock).toHaveBeenCalledWith('session-1')
+        })
         expect(screen.getByRole('heading', { name: 'Move file to Recycle Bin?' })).toBeInTheDocument()
         expect(screen.getByRole('dialog')).toHaveTextContent(filePath)
 

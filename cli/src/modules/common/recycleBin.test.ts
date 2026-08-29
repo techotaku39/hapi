@@ -135,10 +135,13 @@ describe('RecycleBinManager', () => {
             const moved = await manager.moveFile(filePath, workspaceDir)
             if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
             await writeFile(filePath, 'new')
+            const legacyBackupPath = join(workspaceDir, `.${basename(filePath)}.${moved.entry.id}.hapi-restore-backup`)
+            await writeFile(legacyBackupPath, 'unrelated backup')
 
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
             expect(restored).toEqual({ success: true, restoredPath: filePath })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('old')
+            await expect(readFile(legacyBackupPath, 'utf8')).resolves.toBe('unrelated backup')
             expect((await manager.list(workspaceDir)).entries).toHaveLength(0)
         } finally {
             await cleanup()
