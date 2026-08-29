@@ -406,6 +406,42 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('does not report purge success before the recycle root sync completes', async () => {
+        try {
+            const filePath = join(workspaceDir, 'purge-sync-failure.txt')
+            await writeFile(filePath, 'purge me')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.rejectDirectorySync = true
+            recycleBinIoHarness.directorySyncFailureAt = 1
+            const purged = await manager.purge(moved.entry.id, workspaceDir)
+            expect(purged).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('does not report empty-bin success before the recycle root sync completes', async () => {
+        try {
+            const filePath = join(workspaceDir, 'empty-sync-failure.txt')
+            await writeFile(filePath, 'empty me')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.rejectDirectorySync = true
+            recycleBinIoHarness.directorySyncFailureAt = 1
+            const emptied = await manager.empty(workspaceDir, [moved.entry.id])
+            expect(emptied).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('rejects out-of-scope, directory, protected .git, and escaping symlink paths', async () => {
         try {
             const outsideDir = await createTempDir('hapi-recycle-outside')
