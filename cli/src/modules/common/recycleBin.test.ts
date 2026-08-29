@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const recycleBinIoHarness = vi.hoisted(() => ({
     shortWrite: false,
     rejectSync: false,
+    rejectDirectorySync: false,
+    directorySyncCalls: 0,
+    directorySyncFailureAt: undefined as number | undefined,
 }))
 
 vi.mock('node:fs/promises', async () => {
@@ -11,7 +14,10 @@ vi.mock('node:fs/promises', async () => {
         ...actual,
         open: vi.fn(async (...args: [string, string | number, number?]) => {
             const handle = await actual.open(...args)
-            if (args[1] !== 'wx' || (!recycleBinIoHarness.shortWrite && !recycleBinIoHarness.rejectSync)) {
+            const isDestinationHandle = args[1] === 'wx'
+            const isDirectoryHandle = typeof args[1] === 'number'
+            if ((!isDestinationHandle || (!recycleBinIoHarness.shortWrite && !recycleBinIoHarness.rejectSync))
+                && (!isDirectoryHandle || !recycleBinIoHarness.rejectDirectorySync)) {
                 return handle
             }
 
@@ -23,8 +29,18 @@ vi.mock('node:fs/promises', async () => {
                             return await target.write(buffer, bufferOffset, shortLength, position)
                         }
                     }
-                    if (property === 'sync' && recycleBinIoHarness.rejectSync) {
+                    if (property === 'sync' && (recycleBinIoHarness.rejectSync || recycleBinIoHarness.rejectDirectorySync)) {
                         return async () => {
+                            if (isDirectoryHandle) {
+                                recycleBinIoHarness.directorySyncCalls += 1
+                                if (recycleBinIoHarness.directorySyncFailureAt !== undefined
+                                    && recycleBinIoHarness.directorySyncCalls >= recycleBinIoHarness.directorySyncFailureAt) {
+                                    const error = new Error('Simulated recycle-bin directory sync failure') as NodeJS.ErrnoException
+                                    error.code = 'EIO'
+                                    throw error
+                                }
+                                return
+                            }
                             throw new Error('Simulated recycle-bin sync failure')
                         }
                     }
@@ -64,6 +80,9 @@ describe('RecycleBinManager', () => {
     beforeEach(async () => {
         recycleBinIoHarness.shortWrite = false
         recycleBinIoHarness.rejectSync = false
+        recycleBinIoHarness.rejectDirectorySync = false
+        recycleBinIoHarness.directorySyncCalls = 0
+        recycleBinIoHarness.directorySyncFailureAt = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -159,6 +178,22 @@ describe('RecycleBinManager', () => {
             })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('preserve this snapshot')
             await expect(readFile(linkedPath, 'utf8')).resolves.toBe('mutated through the remaining hard link')
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('keeps the source when the new recycle entry cannot be committed to disk', async () => {
+        try {
+            const filePath = join(workspaceDir, 'metadata-durability.txt')
+            await writeFile(filePath, 'keep the source')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDirectorySync = true
+            recycleBinIoHarness.directorySyncFailureAt = 2
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            expect(moved).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('keep the source')
         } finally {
             await cleanup()
         }
@@ -288,6 +323,49 @@ describe('RecycleBinManager', () => {
             await expect(readFile(filePath, 'utf8')).resolves.toBe('current')
             await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [moved.entry] })
             await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-restore-/))
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('keeps a copied restore destination after source unlink when parent sync fails', async () => {
+        try {
+            const filePath = join(workspaceDir, 'source-sync-failure.txt')
+            await writeFile(filePath, 'restore destination')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.directorySyncCalls = 0
+            recycleBinIoHarness.rejectDirectorySync = true
+            recycleBinIoHarness.directorySyncFailureAt = 2
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('restore destination')
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('keeps the recycle payload after a staged replacement is installed but root sync fails', async () => {
+        try {
+            const filePath = join(workspaceDir, 'replacement-sync-failure.txt')
+            await writeFile(filePath, 'original')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await writeFile(filePath, 'current')
+
+            recycleBinIoHarness.directorySyncCalls = 0
+            recycleBinIoHarness.rejectDirectorySync = true
+            recycleBinIoHarness.directorySyncFailureAt = 2
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
+            expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('original')
+            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                success: true,
+                content: Buffer.from('original').toString('base64'),
+            })
         } finally {
             await cleanup()
         }

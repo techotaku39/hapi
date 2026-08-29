@@ -9,7 +9,6 @@ import {
     rename,
     rm,
     unlink,
-    writeFile,
 } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
@@ -115,10 +114,10 @@ function isUnsupportedDirectorySync(error: unknown): boolean {
     return code === 'EINVAL' || code === 'EISDIR' || code === 'ENOTSUP' || code === 'EPERM'
 }
 
-async function syncParentDirectory(path: string): Promise<void> {
+async function syncDirectory(path: string): Promise<void> {
     let handle: Awaited<ReturnType<typeof open>> | null = null
     try {
-        handle = await open(dirname(path), constants.O_RDONLY | (constants.O_DIRECTORY ?? 0))
+        handle = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0))
         await handle.sync()
     } catch (error) {
         if (!isUnsupportedDirectorySync(error) || process.platform !== 'win32') {
@@ -127,6 +126,10 @@ async function syncParentDirectory(path: string): Promise<void> {
     } finally {
         if (handle) await handle.close()
     }
+}
+
+async function syncParentDirectory(path: string): Promise<void> {
+    await syncDirectory(dirname(path))
 }
 
 function publicEntry(entry: StoredRecycleBinEntry): RecycleBinEntry {
@@ -159,9 +162,16 @@ async function ensureFile(path: string): Promise<void> {
 async function writeJsonAtomically(path: string, value: unknown): Promise<void> {
     const temporaryPath = `${path}.${randomUUID()}.tmp`
     try {
-        await writeFile(temporaryPath, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 })
-        await chmod(temporaryPath, 0o600).catch(() => {})
+        const handle = await open(temporaryPath, 'wx', 0o600)
+        try {
+            await handle.writeFile(JSON.stringify(value, null, 2), 'utf8')
+            await handle.chmod(0o600)
+            await handle.sync()
+        } finally {
+            await handle.close()
+        }
         await rename(temporaryPath, path)
+        await syncParentDirectory(path)
     } catch (error) {
         await rm(temporaryPath, { force: true }).catch(() => {})
         throw error
@@ -274,6 +284,7 @@ async function copyFileWithoutReplacing(
 ): Promise<void> {
     const sourceHandle = await open(sourcePath, READ_FILE_FLAGS)
     let destinationCreated = false
+    let sourceRemoved = false
     const buffer = Buffer.allocUnsafe(1024 * 1024)
     let offset = 0
     try {
@@ -315,10 +326,11 @@ async function copyFileWithoutReplacing(
         await assertFileUnchanged(sourcePath, openedStats)
         if (options.unlinkSource !== false) {
             await unlink(sourcePath)
+            sourceRemoved = true
             await syncParentDirectory(sourcePath)
         }
     } catch (error) {
-        if (destinationCreated) {
+        if (destinationCreated && !sourceRemoved) {
             await rm(destinationPath, { force: true }).catch(() => {})
         }
         throw error
@@ -546,12 +558,14 @@ async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> 
         throw error
     }
 
+    let removedAny = false
     await Promise.all(entries.map(async (entryId) => {
         if (!RECYCLE_ENTRY_ID_PATTERN.test(entryId)) return
         try {
             const entry = await readStoredEntry(root, entryId)
             if (entry.expiresAt <= now) {
                 await rm(join(root, entryId), { recursive: true, force: true })
+                removedAny = true
             }
         } catch (error) {
             if (!isNotFound(error)) {
@@ -559,6 +573,7 @@ async function cleanupExpiredUnlocked(root: string, now: number): Promise<void> 
             }
         }
     }))
+    if (removedAny) await syncDirectory(root)
 }
 
 async function listStoredEntriesUnlocked(root: string, now: number): Promise<StoredRecycleBinEntry[]> {
@@ -648,6 +663,7 @@ export class RecycleBinManager {
             await mkdir(entryDirectory, { recursive: false, mode: 0o700 })
             try {
                 await writeJsonAtomically(metadataPath, entry)
+                await syncParentDirectory(entryDirectory)
                 await moveRegularFile(source.path, payloadPath, source.stats)
                 await assertPayloadIntegrity(entry, payloadPath)
             } catch (error) {
@@ -808,7 +824,7 @@ export class RecycleBinManager {
                     })
                 }
                 await rm(join(root, entry.id), { recursive: true, force: true })
-                await syncParentDirectory(join(root, entry.id))
+                await syncDirectory(root)
                 return { success: true, restoredPath: target }
             } catch (error) {
                 if (stagedPath) {
@@ -840,6 +856,7 @@ export class RecycleBinManager {
                 throw new Error('Recycle-bin entry not found')
             }
             await rm(join(root, entry.id), { recursive: true, force: true })
+            await syncDirectory(root)
             return { success: true }
         }).catch((error) => ({
             success: false,
@@ -858,10 +875,16 @@ export class RecycleBinManager {
             const requestedEntryIds = new Set(entryIds)
             const visible = entries.filter((entry) => requestedEntryIds.has(entry.id)
                 && isEntryVisible(entry, scopeRoot, protectedRoot))
-            for (const entry of visible) {
-                await rm(join(root, entry.id), { recursive: true, force: true })
+            let deletedCount = 0
+            try {
+                for (const entry of visible) {
+                    await rm(join(root, entry.id), { recursive: true, force: true })
+                    deletedCount += 1
+                }
+            } finally {
+                if (deletedCount > 0) await syncDirectory(root)
             }
-            return { success: true, deletedCount: visible.length }
+            return { success: true, deletedCount }
         }).catch((error) => ({
             success: false,
             error: errorMessage(error, 'Failed to empty the HAPI Recycle Bin'),
