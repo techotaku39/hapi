@@ -63,7 +63,7 @@ vi.mock('node:fs/promises', async () => {
     }
 })
 
-import { chmod, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, link, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -235,6 +235,37 @@ describe('RecycleBinManager', () => {
             })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('preserve this snapshot')
             await expect(readFile(linkedPath, 'utf8')).resolves.toBe('mutated through the remaining hard link')
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('keeps the deletion-time snapshot when a source handle remains open', async () => {
+        try {
+            const filePath = join(workspaceDir, 'open-handle.txt')
+            await writeFile(filePath, 'preserve this snapshot')
+            const sourceHandle = await open(filePath, 'r+')
+            try {
+                const manager = createManager(homeDir)
+                const moved = await manager.moveFile(filePath, workspaceDir)
+                if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+                const mutation = Buffer.from('mutated through the open handle')
+                await sourceHandle.write(mutation, 0, mutation.length, 0)
+                await sourceHandle.sync()
+
+                await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                    success: true,
+                    content: Buffer.from('preserve this snapshot').toString('base64'),
+                })
+                await expect(manager.restore(moved.entry.id, workspaceDir, 'fail')).resolves.toEqual({
+                    success: true,
+                    restoredPath: filePath,
+                })
+                await expect(readFile(filePath, 'utf8')).resolves.toBe('preserve this snapshot')
+            } finally {
+                await sourceHandle.close()
+            }
         } finally {
             await cleanup()
         }

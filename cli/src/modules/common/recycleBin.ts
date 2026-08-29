@@ -104,10 +104,6 @@ function isSameFileStats(left: FileStats, right: FileStats): boolean {
         && left.mtimeMs === right.mtimeMs
 }
 
-function isExdev(error: unknown): boolean {
-    return error instanceof Error && (error as NodeJS.ErrnoException).code === 'EXDEV'
-}
-
 function isNotFound(error: unknown): boolean {
     return error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
@@ -358,10 +354,7 @@ async function copyFileWithoutReplacing(
     }
 }
 
-type MoveFileOptions = {
-    /** Copy first with an exclusive destination instead of rename replacement. */
-    copyOnly?: boolean
-} & RecycleBinCopyOptions
+type MoveFileOptions = RecycleBinCopyOptions
 
 async function moveRegularFile(
     sourcePath: string,
@@ -375,17 +368,10 @@ async function moveRegularFile(
         throw new Error('Recycle-bin operation destination already exists')
     }
 
-    if (!options.copyOnly && sourceStats.nlink === 1) {
-        try {
-            await rename(sourcePath, destinationPath)
-            await syncParentDirectory(destinationPath)
-            await syncParentDirectory(sourcePath)
-            return
-        } catch (error) {
-            if (!isExdev(error)) throw error
-        }
-    }
-
+    // Always copy the source into a new inode. A same-filesystem rename would
+    // leave the recycle payload writable through descriptors opened before the
+    // deletion, so subsequent writes could mutate the supposedly immutable
+    // recovery snapshot.
     await copyFileWithoutReplacing(sourcePath, destinationPath, sourceStats, options)
 }
 
@@ -687,7 +673,7 @@ export class RecycleBinManager {
                 let rollbackError: unknown = null
                 if (await pathExists(payloadPath)) {
                     try {
-                        await moveRegularFile(payloadPath, source.path, undefined, { copyOnly: true })
+                        await moveRegularFile(payloadPath, source.path)
                     } catch (error) {
                         rollbackError = error
                         logger.debug('[RECYCLE BIN] Failed to roll back a failed move', { rollbackError })
@@ -836,7 +822,6 @@ export class RecycleBinManager {
                     await syncParentDirectory(target)
                 } else {
                     await moveRegularFile(payloadPath, target, payloadStats, {
-                        copyOnly: true,
                         mode: entry.mode & 0o7777,
                     })
                 }
