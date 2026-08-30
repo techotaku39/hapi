@@ -12,6 +12,10 @@ describe('pi title extension source', () => {
         expect(PI_TITLE_EXTENSION_SOURCE).toContain('ctx.ui.setTitle');
     });
 
+    it('uses the typebox specifier that old and new Pi loaders both resolve', () => {
+        expect(PI_TITLE_EXTENSION_SOURCE).toContain("import { Type } from '@sinclair/typebox';");
+    });
+
     it('injects the instruction on every turn, matching the persistent Claude/Codex rule', () => {
         expect(PI_TITLE_EXTENSION_SOURCE).toContain('## Session title');
         expect(PI_TITLE_EXTENSION_SOURCE).toContain('tool once');
@@ -59,11 +63,11 @@ describe('materializePiTitleExtension', () => {
         const dir = await mkdtemp(join(tmpdir(), 'hapi-pi-title-'));
         const file = await materializePiTitleExtension(dir);
 
-        // The materialized source only imports 'typebox', which cannot be
+        // The materialized source only imports typebox, which cannot be
         // resolved from an arbitrary temp dir; stub it so the module loads as ESM.
         const source = await readFile(file, 'utf8');
         const testable = source.replace(
-            "import { Type } from 'typebox';",
+            "import { Type } from '@sinclair/typebox';",
             'const Type = { Object: (properties) => ({ properties }), String: (options) => options };',
         );
         const moduleFile = join(dir, 'hapi-title-extension.mjs');
@@ -90,12 +94,28 @@ describe('materializePiTitleExtension', () => {
         const setTitle = vi.fn();
         const tool = registered.find((definition) => definition.name === 'hapi_change_title');
         expect(tool).toBeDefined();
+
+        // Current Pi call order: (toolCallId, params, signal, onUpdate, ctx).
         const result = await tool!.execute('call-1', { title: 'Fix login bug' }, undefined, undefined, {
             hasUI: true,
             ui: { setTitle },
         });
         expect(setTitle).toHaveBeenCalledWith('Fix login bug');
         expect(result.content[0].text).toContain('Fix login bug');
+
+        // Legacy Pi call order (id, params, onUpdate, ctx, signal) with RPC
+        // reporting hasUI: false — the context must still be normalized and
+        // setTitle must still fire.
+        const setTitleLegacy = vi.fn();
+        const legacyCtx = { hasUI: false, ui: { setTitle: setTitleLegacy } };
+        await tool!.execute(
+            'call-2',
+            { title: 'Legacy goal' },
+            () => {},
+            legacyCtx,
+            new AbortController().signal,
+        );
+        expect(setTitleLegacy).toHaveBeenCalledWith('Legacy goal');
 
         // A later turn (after the title tool executed) still carries the
         // instruction, preserving the objective-change retitle rule.
