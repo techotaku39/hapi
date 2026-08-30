@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 
 const mocks = vi.hoisted(() => ({
@@ -8,11 +8,19 @@ const mocks = vi.hoisted(() => ({
         name: 'photo.png',
         status: { type: 'requires-action', reason: 'composer-send' },
         previewUrl: 'data:image/png;base64,cGhvdG8='
-    } as Record<string, unknown>
+    } as Record<string, unknown>,
+    composer: {
+        addAttachment: vi.fn(async (_file: File) => {}),
+    },
+    attachmentRuntime: {
+        remove: vi.fn(async () => {}),
+    }
 }))
 
 vi.mock('@assistant-ui/react', () => ({
     useThreadComposerAttachment: () => mocks.attachment,
+    useComposerRuntime: () => mocks.composer,
+    useThreadComposerAttachmentRuntime: () => mocks.attachmentRuntime,
     AttachmentPrimitive: {
         Root: ({ children, ...props }: ComponentProps<'div'>) => <div {...props}>{children}</div>,
         Remove: ({ children, ...props }: ComponentProps<'button'> & { children?: ReactNode }) => (
@@ -24,6 +32,11 @@ vi.mock('@assistant-ui/react', () => ({
 import { AttachmentItem } from './AttachmentItem'
 
 afterEach(() => cleanup())
+
+beforeEach(() => {
+    mocks.composer.addAttachment.mockClear()
+    mocks.attachmentRuntime.remove.mockClear()
+})
 
 function renderAttachment() {
     return render(
@@ -119,23 +132,54 @@ describe('AttachmentItem', () => {
         expect(dragHandle.parentElement).toHaveClass('gap-1.5', 'px-2')
 
         for (const control of [dragHandle, removeButton]) {
-            expect(control).toHaveClass('hapi-composer-attachment-file-control', 'h-6', 'w-6', '-mx-1', 'items-center')
+            expect(control).toHaveClass('hapi-composer-attachment-file-control', 'h-6', 'w-6', 'items-center')
             expect(control).not.toHaveClass('absolute', 'top-1/2', '-translate-y-1/2')
             expect(control.querySelector('span')).toBeNull()
         }
+        expect(dragHandle).toHaveClass('-mx-1')
+        expect(removeButton).toHaveClass('-mx-1')
     })
 
-    it('keeps upload errors in the existing error layout', () => {
+    it('renders a failed upload with an inline retry icon', () => {
         mocks.attachment = {
             name: 'broken.png',
             status: { type: 'incomplete', reason: 'error' },
             previewUrl: 'data:image/png;base64,YnJva2Vu'
         }
 
-        renderAttachment()
+        renderAttachmentWithControls()
 
         expect(screen.queryByRole('img')).not.toBeInTheDocument()
-        expect(screen.getByText('Upload failed')).toBeInTheDocument()
+        expect(screen.queryByText('Upload failed')).not.toBeInTheDocument()
+        expect(screen.queryByText('Retry')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('attachment-drag-handle')).not.toBeInTheDocument()
         expect(screen.getByText('broken.png')).toHaveClass('line-through')
+        expect(screen.getByRole('button', { name: 'Retry upload' })).toBeInTheDocument()
+        const retryButton = screen.getByRole('button', { name: 'Retry upload' })
+        expect(retryButton).toHaveClass('hapi-composer-attachment-file-control', 'h-6', 'w-6', '-mx-1', 'items-center')
+        expect(screen.getByRole('button', { name: 'Remove attachment' })).toHaveClass(
+            'hapi-composer-attachment-file-control', 'h-6', 'w-6', '-mx-1', 'items-center',
+        )
+        expect(screen.getByRole('button', { name: 'Remove attachment' })).not.toHaveStyle({ marginLeft: '-7px' })
+        expect(retryButton.querySelector('svg')).toHaveClass('h-[18px]', 'w-[18px]')
+        expect(retryButton.querySelector('svg')).toHaveAttribute('viewBox', '0 0 24 24')
+    })
+
+    it('retries a failed upload with the original file', async () => {
+        const file = new File(['broken'], 'broken.png', { type: 'image/png' })
+        mocks.attachment = {
+            id: 'broken-attachment',
+            name: file.name,
+            file,
+            status: { type: 'incomplete', reason: 'error' },
+        }
+
+        renderAttachment()
+        fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }))
+
+        await waitFor(() => {
+            expect(mocks.attachmentRuntime.remove).toHaveBeenCalledOnce()
+            expect(mocks.composer.addAttachment).toHaveBeenCalledWith(file)
+        })
     })
 })
