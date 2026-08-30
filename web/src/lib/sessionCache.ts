@@ -1,4 +1,4 @@
-import { getSessionListSortTimestamp } from '@hapi/protocol'
+import { getSessionListSortTimestamp, toSessionSummary } from '@hapi/protocol'
 import type {
     Session,
     SessionResponse,
@@ -46,13 +46,18 @@ export function shouldAcceptRefreshedSessionSummary(
 /** A rejected REST list snapshot needs one bounded recovery fetch. */
 export function needsSessionsResponseRetry(
     current: SessionsResponse | undefined,
-    incoming: SessionsResponse
+    incoming: SessionsResponse,
+    getCachedDetail?: (sessionId: string) => Session | undefined
 ): boolean {
-    if (!current) return false
-    const currentById = new Map(current.sessions.map((session) => [session.id, session]))
+    const currentById = new Map((current?.sessions ?? []).map((session) => [session.id, session]))
     return incoming.sessions.some((session) => {
         const cached = currentById.get(session.id)
-        return Boolean(cached && !shouldAcceptRefreshedSessionSummary(cached, session))
+        const detail = getCachedDetail?.(session.id)
+        const watermark = Math.max(
+            cached?.lastAssistantMessageVersion ?? 0,
+            detail?.seq ?? 0
+        )
+        return (session.lastAssistantMessageVersion ?? 0) < watermark
     })
 }
 
@@ -84,22 +89,34 @@ export function mergeSessionResponse(
 
 /**
  * Merge a REST list response against the current cache by session id. REST
- * remains authoritative for membership, while a newer SSE row wins for each
- * session whose reply-clock watermark is ahead of the response.
+ * remains authoritative for membership, while a newer SSE row/detail wins for
+ * each session whose reply-clock watermark is ahead of the response.
  */
 export function mergeSessionsResponse(
     current: SessionsResponse | undefined,
-    incoming: SessionsResponse
+    incoming: SessionsResponse,
+    getCachedDetail?: (sessionId: string) => Session | undefined
 ): SessionsResponse {
-    if (!current) return incoming
-
-    const currentById = new Map(current.sessions.map((session) => [session.id, session]))
+    const currentById = new Map((current?.sessions ?? []).map((session) => [session.id, session]))
     const sessions = incoming.sessions.map((session) => {
         const cached = currentById.get(session.id)
-        if (!cached || shouldAcceptRefreshedSessionSummary(cached, session)) {
+        const detail = getCachedDetail?.(session.id)
+        const cachedVersion = cached?.lastAssistantMessageVersion ?? 0
+        const detailVersion = detail?.seq ?? 0
+        const watermark = Math.max(cachedVersion, detailVersion)
+        if ((session.lastAssistantMessageVersion ?? 0) >= watermark) {
             return session
         }
-        return cached
+        if (detail && detailVersion >= cachedVersion) {
+            return {
+                ...toSessionSummary(detail),
+                // These fields are computed from the REST list's message
+                // table and are not present in a full Session detail.
+                futureScheduledMessageCount: session.futureScheduledMessageCount,
+                nextScheduledAt: session.nextScheduledAt
+            }
+        }
+        return cached ?? session
     })
     sessions.sort(sortSessionSummaries)
     return { ...incoming, sessions }

@@ -99,6 +99,41 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `refresh projects a newer cached detail through an older list snapshot`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("reply", updatedAt = 9_000, lastAssistantMessageAt = 9_000, lastAssistantMessageVersion = 1)
+            )
+        )
+        store.refresh()
+
+        val detail = session("reply", seq = 3, updatedAt = 12_000, lastAssistantMessageAt = null)
+        server.enqueueJson("""{"session":${fullSessionJson(detail)}}""")
+        store.loadSessionDetail("reply")
+
+        val stale = sessionsResponseJson(
+            summary(
+                "reply",
+                updatedAt = 11_000,
+                lastAssistantMessageAt = 1_000,
+                lastAssistantMessageVersion = 2,
+                futureScheduledMessageCount = 4,
+                nextScheduledAt = 42,
+            )
+        )
+        server.enqueueJson(stale)
+        server.enqueueJson(stale)
+        store.refresh()
+
+        val row = store.sessions.value.single()
+        assertEquals(12_000L, row.updatedAt)
+        assertNull(row.lastAssistantMessageAt)
+        assertEquals(3L, row.lastAssistantMessageVersion)
+        assertEquals(4, row.futureScheduledMessageCount)
+        assertEquals(42L, row.nextScheduledAt)
+    }
+
+    @Test
     fun `delayed detail response cannot overwrite a newer full-session event`() = runStoreTest { store, server ->
         server.enqueueJson("""{"session":${fullSessionJson(session("s1", seq = 5, lastAssistantMessageAt = 9_000))}}""")
         store.loadSessionDetail("s1")

@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
-import type { SessionSummary, SessionsResponse } from '@/types/api'
+import type { Session, SessionResponse, SessionSummary, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { useSessions } from './useSessions'
 
@@ -36,6 +36,30 @@ function makeSummary(
         modelReasoningEffort: null,
         effort: null
     }
+}
+
+function makeDetail(seq: number, lastAssistantMessageAt: number | null): Session {
+    return {
+        id: 'reply',
+        namespace: 'default',
+        seq,
+        createdAt: 1,
+        updatedAt: 12_000,
+        lastAssistantMessageAt,
+        active: false,
+        activeAt: 0,
+        metadata: null,
+        metadataVersion: 2,
+        agentState: null,
+        agentStateVersion: 0,
+        thinking: false,
+        thinkingAt: 0,
+        model: null,
+        modelReasoningEffort: null,
+        effort: null,
+        serviceTier: null,
+        permissionMode: 'default'
+    } as Session
 }
 
 function queryWrapper(queryClient: QueryClient) {
@@ -97,6 +121,48 @@ describe('useSessions REST ordering', () => {
         await waitFor(() => {
             expect(result.current.sessions[0]?.lastAssistantMessageAt).toBe(10_000)
             expect(result.current.sessions[0]?.metadataVersion).toBe(2)
+        })
+    })
+
+    it('projects a newer cached detail through an older REST list response', async () => {
+        const queryClient = new QueryClient({
+            defaultOptions: { queries: { retry: false, staleTime: 30_000 } }
+        })
+        queryClient.setQueryData<SessionResponse>(queryKeys.session('reply'), {
+            session: makeDetail(3, null)
+        })
+
+        let resolveFirstResponse!: (response: SessionsResponse) => void
+        let resolveSecondResponse!: (response: SessionsResponse) => void
+        const firstResponse = new Promise<SessionsResponse>((resolve) => { resolveFirstResponse = resolve })
+        const secondResponse = new Promise<SessionsResponse>((resolve) => { resolveSecondResponse = resolve })
+        const responses = [firstResponse, secondResponse]
+        const api = {
+            getSessions: vi.fn(() => responses.shift()!)
+        } as unknown as ApiClient
+        const { result } = renderHook(() => useSessions(api), { wrapper: queryWrapper(queryClient) })
+
+        let refetch!: Promise<unknown>
+        await act(async () => { refetch = result.current.refetch() })
+        await waitFor(() => expect(api.getSessions).toHaveBeenCalledTimes(1))
+
+        const stale = {
+            ...makeSummary('reply', 1_000, 2, 2),
+            futureScheduledMessageCount: 4,
+            nextScheduledAt: 42
+        }
+        resolveFirstResponse({ sessions: [stale] })
+        await waitFor(() => expect(api.getSessions).toHaveBeenCalledTimes(2))
+        resolveSecondResponse({ sessions: [stale] })
+        await act(async () => { await refetch })
+
+        await waitFor(() => {
+            const row = result.current.sessions[0]
+            expect(row?.lastAssistantMessageAt).toBeNull()
+            expect(row?.lastAssistantMessageVersion).toBe(3)
+            expect(row?.updatedAt).toBe(12_000)
+            expect(row?.futureScheduledMessageCount).toBe(4)
+            expect(row?.nextScheduledAt).toBe(42)
         })
     })
 })

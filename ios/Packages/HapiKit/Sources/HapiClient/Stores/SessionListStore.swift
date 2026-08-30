@@ -161,10 +161,15 @@ public final class SessionListStore: SessionListStoring {
         let generation = refreshGeneration
         var list = try await api.listSessions()
         let cachedByIdBeforeRetry = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let detailsByIdBeforeRetry = details
         if list.contains(where: { incoming in
-            guard let cached = cachedByIdBeforeRetry[incoming.id] else { return false }
-            return (incoming.lastAssistantMessageVersion ?? 0)
-                < (cached.lastAssistantMessageVersion ?? 0)
+            let cached = cachedByIdBeforeRetry[incoming.id]
+            let detail = detailsByIdBeforeRetry[incoming.id]
+            let watermark = max(
+                cached?.lastAssistantMessageVersion ?? 0,
+                detail?.seq ?? 0
+            )
+            return (incoming.lastAssistantMessageVersion ?? 0) < watermark
         }) {
             // Recover unrelated row fields after discarding an older list
             // snapshot, while keeping the retry bounded to one request.
@@ -174,13 +179,23 @@ public final class SessionListStore: SessionListStoring {
         guard generation > lastAppliedRefresh else { return }
         lastAppliedRefresh = generation
         let cachedById = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let detailsById = details
         let merged = list.map { incoming in
-            guard let cached = cachedById[incoming.id],
-                  (incoming.lastAssistantMessageVersion ?? 0)
-                    < (cached.lastAssistantMessageVersion ?? 0) else {
+            let cached = cachedById[incoming.id]
+            let detail = detailsById[incoming.id]
+            let cachedVersion = cached?.lastAssistantMessageVersion ?? 0
+            let detailVersion = detail?.seq ?? 0
+            let watermark = max(cachedVersion, detailVersion)
+            if (incoming.lastAssistantMessageVersion ?? 0) >= watermark {
                 return incoming
             }
-            return cached
+            if let detail, detailVersion >= cachedVersion {
+                var projected = SummaryPatching.toSessionSummary(detail)
+                projected.futureScheduledMessageCount = incoming.futureScheduledMessageCount
+                projected.nextScheduledAt = incoming.nextScheduledAt
+                return projected
+            }
+            return cached ?? incoming
         }
         setSessions(sortSessionSummaries(merged))
     }

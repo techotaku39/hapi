@@ -69,6 +69,39 @@ struct SessionListStoreTests {
         #expect(store.sessions.first?.metadataVersion == 2)
     }
 
+    @Test func refreshProjectsANewerCachedDetailThroughAnOlderListSnapshot() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("reply", updatedAt: 9_000, lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 1)
+        ))
+        try await store.refresh()
+
+        let detail = storeSession("reply", seq: 3, updatedAt: 12_000, lastAssistantMessageAt: nil)
+        await performer.enqueue(json: try sessionResponseJSON(detail))
+        _ = try await store.loadSessionDetail("reply")
+
+        let stale = try sessionsResponseJSON(
+            storeSummary(
+                "reply",
+                updatedAt: 11_000,
+                lastAssistantMessageAt: 1_000,
+                lastAssistantMessageVersion: 2,
+                futureScheduledMessageCount: 4,
+                nextScheduledAt: 42
+            )
+        )
+        await performer.enqueue(json: stale)
+        await performer.enqueue(json: stale)
+        try await store.refresh()
+
+        let row = try #require(store.sessions.first)
+        #expect(row.updatedAt == 12_000)
+        #expect(row.lastAssistantMessageAt == nil)
+        #expect(row.lastAssistantMessageVersion == 3)
+        #expect(row.futureScheduledMessageCount == 4)
+        #expect(row.nextScheduledAt == 42)
+    }
+
     @Test func delayedDetailResponseCannotOverwriteANewerFullSessionEvent() async throws {
         let (performer, store) = try makeStore()
         let current = storeSession("s1", seq: 5, lastAssistantMessageAt: 9_000)

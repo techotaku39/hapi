@@ -210,9 +210,15 @@ class SessionStore(
         refreshMutex.withLock {
             var response = api.getSessions()
             val cachedById = _sessions.value.associateBy { it.id }
+            val detailsById = _details.value
             if (response.sessions.any { incoming ->
                     val cached = cachedById[incoming.id]
-                    cached != null && (incoming.lastAssistantMessageVersion ?: 0) < (cached.lastAssistantMessageVersion ?: 0)
+                    val detail = detailsById[incoming.id]
+                    val watermark = maxOf(
+                        cached?.lastAssistantMessageVersion ?: 0L,
+                        detail?.seq ?: 0L,
+                    )
+                    (incoming.lastAssistantMessageVersion ?: 0L) < watermark
                 }) {
                 // The rejected snapshot may omit unrelated fields that were
                 // present at its older sequence. Retry once, then merge the
@@ -221,16 +227,23 @@ class SessionStore(
             }
             updateSummaries { list ->
                 val latestById = list.associateBy { it.id }
+                val latestDetailsById = _details.value
                 sortSessionSummaries(
                     response.sessions.map { incoming ->
                         val cached = latestById[incoming.id]
-                        if (cached != null
-                            && (incoming.lastAssistantMessageVersion ?: 0)
-                                < (cached.lastAssistantMessageVersion ?: 0)
-                        ) {
-                            cached
-                        } else {
+                        val detail = latestDetailsById[incoming.id]
+                        val cachedVersion = cached?.lastAssistantMessageVersion ?: 0L
+                        val detailVersion = detail?.seq ?: 0L
+                        val watermark = maxOf(cachedVersion, detailVersion)
+                        if ((incoming.lastAssistantMessageVersion ?: 0L) >= watermark) {
                             incoming
+                        } else if (detail != null && detailVersion >= cachedVersion) {
+                            SummaryPatching.toSessionSummary(detail).copy(
+                                futureScheduledMessageCount = incoming.futureScheduledMessageCount,
+                                nextScheduledAt = incoming.nextScheduledAt,
+                            )
+                        } else {
+                            cached ?: incoming
                         }
                     }
                 )
