@@ -315,10 +315,13 @@ export const SessionSchema = z.object({
     seq: z.number(),
     createdAt: z.number(),
     updatedAt: z.number(),
-    // Separate clock for the latest visible assistant prose. Unlike updatedAt,
-    // this does not change activity/unread state; the default sidebar sort uses
-    // it and falls back to updatedAt when no assistant reply exists.
+    // Separate clock for the latest visible assistant prose. The sidebar uses
+    // it for recency and unread state, while updatedAt remains the fallback
+    // activity clock when no assistant reply exists.
     lastAssistantMessageAt: z.number().nullable().optional(),
+    // False while a legacy transcript is still being scanned. Clients should
+    // defer reply-clock unread baselines until the Hub marks it complete.
+    assistantReplyClockBackfilled: z.boolean().optional(),
     pinned: z.boolean().optional(),
     globalPinned: z.boolean().optional(),
     active: z.boolean(),

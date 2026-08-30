@@ -174,6 +174,7 @@ public enum SummaryPatching {
             activeAt: session.activeAt,
             updatedAt: session.updatedAt,
             lastAssistantMessageAt: session.lastAssistantMessageAt,
+            assistantReplyClockBackfilled: session.assistantReplyClockBackfilled,
             lastAssistantMessageVersion: session.seq,
             pinned: session.pinned ?? false,
             globalPinned: session.globalPinned ?? false,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import {
+    getSessionActivityTimestamp,
     getSessionListSortTimestamp,
     isWildcardSearch,
     matchesSearchQuery,
@@ -1072,7 +1073,7 @@ function SessionItem(props: {
                 onSetPinMode={(mode) => void handleSetPinMode(mode)}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
-                onMarkUnread={() => markSessionUnread(s.id, s.updatedAt)}
+                onMarkUnread={() => markSessionUnread(s.id, getSessionActivityTimestamp(s))}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
                 reopenDisabledReason={cursorReopenDisabledReason}

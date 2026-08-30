@@ -84,10 +84,12 @@ describe('toSessionSummary', () => {
     it('carries the independent assistant reply timestamp', () => {
         const summary = toSessionSummary(makeSession({
             updatedAt: 5_000,
-            lastAssistantMessageAt: 4_000
+            lastAssistantMessageAt: 4_000,
+            assistantReplyClockBackfilled: false
         }))
         expect(summary.updatedAt).toBe(5_000)
         expect(summary.lastAssistantMessageAt).toBe(4_000)
+        expect(summary.assistantReplyClockBackfilled).toBe(false)
     })
 
     it('includes the pinned state', () => {

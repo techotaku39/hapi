@@ -17,6 +17,8 @@ data class SessionSummary(
     val updatedAt: Long = 0,
     /** Latest visible assistant prose; list sorting falls back to updatedAt. */
     val lastAssistantMessageAt: Long? = null,
+    /** False while the Hub is still backfilling a legacy transcript. */
+    val assistantReplyClockBackfilled: Boolean? = null,
     /** Session sequence that supplied lastAssistantMessageAt. */
     val lastAssistantMessageVersion: Long? = null,
     val pinned: Boolean? = null,

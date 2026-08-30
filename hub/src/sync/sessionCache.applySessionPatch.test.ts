@@ -100,6 +100,7 @@ describe('SessionCache.applySessionPatch', () => {
         const backfilled = await waitForAssistantReplyClock(store, session.id)
         expect(backfilled.lastAssistantMessageAt).toBe(3_000)
         expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
+        expect(cache.getSession(session.id)?.assistantReplyClockBackfilled).toBe(true)
         expect(events.at(-1)).toMatchObject({
             type: 'session-updated',
             sessionId: session.id,
@@ -217,6 +218,7 @@ describe('SessionCache.applySessionPatch', () => {
         const backfilled = await waitForAssistantReplyClock(store, session.id)
         expect(backfilled.lastAssistantMessageAt).toBeNull()
         expect(backfilled.assistantReplyClockBackfilled).toBe(true)
+        expect(firstCache.getSession(session.id)?.assistantReplyClockBackfilled).toBe(true)
 
         const secondCache = new SessionCache(store, createPublisher([]))
         expect(secondCache.refreshSession(session.id)?.lastAssistantMessageAt).toBeNull()

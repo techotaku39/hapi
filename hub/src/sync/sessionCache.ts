@@ -197,6 +197,7 @@ export class SessionCache {
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt,
             lastAssistantMessageAt: stored.lastAssistantMessageAt,
+            assistantReplyClockBackfilled: stored.assistantReplyClockBackfilled,
             pinned: stored.pinned,
             globalPinned: stored.globalPinned,
             active: existing?.active ?? stored.active,
@@ -336,10 +337,13 @@ export class SessionCache {
             const session = this.sessions.get(sessionId)
             if (!refreshed || !session || refreshed.namespace !== session.namespace) return false
 
+            const replyClockChanged = session.lastAssistantMessageAt !== refreshed.lastAssistantMessageAt
+            const replyClockReadyChanged = session.assistantReplyClockBackfilled !== refreshed.assistantReplyClockBackfilled
             session.seq = refreshed.seq
-            if (session.lastAssistantMessageAt === refreshed.lastAssistantMessageAt) return false
+            if (!replyClockChanged && !replyClockReadyChanged) return false
 
             session.lastAssistantMessageAt = refreshed.lastAssistantMessageAt
+            session.assistantReplyClockBackfilled = refreshed.assistantReplyClockBackfilled
             this.publisher.emit({
                 type: 'session-updated',
                 sessionId,

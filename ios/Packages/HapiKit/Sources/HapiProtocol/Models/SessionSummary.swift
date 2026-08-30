@@ -100,6 +100,8 @@ public struct SessionSummary: Codable, Equatable, Sendable {
     public var updatedAt: Int
     /// Latest visible assistant prose; list sorting falls back to updatedAt.
     public var lastAssistantMessageAt: Int?
+    /// False while the Hub is still backfilling a legacy transcript.
+    public var assistantReplyClockBackfilled: Bool?
     /// Session sequence that supplied lastAssistantMessageAt.
     public var lastAssistantMessageVersion: Int?
     public var pinned: Bool?
@@ -129,6 +131,7 @@ public struct SessionSummary: Codable, Equatable, Sendable {
         activeAt: Int,
         updatedAt: Int,
         lastAssistantMessageAt: Int? = nil,
+        assistantReplyClockBackfilled: Bool? = nil,
         lastAssistantMessageVersion: Int? = nil,
         pinned: Bool? = nil,
         globalPinned: Bool? = nil,
@@ -153,6 +156,7 @@ public struct SessionSummary: Codable, Equatable, Sendable {
         self.activeAt = activeAt
         self.updatedAt = updatedAt
         self.lastAssistantMessageAt = lastAssistantMessageAt
+        self.assistantReplyClockBackfilled = assistantReplyClockBackfilled
         self.lastAssistantMessageVersion = lastAssistantMessageVersion
         self.pinned = pinned
         self.globalPinned = globalPinned
