@@ -82,7 +82,9 @@ describe('materializePiTitleExtension', () => {
             registerTool: (definition: (typeof registered)[number]) => registered.push(definition),
         });
 
-        const beforeAgentStart = handlers.before_agent_start[0];
+        const beforeAgentStart = handlers.before_agent_start[0] as (
+            event: { systemPrompt: string },
+        ) => { systemPrompt: string };
         expect(beforeAgentStart({ systemPrompt: 'base' }).systemPrompt).toContain('## Session title');
 
         const setTitle = vi.fn();
