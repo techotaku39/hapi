@@ -2,7 +2,6 @@ import type { ComponentProps, ReactNode } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { MAX_UPLOAD_BYTES } from '@/lib/attachmentAdapter'
 
 const mocks = vi.hoisted(() => ({
     attachment: {
@@ -198,11 +197,12 @@ describe('AttachmentItem', () => {
         expect(retryFile.size).toBe(file.size)
     })
 
-    it('keeps an error indicator without retrying oversized files', () => {
+    it('keeps an error indicator without retrying non-retryable files', () => {
         mocks.attachment = {
             name: 'oversized.bin',
-            file: { name: 'oversized.bin', size: MAX_UPLOAD_BYTES + 1, type: 'application/octet-stream' } as File,
+            file: { name: 'oversized.bin', size: 1, type: 'application/octet-stream' } as File,
             status: { type: 'incomplete', reason: 'error' },
+            retryable: false,
         }
 
         renderAttachmentWithControls()

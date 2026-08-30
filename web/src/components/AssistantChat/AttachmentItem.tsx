@@ -11,11 +11,11 @@ import { ImagePreview } from '@/components/ImagePreview'
 import { Spinner } from '@/components/Spinner'
 import { RefreshIcon } from '@/components/icons'
 import { useComposerParking } from '@/components/AssistantChat/composerParkingContext'
-import { MAX_UPLOAD_BYTES } from '@/lib/attachmentAdapter'
 import { useTranslation } from '@/lib/use-translation'
 
 type ComposerAttachmentWithPreview = PendingAttachment & {
     previewUrl?: string
+    retryable?: boolean
 }
 
 const TRUNCATED_REMOVE_MARGIN_LEFT = '-7px'
@@ -106,7 +106,7 @@ function DragHandle(props: AttachmentDragHandleProps & { isFile?: boolean }) {
 }
 
 export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandleProps } = {}) {
-    const { name, file, status, previewUrl } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
+    const { name, file, status, previewUrl, retryable } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
     const composer = useComposerRuntime()
     const attachmentRuntime = useThreadComposerAttachmentRuntime()
     const isParking = useComposerParking()
@@ -116,8 +116,7 @@ export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandlePr
     const [isFilenameTruncated, setIsFilenameTruncated] = useState(false)
     const isUploading = status.type === 'running'
     const isError = status.type === 'incomplete'
-    const isRetryableError = isError && file.size <= MAX_UPLOAD_BYTES
-    const showRetry = isRetryableError && !isParking
+    const showRetry = isError && retryable !== false && !isParking
 
     useLayoutEffect(() => {
         const element = filenameRef.current

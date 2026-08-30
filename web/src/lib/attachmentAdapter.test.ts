@@ -104,6 +104,25 @@ describe('attachmentAdapter', () => {
         expect(retriedEmitted.at(-1)?.id).not.toBe('restored-failed')
     })
 
+    it('marks deterministic size failures as non-retryable', async () => {
+        const { createAttachmentAdapter, MAX_UPLOAD_BYTES } = await import('./attachmentAdapter')
+        const file = new File(['too-large'], 'too-large.txt', { type: 'text/plain' })
+        Object.defineProperty(file, 'size', { value: MAX_UPLOAD_BYTES + 1 })
+        const uploadFile = vi.fn()
+        const adapter = createAttachmentAdapter({ uploadFile } as never, 'session-1')
+        const emitted: Record<string, unknown>[] = []
+
+        for await (const attachment of adapter.add({ file }) as AsyncIterable<Record<string, unknown>>) {
+            emitted.push(attachment)
+        }
+
+        expect(emitted.at(-1)).toMatchObject({
+            status: { type: 'incomplete', reason: 'error' },
+            retryable: false,
+        })
+        expect(uploadFile).not.toHaveBeenCalled()
+    })
+
     it('uploads an image when the initial preview read fails', async () => {
         let readCount = 0
         class FileReaderMock {
