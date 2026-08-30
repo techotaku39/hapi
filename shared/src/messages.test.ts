@@ -88,6 +88,17 @@ describe('extractAssistantPlainText', () => {
         expect(extractAssistantPlainText(content)).toBe('Line one.\nLine two.')
     })
 
+    test('extracts output/assistant text from claude SDK string content', () => {
+        const content = {
+            type: 'output',
+            data: {
+                type: 'assistant',
+                message: { content: 'A string-form Claude reply.' }
+            }
+        }
+        expect(extractAssistantPlainText(content)).toBe('A string-form Claude reply.')
+    })
+
     test('returns null for output/assistant with no text blocks', () => {
         const content = {
             type: 'output',

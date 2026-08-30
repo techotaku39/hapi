@@ -133,7 +133,8 @@ export function isRedundantGoalStatusEventContent(value: unknown): boolean {
  *
  *  2. `output` flavor (Claude SDK passthrough):  content.type = 'output',
  *     content.data.type = 'assistant'  -> text at
- *     `content.data.message.content[i].text` (array of `{type:'text', text}`).
+ *     `content.data.message.content` (a string or an array of
+ *     `{type:'text', text}` blocks).
  *
  * Returns `null` when the content does not look like assistant *text*
  * (tool calls, tool results, reasoning, token counts, etc.) so callers can
@@ -163,7 +164,11 @@ export function extractAssistantPlainText(content: unknown): string | null {
 
         if (data.type !== 'assistant') return null
         const message = isObject(data.message) ? data.message : null
-        const blocks = Array.isArray(message?.content) ? message.content : null
+        const rawContent = message?.content
+        if (typeof rawContent === 'string') {
+            return rawContent.trim().length > 0 ? rawContent : null
+        }
+        const blocks = Array.isArray(rawContent) ? rawContent : null
         if (!blocks) return null
         const textParts: string[] = []
         for (const block of blocks) {
