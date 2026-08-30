@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     } as Record<string, unknown>,
     composer: {
         addAttachment: vi.fn(async (_file: File) => {}),
+        getState: vi.fn(() => ({ attachments: [] })),
     },
     attachmentRuntime: {
         remove: vi.fn(async () => {}),
@@ -38,6 +39,8 @@ afterEach(() => {
 
 beforeEach(() => {
     mocks.composer.addAttachment.mockClear()
+    mocks.composer.getState.mockReset()
+    mocks.composer.getState.mockReturnValue({ attachments: [] })
     mocks.attachmentRuntime.remove.mockClear()
 })
 
@@ -195,6 +198,34 @@ describe('AttachmentItem', () => {
             lastModified: file.lastModified,
         })
         expect(retryFile.size).toBe(file.size)
+    })
+
+    it('reports the fresh retry id with the original attachment index', async () => {
+        const file = new File(['broken'], 'broken.png', { type: 'image/png' })
+        const attachmentOrderRef = { current: ['first-attachment', 'broken-attachment', 'last-attachment'] }
+        const onRetry = vi.fn()
+        mocks.attachment = {
+            id: 'broken-attachment',
+            name: file.name,
+            file,
+            status: { type: 'incomplete', reason: 'error' },
+        }
+        mocks.composer.addAttachment.mockImplementationOnce(async (retryFile: File) => {
+            mocks.composer.getState.mockReturnValue({
+                attachments: [{ id: 'retried-attachment', file: retryFile }] as never[],
+            })
+        })
+
+        render(
+            <I18nProvider>
+                <AttachmentItem attachmentOrderRef={attachmentOrderRef} onRetry={onRetry} />
+            </I18nProvider>,
+        )
+        fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }))
+
+        await waitFor(() => {
+            expect(onRetry).toHaveBeenCalledWith('broken-attachment', 'retried-attachment', 1)
+        })
     })
 
     it('keeps an error indicator without retrying non-retryable files', () => {

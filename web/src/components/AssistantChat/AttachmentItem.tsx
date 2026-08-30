@@ -6,7 +6,13 @@ import {
     useThreadComposerAttachmentRuntime,
 } from '@assistant-ui/react'
 import type { PendingAttachment } from '@assistant-ui/react'
-import type { KeyboardEventHandler, MouseEventHandler, PointerEventHandler, PointerEvent as ReactPointerEvent } from 'react'
+import type {
+    KeyboardEventHandler,
+    MouseEventHandler,
+    MutableRefObject,
+    PointerEventHandler,
+    PointerEvent as ReactPointerEvent,
+} from 'react'
 import { ImagePreview } from '@/components/ImagePreview'
 import { Spinner } from '@/components/Spinner'
 import { RefreshIcon } from '@/components/icons'
@@ -29,6 +35,12 @@ export type AttachmentDragHandleProps = {
     onSurfaceContextMenu?: MouseEventHandler<HTMLElement>
     onSurfaceClick?: MouseEventHandler<HTMLElement>
 }
+
+export type AttachmentRetryHandler = (
+    originalId: string,
+    retryId: string,
+    originalIndex: number,
+) => void
 
 function ErrorIcon() {
     return (
@@ -105,8 +117,12 @@ function DragHandle(props: AttachmentDragHandleProps & { isFile?: boolean }) {
     )
 }
 
-export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandleProps } = {}) {
-    const { name, file, status, previewUrl, retryable } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
+export function AttachmentItem(props: {
+    dragHandleProps?: AttachmentDragHandleProps
+    attachmentOrderRef?: MutableRefObject<string[]>
+    onRetry?: AttachmentRetryHandler
+} = {}) {
+    const { id, name, file, status, previewUrl, retryable } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
     const composer = useComposerRuntime()
     const attachmentRuntime = useThreadComposerAttachmentRuntime()
     const isParking = useComposerParking()
@@ -148,18 +164,21 @@ export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandlePr
 
         setIsRetrying(true)
         try {
+            const originalIndex = props.attachmentOrderRef?.current.indexOf(id) ?? -1
             const retryFile = new File([file], file.name, {
                 type: file.type,
                 lastModified: file.lastModified,
             })
             await attachmentRuntime.remove()
             await composer.addAttachment(retryFile)
+            const retryAttachment = composer.getState().attachments.find((attachment) => attachment.file === retryFile)
+            if (retryAttachment) props.onRetry?.(id, retryAttachment.id, originalIndex)
         } catch (error) {
             console.error('Failed to retry attachment upload', error)
         } finally {
             setIsRetrying(false)
         }
-    }, [attachmentRuntime, composer, file, isParking, isRetrying])
+    }, [attachmentRuntime, composer, file, id, isParking, isRetrying, props.attachmentOrderRef, props.onRetry])
 
     if (previewUrl && !isError) {
         return (
