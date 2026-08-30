@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { configuration } from '@/configuration';
 import packageJson from '../../package.json';
@@ -6,7 +7,7 @@ import packageJson from '../../package.json';
 /**
  * Source of the bundled Pi extension that gives Pi sessions the same
  * auto-titling capability the Claude/Codex/OpenCode launchers already have:
- * a `hapi_change_title` tool callable by the model plus a first-turn
+ * a `hapi_change_title` tool callable by the model plus a persistent
  * system-prompt instruction. The title is applied via `ctx.ui.setTitle()`,
  * which the Pi extension UI bridge (`extensionUiHandler`) syncs into session
  * metadata, so no extra title-provider round-trip is needed.
@@ -30,14 +31,11 @@ const TITLE_INSTRUCTION = [
     'Rename only when the user\\'s primary objective changes substantially and the existing title would be misleading.'
 ].join('\\n');
 
-let titled = false;
-
 export default function hapiTitleExtension(pi) {
     // The tool name is namespaced ('hapi_change_title', matching the OpenCode
     // launcher convention) so user extensions registering their own tools
     // cannot collide with it.
     pi.on('before_agent_start', function (event) {
-        if (titled) return;
         return { systemPrompt: event.systemPrompt + TITLE_INSTRUCTION };
     });
 
@@ -53,7 +51,6 @@ export default function hapiTitleExtension(pi) {
             if (!title) {
                 return { content: [{ type: 'text', text: 'Error: title must not be empty' }], details: {} };
             }
-            titled = true;
             if (ctx.hasUI) ctx.ui.setTitle(title);
             return { content: [{ type: 'text', text: 'Session title set: ' + title }], details: {} };
         }
@@ -61,9 +58,24 @@ export default function hapiTitleExtension(pi) {
 }
 `;
 
+async function fileExists(path: string): Promise<boolean> {
+    try {
+        await access(path);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 /**
  * Materializes the bundled title extension under the HAPI runtime dir and
  * returns the path that should be passed to `pi --extension`.
+ *
+ * The file is published atomically (write to a unique temp file, then rename):
+ * concurrent Pi launches share the same versioned path, a plain write could be
+ * observed half-written by another process, and Pi treats extension-load
+ * errors as fatal. If `rename` loses a race against another launcher that
+ * already published the file, the existing copy is kept.
  *
  * Layout mirrors `runtimePath()` in compiled builds
  * (`<happyHomeDir>/runtime/<version>/pi/`), but is derived from
@@ -74,6 +86,13 @@ export async function materializePiTitleExtension(targetDir?: string): Promise<s
     const dir = targetDir ?? join(configuration.happyHomeDir, 'runtime', packageJson.version, 'pi');
     const file = join(dir, 'hapi-title-extension.ts');
     await mkdir(dir, { recursive: true });
-    await writeFile(file, PI_TITLE_EXTENSION_SOURCE, 'utf8');
+    const temporaryFile = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporaryFile, PI_TITLE_EXTENSION_SOURCE, 'utf8');
+    try {
+        await rename(temporaryFile, file);
+    } catch (error) {
+        if (!(await fileExists(file))) throw error;
+        await unlink(temporaryFile).catch(() => {});
+    }
     return file;
 }
