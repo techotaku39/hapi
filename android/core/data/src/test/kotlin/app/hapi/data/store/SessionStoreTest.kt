@@ -172,6 +172,27 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `older full-session event cannot rewind a summary below the detail watermark`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("s1", updatedAt = 9_000, lastAssistantMessageAt = 9_000, lastAssistantMessageVersion = 1)
+            )
+        )
+        store.refresh()
+
+        val newer = session("s1", seq = 5, updatedAt = 12_000, lastAssistantMessageAt = null)
+        server.enqueueJson("""{"session":${fullSessionJson(newer)}}""")
+        store.loadSessionDetail("s1")
+
+        val stale = session("s1", seq = 4, updatedAt = 11_000, lastAssistantMessageAt = 1_000)
+        store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(stale)))
+
+        assertEquals(newer, store.currentDetail("s1"))
+        assertEquals(9_000L, store.sessions.value.first().lastAssistantMessageAt)
+        assertEquals(1L, store.sessions.value.first().lastAssistantMessageVersion)
+    }
+
+    @Test
     fun `concurrent full-session events keep the highest detail sequence`() = runStoreTest { store, _ ->
         coroutineScope {
             (2L..64L).shuffled().map { seq ->

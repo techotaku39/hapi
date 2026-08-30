@@ -463,7 +463,14 @@ class SessionStore(
         updateSummaries { list ->
             val index = list.indexOfFirst { it.id == session.id }
             val existing = if (index >= 0) list[index] else null
-            if (existing != null && session.seq < (existing.lastAssistantMessageVersion ?: 0)) {
+            val detailVersion = _details.value[session.id]?.seq ?: 0L
+            val watermark = maxOf(existing?.lastAssistantMessageVersion ?: 0L, detailVersion)
+            if (session.seq < watermark) {
+                // A newer full record may already be cached in the detail pipe
+                // even when the list row is absent or still at an older seq.
+                // Refetch the list rather than allowing this stale projection
+                // to restore its reply clock and ordering.
+                scheduleRefresh()
                 return@updateSummaries list
             }
             // The projection cannot derive the hub-computed scheduled-message

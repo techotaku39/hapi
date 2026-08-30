@@ -307,7 +307,12 @@ public final class SessionListStore: SessionListStoring {
         var list = sessions
         let index = list.firstIndex { $0.id == session.id }
         let existing = index.map { list[$0] }
-        if let existing, session.seq < (existing.lastAssistantMessageVersion ?? 0) {
+        let detailVersion = details[session.id]?.seq ?? 0
+        let watermark = max(existing?.lastAssistantMessageVersion ?? 0, detailVersion)
+        if session.seq < watermark {
+            // A newer full record may already be cached in the detail pipe
+            // while this list projection is absent or still behind.
+            scheduleRefresh()
             return
         }
         // The projection cannot derive the hub-computed scheduled-message
