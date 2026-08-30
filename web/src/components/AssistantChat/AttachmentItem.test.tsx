@@ -2,6 +2,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
+import { MAX_UPLOAD_BYTES } from '@/lib/attachmentAdapter'
 
 const mocks = vi.hoisted(() => ({
     attachment: {
@@ -31,7 +32,10 @@ vi.mock('@assistant-ui/react', () => ({
 
 import { AttachmentItem } from './AttachmentItem'
 
-afterEach(() => cleanup())
+afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+})
 
 beforeEach(() => {
     mocks.composer.addAttachment.mockClear()
@@ -141,8 +145,10 @@ describe('AttachmentItem', () => {
     })
 
     it('renders a failed upload with an inline retry icon', () => {
+        const file = new File(['broken'], 'broken.png', { type: 'image/png' })
         mocks.attachment = {
             name: 'broken.png',
+            file,
             status: { type: 'incomplete', reason: 'error' },
             previewUrl: 'data:image/png;base64,YnJva2Vu'
         }
@@ -179,7 +185,56 @@ describe('AttachmentItem', () => {
 
         await waitFor(() => {
             expect(mocks.attachmentRuntime.remove).toHaveBeenCalledOnce()
-            expect(mocks.composer.addAttachment).toHaveBeenCalledWith(file)
+            expect(mocks.composer.addAttachment).toHaveBeenCalledOnce()
         })
+
+        const retryFile = mocks.composer.addAttachment.mock.calls[0]?.[0] as File
+        expect(retryFile).not.toBe(file)
+        expect(retryFile).toMatchObject({
+            name: file.name,
+            type: file.type,
+            lastModified: file.lastModified,
+        })
+        expect(retryFile.size).toBe(file.size)
+    })
+
+    it('keeps an error indicator without retrying oversized files', () => {
+        mocks.attachment = {
+            name: 'oversized.bin',
+            file: { name: 'oversized.bin', size: MAX_UPLOAD_BYTES + 1, type: 'application/octet-stream' } as File,
+            status: { type: 'incomplete', reason: 'error' },
+        }
+
+        renderAttachmentWithControls()
+
+        expect(screen.queryByRole('button', { name: 'Retry upload' })).not.toBeInTheDocument()
+        expect(screen.getByTestId('attachment-error-icon')).toBeInTheDocument()
+    })
+
+    it('rechecks filename truncation when an image enters the error layout', () => {
+        vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(200)
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(100)
+        const file = new File(['broken'], 'a-very-long-filename-that-needs-truncation.png', { type: 'image/png' })
+        mocks.attachment = {
+            name: file.name,
+            file,
+            status: { type: 'running', reason: 'uploading', progress: 0 },
+            previewUrl: 'data:image/png;base64,YnJva2Vu',
+        }
+        const view = renderAttachment()
+
+        mocks.attachment = {
+            name: file.name,
+            file,
+            status: { type: 'incomplete', reason: 'error' },
+            previewUrl: 'data:image/png;base64,YnJva2Vu',
+        }
+        view.rerender(
+            <I18nProvider>
+                <AttachmentItem />
+            </I18nProvider>,
+        )
+
+        expect(screen.getByRole('button', { name: 'Remove attachment' })).toHaveStyle({ marginLeft: '-7px' })
     })
 })

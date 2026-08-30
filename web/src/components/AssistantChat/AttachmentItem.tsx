@@ -11,6 +11,7 @@ import { ImagePreview } from '@/components/ImagePreview'
 import { Spinner } from '@/components/Spinner'
 import { RefreshIcon } from '@/components/icons'
 import { useComposerParking } from '@/components/AssistantChat/composerParkingContext'
+import { MAX_UPLOAD_BYTES } from '@/lib/attachmentAdapter'
 import { useTranslation } from '@/lib/use-translation'
 
 type ComposerAttachmentWithPreview = PendingAttachment & {
@@ -115,7 +116,8 @@ export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandlePr
     const [isFilenameTruncated, setIsFilenameTruncated] = useState(false)
     const isUploading = status.type === 'running'
     const isError = status.type === 'incomplete'
-    const showRetry = isError && !isParking
+    const isRetryableError = isError && file.size <= MAX_UPLOAD_BYTES
+    const showRetry = isRetryableError && !isParking
 
     useLayoutEffect(() => {
         const element = filenameRef.current
@@ -131,7 +133,7 @@ export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandlePr
         const observer = new ResizeObserver(updateTruncation)
         observer.observe(element)
         return () => observer.disconnect()
-    }, [name])
+    }, [name, isError])
     const surfacePointerDown = props.dragHandleProps?.onSurfacePointerDown
         ? (event: ReactPointerEvent<HTMLElement>) => {
             const target = event.target
@@ -147,8 +149,12 @@ export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandlePr
 
         setIsRetrying(true)
         try {
+            const retryFile = new File([file], file.name, {
+                type: file.type,
+                lastModified: file.lastModified,
+            })
             await attachmentRuntime.remove()
-            await composer.addAttachment(file)
+            await composer.addAttachment(retryFile)
         } catch (error) {
             console.error('Failed to retry attachment upload', error)
         } finally {
@@ -223,8 +229,8 @@ export function AttachmentItem(props: { dragHandleProps?: AttachmentDragHandlePr
                 <DragHandle {...props.dragHandleProps} isFile />
             ) : null}
             {isUploading ? <Spinner size="sm" label={null} className="text-[var(--app-hint)]" /> : null}
-            {isError && isParking ? (
-                <span className="text-red-500">
+            {isError && (!showRetry || isParking) ? (
+                <span data-testid="attachment-error-icon" className="text-red-500">
                     <ErrorIcon />
                 </span>
             ) : null}
