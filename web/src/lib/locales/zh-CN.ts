@@ -421,6 +421,7 @@ export default {
   'chat.sendError.sessionInactive': '此会话已归档。请先重新打开再发送消息。',
   'chat.sendError.sessionInactive.action': '重新打开',
   'attachment.retryUpload': '重试上传',
+  'attachment.uploadFailed': '上传失败',
 
   // Codex review
   'codexReview.title': 'Codex review',

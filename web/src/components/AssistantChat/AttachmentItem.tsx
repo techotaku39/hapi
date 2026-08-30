@@ -169,10 +169,24 @@ export function AttachmentItem(props: {
                 type: file.type,
                 lastModified: file.lastModified,
             })
-            await attachmentRuntime.remove()
-            await composer.addAttachment(retryFile)
-            const retryAttachment = composer.getState().attachments.find((attachment) => attachment.file === retryFile)
-            if (retryAttachment) props.onRetry?.(id, retryAttachment.id, originalIndex)
+            let unsubscribe: (() => void) | undefined
+            if (props.onRetry) {
+                unsubscribe = composer.subscribe(() => {
+                    const retryAttachment = composer.getState().attachments.find(
+                        (attachment) => attachment.file === retryFile,
+                    )
+                    if (!retryAttachment) return
+                    unsubscribe?.()
+                    unsubscribe = undefined
+                    props.onRetry?.(id, retryAttachment.id, originalIndex)
+                })
+            }
+            try {
+                await attachmentRuntime.remove()
+                await composer.addAttachment(retryFile)
+            } finally {
+                unsubscribe?.()
+            }
         } catch (error) {
             console.error('Failed to retry attachment upload', error)
         } finally {
@@ -249,7 +263,10 @@ export function AttachmentItem(props: {
             {isUploading ? <Spinner size="sm" label={null} className="text-[var(--app-hint)]" /> : null}
             {isError && (!showRetry || isParking) ? (
                 <span data-testid="attachment-error-icon" className="text-red-500">
-                    <ErrorIcon />
+                    <span aria-hidden="true">
+                        <ErrorIcon />
+                    </span>
+                    <span className="sr-only">{t('attachment.uploadFailed')}</span>
                 </span>
             ) : null}
             <span

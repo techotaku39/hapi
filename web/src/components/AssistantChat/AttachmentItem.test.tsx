@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     composer: {
         addAttachment: vi.fn(async (_file: File) => {}),
         getState: vi.fn(() => ({ attachments: [] })),
+        subscribe: vi.fn((_listener: () => void) => () => {}),
     },
     attachmentRuntime: {
         remove: vi.fn(async () => {}),
@@ -41,6 +42,7 @@ beforeEach(() => {
     mocks.composer.addAttachment.mockClear()
     mocks.composer.getState.mockReset()
     mocks.composer.getState.mockReturnValue({ attachments: [] })
+    mocks.composer.subscribe.mockClear()
     mocks.attachmentRuntime.remove.mockClear()
 })
 
@@ -204,16 +206,21 @@ describe('AttachmentItem', () => {
         const file = new File(['broken'], 'broken.png', { type: 'image/png' })
         const attachmentOrderRef = { current: ['first-attachment', 'broken-attachment', 'last-attachment'] }
         const onRetry = vi.fn()
+        const unsubscribe = vi.fn()
         mocks.attachment = {
             id: 'broken-attachment',
             name: file.name,
             file,
             status: { type: 'incomplete', reason: 'error' },
         }
-        mocks.composer.addAttachment.mockImplementationOnce(async (retryFile: File) => {
-            mocks.composer.getState.mockReturnValue({
-                attachments: [{ id: 'retried-attachment', file: retryFile }] as never[],
+        mocks.composer.subscribe.mockImplementationOnce((listener: () => void) => {
+            mocks.composer.addAttachment.mockImplementationOnce(async (retryFile: File) => {
+                mocks.composer.getState.mockReturnValue({
+                    attachments: [{ id: 'retried-attachment', file: retryFile }] as never[],
+                })
+                listener()
             })
+            return unsubscribe
         })
 
         render(
@@ -226,6 +233,7 @@ describe('AttachmentItem', () => {
         await waitFor(() => {
             expect(onRetry).toHaveBeenCalledWith('broken-attachment', 'retried-attachment', 1)
         })
+        expect(unsubscribe).toHaveBeenCalledOnce()
     })
 
     it('keeps an error indicator without retrying non-retryable files', () => {
@@ -240,6 +248,7 @@ describe('AttachmentItem', () => {
 
         expect(screen.queryByRole('button', { name: 'Retry upload' })).not.toBeInTheDocument()
         expect(screen.getByTestId('attachment-error-icon')).toBeInTheDocument()
+        expect(screen.getByText('Upload failed')).toHaveClass('sr-only')
     })
 
     it('rechecks filename truncation when an image enters the error layout', () => {
