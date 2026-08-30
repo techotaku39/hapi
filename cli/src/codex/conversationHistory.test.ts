@@ -111,6 +111,7 @@ describe('CodexConversationHistory', () => {
             })
         }) as never)
         history.setThreadId('thread-1')
+        await history.probeCapabilities()
 
         const result = await history.rewind('local-b')
 
@@ -121,6 +122,47 @@ describe('CodexConversationHistory', () => {
         })
         if (result.success) throw new Error('Expected rewind to be rejected')
         expect(result.error).toContain('ambiguous')
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
+    it('does not offer the Fork fallback when historical fork is unsupported', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const supportsMethod = vi.fn(async (method: string) => method === 'thread/rollback')
+        const history = new CodexConversationHistory(() => ({
+            ...createClient({
+                rollback,
+                read: async () => ({
+                    thread: {
+                        id: 'thread-1',
+                        turns: [
+                            { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                            {
+                                id: 'turn-b',
+                                items: [
+                                    { type: 'userMessage', clientId: 'local-b' },
+                                    { type: 'userMessage', clientId: 'local-steer' }
+                                ]
+                            }
+                        ]
+                    }
+                })
+            }),
+            supportsMethod
+        }) as never)
+        history.setThreadId('thread-1')
+        await history.probeCapabilities()
+
+        const result = await history.rewind('local-b')
+
+        expect(result).toMatchObject({
+            success: false,
+            outcome: 'rejected',
+            code: 'ambiguous_native_boundary'
+        })
+        expect(history.getCapabilityStates()).toMatchObject({
+            forkAtMessage: 'unsupported',
+            rewindToMessage: 'supported'
+        })
         expect(rollback).not.toHaveBeenCalled()
     })
 
