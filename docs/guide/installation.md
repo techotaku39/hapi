@@ -109,6 +109,8 @@ sudo mv ./hapi /usr/local/bin/
 <details>
 <summary>Build from source</summary>
 
+Requires Bun 1.4.0.
+
 ```bash
 git clone https://github.com/tiann/hapi.git
 cd hapi
@@ -335,6 +337,11 @@ Use `--workspace-root <path>` to restrict which directories the runner can brows
 ```bash
 hapi runner start --workspace-root ~/projects --workspace-root ~/work
 ```
+
+Without `--workspace-root`, manually entered spawn paths remain unrestricted.
+Session directory autocomplete and native pickers browse only beneath the
+runner's home directory; configuring roots makes both browsing and spawning
+use those roots instead.
 
 For running the hub and runner as persistent background services (pm2, launchd, systemd), see [Deployment](./deployment.md). Supervised installs should set `HAPI_RUNNER_SUPERVISED=1` on the runner process (systemd `Environment=` / pm2 `--env`) so the web **Restart** control can safely stop-runner knowing the supervisor will cold-start it.
 
