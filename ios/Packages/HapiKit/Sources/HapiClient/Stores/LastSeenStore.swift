@@ -109,6 +109,11 @@ public final class LastSeenStore {
     }
 
     /// Timestamp shared by list recency, read state, and unread checks.
+    public static func seenTimestamp(_ session: Session) -> Int {
+        session.lastAssistantMessageAt ?? session.updatedAt
+    }
+
+    /// Timestamp shared by list recency, read state, and unread checks.
     public static func seenTimestamp(_ summary: SessionSummary) -> Int {
         summary.lastAssistantMessageAt ?? summary.updatedAt
     }

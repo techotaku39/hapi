@@ -1,5 +1,6 @@
 package app.hapi.data.store
 
+import app.hapi.protocol.wire.Session
 import app.hapi.protocol.wire.SessionSummary
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -118,6 +119,10 @@ class LastSeenStore(
     }
 
     companion object {
+        /** Timestamp shared by list recency, read state, and unread checks. */
+        fun seenTimestamp(session: Session): Long =
+            session.lastAssistantMessageAt ?: session.updatedAt
+
         /** Timestamp shared by list recency, read state, and unread checks. */
         fun seenTimestamp(summary: SessionSummary): Long =
             summary.lastAssistantMessageAt ?: summary.updatedAt
