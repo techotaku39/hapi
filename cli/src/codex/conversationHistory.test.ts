@@ -166,6 +166,39 @@ describe('CodexConversationHistory', () => {
         expect(rollback).not.toHaveBeenCalled()
     })
 
+    it('does not offer the Fork fallback when an earlier user message has no client id', async () => {
+        const rollback = vi.fn(async () => ({}))
+        const history = new CodexConversationHistory(() => createClient({
+            rollback,
+            read: async () => ({
+                thread: {
+                    id: 'thread-1',
+                    turns: [
+                        { id: 'turn-a', items: [{ type: 'userMessage', clientId: 'local-a' }] },
+                        {
+                            id: 'turn-b',
+                            items: [
+                                { type: 'userMessage' },
+                                { type: 'userMessage', clientId: 'local-b' }
+                            ]
+                        }
+                    ]
+                }
+            })
+        }) as never)
+        history.setThreadId('thread-1')
+        await history.probeCapabilities()
+
+        const result = await history.rewind('local-b')
+
+        expect(result).toMatchObject({
+            success: false,
+            outcome: 'rejected',
+            code: 'ambiguous_native_boundary'
+        })
+        expect(rollback).not.toHaveBeenCalled()
+    })
+
     it('does not offer the Fork fallback for the second message in a steered turn', async () => {
         const rollback = vi.fn(async () => ({}))
         const history = new CodexConversationHistory(() => createClient({

@@ -286,6 +286,7 @@ export class CodexConversationHistory {
             || !selected.id
             || !selected.hasCompleteItems
             || selected.hasContextCompaction
+            || selected.userMessageCount !== selected.clientIds.length
             || selected.clientIds[0] !== messageLocalId
         ) {
             return false
