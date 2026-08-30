@@ -481,6 +481,9 @@ export function useSSE(options: {
 
         const upsertSessionSummary = (session: Session): boolean => {
             let accepted = false
+            const detailVersion = queryClient.getQueryData<SessionResponse>(
+                queryKeys.session(session.id)
+            )?.session.seq ?? 0
             queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (previous) => {
                 if (!previous) {
                     return previous
@@ -488,7 +491,8 @@ export function useSSE(options: {
 
                 const existingIndex = previous.sessions.findIndex((item) => item.id === session.id)
                 const existing = existingIndex >= 0 ? previous.sessions[existingIndex] : undefined
-                if (!shouldAcceptSessionSummaryRecord(existing, session)) {
+                const watermark = Math.max(existing?.lastAssistantMessageVersion ?? 0, detailVersion)
+                if (session.seq < watermark) {
                     return previous
                 }
                 accepted = true
@@ -764,7 +768,10 @@ export function useSSE(options: {
                     if (shouldAcceptSessionRecord(currentDetail, event.data)) {
                         queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), { session: event.data })
                     }
-                    upsertSessionSummary(event.data)
+                    const summaryAccepted = upsertSessionSummary(event.data)
+                    if (!summaryAccepted) {
+                        queueSessionListInvalidation()
+                    }
                 } else {
                     const patch = getSessionPatch(event.data)
                     if (patch) {

@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SessionSummary } from '@/types/api'
-import type { Session } from '@/types/api'
+import type { Session, SessionResponse, SessionSummary, SessionsResponse } from '@/types/api'
+import { queryKeys } from '@/lib/query-keys'
 import {
     applySessionDetailPatch,
     canApplyVersionedSummaryPatch,
@@ -52,7 +52,7 @@ function renderUseSSE(options?: { onDisconnect?: (reason: string) => void }) {
     const queryClient = new QueryClient()
     const wrapper = ({ children }: { children: ReactNode }) =>
         createElement(QueryClientProvider, { client: queryClient }, children)
-    return renderHook(() => useSSE({
+    const result = renderHook(() => useSSE({
         enabled: true,
         token: 'test-token',
         baseUrl: 'http://hub.test',
@@ -60,6 +60,7 @@ function renderUseSSE(options?: { onDisconnect?: (reason: string) => void }) {
         onEvent: () => {},
         onDisconnect: options?.onDisconnect
     }), { wrapper })
+    return { ...result, queryClient }
 }
 
 describe('useSSE connection liveness (mobile suspend/resume)', () => {
@@ -226,6 +227,75 @@ describe('reply-clock SSE ordering', () => {
         expect(shouldAcceptSessionSummaryRecord(current, { seq: 11 })).toBe(false)
         expect(shouldAcceptSessionSummaryRecord(current, { seq: 12 })).toBe(true)
         expect(shouldAcceptSessionSummaryRecord(current, { seq: 13 })).toBe(true)
+    })
+})
+
+describe('reply-clock full-record cache ordering', () => {
+    beforeEach(() => {
+        vi.useFakeTimers()
+        FakeEventSource.instances = []
+        vi.stubGlobal('EventSource', FakeEventSource)
+    })
+
+    afterEach(() => {
+        vi.unstubAllGlobals()
+        vi.useRealTimers()
+    })
+
+    it('does not let an older full record overwrite a newer detail watermark', () => {
+        const { queryClient, unmount } = renderUseSSE()
+        const newerDetail = {
+            id: 'session-1',
+            namespace: 'default',
+            seq: 12,
+            createdAt: 1_000,
+            updatedAt: 12_000,
+            active: false,
+            activeAt: 0,
+            metadata: null,
+            metadataVersion: 0,
+            agentState: null,
+            agentStateVersion: 0,
+            thinking: false,
+            thinkingAt: 0,
+            model: null,
+            modelReasoningEffort: null,
+            effort: null,
+            serviceTier: null,
+            lastAssistantMessageAt: null
+        } as Session
+        const olderRecord = {
+            ...newerDetail,
+            seq: 11,
+            updatedAt: 11_000,
+            lastAssistantMessageAt: 11_000
+        }
+        queryClient.setQueryData<SessionResponse>(queryKeys.session('session-1'), { session: newerDetail })
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSummary({
+                id: 'session-1',
+                updatedAt: 10_000,
+                lastAssistantMessageAt: 10_000,
+                lastAssistantMessageVersion: 10
+            })]
+        })
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId: 'session-1',
+                namespace: 'default',
+                data: olderRecord
+            })
+        })
+
+        const summary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]
+        expect(summary?.lastAssistantMessageAt).toBe(10_000)
+        expect(summary?.lastAssistantMessageVersion).toBe(10)
+
+        act(() => { vi.advanceTimersByTime(20) })
+        expect(queryClient.getQueryState(queryKeys.sessions)?.isInvalidated).toBe(true)
+        unmount()
     })
 })
 
