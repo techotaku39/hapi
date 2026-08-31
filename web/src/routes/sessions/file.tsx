@@ -322,6 +322,31 @@ export default function FilePage() {
         restoreFileScroll()
         restoredScrollKeyRef.current = fileScrollKey
     }, [diffQuery.isLoading, fileQuery.isLoading, fileScrollKey, restoreFileScroll])
+    useLayoutEffect(() => {
+        const element = fileScrollRef.current
+        if (!element) return
+        const content = element.querySelector<HTMLElement>('.file-preview-scroll-content')
+
+        const updateScrollbarCompensation = () => {
+            const scrollbarWidth = Math.max(0, element.offsetWidth - element.clientWidth)
+            element.style.setProperty('--file-preview-scrollbar-compensation', `${scrollbarWidth}px`)
+            const contentWidth = content?.getBoundingClientRect().width ?? 0
+            const contentOffset = scrollbarWidth > 0 && contentWidth <= element.clientWidth
+                ? scrollbarWidth / 2
+                : 0
+            element.style.setProperty('--file-preview-scroll-content-offset', `${contentOffset}px`)
+        }
+
+        updateScrollbarCompensation()
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollbarCompensation)
+        resizeObserver?.observe(element)
+        if (content) resizeObserver?.observe(content)
+        window.addEventListener('resize', updateScrollbarCompensation)
+        return () => {
+            resizeObserver?.disconnect()
+            window.removeEventListener('resize', updateScrollbarCompensation)
+        }
+    }, [])
 
     const setMarkdownPreviewMode = (mode: MarkdownPreviewMode) => {
         setMarkdownMode(mode)
@@ -438,8 +463,8 @@ export default function FilePage() {
                 </div>
             ) : null}
 
-            <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y flex-1 min-h-0">
-                <div className="mx-auto w-full max-w-content p-4">
+            <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y file-preview-scroll-y flex-1 min-h-0">
+                <div className="file-preview-scroll-content mx-auto w-full max-w-content p-4">
                     {diffErrorMessage ? (
                         <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs text-[var(--app-hint)]">
                             {diffErrorMessage}
