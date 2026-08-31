@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { MachinePathPolicy } from '@/api/machinePathPolicy'
-import { registerWorkspaceFileHandlers } from './workspaceFileHandlers'
+import { MAX_WORKSPACE_FILE_BYTES, registerWorkspaceFileHandlers, type WorkspaceFilePathPolicy } from './workspaceFileHandlers'
 
 const execFileAsync = promisify(execFile)
 
@@ -85,6 +85,58 @@ describe('workspace file RPC handlers', () => {
                 { path: 'missing.ts' },
             ],
         })
+    })
+
+    it('rejects oversized and non-regular files before reading them', async () => {
+        const oversizedPath = join(rootDir, 'oversized.bin')
+        await writeFile(oversizedPath, '')
+        await truncate(oversizedPath, MAX_WORKSPACE_FILE_BYTES + 1)
+
+        const oversized = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceReadFile, {
+            cwd: rootDir,
+            path: 'oversized.bin',
+        })
+        expect(oversized).toEqual({ success: false, error: 'File is too large to display inline' })
+
+        const directoryPath = join(rootDir, 'not-a-file')
+        await mkdir(directoryPath)
+        const directory = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceReadFile, {
+            cwd: rootDir,
+            path: 'not-a-file',
+        })
+        expect(directory).toEqual({ success: false, error: 'Path is not a regular file' })
+
+        if (process.platform !== 'win32') {
+            const fifoPath = join(rootDir, 'named-pipe')
+            await execFileAsync('mkfifo', [fifoPath])
+            const fifo = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceReadFile, {
+                cwd: rootDir,
+                path: 'named-pipe',
+            })
+            expect(fifo).toEqual({ success: false, error: 'Path is not a regular file' })
+        }
+    })
+
+    it('passes workspace paths to the runner policy without trimming them', async () => {
+        const checkedPaths: string[] = []
+        const pathPolicy: WorkspaceFilePathPolicy = {
+            resolveForCheck: async (path) => {
+                checkedPaths.push(path)
+                return rootDir
+            },
+            isWithinSpawnRoots: () => true,
+        }
+        rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
+        registerWorkspaceFileHandlers(rpc, pathPolicy)
+
+        const workspacePath = `${rootDir} `
+        const result = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceListDirectory, {
+            cwd: workspacePath,
+            path: '',
+        })
+
+        expect(result.success).toBe(true)
+        expect(checkedPaths[0]).toBe(workspacePath)
     })
 
     it('rejects workspace roots outside the runner allowlist', async () => {

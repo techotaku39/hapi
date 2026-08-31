@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
     CommandResponse,
@@ -11,6 +11,7 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { runGitCommand } from './handlers/git'
 import { run as runRipgrep, runFileSearch, type FileSearchOptions } from '@/modules/ripgrep/index'
+import { MAX_GENERATED_IMAGE_BYTES, readBoundedRegularFile } from './generatedImages'
 import { getErrorMessage, rpcError } from './rpcResponses'
 
 /**
@@ -67,6 +68,7 @@ type ResolvedWorkspacePath = { cwd: string; path: string } | { error: string }
 
 const OUTSIDE_WORKSPACE_ERROR = 'Path is outside workspace roots'
 const OUTSIDE_SESSION_WORKSPACE_ERROR = 'Path is outside the session workspace'
+export const MAX_WORKSPACE_FILE_BYTES = MAX_GENERATED_IMAGE_BYTES
 
 function isWithinRoot(root: string, target: string): boolean {
     const child = relative(root, target)
@@ -77,7 +79,7 @@ async function resolveWorkspaceCwd(
     pathPolicy: WorkspaceFilePathPolicy,
     value: unknown,
 ): Promise<ResolvedWorkspaceCwd> {
-    const raw = typeof value === 'string' ? value.trim() : ''
+    const raw = typeof value === 'string' ? value : ''
     if (!raw) {
         return { error: 'Workspace path is required' }
     }
@@ -175,7 +177,10 @@ export function registerWorkspaceFileHandlers(
 
             try {
                 const stats = await stat(resolved.path)
-                const buffer = await readFile(resolved.path)
+                if (!stats.isFile()) {
+                    throw new Error('Path is not a regular file')
+                }
+                const buffer = await readBoundedRegularFile(resolved.path, MAX_WORKSPACE_FILE_BYTES)
                 return {
                     success: true,
                     content: buffer.toString('base64'),
