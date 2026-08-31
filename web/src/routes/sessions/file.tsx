@@ -330,9 +330,12 @@ export default function FilePage() {
         const updateScrollbarCompensation = () => {
             const scrollbarWidth = Math.max(0, element.offsetWidth - element.clientWidth)
             element.style.setProperty('--file-preview-scrollbar-compensation', `${scrollbarWidth}px`)
-            const contentWidth = content?.getBoundingClientRect().width ?? 0
-            const contentOffset = scrollbarWidth > 0 && contentWidth <= element.clientWidth
-                ? scrollbarWidth / 2
+            const contentWidth = content?.getBoundingClientRect().width ?? element.clientWidth
+            const contentOffset = scrollbarWidth > 0
+                ? Math.min(
+                    scrollbarWidth / 2,
+                    Math.max(0, (element.offsetWidth - contentWidth) / 2)
+                )
                 : 0
             element.style.setProperty('--file-preview-scroll-content-offset', `${contentOffset}px`)
         }
