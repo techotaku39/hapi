@@ -97,6 +97,12 @@ export function resolveComposerEnterKeyAction(input: {
     ctrlOrMeta: boolean
     altKey: boolean
 }): ComposerEnterKeyAction {
+    // The current main branch no longer has the old Pi Alt+Enter queue
+    // gesture (#1480). Preserve its existing send-mode modifier behavior
+    // rather than turning that shortcut into an unintended line break.
+    if (input.isExpanded && input.altKey && input.composerEnterBehavior === 'send') {
+        return 'ignore'
+    }
     const insertNewline = input.isExpanded || input.composerEnterBehavior === 'newline'
     if (insertNewline) {
         if (input.ctrlOrMeta && !input.altKey) return 'send'

@@ -28,6 +28,24 @@ describe('resolveComposerEnterKeyAction', () => {
         })).toBe('send')
     })
 
+    it('keeps expanded Alt+Enter ignored in the current send-mode main behavior', () => {
+        expect(resolveComposerEnterKeyAction({
+            composerEnterBehavior: 'send',
+            isExpanded: true,
+            ctrlOrMeta: false,
+            altKey: true,
+        })).toBe('ignore')
+    })
+
+    it('preserves newline-mode Alt+Enter behavior while expanded', () => {
+        expect(resolveComposerEnterKeyAction({
+            composerEnterBehavior: 'newline',
+            isExpanded: true,
+            ctrlOrMeta: false,
+            altKey: true,
+        })).toBe('newline')
+    })
+
     it('honors collapsed send preference for plain Enter', () => {
         expect(resolveComposerEnterKeyAction({
             composerEnterBehavior: 'send',
