@@ -793,7 +793,8 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         ))))
                         continue
                     }
-                    if let streamId = nonBlankStreamId(textContent.streamId), let existingBox = textBlocksByStreamId[streamId] {
+                    let streamId = nonBlankStreamId(textContent.streamId)
+                    if let streamId, let existingBox = textBlocksByStreamId[streamId] {
                         if var existing = existingBox.block.asAgentText {
                             existing.text = textContent.text
                             existing.usage = msg.usage
@@ -810,7 +811,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         // snapshots of one stream arrive as separate rows that
                         // the window keeps swapping, so a row-derived id would
                         // churn per snapshot and remount the rendered block.
-                        id: textContent.streamId ?? "\(msg.id):\(idx)",
+                        id: streamId ?? "\(msg.id):\(idx)",
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
@@ -821,7 +822,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         meta: msg.meta
                     )))
                     blocks.append(box)
-                    if let streamId = nonBlankStreamId(textContent.streamId) {
+                    if let streamId {
                         textBlocksByStreamId[streamId] = box
                     }
                     continue
@@ -841,7 +842,8 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                     continue
 
                 case .reasoning(let reasoningContent):
-                    if let streamId = nonBlankStreamId(reasoningContent.streamId), let existingBox = reasoningBlocksByStreamId[streamId] {
+                    let streamId = nonBlankStreamId(reasoningContent.streamId)
+                    if let streamId, let existingBox = reasoningBlocksByStreamId[streamId] {
                         if var existing = existingBox.block.asAgentReasoning {
                             existing.text = reasoningContent.text
                             existing.usage = msg.usage
@@ -857,7 +859,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         // Stream-stable id (mirrors web/src/chat/reducerTimeline.ts):
                         // keeps the reasoning block identity stable across its
                         // snapshot rows so clients update it in place.
-                        id: reasoningContent.streamId ?? "\(msg.id):\(idx)",
+                        id: streamId ?? "\(msg.id):\(idx)",
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
@@ -868,7 +870,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         meta: msg.meta
                     )))
                     blocks.append(box)
-                    if let streamId = nonBlankStreamId(reasoningContent.streamId) {
+                    if let streamId {
                         reasoningBlocksByStreamId[streamId] = box
                     }
                     continue
