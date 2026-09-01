@@ -797,7 +797,11 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                     }
 
                     let box = BlockBox(.agentText(AgentTextBlock(
-                        id: "\(msg.id):\(idx)",
+                        // Stream-stable id (mirrors web/src/chat/reducerTimeline.ts):
+                        // snapshots of one stream arrive as separate rows that
+                        // the window keeps swapping, so a row-derived id would
+                        // churn per snapshot and remount the rendered block.
+                        id: textContent.streamId ?? "\(msg.id):\(idx)",
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
@@ -841,7 +845,10 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                     }
 
                     let box = BlockBox(.agentReasoning(AgentReasoningBlock(
-                        id: "\(msg.id):\(idx)",
+                        // Stream-stable id (mirrors web/src/chat/reducerTimeline.ts):
+                        // keeps the reasoning block identity stable across its
+                        // snapshot rows so clients update it in place.
+                        id: reasoningContent.streamId ?? "\(msg.id):\(idx)",
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,

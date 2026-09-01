@@ -789,7 +789,11 @@ fun reduceTimeline(
                         }
 
                         val block = AgentTextBlock(
-                            id = "${msg.id}:$idx",
+                            // Stream-stable id (mirrors web/src/chat/reducerTimeline.ts):
+                            // snapshots of one stream arrive as separate rows that
+                            // the window keeps swapping, so a row-derived id would
+                            // churn per snapshot and remount the rendered block.
+                            id = streamId ?: "${msg.id}:$idx",
                             localId = msg.localId,
                             createdAt = msg.createdAt,
                             invokedAt = msg.invokedAt,
@@ -835,7 +839,10 @@ fun reduceTimeline(
                         }
 
                         val block = AgentReasoningBlock(
-                            id = "${msg.id}:$idx",
+                            // Stream-stable id (mirrors web/src/chat/reducerTimeline.ts):
+                            // keeps the reasoning block identity stable across its
+                            // snapshot rows so clients update it in place.
+                            id = streamId ?: "${msg.id}:$idx",
                             localId = msg.localId,
                             createdAt = msg.createdAt,
                             invokedAt = msg.invokedAt,
