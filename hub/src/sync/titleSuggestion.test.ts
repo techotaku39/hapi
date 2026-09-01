@@ -128,6 +128,26 @@ describe('OpenAI-compatible title provider', () => {
         await provider.suggest('Recent conversation')
         expect(await request?.json()).toMatchObject({ max_tokens: 4096 })
     })
+
+    it('aborts the request when the configured timeout elapses', async () => {
+        const provider = new OpenAICompatibleTitleProvider(
+            {
+                baseUrl: 'https://example.test/v1',
+                apiKey: 'secret',
+                model: 'small-model',
+                timeoutMs: 20
+            },
+            async (input, init) => {
+                return new Promise((resolve, reject) => {
+                    const signal = init?.signal
+                    if (!signal) throw new Error('expected an AbortSignal')
+                    signal.addEventListener('abort', () => reject(signal.reason))
+                })
+            }
+        )
+
+        await expect(provider.suggest('Recent conversation')).rejects.toMatchObject({ name: 'AbortError' })
+    })
 })
 
 describe('TitleSuggestionService', () => {
