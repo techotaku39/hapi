@@ -803,7 +803,13 @@ export function reduceTimeline(
 
                     const block: AgentTextBlock = {
                         kind: 'agent-text',
-                        id: `${msg.id}:${idx}`,
+                        // Streamed snapshots under one stream id arrive as
+                        // separate message rows that the window keeps swapping
+                        // for newer rows. Deriving the id from the stream id
+                        // (unique per stream) keeps the block identity stable
+                        // across snapshots so the rendered component is
+                        // updated in place instead of being remounted.
+                        id: streamId ?? `${msg.id}:${idx}`,
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
@@ -851,7 +857,11 @@ export function reduceTimeline(
 
                     const block: AgentReasoningBlock = {
                         kind: 'agent-reasoning',
-                        id: `${msg.id}:${idx}`,
+                        // Same as agent-text above: a stream-stable id keeps
+                        // the reasoning panel mounted while its snapshots
+                        // arrive, so the smooth streaming continues from the
+                        // previous text instead of replaying from a remount.
+                        id: streamId ?? `${msg.id}:${idx}`,
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,

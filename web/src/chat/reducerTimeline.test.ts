@@ -291,9 +291,40 @@ describe('reduceTimeline', () => {
 
         expect(reasoningBlocks).toHaveLength(1)
         expect(reasoningBlocks[0]).toMatchObject({
-            id: 'reasoning-row-1:0',
+            id: 'reasoning-stream-1',
             text: 'first second'
         })
+    })
+
+    it('keeps reasoning block identity stable when the surviving snapshot row changes', () => {
+        // Production flow: the window store only keeps the newest snapshot row
+        // of a stream, so each reduce pass can see a different underlying
+        // message row. The block id must not churn with it, or the rendered
+        // reasoning panel remounts (replaying its open animation) per snapshot.
+        const makeRow = (id: string, text: string): TracedMessage => ({
+            id,
+            localId: null,
+            createdAt: 1_700_000_000_000,
+            role: 'agent',
+            content: [{
+                type: 'reasoning',
+                text,
+                uuid: id,
+                streamId: 'reasoning-stream-1',
+                parentUUID: null
+            }],
+            isSidechain: false
+        } as TracedMessage)
+
+        const firstPass = reduceTimeline([makeRow('row-1', 'partial')], makeContext())
+        const secondPass = reduceTimeline([makeRow('row-2', 'partial extended')], makeContext())
+
+        const firstBlock = firstPass.blocks.find((block) => block.kind === 'agent-reasoning') as any
+        const secondBlock = secondPass.blocks.find((block) => block.kind === 'agent-reasoning') as any
+
+        expect(firstBlock.id).toBe('reasoning-stream-1')
+        expect(secondBlock.id).toBe(firstBlock.id)
+        expect(secondBlock.text).toBe('partial extended')
     })
 
     it('collapses text snapshots with the same stream id while leaving legacy text separate', () => {
@@ -332,7 +363,7 @@ describe('reduceTimeline', () => {
 
         expect(textBlocks).toHaveLength(2)
         expect(textBlocks[0]).toMatchObject({
-            id: 'text-row-1:0',
+            id: 'text-stream-1',
             text: 'first second'
         })
         expect(textBlocks[1]).toMatchObject({

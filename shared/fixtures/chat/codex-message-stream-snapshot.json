@@ -4,7 +4,7 @@
         "blocks": [
             {
                 "createdAt": 1755000000000,
-                "id": "msg-codex-051:0",
+                "id": "item_7",
                 "kind": "agent-text",
                 "localId": null,
                 "text": "Tracking down the failing pagination test: the cursor math drops the epoch check when seq wraps."
@@ -15,7 +15,7 @@
         "visibleBlocks": [
             {
                 "createdAt": 1755000000000,
-                "id": "msg-codex-051:0",
+                "id": "item_7",
                 "kind": "agent-text",
                 "localId": null,
                 "text": "Tracking down the failing pagination test: the cursor math drops the epoch check when seq wraps."
