@@ -10,6 +10,14 @@ function getEventString(event: Record<string, unknown>, key: string): string | n
     return asString(event[key])
 }
 
+// Stream identity must match the wire-level semantics in @hapi/protocol
+// (blank ids are not streams): a blank value falls back to row-derived ids
+// instead of colliding every blank-id row onto one block identity.
+function nonBlank(value: unknown): string | null {
+    const raw = asString(value)
+    return raw !== null && raw.trim().length > 0 ? raw : null
+}
+
 function getEventNumber(event: Record<string, unknown>, key: string): number | null {
     const value = event[key]
     return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -788,7 +796,7 @@ export function reduceTimeline(
                         }))
                         continue
                     }
-                    const streamId = asString(c.streamId)
+                    const streamId = nonBlank(c.streamId)
                     if (streamId) {
                         const existing = textBlocksByStreamId.get(streamId)
                         if (existing) {
@@ -842,7 +850,7 @@ export function reduceTimeline(
                 }
 
                 if (c.type === 'reasoning') {
-                    const streamId = asString(c.streamId)
+                    const streamId = nonBlank(c.streamId)
                     if (streamId) {
                         const existing = reasoningBlocksByStreamId.get(streamId)
                         if (existing) {

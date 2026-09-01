@@ -317,6 +317,15 @@ private func setDurationMs(_ box: BlockBox, _ durationMs: Int) {
 // MARK: - reduceTimeline
 
 /// Port of `reduceTimeline`.
+
+/// Stream identity must match the wire-level semantics in shared/src/messages.ts
+/// (blank ids are not streams): a blank value falls back to row-derived ids
+/// instead of colliding every blank-id row onto one block identity.
+private func nonBlankStreamId(_ value: String?) -> String? {
+    guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+    return value
+}
+
 // swiftlint:disable:next cyclomatic_complexity function_body_length
 func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) -> TimelineResult {
     var blocks: [BlockBox] = []
@@ -784,7 +793,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         ))))
                         continue
                     }
-                    if let streamId = textContent.streamId, let existingBox = textBlocksByStreamId[streamId] {
+                    if let streamId = nonBlankStreamId(textContent.streamId), let existingBox = textBlocksByStreamId[streamId] {
                         if var existing = existingBox.block.asAgentText {
                             existing.text = textContent.text
                             existing.usage = msg.usage
@@ -812,7 +821,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         meta: msg.meta
                     )))
                     blocks.append(box)
-                    if let streamId = textContent.streamId {
+                    if let streamId = nonBlankStreamId(textContent.streamId) {
                         textBlocksByStreamId[streamId] = box
                     }
                     continue
@@ -832,7 +841,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                     continue
 
                 case .reasoning(let reasoningContent):
-                    if let streamId = reasoningContent.streamId, let existingBox = reasoningBlocksByStreamId[streamId] {
+                    if let streamId = nonBlankStreamId(reasoningContent.streamId), let existingBox = reasoningBlocksByStreamId[streamId] {
                         if var existing = existingBox.block.asAgentReasoning {
                             existing.text = reasoningContent.text
                             existing.usage = msg.usage
@@ -859,7 +868,7 @@ func reduceTimeline(_ messages: [NormalizedMessage], context: ReducerContext) ->
                         meta: msg.meta
                     )))
                     blocks.append(box)
-                    if let streamId = reasoningContent.streamId {
+                    if let streamId = nonBlankStreamId(reasoningContent.streamId) {
                         reasoningBlocksByStreamId[streamId] = box
                     }
                     continue

@@ -25,6 +25,14 @@ class TimelineResult(
 
 private fun getEventString(event: JsonObject, key: String): String? = asString(event[key])
 
+/**
+ * Stream identity must match the wire-level semantics in shared/src/messages.ts
+ * (blank ids are not streams): a blank value falls back to row-derived ids
+ * instead of colliding every blank-id row onto one block identity.
+ */
+private fun nonBlankStreamId(value: String?): String? =
+    value?.takeIf { it.isNotBlank() }
+
 private fun getEventNumber(event: JsonObject, key: String): Double? = asNumber(event[key])
 
 private fun getAgentRunStartedAt(event: JsonObject): Double? =
@@ -775,7 +783,7 @@ fun reduceTimeline(
                             )
                             continue
                         }
-                        val streamId = c.streamId
+                        val streamId = nonBlankStreamId(c.streamId)
                         if (streamId != null) {
                             val existing = textBlocksByStreamId[streamId]
                             if (existing != null) {
@@ -825,7 +833,7 @@ fun reduceTimeline(
                     }
 
                     is NormalizedAgentContent.Reasoning -> {
-                        val streamId = c.streamId
+                        val streamId = nonBlankStreamId(c.streamId)
                         if (streamId != null) {
                             val existing = reasoningBlocksByStreamId[streamId]
                             if (existing != null) {

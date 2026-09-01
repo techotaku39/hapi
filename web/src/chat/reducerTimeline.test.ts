@@ -327,6 +327,33 @@ describe('reduceTimeline', () => {
         expect(secondBlock.text).toBe('partial extended')
     })
 
+    it('treats blank stream ids as no stream so rows keep distinct row-derived ids', () => {
+        const makeRow = (id: string, streamId: string): TracedMessage => ({
+            id,
+            localId: null,
+            createdAt: 1_700_000_000_000,
+            role: 'agent',
+            content: [{
+                type: 'reasoning',
+                text: `text of ${id}`,
+                uuid: id,
+                streamId,
+                parentUUID: null
+            }],
+            isSidechain: false
+        } as TracedMessage)
+
+        const { blocks } = reduceTimeline([
+            makeRow('blank-1', ''),
+            makeRow('blank-2', '   ')
+        ], makeContext())
+        const reasoningBlocks = blocks.filter((block) => block.kind === 'agent-reasoning')
+
+        expect(reasoningBlocks).toHaveLength(2)
+        expect(reasoningBlocks[0]).toMatchObject({ id: 'blank-1:0' })
+        expect(reasoningBlocks[1]).toMatchObject({ id: 'blank-2:0' })
+    })
+
     it('collapses text snapshots with the same stream id while leaving legacy text separate', () => {
         const first = makeAgentMessage('first ', {
             id: 'text-row-1',
