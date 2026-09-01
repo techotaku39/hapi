@@ -1,5 +1,5 @@
 {
-    "description": "Codex family: two message payloads sharing a stream id (data.id) are cumulative snapshots. Expects a single agent-text block keyed by the first message, carrying the final snapshot text.",
+    "description": "Codex family: two message payloads sharing a stream id (data.id) are cumulative snapshots. Expects a single agent-text block keyed by that stable stream id, carrying the final snapshot text.",
     "expected": {
         "blocks": [
             {

@@ -1,5 +1,5 @@
 {
-    "description": "Codex family: reasoning payload becomes an agent-reasoning block (stream id kept internal — not part of the projection).",
+    "description": "Codex family: reasoning payload becomes an agent-reasoning block keyed by its stream id (data.id).",
     "expected": {
         "blocks": [
             {
