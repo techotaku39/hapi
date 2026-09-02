@@ -15,9 +15,11 @@ export const TITLE_SUGGESTION_RATE_LIMIT = 5
 export const TITLE_SUGGESTION_RATE_WINDOW_MS = 10 * 60 * 1000
 export const TITLE_SUGGESTION_TIMEOUT_MS = 10_000
 const TITLE_PROVIDER_RESPONSE_MAX_CHARS = 16_000
+export const TITLE_SUGGESTION_MAX_TOKENS = 64
 const TITLE_SUGGESTION_RATE_LIMIT_ENV = 'HAPI_TITLE_SUGGESTION_RATE_LIMIT'
 const TITLE_SUGGESTION_RATE_WINDOW_ENV = 'HAPI_TITLE_SUGGESTION_RATE_WINDOW_MS'
 const TITLE_PROVIDER_TIMEOUT_ENV = 'HAPI_TITLE_PROVIDER_TIMEOUT_MS'
+const TITLE_PROVIDER_MAX_TOKENS_ENV = 'HAPI_TITLE_PROVIDER_MAX_TOKENS'
 export const TITLE_SUGGESTION_UNAVAILABLE_MESSAGE =
     'Title suggestions are not configured on this Hub. Configure titleProvider.baseUrl, titleProvider.apiKey, and titleProvider.model in $HAPI_HOME/settings.json (default ~/.hapi/settings.json), or set HAPI_TITLE_PROVIDER_BASE_URL, HAPI_TITLE_PROVIDER_API_KEY, and HAPI_TITLE_PROVIDER_MODEL in the Hub environment, then restart the Hub.'
 
@@ -41,6 +43,7 @@ export type OpenAICompatibleTitleProviderConfig = {
     apiKey: string
     model: string
     timeoutMs?: number
+    maxTokens?: number
 }
 
 type TitleProviderFetch = (
@@ -92,6 +95,18 @@ export function readTitleSuggestionLimits(
     return {
         rateLimit: readPositiveInteger(env[TITLE_SUGGESTION_RATE_LIMIT_ENV], TITLE_SUGGESTION_RATE_LIMIT),
         rateWindowMs: readPositiveInteger(env[TITLE_SUGGESTION_RATE_WINDOW_ENV], TITLE_SUGGESTION_RATE_WINDOW_MS)
+    }
+}
+
+/// Some providers (e.g. reasoning models) need more than one emitted token
+/// per title and more than 10s to produce it, so both knobs are tunable via
+/// environment without changing the defaults for standard providers.
+export function readTitleProviderRequestLimits(
+    env: TitleProviderEnvironment = process.env
+): { maxTokens: number; timeoutMs: number } {
+    return {
+        maxTokens: readPositiveInteger(env[TITLE_PROVIDER_MAX_TOKENS_ENV], TITLE_SUGGESTION_MAX_TOKENS),
+        timeoutMs: readPositiveInteger(env[TITLE_PROVIDER_TIMEOUT_ENV], TITLE_SUGGESTION_TIMEOUT_MS)
     }
 }
 
@@ -285,12 +300,14 @@ class TitleProviderRequestError extends Error {
 
 export class OpenAICompatibleTitleProvider {
     private readonly timeoutMs: number
+    private readonly maxTokens: number
 
     constructor(
         private readonly config: OpenAICompatibleTitleProviderConfig,
         private readonly fetchImpl: TitleProviderFetch = fetch
     ) {
         this.timeoutMs = config.timeoutMs ?? TITLE_SUGGESTION_TIMEOUT_MS
+        this.maxTokens = config.maxTokens ?? TITLE_SUGGESTION_MAX_TOKENS
     }
 
     async suggest(prompt: string): Promise<string> {
@@ -307,7 +324,7 @@ export class OpenAICompatibleTitleProvider {
                 body: JSON.stringify({
                     model: this.config.model,
                     temperature: 0.2,
-                    max_tokens: 64,
+                    max_tokens: this.maxTokens,
                     messages: [
                         {
                             role: 'system',
@@ -428,10 +445,15 @@ export function createTitleSuggestionService(
     config: OpenAICompatibleTitleProviderConfig | null = readTitleProviderConfig()
 ): TitleSuggestionService {
     const limits = readTitleSuggestionLimits()
+    const requestLimits = readTitleProviderRequestLimits()
     return new TitleSuggestionService(
         store,
         {
-            provider: config ? new OpenAICompatibleTitleProvider(config) : null,
+            provider: config ? new OpenAICompatibleTitleProvider({
+                ...config,
+                maxTokens: requestLimits.maxTokens,
+                timeoutMs: config.timeoutMs ?? requestLimits.timeoutMs,
+            }) : null,
             ...limits
         }
     )
