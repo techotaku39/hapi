@@ -151,6 +151,11 @@ See `src/web/routes/` for all endpoints.
 - `POST /api/sessions/:id/recycle-bin/purge` - Permanently delete one entry.
 - `POST /api/sessions/:id/recycle-bin/empty` - Permanently delete the confirmed entry IDs.
 
+For inactive sessions, including archived sessions, these read-only file and Git operations fall back to
+the matching online Runner when it advertises `workspace-file-access`. The
+Runner reads the current workspace under its configured roots; HAPI does not
+copy or snapshot files during archive.
+
 ### Events (`src/web/routes/events.ts`)
 
 - `GET /api/events` - SSE stream for live updates.
