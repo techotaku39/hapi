@@ -302,6 +302,8 @@ export function HappyComposer(props: {
     onUploadDraftSnapshot?: (text: string, attachments: AttachmentDraftInput[]) => void
     onReleaseSentAttachments?: (ids: readonly string[]) => void
     canRestoreAttachments?: boolean
+    /** False when SessionChat has no attachment adapter for this session. */
+    attachmentsEnabled?: boolean
     disabled?: boolean
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
@@ -2828,6 +2830,7 @@ export function HappyComposer(props: {
                             onSchedule={handleUserSchedule}
                             onClearSchedule={onUserClearSchedule}
                             hasAttachments={blocksScheduling}
+                            attachmentsEnabled={props.attachmentsEnabled}
                             modelValueLabel={modelValueLabel}
                             modelValueDisabled={modelEffortControlsDisabled}
                             modelValueOpen={showSettings && settingsSection !== 'effort'}

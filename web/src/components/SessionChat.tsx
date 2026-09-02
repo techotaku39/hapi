@@ -2055,6 +2055,7 @@ function SessionChatInner(props: SessionChatProps) {
                         sessionId={props.session.id}
                         canRestoreAttachments={props.session.active}
                         onReleaseSentAttachments={releaseSentAttachments}
+                        attachmentsEnabled={attachmentAdapter !== undefined}
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
