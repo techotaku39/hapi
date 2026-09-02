@@ -7,6 +7,7 @@ export const queryKeys = {
     hubSettings: ['hub-settings'] as const,
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
+    machineAgentAvailability: (machineId: string) => ['machine-agent-availability', machineId] as const,
     sessionCodexModels: (sessionId: string) => ['session-codex-models', sessionId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
     sessionFiles: (sessionId: string, query: string) => ['session-files', sessionId, query] as const,
@@ -32,6 +33,7 @@ export const queryKeys = {
     machineCopilotModelsForCwd: (machineId: string, cwd: string) => ['machine-copilot-models', machineId, cwd] as const,
     sessionGrokReasoningEffortOptions: (sessionId: string) => ['session-grok-reasoning-effort-options', sessionId] as const,
     machineAgyModels: (machineId: string) => ['machine-agy-models', machineId] as const,
+    machinePiModels: (machineId: string) => ['machine-pi-models', machineId] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
 }

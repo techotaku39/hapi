@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from '@/ui/logger';
+import { convertAgentMessage } from '@/agent/messageConverter';
 import { bootstrapExistingSession, bootstrapSession } from '@/agent/sessionFactory';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
 import { registerLocalHandoffHandler } from '@/agent/localHandoff';
 import { createRunnerLifecycle, createModeChangeHandler, setControlledByUser } from '@/agent/runnerLifecycle';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PiTransport } from './piTransport';
+import { getAgentLaunchCommand } from '@/agent/agentLaunchCommand';
 import { PiSession } from './session';
 import { PiConversationHistory, PiHistoryRestoreError } from './conversationHistory';
 import { parsePiModels, parsePiCommands, PiRpcTimeoutError, sendPiRpcAndWait, wireTransportEvents } from './loop';
+import { convertPiCompactionUsage } from './piEventConverter';
 import { PiThinkingLevelSchema, SetSessionConfigPayloadSchema, PiCompactResultSchema, PiFullSessionStatsSchema } from './schemas';
 import type { PiImageContent, PiThinkingLevel } from './types';
 import { parsePiSpecialCommand, parseLeadingSlashName, type PiSpecialCommand } from './specialCommands';
@@ -241,7 +244,7 @@ export async function runPi(opts: {
         transportArgs.push('--session', opts.resumeSessionId);
     }
     const transport = new PiTransport({
-        command: 'pi',
+        command: getAgentLaunchCommand('pi'),
         args: transportArgs,
         cwd: workingDirectory,
         env: { ...process.env, PI_RPC_EMIT_TITLE: '1' },
@@ -1059,6 +1062,13 @@ export async function runPi(opts: {
                         else delta.push('?');
                         sendEvent(`📦 Compaction completed (tokens: ${delta.join(' ')})`);
                     }
+                    // Pi reports unknown context stats until the next model
+                    // response; use the compact result's estimate as a
+                    // temporary context-only update, then let real usage
+                    // replace it on the next turn.
+                    const usage = convertPiCompactionUsage(result.estimatedTokensAfter);
+                    const convertedUsage = usage ? convertAgentMessage(usage, piSession.currentModel) : null;
+                    if (convertedUsage) piSession.sendAgentMessage(convertedUsage);
                 } catch (error) {
                     if (error instanceof PiRpcTimeoutError) {
                         // The runtime lease is deliberately retained on timeout
@@ -1454,9 +1464,15 @@ export async function runPi(opts: {
         // default (already reported by get_state). Detached so the run loop is
         // not blocked; sent after get_state so the authoritative baseline lands
         // first and a late get_state response does not clobber the confirmed
-        // value (get_state runs on the wire before this await resolves).
+        // value (get_state runs on the wire before this await resolves). When a
+        // startup model is also requested, wait for it to settle first so
+        // set_thinking_level cannot be rejected against Pi's default model
+        // before set_model confirms the requested one.
         if (startupThinkingLevel) {
             void (async () => {
+                if (opts.model) {
+                    await piSession.startupModelSettled;
+                }
                 try {
                     await piSession.runRuntimeMutation(async () => {
                         await sendPiRpcAndWait(piSession, transport, {

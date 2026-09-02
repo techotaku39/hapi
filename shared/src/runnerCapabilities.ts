@@ -12,9 +12,12 @@ import { RPC_METHODS } from './rpcMethods'
  * socket-side advertisement, a runner upgraded in place would never get its
  * new capabilities observed by the hub.
  */
+import { getBuiltinAgentConfigDescriptors } from './agentConfig'
+
 export const RUNNER_CAPABILITIES = {
-    piExistingSessionResume: true
-} as const
+    piExistingSessionResume: true as const,
+    agentConfigs: getBuiltinAgentConfigDescriptors()
+}
 
 export type RunnerCapabilities = typeof RUNNER_CAPABILITIES
 
@@ -25,6 +28,7 @@ export type RunnerCapabilities = typeof RUNNER_CAPABILITIES
  * instead of a silent fail-closed product bug.
  */
 export const MACHINE_CAPABILITIES = {
+    AgentAvailability: RPC_METHODS.AgentAvailability,
     CursorChatStoreStatus: RPC_METHODS.CursorChatStoreStatus,
     StopRunner: RPC_METHODS.StopRunner,
 } as const
@@ -34,6 +38,7 @@ export type MachineCapability =
 
 /** Capabilities this CLI generation registers on the machine socket. */
 export const CURRENT_MACHINE_CAPABILITIES: readonly MachineCapability[] = [
+    MACHINE_CAPABILITIES.AgentAvailability,
     MACHINE_CAPABILITIES.CursorChatStoreStatus,
     MACHINE_CAPABILITIES.StopRunner,
 ]
@@ -44,6 +49,7 @@ export const CURRENT_MACHINE_CAPABILITIES: readonly MachineCapability[] = [
  * stop-runner ensure when a newer binary is already on disk).
  */
 export const REQUIRED_MACHINE_CAPABILITIES: readonly MachineCapability[] = [
+    MACHINE_CAPABILITIES.AgentAvailability,
     MACHINE_CAPABILITIES.CursorChatStoreStatus,
 ]
 
