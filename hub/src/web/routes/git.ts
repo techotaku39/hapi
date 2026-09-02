@@ -260,7 +260,8 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             sessionResult.sessionId,
             args,
             sessionPath,
-            { query: normalizedQuery, limit }
+            { query: normalizedQuery, limit },
+            c.req.raw.signal
         ))
         if (!result.success) {
             return c.json({ success: false, error: result.error ?? 'Failed to list files' })
@@ -278,7 +279,7 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             .filter((path) => !normalizedQuery || matchesSearchQuery(path, normalizedQuery))
             .slice(0, limit)
 
-        const metadataResult = await runRpc(() => engine.statFiles(sessionResult.sessionId, paths))
+        const metadataResult = await runRpc(() => engine.statFiles(sessionResult.sessionId, paths, c.req.raw.signal))
         const metadataByPath = new Map(
             metadataResult.success
                 ? (metadataResult.entries ?? []).map((entry) => [entry.path, entry] as const)
