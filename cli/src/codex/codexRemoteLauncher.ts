@@ -17,10 +17,17 @@ import { AppServerEventConverter } from './utils/appServerEventConverter';
 import { registerGeneratedImageFromPath } from '@/modules/common/generatedImages';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
-import type { SkillMetadata, ThreadGoal, ThreadGoalStatus } from './appServerTypes';
+import type { SkillMetadata, ThreadGoal, ThreadGoalStatus, ThreadStartParams } from './appServerTypes';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
 import { extractErrorInfo } from '@/utils/errorUtils';
+import { buildCodexContextDetails, publishContextDetails, type CodexMcpServerInventory } from '@/agent/contextDetails';
+import { listSlashCommands } from '@/modules/common/slashCommands';
+import {
+    listConfiguredCodexMcpServers,
+    mergeCodexMcpInventories,
+    parseCodexMcpStatusResponse
+} from './utils/codexMcpInventory';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import {
     RemoteLauncherBase,
@@ -353,6 +360,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const messageBuffer = this.messageBuffer;
         const appServerClient = this.appServerClient;
         const appServerEventConverter = new AppServerEventConverter();
+        let latestCodexThreadResponse: unknown = null;
+        let latestCodexThreadParams: ThreadStartParams | undefined;
+        let availableSlashCommands: string[] = [];
+        let codexMcpServerInventory: CodexMcpServerInventory[] = [];
+        let publishCodexInventoryContext: (() => void) | null = null;
 
         const normalizeCommand = (value: unknown): string | undefined => {
             if (typeof value === 'string') {
@@ -3228,6 +3240,18 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
             if (msgType === 'token_count') {
                 const threadId = eventThreadId ?? this.currentThreadId;
+                const details = buildCodexContextDetails({
+                    info: msg.info,
+                    model: asString(msg.model) ?? usageModel,
+                    threadId,
+                    threadResponse: latestCodexThreadResponse,
+                    threadParams: latestCodexThreadParams,
+                    slashCommands: availableSlashCommands,
+                    skills: nativeSkills,
+                    mcpServers,
+                    mcpServerInventory: codexMcpServerInventory
+                });
+                publishContextDetails(session.client, details);
                 session.sendAgentMessage({
                     ...addCodexEventScope(msg, 'parent', threadId),
                     flavor: 'codex',
@@ -3479,6 +3503,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }))
                 }));
             }
+            publishCodexInventoryContext?.();
         };
 
         appServerClient.setNotificationHandler((method, params) => {
@@ -3534,6 +3559,63 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             emitTitleSummary: false
         });
         this.happyServer = happyServer;
+        const publishCodexThreadContext = (response: unknown, params: ThreadStartParams, threadId?: string): void => {
+            latestCodexThreadResponse = response;
+            latestCodexThreadParams = params;
+            publishContextDetails(session.client, buildCodexContextDetails({
+                model: asString(asRecord(response)?.model),
+                threadResponse: response,
+                threadParams: params,
+                threadId: threadId ?? asString(asRecord(asRecord(response)?.thread)?.id),
+                slashCommands: availableSlashCommands,
+                skills: nativeSkills,
+                mcpServers,
+                mcpServerInventory: codexMcpServerInventory
+            }));
+        };
+
+        publishCodexInventoryContext = () => {
+            const response = latestCodexThreadResponse;
+            publishContextDetails(session.client, buildCodexContextDetails({
+                model: asString(asRecord(response)?.model),
+                threadResponse: response,
+                threadParams: latestCodexThreadParams,
+                threadId: this.currentThreadId,
+                slashCommands: availableSlashCommands,
+                skills: nativeSkills,
+                mcpServers,
+                mcpServerInventory: codexMcpServerInventory
+            }));
+        };
+
+        const initialCodexContextDetails = buildCodexContextDetails({
+            threadParams: undefined,
+            slashCommands: availableSlashCommands,
+            skills: nativeSkills,
+            mcpServers,
+            mcpServerInventory: codexMcpServerInventory
+        });
+        if (initialCodexContextDetails.codex) {
+            publishContextDetails(session.client, initialCodexContextDetails);
+        }
+        void listSlashCommands('codex', session.path)
+            .then((commands) => {
+                if (this.shouldExit) return;
+                availableSlashCommands = commands.map((command) => command.name);
+                publishCodexInventoryContext?.();
+            })
+            .catch((error) => {
+                logger.debug(`[Codex] failed to list slash commands: ${errorMessage(error)}`);
+            });
+        void listConfiguredCodexMcpServers(session.path)
+            .then((inventory) => {
+                if (this.shouldExit) return;
+                codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, inventory);
+                publishCodexInventoryContext?.();
+            })
+            .catch((error) => {
+                logger.debug(`[Codex] failed to list configured MCP servers: ${errorMessage(error)}`);
+            });
 
         this.setupAbortHandlers(session.client.rpcHandlerManager, {
             onAbort: () => this.handleAbort(),
@@ -3566,6 +3648,18 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 experimentalApi: true
             }
         });
+
+        void appServerClient.listMcpServerStatuses()
+            .then((response) => {
+                if (this.shouldExit) return;
+                const statusInventory = parseCodexMcpStatusResponse(response);
+                if (statusInventory.length === 0) return;
+                codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, statusInventory);
+                publishCodexInventoryContext?.();
+            })
+            .catch((error) => {
+                logger.debug(`[Codex] mcpServerStatus/list failed: ${errorMessage(error)}`);
+            });
 
         const publishConversationHistoryCapabilities = async () => {
             const conversationHistory = this.conversationHistory.getCapabilitiesForMetadata()?.conversationHistory
@@ -3738,6 +3832,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 const resumeThread = resumeRecord ? asRecord(resumeRecord.thread) : null;
                 const threadId = asString(resumeThread?.id) ?? resumeCandidate;
                 applyResolvedModel(resumeRecord?.model);
+                publishCodexThreadContext(resumeResponse, threadParams, threadId);
                 this.currentThreadId = threadId;
                 this.conversationHistory.setThreadId(threadId);
                 void this.conversationHistory.probeCapabilities().catch(() => {});
@@ -3802,6 +3897,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     const resumeThread = resumeRecord ? asRecord(resumeRecord.thread) : null;
                     const threadId = asString(resumeThread?.id) ?? resumeCandidate;
                     applyResolvedModel(resumeRecord?.model);
+                    publishCodexThreadContext(resumeResponse, threadParams, threadId);
                     this.currentThreadId = threadId;
                     this.conversationHistory.setThreadId(threadId);
                     void this.conversationHistory.probeCapabilities().catch(() => {});
@@ -3835,6 +3931,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 if (!threadId) {
                     throw new Error('app-server thread/start did not return thread.id');
                 }
+                publishCodexThreadContext(threadResponse, threadParams, threadId);
                 this.currentThreadId = threadId;
                 this.conversationHistory.setThreadId(threadId);
                 void this.conversationHistory.probeCapabilities().catch(() => {});
@@ -4100,6 +4197,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             const responseThread = responseRecord ? asRecord(responseRecord.thread) : null;
                             threadId = asString(responseThread?.id) ?? resumeCandidate;
                             applyResolvedModel(responseRecord?.model);
+                            publishCodexThreadContext(response, threadParams, threadId);
                             logger.debug(shouldForkImportedSource
                                 ? `[Codex] Forked imported app-server thread ${resumeCandidate} -> ${threadId}`
                                 : `[Codex] Resumed app-server thread ${threadId}`);
@@ -4128,6 +4226,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         if (!threadId) {
                             throw new Error('app-server thread/start did not return thread.id');
                         }
+                        publishCodexThreadContext(threadResponse, threadParams, threadId);
                     }
 
                     if (!threadId) {
