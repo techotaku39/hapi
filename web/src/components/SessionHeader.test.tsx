@@ -129,6 +129,8 @@ describe('SessionHeader', () => {
 
         expect(screen.queryByTestId('session-header-agent-icon')).not.toBeInTheDocument()
         expect(screen.queryAllByText('codex', { exact: true })).toHaveLength(0)
+    })
+
     it('renders the session title through the scrollable detail-header surface', () => {
         const title = '评估移动端标题横向查看与文件预览交互'
         renderHeader(baseSession({
