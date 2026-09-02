@@ -74,7 +74,8 @@ import {
     getComposerHistoryTrigger,
     type ComposerMessageHistoryEntry,
 } from '@/lib/composerMessageHistory'
-import { moveAttachmentId, orderItemsById, reconcileAttachmentOrder, type AttachmentDropPosition } from '@/lib/attachmentOrder'
+import { moveAttachmentId, orderItemsById, reconcileAttachmentOrder, replaceAttachmentId, type AttachmentDropPosition } from '@/lib/attachmentOrder'
+import type { AttachmentRetryHandler } from './AttachmentItem'
 
 export interface TextInputState {
     text: string
@@ -518,6 +519,15 @@ export function HappyComposer(props: {
         if (sessionId) recordComposerDraftChange(sessionId)
         setAttachmentOrderRevision((revision) => revision + 1)
     }, [attachmentIds, attachmentOrderRef, sessionId])
+    const handleAttachmentRetry = useCallback<AttachmentRetryHandler>((originalId, retryId, originalIndex) => {
+        attachmentOrderRef.current = replaceAttachmentId(
+            attachmentOrderRef.current,
+            originalId,
+            retryId,
+            originalIndex,
+        )
+        setAttachmentOrderRevision((revision) => revision + 1)
+    }, [attachmentOrderRef])
     const orderedAttachments = orderItemsById(attachments, orderedAttachmentIds)
     const threadIsRunning = useAuiState((s) => s.thread.isRunning)
     const threadIsDisabled = useAuiState((s) => s.thread.isDisabled)
@@ -2705,6 +2715,8 @@ export function HappyComposer(props: {
                                     disabled={controlsDisabled}
                                     onRemove={handleAttachmentRemove}
                                     onReorder={handleAttachmentReorder}
+                                    attachmentOrderRef={attachmentOrderRef}
+                                    onRetry={handleAttachmentRetry}
                                 />
                             </div>
                         ) : null}
