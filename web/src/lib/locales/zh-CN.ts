@@ -537,7 +537,8 @@ export default {
   'media.displayed.prepareDownloadWithSize': '加载文件（{size}）',
   'media.displayed.download': '下载文件（{size}）',
   'media.displayed.downloadFile': '下载文件 {fileName}（{size}）',
-  'media.displayed.unavailable': '{label}不可用：{error}',
+  'media.displayed.unavailable': '{label}暂不可用。',
+  'media.displayed.retry': '重新加载',
 
   // Tool card
   'tool.askQuestion': '其他',

@@ -538,7 +538,8 @@ export default {
   'media.displayed.prepareDownloadWithSize': 'Prepare download ({size})',
   'media.displayed.download': 'Download file ({size})',
   'media.displayed.downloadFile': 'Download file {fileName} ({size})',
-  'media.displayed.unavailable': '{label} is unavailable. {error}',
+  'media.displayed.unavailable': '{label} is currently unavailable.',
+  'media.displayed.retry': 'Retry',
 
   // Tool card
   'tool.askQuestion': 'Other',
