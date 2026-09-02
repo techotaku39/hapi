@@ -675,7 +675,6 @@ export function HappyComposer(props: {
         pendingSendAttemptIdRef.current = null
         if (settlement.status === 'success') setIsExpanded(false)
     }, [props.sendSettlement])
-
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const richInputRef = useRef<RichComposerInputHandle>(null)
     const richComposerFueAnchorRef = useRef<HTMLDivElement>(null)
@@ -1556,6 +1555,10 @@ export function HappyComposer(props: {
             pendingSendEditGenerationRef.current = userEditGenerationRef.current
             pendingSendAttachmentGenerationRef.current = userAttachmentGenerationRef.current
             pendingSendScheduleGenerationRef.current = userScheduleGenerationRef.current
+            // The editor is a transient full-screen editing surface. Collapse
+            // when the submit action is dispatched, rather than waiting for a
+            // queued or slow network request to settle.
+            setIsExpanded(false)
             api.composer().send()
         } catch (error) {
             resetPendingSendIntent()
