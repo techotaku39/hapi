@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
     persistScratchlist,
@@ -158,32 +158,26 @@ describe('ScratchlistPanel', () => {
         expect(readScratchlist(SID).map((e) => e.text)).toEqual(['enter add'])
     })
 
-    it('deletes short entries without a confirmation prompt', () => {
+    it('requires confirmation before deleting an entry', () => {
         persistScratchlist(SID, [makeEntry({ id: 'a', text: 'short' })])
-        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
         renderPanel()
         expandPanel()
         fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
-        expect(confirmSpy).not.toHaveBeenCalled()
-        expect(screen.queryByText('short')).toBeNull()
-        expect(readScratchlist(SID)).toEqual([])
-        confirmSpy.mockRestore()
-    })
+        const dialog = screen.getByRole('dialog', { name: 'Delete draft?' })
+        expect(within(dialog).getByText('Delete this draft? This action cannot be undone.')).toBeInTheDocument()
+        expect(within(dialog).getByRole('button', { name: 'Delete' })).toHaveClass('bg-red-600')
+        expect(screen.getByText('short')).toBeInTheDocument()
+        expect(readScratchlist(SID)).toHaveLength(1)
 
-    it('deletes long entries without a confirmation prompt', () => {
-        const longText = 'x'.repeat(150)
-        persistScratchlist(SID, [makeEntry({ id: 'a', text: longText })])
-        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+        expect(screen.getByText('short')).toBeInTheDocument()
+        expect(readScratchlist(SID)).toHaveLength(1)
 
-        renderPanel()
-        expandPanel()
         fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
-
-        expect(confirmSpy).not.toHaveBeenCalled()
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete draft?' })).getByRole('button', { name: 'Delete' }))
         expect(readScratchlist(SID)).toEqual([])
-        confirmSpy.mockRestore()
     })
 
     it('edits an entry by clicking its text block and removes the old row action buttons', async () => {
@@ -558,7 +552,7 @@ describe('ScratchlistDrawer disabled operations', () => {
         expect(onUpdate).not.toHaveBeenCalledWith(entry.id, 'remove this text')
     })
 
-    it('removes one attachment without confirmation while keeping the rest of the draft', async () => {
+    it('requires confirmation before removing one attachment', async () => {
         const { ScratchlistDrawer } = await import('./ScratchlistPanel')
         const attachment = {
             id: 'partial-remove-1',
@@ -575,29 +569,32 @@ describe('ScratchlistDrawer disabled operations', () => {
         })
         const onUpdate = vi.fn()
         const onDelete = vi.fn()
-        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
 
-        try {
-            render(
-                <I18nProvider>
-                    <ScratchlistDrawer
-                        entries={[entry]}
-                        sessionId={SID}
-                        api={{} as never}
-                        onUpdate={onUpdate}
-                        onReorder={vi.fn()}
-                        onDelete={onDelete}
-                    />
-                </I18nProvider>,
-            )
+        render(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[entry]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={onUpdate}
+                    onReorder={vi.fn()}
+                    onDelete={onDelete}
+                />
+            </I18nProvider>,
+        )
 
-            fireEvent.click(screen.getByRole('button', { name: 'Remove attachment photo.png' }))
-            expect(confirmSpy).not.toHaveBeenCalled()
-            expect(onUpdate).toHaveBeenCalledWith('partial-remove-entry', 'keep this text', [])
-            expect(onDelete).not.toHaveBeenCalled()
-        } finally {
-            confirmSpy.mockRestore()
-        }
+        fireEvent.click(screen.getByRole('button', { name: 'Remove attachment photo.png' }))
+        const dialog = screen.getByRole('dialog', { name: 'Delete attachment?' })
+        expect(onUpdate).not.toHaveBeenCalled()
+        expect(onDelete).not.toHaveBeenCalled()
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+        expect(onUpdate).not.toHaveBeenCalled()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Remove attachment photo.png' }))
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete attachment?' })).getByRole('button', { name: 'Delete' }))
+        await waitFor(() => expect(onUpdate).toHaveBeenCalledWith('partial-remove-entry', 'keep this text', []))
+        expect(onDelete).not.toHaveBeenCalled()
     })
 
     it('renders non-image attachment-only rows with a filename and remove affordance', () => {
@@ -626,6 +623,7 @@ describe('ScratchlistDrawer disabled operations', () => {
         expect(screen.getByTestId('scratchlist-attachment-files')).toBeInTheDocument()
         expect(screen.getByText('brief.pdf')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Remove attachment brief.pdf' }))
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete attachment?' })).getByRole('button', { name: 'Delete' }))
         expect(onDelete).toHaveBeenCalledWith('document-entry')
     })
 
@@ -702,11 +700,10 @@ describe('ScratchlistDrawer disabled operations', () => {
             fireEvent.click(screen.getByTitle('Click to zoom'))
             expect(screen.getByRole('dialog', { name: 'photo.png' })).toBeInTheDocument()
 
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
             fireEvent.click(screen.getByRole('button', { name: 'Remove attachment photo.png' }))
-            expect(confirmSpy).not.toHaveBeenCalled()
+            expect(screen.getByRole('dialog', { name: 'Delete attachment?' })).toBeInTheDocument()
+            fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete attachment?' })).getByRole('button', { name: 'Delete' }))
             expect(onDelete).toHaveBeenCalledWith('entry-1')
-            confirmSpy.mockRestore()
             rendered.unmount()
         } finally {
             cleanup()

@@ -33,6 +33,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { HoverTooltip } from '@/components/HoverTooltip'
 import { ImagePreview } from '@/components/ImagePreview'
 import { CheckIcon } from '@/components/icons'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ScheduleTimePicker, type PendingSchedule } from './ScheduleTimePicker'
 import {
     getScratchlistAttachmentPreview,
@@ -315,7 +316,6 @@ function ScratchlistAttachmentThumbnails(props: {
                         onClick={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
-                            releaseScratchlistAttachmentPreview(item.id)
                             props.onRemove(item.id)
                         }}
                         className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white transition-colors hover:bg-black/85 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white"
@@ -448,6 +448,14 @@ type ScratchlistMenuState = {
     left: number
     top: number
 }
+
+type ScratchlistDeleteRequest =
+    | { kind: 'entry'; entry: ScratchlistEntry }
+    | {
+        kind: 'attachment'
+        entry: ScratchlistEntry
+        attachment: ScratchlistAttachmentMetadata
+    }
 
 function clampScratchlistMenuPosition(left: number, top: number): { left: number; top: number } {
     if (typeof window === 'undefined') return { left, top }
@@ -606,6 +614,8 @@ function ScratchlistInventory({
     const [menuState, setMenuState] = useState<ScratchlistMenuState | null>(null)
     const [scheduleEntryId, setScheduleEntryId] = useState<string | null>(null)
     const [actionPendingEntryId, setActionPendingEntryId] = useState<string | null>(null)
+    const [deleteRequest, setDeleteRequest] = useState<ScratchlistDeleteRequest | null>(null)
+    const [deletePending, setDeletePending] = useState(false)
     const pointerDragRef = useRef<PointerDragState | null>(null)
     const touchDragRef = useRef<TouchDragState | null>(null)
     const touchContextMenuRef = useRef(false)
@@ -959,18 +969,48 @@ function ScratchlistInventory({
         setEditingText(entry.text)
     }, [disabled])
 
+    const requestDeleteEntry = useCallback((entry: ScratchlistEntry) => {
+        if (disabled || actionPendingEntryId) return
+        setDeleteRequest({ kind: 'entry', entry })
+    }, [actionPendingEntryId, disabled])
+
     const removeAttachment = useCallback((entry: ScratchlistEntry, attachmentId: string) => {
-        if (disabled) return
+        if (disabled || actionPendingEntryId) return
         const attachments = entry.attachments ?? []
-        const nextAttachments = attachments.filter((attachment) => attachment.id !== attachmentId)
-        if (nextAttachments.length === attachments.length) return
-        releaseScratchlistAttachmentPreview(attachmentId)
-        if (entry.text.trim().length === 0 && nextAttachments.length === 0) {
-            onDelete(entry)
-            return
+        const attachment = attachments.find((candidate) => candidate.id === attachmentId)
+        if (!attachment) return
+        setDeleteRequest({ kind: 'attachment', entry, attachment })
+    }, [actionPendingEntryId, disabled])
+
+    const closeDeleteConfirmation = useCallback(() => {
+        if (deletePending) return
+        setDeleteRequest(null)
+    }, [deletePending])
+
+    const confirmDelete = useCallback(async () => {
+        if (!deleteRequest) return
+        setDeletePending(true)
+        try {
+            if (deleteRequest.kind === 'entry') {
+                for (const attachment of deleteRequest.entry.attachments ?? []) {
+                    releaseScratchlistAttachmentPreview(attachment.id)
+                }
+                await onDelete(deleteRequest.entry)
+                return
+            }
+
+            releaseScratchlistAttachmentPreview(deleteRequest.attachment.id)
+            const nextAttachments = (deleteRequest.entry.attachments ?? [])
+                .filter((attachment) => attachment.id !== deleteRequest.attachment.id)
+            if (deleteRequest.entry.text.trim().length === 0 && nextAttachments.length === 0) {
+                await onDelete(deleteRequest.entry)
+                return
+            }
+            await onUpdate(deleteRequest.entry, deleteRequest.entry.text, nextAttachments)
+        } finally {
+            setDeletePending(false)
         }
-        void onUpdate(entry, entry.text, nextAttachments)
-    }, [disabled, onDelete, onUpdate])
+    }, [deleteRequest, onDelete, onUpdate])
 
     const handleSend = useCallback((entry: ScratchlistEntry) => {
         void runEntryAction(entry, onSend)
@@ -1132,7 +1172,7 @@ function ScratchlistInventory({
                                 scheduleOpen={scheduleEntryId === entry.id}
                                 onClose={closeMenu}
                                 onCopy={() => { void handleCopy(entry) }}
-                                onDelete={() => onDelete(entry)}
+                                onDelete={() => requestDeleteEntry(entry)}
                                 onSend={onSend ? () => handleSend(entry) : undefined}
                                 onOpenSchedule={() => setScheduleEntryId(entry.id)}
                                 onSchedule={(pending) => handleSchedule(entry, pending)}
@@ -1144,6 +1184,24 @@ function ScratchlistInventory({
                     )
                 })}
             </ul>
+            <ConfirmDialog
+                isOpen={deleteRequest !== null}
+                onClose={closeDeleteConfirmation}
+                title={deleteRequest?.kind === 'attachment'
+                    ? t('scratchlist.confirmDelete.attachmentTitle')
+                    : t('scratchlist.confirmDelete.title')}
+                description={deleteRequest?.kind === 'attachment'
+                    ? t('scratchlist.confirmDelete.attachmentDescription', {
+                        name: deleteRequest.attachment.filename,
+                    })
+                    : t('scratchlist.confirmDelete.description')}
+                confirmLabel={t('dialog.delete.confirm')}
+                confirmingLabel={t('dialog.delete.confirming')}
+                onConfirm={confirmDelete}
+                isPending={deletePending}
+                destructive
+                centerTitle
+            />
         </div>
     )
 }
@@ -1189,9 +1247,6 @@ export function ScratchlistDrawer({
 
     const handleDelete = useCallback((entry: ScratchlistEntry) => {
         if (disabled) return
-        for (const attachment of entry.attachments ?? []) {
-            releaseScratchlistAttachmentPreview(attachment.id)
-        }
         onDelete(entry.id)
     }, [disabled, onDelete])
 
