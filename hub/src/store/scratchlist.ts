@@ -236,13 +236,15 @@ export function deleteScratchlistEntry(
     sessionId: string,
     entryId: string
 ): boolean {
-    const result = db.prepare(
-        `DELETE FROM session_scratchlist
-          WHERE session_id = ? AND entry_id = ?`
-    ).run(sessionId, entryId)
-    if (result.changes === 0) return false
-    normalizeScratchlistPositions(db, sessionId)
-    return true
+    return db.transaction(() => {
+        const result = db.prepare(
+            `DELETE FROM session_scratchlist
+              WHERE session_id = ? AND entry_id = ?`
+        ).run(sessionId, entryId)
+        if (result.changes === 0) return false
+        normalizeScratchlistPositions(db, sessionId)
+        return true
+    })()
 }
 
 /** Delete an entry only when it still has the expected revision timestamp. */
@@ -252,13 +254,15 @@ export function deleteScratchlistEntryIfUpdatedAt(
     entryId: string,
     expectedUpdatedAt: number,
 ): boolean {
-    const result = db.prepare(
-        `DELETE FROM session_scratchlist
-          WHERE session_id = ? AND entry_id = ? AND updated_at = ?`
-    ).run(sessionId, entryId, expectedUpdatedAt)
-    if (result.changes === 0) return false
-    normalizeScratchlistPositions(db, sessionId)
-    return true
+    return db.transaction(() => {
+        const result = db.prepare(
+            `DELETE FROM session_scratchlist
+              WHERE session_id = ? AND entry_id = ? AND updated_at = ?`
+        ).run(sessionId, entryId, expectedUpdatedAt)
+        if (result.changes === 0) return false
+        normalizeScratchlistPositions(db, sessionId)
+        return true
+    })()
 }
 
 function normalizeScratchlistPositions(db: Database, sessionId: string): void {
