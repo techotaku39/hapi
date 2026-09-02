@@ -335,7 +335,9 @@ html:has(.chat-scroll-y) #root {
 }
 
 /* Keep the agent details content centered when the modal scrollbar is visible. */
-.agent-details-scroll-y {
+.agent-details-scroll-y,
+/* Keep the share canvas centered between both edges of its scrollbar. */
+.hapi-share-preview-scroll {
     scrollbar-gutter: stable both-edges;
 }
 
