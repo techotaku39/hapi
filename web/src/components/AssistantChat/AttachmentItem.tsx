@@ -98,7 +98,7 @@ export function AttachmentItem(props: {
     onRemove?: () => void
     dragHandleProps?: AttachmentDragHandleProps
 } = {}) {
-    const { name, status, previewUrl } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
+    const { name, status, previewUrl, file } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
     const isParking = useComposerParking()
     const isUploading = status.type === 'running'
     const isError = status.type === 'incomplete'
@@ -123,6 +123,7 @@ export function AttachmentItem(props: {
                     src={previewUrl}
                     fileName={name}
                     label={name}
+                    fileSize={file?.size}
                     galleryId="composer-attachments"
                     buttonClassName={`group h-full w-full cursor-zoom-in overflow-hidden rounded-lg text-left ${props.dragHandleProps ? 'touch-none' : ''}`}
                     imageClassName="h-full w-full object-cover"
