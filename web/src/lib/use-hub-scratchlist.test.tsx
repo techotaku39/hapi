@@ -301,7 +301,7 @@ describe('useHubScratchlist - delete', () => {
         await waitFor(() => expect(result.current.entries.length).toBe(2))
 
         await act(async () => {
-            await result.current.remove('a')
+            await expect(result.current.remove('a')).rejects.toThrow('HTTP 500')
         })
         // After rollback the entry is restored.
         await waitFor(() => expect(result.current.entries.length).toBe(2))
@@ -370,6 +370,25 @@ describe('useHubScratchlist - update', () => {
         })
         await waitFor(() => expect(result.current.entries[0]?.text).toBe('after'))
         expect(result.current.entries[0]?.updatedAt).toBe(5)
+    })
+
+    it('rethrows non-404 update errors after rolling back the optimistic edit', async () => {
+        const sid = makeSid()
+        const api = createMockApi({
+            getScratchlist: async () => ({
+                entries: [{ entryId: 'a', text: 'before', createdAt: 1, updatedAt: 1 }]
+            }),
+            updateScratchlistEntry: async () => {
+                throw new Error('HTTP 500')
+            }
+        })
+        const { result } = renderHook(() => useHubScratchlist(sid, api), { wrapper: createWrapper() })
+        await waitFor(() => expect(result.current.entries.length).toBe(1))
+
+        await act(async () => {
+            await expect(result.current.update('a', 'after')).rejects.toThrow('HTTP 500')
+        })
+        await waitFor(() => expect(result.current.entries[0]?.text).toBe('before'))
     })
 
     it('drops entry when update returns 404 (deleted elsewhere) (HAPI Bot, PR #896)', async () => {

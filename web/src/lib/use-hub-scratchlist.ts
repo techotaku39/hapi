@@ -540,11 +540,11 @@ export function useHubScratchlist(
     const remove = useCallback(async (id: string) => {
         try {
             await deleteMutation.mutateAsync({ entryId: id })
-        } catch {
-            // Rollback already happened in onError; surface to caller via
-            // the rejected promise would force the panel to add error UI
-            // we don't have copy for. Swallow here; SSE refetch on next
-            // hub state change will reconcile.
+        } catch (error) {
+            // A missing row is already reconciled by onError. Other failures
+            // must reach the delete confirmation so it stays open and shows
+            // the mutation error instead of disappearing as if it succeeded.
+            if (!isScratchlistNotFound(error)) throw error
         }
     }, [deleteMutation])
 
@@ -560,8 +560,11 @@ export function useHubScratchlist(
             : text
         try {
             await updateMutation.mutateAsync({ entryId: id, text: truncated, attachments })
-        } catch {
-            // see `remove` rationale.
+        } catch (error) {
+            // A missing row is reconciled by onError. Preserve other errors
+            // for the confirmation path; inline editing catches this promise
+            // at its event boundary because it has no error dialog.
+            if (!isScratchlistNotFound(error)) throw error
         }
     }, [updateMutation])
 

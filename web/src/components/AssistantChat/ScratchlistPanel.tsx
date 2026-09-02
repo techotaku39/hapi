@@ -450,11 +450,12 @@ type ScratchlistMenuState = {
 }
 
 type ScratchlistDeleteRequest =
-    | { kind: 'entry'; entry: ScratchlistEntry }
+    | { kind: 'entry'; entryId: string }
     | {
         kind: 'attachment'
-        entry: ScratchlistEntry
-        attachment: ScratchlistAttachmentMetadata
+        entryId: string
+        attachmentId: string
+        attachmentFilename: string
     }
 
 function clampScratchlistMenuPosition(left: number, top: number): { left: number; top: number } {
@@ -596,7 +597,7 @@ function ScratchlistInventory({
         attachments?: ScratchlistAttachmentMetadata[],
     ) => void | Promise<void>
     onReorder: (entryId: string, targetIndex: number) => void
-    onDelete: (entry: ScratchlistEntry) => void
+    onDelete: (entry: ScratchlistEntry) => void | Promise<void>
     onSend?: ScratchlistEntryAction
     onSchedule?: ScratchlistScheduleAction
     sessionId?: string
@@ -971,7 +972,7 @@ function ScratchlistInventory({
 
     const requestDeleteEntry = useCallback((entry: ScratchlistEntry) => {
         if (disabled || actionPendingEntryId) return
-        setDeleteRequest({ kind: 'entry', entry })
+        setDeleteRequest({ kind: 'entry', entryId: entry.id })
     }, [actionPendingEntryId, disabled])
 
     const removeAttachment = useCallback((entry: ScratchlistEntry, attachmentId: string) => {
@@ -979,7 +980,12 @@ function ScratchlistInventory({
         const attachments = entry.attachments ?? []
         const attachment = attachments.find((candidate) => candidate.id === attachmentId)
         if (!attachment) return
-        setDeleteRequest({ kind: 'attachment', entry, attachment })
+        setDeleteRequest({
+            kind: 'attachment',
+            entryId: entry.id,
+            attachmentId: attachment.id,
+            attachmentFilename: attachment.filename,
+        })
     }, [actionPendingEntryId, disabled])
 
     const closeDeleteConfirmation = useCallback(() => {
@@ -991,22 +997,33 @@ function ScratchlistInventory({
         if (!deleteRequest) return
         setDeletePending(true)
         try {
+            // The entry captured when the dialog opened may be stale after a
+            // cross-device update. Always apply the confirmed action to the
+            // latest row so removing one attachment cannot overwrite newer
+            // text or attachment changes.
+            const currentEntry = entriesRef.current.find((entry) => entry.id === deleteRequest.entryId)
+            if (!currentEntry) return
+
             if (deleteRequest.kind === 'entry') {
-                for (const attachment of deleteRequest.entry.attachments ?? []) {
+                for (const attachment of currentEntry.attachments ?? []) {
                     releaseScratchlistAttachmentPreview(attachment.id)
                 }
-                await onDelete(deleteRequest.entry)
+                await onDelete(currentEntry)
                 return
             }
 
-            releaseScratchlistAttachmentPreview(deleteRequest.attachment.id)
-            const nextAttachments = (deleteRequest.entry.attachments ?? [])
-                .filter((attachment) => attachment.id !== deleteRequest.attachment.id)
-            if (deleteRequest.entry.text.trim().length === 0 && nextAttachments.length === 0) {
-                await onDelete(deleteRequest.entry)
+            const currentAttachment = (currentEntry.attachments ?? [])
+                .find((attachment) => attachment.id === deleteRequest.attachmentId)
+            if (!currentAttachment) return
+
+            releaseScratchlistAttachmentPreview(currentAttachment.id)
+            const nextAttachments = (currentEntry.attachments ?? [])
+                .filter((attachment) => attachment.id !== currentAttachment.id)
+            if (currentEntry.text.trim().length === 0 && nextAttachments.length === 0) {
+                await onDelete(currentEntry)
                 return
             }
-            await onUpdate(deleteRequest.entry, deleteRequest.entry.text, nextAttachments)
+            await onUpdate(currentEntry, currentEntry.text, nextAttachments)
         } finally {
             setDeletePending(false)
         }
@@ -1032,7 +1049,17 @@ function ScratchlistInventory({
         setEditingText('')
         const hasAttachments = (entry.attachments?.length ?? 0) > 0
         if (nextText !== entry.text && (nextText.length > 0 || hasAttachments)) {
-            void onUpdate(entry, nextText)
+            try {
+                void Promise.resolve(onUpdate(entry, nextText)).catch(() => {
+                    // Inline edits do not have a confirmation dialog to show
+                    // mutation errors; the hook rolls back and the next SSE
+                    // refresh reconciles the row. Delete confirmations await
+                    // the same callback and surface failures themselves.
+                })
+            } catch {
+                // Keep a synchronous callback failure from becoming an
+                // unhandled event-handler exception.
+            }
         }
     }, [editingText, onUpdate])
 
@@ -1192,7 +1219,7 @@ function ScratchlistInventory({
                     : t('scratchlist.confirmDelete.title')}
                 description={deleteRequest?.kind === 'attachment'
                     ? t('scratchlist.confirmDelete.attachmentDescription', {
-                        name: deleteRequest.attachment.filename,
+                        name: deleteRequest.attachmentFilename,
                     })
                     : t('scratchlist.confirmDelete.description')}
                 confirmLabel={t('dialog.delete.confirm')}
@@ -1231,7 +1258,7 @@ export function ScratchlistDrawer({
         attachments?: ScratchlistAttachmentMetadata[],
     ) => void | Promise<void>
     onReorder: (id: string, targetIndex: number) => void
-    onDelete: (id: string) => void
+    onDelete: (id: string) => void | Promise<void>
     onSend?: ScratchlistEntryAction
     onSchedule?: ScratchlistScheduleAction
     sessionId: string
@@ -1247,7 +1274,7 @@ export function ScratchlistDrawer({
 
     const handleDelete = useCallback((entry: ScratchlistEntry) => {
         if (disabled) return
-        onDelete(entry.id)
+        return onDelete(entry.id)
     }, [disabled, onDelete])
 
     return (

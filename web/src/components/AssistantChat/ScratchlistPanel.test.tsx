@@ -597,6 +597,130 @@ describe('ScratchlistDrawer disabled operations', () => {
         expect(onDelete).not.toHaveBeenCalled()
     })
 
+    it('uses the latest row when an attachment confirmation stays open across an update', async () => {
+        const attachment = {
+            id: 'stale-remove-1',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            size: 4,
+            path: 'hapi-hub:scratchlist/default/session-test/stale-remove-1.png',
+            previewUrl: 'data:image/png;base64,cGhvdG8=',
+        }
+        const newerAttachment = {
+            id: 'stale-remove-2',
+            filename: 'new-photo.png',
+            mimeType: 'image/png',
+            size: 5,
+            path: 'hapi-hub:scratchlist/default/session-test/stale-remove-2.png',
+            previewUrl: 'data:image/png;base64,bmV3LXBob3Rv',
+        }
+        const initialEntry = makeEntry({
+            id: 'stale-remove-entry',
+            text: 'original text',
+            attachments: [attachment],
+        })
+        const currentEntry = makeEntry({
+            ...initialEntry,
+            text: 'newer text from another device',
+            updatedAt: 2000,
+            attachments: [attachment, newerAttachment],
+        })
+        const onUpdate = vi.fn().mockResolvedValue(undefined)
+        const onDelete = vi.fn()
+
+        const rendered = render(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[initialEntry]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={onUpdate}
+                    onReorder={vi.fn()}
+                    onDelete={onDelete}
+                />
+            </I18nProvider>,
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Remove attachment photo.png' }))
+        rendered.rerender(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[currentEntry]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={onUpdate}
+                    onReorder={vi.fn()}
+                    onDelete={onDelete}
+                />
+            </I18nProvider>,
+        )
+
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete attachment?' })).getByRole('button', { name: 'Delete' }))
+        await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(
+            'stale-remove-entry',
+            'newer text from another device',
+            [newerAttachment],
+        ))
+        expect(onDelete).not.toHaveBeenCalled()
+    })
+
+    it('keeps the attachment confirmation open when its update fails', async () => {
+        const attachment = {
+            id: 'failed-update-1',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            size: 4,
+            path: 'hapi-hub:scratchlist/default/session-test/failed-update-1.png',
+            previewUrl: 'data:image/png;base64,cGhvdG8=',
+        }
+        const onUpdate = vi.fn().mockRejectedValue(new Error('update failed'))
+
+        render(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[makeEntry({ id: 'failed-update-entry', text: 'keep this text', attachments: [attachment] })]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={onUpdate}
+                    onReorder={vi.fn()}
+                    onDelete={vi.fn()}
+                />
+            </I18nProvider>,
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Remove attachment photo.png' }))
+        const dialog = screen.getByRole('dialog', { name: 'Delete attachment?' })
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+        await waitFor(() => expect(within(dialog).getByText('update failed')).toBeInTheDocument())
+        expect(screen.getByRole('dialog', { name: 'Delete attachment?' })).toBeInTheDocument()
+    })
+
+    it('keeps the draft confirmation open when deletion fails', async () => {
+        const onDelete = vi.fn().mockRejectedValue(new Error('delete failed'))
+
+        render(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[makeEntry({ id: 'failed-delete-entry', text: 'delete me' })]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={vi.fn()}
+                    onReorder={vi.fn()}
+                    onDelete={onDelete}
+                />
+            </I18nProvider>,
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
+        const dialog = screen.getByRole('dialog', { name: 'Delete draft?' })
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+        await waitFor(() => expect(within(dialog).getByText('delete failed')).toBeInTheDocument())
+        expect(screen.getByRole('dialog', { name: 'Delete draft?' })).toBeInTheDocument()
+    })
+
     it('renders non-image attachment-only rows with a filename and remove affordance', () => {
         const attachment = {
             id: 'document-1',
