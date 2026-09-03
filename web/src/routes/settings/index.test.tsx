@@ -262,6 +262,7 @@ describe('responsive settings pages', () => {
         expect(await screen.findByRole('heading', { name: 'Session status summaries' })).toBeInTheDocument()
         expect(screen.getByText('Choose whether supported agents emit a machine-readable status summary and whether it appears in chat.')).toBeInTheDocument()
         expect(await screen.findByRole('checkbox', { name: 'Emit status summaries' })).toBeInTheDocument()
+        expect(screen.getByText('Off by default. When enabled, supported agents are asked to add a trailing AGENT_NOTIFY_SUMMARY line after each turn for notifications and background work records. Applies to new/resumed sessions. (Supported: Claude, Codex, OpenCode, remote Grok; not yet supported: local Grok, Cursor)')).toBeInTheDocument()
         expect(screen.queryByRole('heading', { name: 'Chat display', level: 3 })).not.toBeInTheDocument()
         expect(screen.getByText('Only affects display in chat and copied content; it does not affect summary generation, notifications, or background work records. When on, a status row is shown; when off, it is hidden. Stored messages remain unchanged.')).toBeInTheDocument()
 
