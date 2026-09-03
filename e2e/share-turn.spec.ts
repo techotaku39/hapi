@@ -256,6 +256,51 @@ test('keeps code and image controls interactive in preview', async ({ page }, te
     await expect(dialog).toBeVisible()
 })
 
+test('downloads generated files from share preview controls', async ({ page }, testInfo) => {
+    await page.goto('/e2e-fixtures/share-turn-fixture.html?generatedFile=1')
+    await page.getByRole('button', { name: 'Open share preview' }).click()
+
+    const dialog = page.getByRole('dialog')
+    const prepareButton = dialog.getByRole('button', { name: 'Prepare download', exact: true })
+    await expect(prepareButton).toBeVisible()
+
+    await prepareButton.click()
+    const downloadLink = dialog.locator('[data-hapi-generated-media-download="true"]')
+    await expect(downloadLink).toHaveText('Download fixture-export.zip')
+    await expect(downloadLink).toHaveAttribute('href', /^blob:/)
+
+    const downloadPromise = page.waitForEvent('download', { timeout: 5_000 })
+    await downloadLink.click()
+    const download = await downloadPromise
+    const path = testInfo.outputPath('generated-file-preview.zip')
+    await download.saveAs(path)
+    expect(download.suggestedFilename()).toBe('fixture-export.zip')
+    expect(await readFile(path)).toEqual(Buffer.from('preview generated file'))
+})
+
+test('downloads loaded generated files after the preview strips the original blob URL', async ({ page }, testInfo) => {
+    await page.goto('/e2e-fixtures/share-turn-fixture.html?generatedFile=1&generatedFileState=loaded')
+    await page.getByRole('button', { name: 'Open share preview' }).click()
+
+    const dialog = page.getByRole('dialog')
+    const downloadLink = dialog.locator('[data-hapi-generated-media-download="true"]')
+    await expect(downloadLink).toHaveText('Download fixture-export.zip')
+    await expect(downloadLink.locator('xpath=ancestor::*[@data-hapi-generated-media-id][1]')).toHaveAttribute('data-hapi-generated-media-loaded', 'true')
+    await expect(downloadLink).not.toHaveAttribute('href')
+    await expect(downloadLink).toHaveCSS('cursor', 'pointer')
+
+    const downloadPromise = page.waitForEvent('download', { timeout: 5_000 }).catch(() => null)
+    await downloadLink.click()
+    const download = await downloadPromise
+    expect(download).not.toBeNull()
+    if (!download) throw new Error('Expected generated file download')
+
+    const path = testInfo.outputPath('loaded-generated-file-preview.zip')
+    await download.saveAs(path)
+    expect(download.suggestedFilename()).toBe('fixture-export.zip')
+    expect(await readFile(path)).toEqual(Buffer.from('preview generated file'))
+})
+
 test('preserves the desktop source width but keeps mobile export width stable', async ({ page }, testInfo) => {
     await page.addInitScript(() => {
         Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })

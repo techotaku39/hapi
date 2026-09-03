@@ -16,6 +16,7 @@ type ShareTurnDialogProps = {
         role?: 'user' | 'assistant'
     }>
     sourceContentWidth?: number | null
+    getGeneratedMediaBlob?: (imageId: string) => Promise<Blob>
     onClose: () => void
 }
 
@@ -61,6 +62,9 @@ function stripCaptureOnlyControls(root: HTMLElement): void {
         anchor.removeAttribute('href')
         anchor.removeAttribute('target')
         anchor.removeAttribute('rel')
+        if (anchor.matches('[data-hapi-generated-media-download="true"]')) {
+            anchor.classList.add('cursor-pointer')
+        }
     }
     for (const element of Array.from(root.querySelectorAll('[role="button"], [contenteditable="true"]'))) {
         if (element.tagName.toLowerCase() !== 'a') {
@@ -88,6 +92,37 @@ function getPreviewCodeBody(control: HTMLElement): HTMLElement | null {
     const header = control.closest<HTMLElement>('[data-hapi-code-header="true"]')
     const body = header?.nextElementSibling
     return body instanceof HTMLElement && body.matches('[data-hapi-code-body="true"]') ? body : null
+}
+
+function getGeneratedMediaFileName(media: HTMLElement): string {
+    return media.dataset.hapiGeneratedMediaFileName
+        || media.querySelector<HTMLElement>('[data-hapi-generated-media-download="true"]')?.getAttribute('download')
+        || 'generated-file'
+}
+
+function revokePreviewMediaUrls(urls: Set<string>): void {
+    for (const url of urls) URL.revokeObjectURL(url)
+    urls.clear()
+}
+
+function replaceGeneratedMediaPrepareAction(action: HTMLElement, media: HTMLElement, url: string): void {
+    const link = document.createElement('a')
+    for (const attribute of Array.from(action.attributes)) {
+        if (attribute.name === 'type' || attribute.name === 'disabled' || attribute.name === 'aria-busy') continue
+        link.setAttribute(attribute.name, attribute.value)
+    }
+    link.href = url
+    link.download = getGeneratedMediaFileName(media)
+    link.dataset.hapiGeneratedMediaDownload = 'true'
+    link.dataset.hapiGeneratedMediaLoaded = 'true'
+    link.innerHTML = action.innerHTML
+    const label = link.querySelector<HTMLElement>('span')
+    if (label) {
+        label.textContent = `Download ${link.download}`
+    } else {
+        link.textContent = `Download ${link.download}`
+    }
+    action.replaceWith(link)
 }
 
 function setPreviewCodeWrap(control: HTMLElement, enabled: boolean): void {
@@ -521,6 +556,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
     const { t } = useTranslation()
     const captureRef = useRef<HTMLDivElement | null>(null)
     const bodyRef = useRef<HTMLDivElement | null>(null)
+    const previewMediaUrlsRef = useRef<Set<string>>(new Set())
     const [busy, setBusy] = useState<'copy' | 'download' | 'share' | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [copied, setCopied] = useState(false)
@@ -547,6 +583,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
         : SHARE_EXPORT_WIDTH
 
     useLayoutEffect(() => {
+        revokePreviewMediaUrls(previewMediaUrlsRef.current)
         setReady(false)
         if (!props.isOpen) return undefined
         const body = bodyRef.current
@@ -594,6 +631,10 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
     }, [props.isOpen, props.sourceSnapshots, restoreTick])
 
     useEffect(() => {
+        return () => revokePreviewMediaUrls(previewMediaUrlsRef.current)
+    }, [])
+
+    useEffect(() => {
         const capture = captureRef.current
         if (!props.isOpen || !ready || !capture) {
             setPreparedBlob(null)
@@ -615,6 +656,47 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
     const handlePreviewClick = (event: ReactMouseEvent<HTMLElement>) => {
         const target = event.target
         if (!(target instanceof Element)) return
+
+        const generatedMediaAction = target.closest<HTMLElement>('[data-hapi-generated-media-download="true"]')
+        if (generatedMediaAction) {
+            const media = generatedMediaAction.closest<HTMLElement>('[data-hapi-generated-media-id]')
+            const imageId = media?.dataset.hapiGeneratedMediaId
+            if (!imageId || !props.getGeneratedMediaBlob) return
+
+            // Once the preview has created a real object URL, let the browser
+            // handle the native download on the next click.
+            if (generatedMediaAction instanceof HTMLAnchorElement
+                && generatedMediaAction.getAttribute('href')) return
+
+            event.preventDefault()
+            event.stopPropagation()
+            if (generatedMediaAction.getAttribute('aria-busy') === 'true') return
+
+            const loaded = generatedMediaAction.dataset.hapiGeneratedMediaLoaded === 'true'
+            generatedMediaAction.setAttribute('aria-busy', 'true')
+            if (generatedMediaAction instanceof HTMLButtonElement) generatedMediaAction.disabled = true
+            void props.getGeneratedMediaBlob(imageId)
+                .then((blob) => {
+                    if (!loaded && generatedMediaAction instanceof HTMLButtonElement) {
+                        const url = URL.createObjectURL(blob)
+                        previewMediaUrlsRef.current.add(url)
+                        replaceGeneratedMediaPrepareAction(generatedMediaAction, media, url)
+                        setPreparedBlob(null)
+                        setPreviewRevision((revision) => revision + 1)
+                        return
+                    }
+                    downloadBlob(blob, getGeneratedMediaFileName(media))
+                })
+                .catch((err: unknown) => {
+                    setError(err instanceof Error ? err.message : 'Failed to download file')
+                })
+                .finally(() => {
+                    if (!generatedMediaAction.isConnected) return
+                    generatedMediaAction.removeAttribute('aria-busy')
+                    if (generatedMediaAction instanceof HTMLButtonElement) generatedMediaAction.disabled = false
+                })
+            return
+        }
 
         const wrapButton = target.closest<HTMLButtonElement>('[data-hapi-code-wrap-toggle="true"]')
         if (wrapButton) {
