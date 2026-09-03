@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -64,14 +64,18 @@ function stripCaptureOnlyControls(root: HTMLElement): void {
         anchor.removeAttribute('rel')
         if (anchor.matches('[data-hapi-generated-media-download="true"]')) {
             anchor.classList.add('cursor-pointer')
+            anchor.setAttribute('role', 'button')
+            anchor.setAttribute('tabindex', '0')
         }
     }
     for (const element of Array.from(root.querySelectorAll('[role="button"], [contenteditable="true"]'))) {
+        const isGeneratedMediaAction = element.tagName.toLowerCase() === 'a'
+            && element.matches('[data-hapi-generated-media-download="true"]')
         if (element.tagName.toLowerCase() !== 'a') {
             element.removeAttribute('role')
         }
         element.removeAttribute('contenteditable')
-        element.removeAttribute('tabindex')
+        if (!isGeneratedMediaAction) element.removeAttribute('tabindex')
     }
 }
 
@@ -753,6 +757,18 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
         }
     }
 
+    const handlePreviewKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        const target = event.target
+        if (!(target instanceof Element)) return
+        const action = target.closest<HTMLAnchorElement>(
+            'a[data-hapi-generated-media-download="true"]:not([href])'
+        )
+        if (!action) return
+        event.preventDefault()
+        action.click()
+    }
+
     const runBlobAction = (
         blob: Blob,
         action: (prepared: Blob) => Promise<void> | void,
@@ -813,6 +829,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                     <div
                         ref={captureRef}
                         onClick={handlePreviewClick}
+                        onKeyDown={handlePreviewKeyDown}
                         className="hapi-share-preview-root mx-auto w-[720px] max-w-full rounded-[28px] bg-[var(--app-bg)] p-4 text-[var(--app-fg)] sm:p-5"
                     >
                         <style>{`

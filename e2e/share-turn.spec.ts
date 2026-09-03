@@ -287,10 +287,21 @@ test('downloads loaded generated files after the preview strips the original blo
     await expect(downloadLink).toHaveText('Download fixture-export.zip')
     await expect(downloadLink.locator('xpath=ancestor::*[@data-hapi-generated-media-id][1]')).toHaveAttribute('data-hapi-generated-media-loaded', 'true')
     await expect(downloadLink).not.toHaveAttribute('href')
+    await expect(downloadLink).toHaveAttribute('role', 'button')
+    await expect(downloadLink).toHaveAttribute('tabindex', '0')
     await expect(downloadLink).toHaveCSS('cursor', 'pointer')
 
+    await dialog.focus()
+    let linkFocused = false
+    for (let index = 0; index < 32; index += 1) {
+        await page.keyboard.press('Tab')
+        linkFocused = await downloadLink.evaluate((element) => document.activeElement === element)
+        if (linkFocused) break
+    }
+    expect(linkFocused).toBe(true)
+
     const downloadPromise = page.waitForEvent('download', { timeout: 5_000 }).catch(() => null)
-    await downloadLink.click()
+    await page.keyboard.press('Enter')
     const download = await downloadPromise
     expect(download).not.toBeNull()
     if (!download) throw new Error('Expected generated file download')
