@@ -677,6 +677,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
             if (generatedMediaAction instanceof HTMLButtonElement) generatedMediaAction.disabled = true
             void props.getGeneratedMediaBlob(imageId)
                 .then((blob) => {
+                    if (!generatedMediaAction.isConnected) return
                     if (!loaded && generatedMediaAction instanceof HTMLButtonElement) {
                         const url = URL.createObjectURL(blob)
                         previewMediaUrlsRef.current.add(url)
