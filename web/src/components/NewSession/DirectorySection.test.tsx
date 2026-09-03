@@ -48,7 +48,7 @@ describe('DirectorySection', () => {
             />
         )
 
-        const recentPath = screen.getByRole('button', { name: 'Agent/Hapi' })
+        const recentPath = screen.getByRole('button', { name: path })
         expect(recentPath).toHaveTextContent('Agent/Hapi')
         expect(recentPath).toHaveAttribute('title', path)
 

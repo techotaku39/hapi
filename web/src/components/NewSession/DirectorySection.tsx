@@ -127,6 +127,7 @@ export function DirectorySection(props: {
                                 disabled={props.isDisabled}
                                 className="rounded bg-[var(--app-subtle-bg)] px-2 py-1 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] transition-colors truncate max-w-[200px] disabled:opacity-50"
                                 title={path}
+                                aria-label={path}
                             >
                                 {getPathDisplayName(path)}
                             </button>
