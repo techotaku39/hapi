@@ -215,10 +215,11 @@ test.describe('markdown table actions', () => {
         const readGeometry = () => surface.evaluate((element) => {
             const table = element.querySelector('table')
             const header = table?.querySelector('thead th')
+            const frame = element.querySelector<HTMLElement>('.aui-md-table-frame')
             const actions = element.querySelector('.aui-md-table-actions')
-            if (!table || !header || !actions) throw new Error('Markdown table geometry is incomplete')
+            if (!table || !header || !frame || !actions) throw new Error('Markdown table geometry is incomplete')
 
-            const headerRect = header.getBoundingClientRect()
+            const frameRect = frame.getBoundingClientRect()
             const actionRect = actions.getBoundingClientRect()
             const headerStyle = getComputedStyle(header)
             return {
@@ -227,9 +228,8 @@ test.describe('markdown table actions', () => {
                 paddingLeft: headerStyle.paddingLeft,
                 paddingRight: headerStyle.paddingRight,
                 lineHeight: headerStyle.lineHeight,
-                actionHeaderCenterDelta: Math.round(Math.abs(
-                    (actionRect.top + actionRect.height / 2) - (headerRect.top + headerRect.height / 2),
-                )),
+                actionTopOffset: Math.round(actionRect.top - frameRect.top),
+                actionRightOffset: Math.round(frameRect.right - actionRect.right),
             }
         })
 
@@ -238,7 +238,8 @@ test.describe('markdown table actions', () => {
         const filePreviewGeometry = await readGeometry()
 
         expect(filePreviewGeometry).toEqual(chatGeometry)
-        expect(filePreviewGeometry.actionHeaderCenterDelta).toBeLessThanOrEqual(2)
+        expect(filePreviewGeometry.actionTopOffset).toBe(3)
+        expect(filePreviewGeometry.actionRightOffset).toBe(3)
     })
 
     test('keeps the inline fullscreen action fixed at the table top-right when the header wraps', async ({ page }) => {
