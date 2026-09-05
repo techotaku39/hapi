@@ -2088,7 +2088,7 @@ export function SessionList(props: {
                 confirmLabel={t('sessions.markAllRead.confirm')}
                 confirmingLabel={t('sessions.markAllRead.confirming')}
                 onConfirm={async () => {
-                    markAllSessionsSeen(sidebarSessions)
+                    markAllSessionsSeen(props.sessions)
                 }}
                 isPending={false}
                 centerTitle

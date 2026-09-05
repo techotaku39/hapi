@@ -135,6 +135,66 @@ describe('SessionList mark all as read', () => {
         expect(JSON.parse(localStorage.getItem('hapi.sessionLastSeen.v1')!)).toEqual({ unread: 1000 })
     })
 
+    it('marks hidden duplicate session IDs so a dedup winner change stays read', async () => {
+        localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
+            visibleWinner: 0,
+            hiddenDuplicate: 0,
+        }))
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false },
+            }
+        })
+        const renderTree = (sessions: SessionSummary[]) => (
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionList
+                            sessions={sessions}
+                            selectedSessionId={null}
+                            onSelect={vi.fn()}
+                            onNewSession={vi.fn()}
+                            onRefresh={vi.fn()}
+                            isLoading={false}
+                            renderHeader={false}
+                            api={null}
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+        const initialSessions = [
+            makeSession({
+                id: 'visibleWinner',
+                updatedAt: 2000,
+                metadata: { path: '/work/shared', name: 'Visible winner', agentSessionId: 'native-1', flavor: 'codex' }
+            }),
+            makeSession({
+                id: 'hiddenDuplicate',
+                updatedAt: 1000,
+                metadata: { path: '/work/shared', name: 'Hidden duplicate', agentSessionId: 'native-1', flavor: 'codex' }
+            }),
+        ]
+        const view = render(renderTree(initialSessions))
+
+        fireEvent.click(screen.getByRole('button', { name: 'Mark all as read (1)' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+        await waitFor(() => {
+            expect(screen.queryByRole('button', { name: 'Mark all as read (1)' })).toBeNull()
+        })
+
+        view.rerender(renderTree(initialSessions.map(session => (
+            session.id === 'hiddenDuplicate' ? { ...session, active: true } : session
+        ))))
+
+        expect(screen.queryByRole('button', { name: 'Mark all as read (1)' })).toBeNull()
+        expect(JSON.parse(localStorage.getItem('hapi.sessionLastSeen.v1')!)).toMatchObject({
+            visibleWinner: 2000,
+            hiddenDuplicate: 1000,
+        })
+    })
+
     it('uses the requested Chinese label', () => {
         localStorage.setItem('hapi-lang', 'zh-CN')
         localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ unread: 1000 }))
