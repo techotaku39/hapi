@@ -7,6 +7,7 @@ const html2canvas = vi.hoisted(() => vi.fn())
 vi.mock('html2canvas-pro', () => ({ default: html2canvas }))
 
 import {
+    copyTableImagePromiseToClipboard,
     downloadTableAsCsv,
     getTableExportScale,
     getTableExportHeight,
@@ -338,6 +339,24 @@ describe('MarkdownTable', () => {
 
         await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not process table image.'))
         expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    })
+
+    it('observes a pending raster rejection after clipboard setup throws synchronously', async () => {
+        let rejectRaster: ((reason?: unknown) => void) | undefined
+        const raster = new Promise<Blob>((_resolve, reject) => {
+            rejectRaster = reject
+        })
+        class ClipboardItemStub {
+            constructor() {
+                throw new Error('clipboard item failed')
+            }
+        }
+        Object.defineProperty(window, 'ClipboardItem', { configurable: true, value: ClipboardItemStub })
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn() } })
+
+        await expect(copyTableImagePromiseToClipboard(raster)).rejects.toThrow('clipboard item failed')
+        rejectRaster?.(new Error('raster failed'))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
     })
 
     it('re-evaluates the automatic wrapping choice when the viewer width changes', async () => {
@@ -862,6 +881,21 @@ describe('MarkdownTable', () => {
             </I18nProvider>,
         )
         expect(screen.getByRole<HTMLTableElement>('table').tBodies[0]?.rows[0]?.cells[0]).toHaveTextContent('*literal* _literal_ [brackets] `ticks` ~~tilde~~ <angle> &copy;')
+    })
+
+    it('encodes Markdown link and image destinations with spaces and parentheses', () => {
+        const table = document.createElement('table')
+        table.innerHTML = '<thead><tr><th>Value</th></tr></thead><tbody><tr><td></td></tr></tbody>'
+        const cell = table.tBodies[0]!.rows[0]!.cells[0]!
+        const link = document.createElement('a')
+        link.dataset.hapiMarkdownHref = 'docs/My file (final).md'
+        link.textContent = 'Spec'
+        const image = document.createElement('img')
+        image.setAttribute('src', 'https://example.com/My file (final).png')
+        image.setAttribute('alt', 'Preview')
+        cell.append(link, ' ', image)
+
+        expect(serializeTableToMarkdown(table)).toBe('| Value |\n| --- |\n| [Spec](<docs/My file (final).md>) ![Preview](<https://example.com/My file (final).png>) |\n')
     })
 
     it('preserves Markdown column alignment when copying a table', () => {

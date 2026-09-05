@@ -241,6 +241,11 @@ function serializeMarkdownText(value: string): string {
         .replace(/([&`*_\[\]<>~])/g, '\\$1')
 }
 
+function serializeMarkdownDestination(value: string): string {
+    const escaped = value.replace(/[\\<>&]/g, '\\$&')
+    return /[\s()]/.test(value) || escaped !== value ? `<${escaped}>` : escaped
+}
+
 function serializeInlineMarkdown(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return serializeMarkdownText(node.textContent ?? '')
     if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -254,7 +259,7 @@ function serializeInlineMarkdown(node: Node): string {
             const href = element.dataset.hapiMarkdownHref ?? element.getAttribute('href')
             const label = children()
             if (href?.startsWith('hapi-file:') || href?.startsWith('hapi-file-candidate:')) return label
-            return href ? `[${label}](${href})` : label
+            return href ? `[${label}](${serializeMarkdownDestination(href)})` : label
         }
         case 'code':
             return serializeCodeSpan(element.textContent ?? '')
@@ -272,11 +277,11 @@ function serializeInlineMarkdown(node: Node): string {
         case 'img': {
             const src = element.getAttribute('src')
             const alt = serializeMarkdownText(element.getAttribute('alt') ?? '')
-            return src ? `![${alt}](${src})` : alt
+            return src ? `![${alt}](${serializeMarkdownDestination(src)})` : alt
         }
         case 'span': {
             const href = element.dataset.hapiMarkdownHref
-            return href ? `[${children()}](${href})` : children()
+            return href ? `[${children()}](${serializeMarkdownDestination(href)})` : children()
         }
         default:
             return children()
@@ -719,6 +724,9 @@ function writeTableImageToClipboard(
             new ClipboardItemCtor({ [mimeType]: image }),
         ]))
     } catch (error) {
+        if (!(image instanceof Blob)) {
+            void Promise.resolve(image).catch(() => undefined)
+        }
         return Promise.reject(error)
     }
 }
