@@ -1243,6 +1243,10 @@ export function SessionList(props: {
         () => prepareSidebarSessions(props.sessions, selectedSessionId),
         [props.sessions, selectedSessionId]
     )
+    const readableSessions = useMemo(
+        () => props.sessions.filter(session => shouldShowSessionInSidebar(session, selectedSessionId)),
+        [props.sessions, selectedSessionId]
+    )
     const allSessions = useMemo(
         () => showActiveSessionsOnly
             ? filterActiveSessionsOnly(sidebarSessions, selectedSessionId)
@@ -1250,8 +1254,8 @@ export function SessionList(props: {
         [sidebarSessions, selectedSessionId, showActiveSessionsOnly]
     )
     const unreadSessionCount = useMemo(
-        () => getUnreadSessionCount(props.sessions),
-        [lastSeenVersion, props.sessions]
+        () => getUnreadSessionCount(readableSessions),
+        [lastSeenVersion, readableSessions]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
@@ -2088,7 +2092,7 @@ export function SessionList(props: {
                 confirmLabel={t('sessions.markAllRead.confirm')}
                 confirmingLabel={t('sessions.markAllRead.confirming')}
                 onConfirm={async () => {
-                    markAllSessionsSeen(props.sessions)
+                    markAllSessionsSeen(readableSessions)
                 }}
                 isPending={false}
                 centerTitle

@@ -195,6 +195,23 @@ describe('SessionList mark all as read', () => {
         })
     })
 
+    it('does not count unread inactive empty session stubs', () => {
+        localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
+            visible: 2000,
+            emptyStub: 0,
+        }))
+        renderSessionList([
+            makeSession({
+                id: 'visible',
+                updatedAt: 2000,
+                metadata: { path: '/work/visible', name: 'Visible' }
+            }),
+            makeSession({ id: 'emptyStub', updatedAt: 3000 })
+        ])
+
+        expect(screen.queryByRole('button', { name: 'Mark all as read (1)' })).toBeNull()
+    })
+
     it('uses the requested Chinese label', () => {
         localStorage.setItem('hapi-lang', 'zh-CN')
         localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ unread: 1000 }))
