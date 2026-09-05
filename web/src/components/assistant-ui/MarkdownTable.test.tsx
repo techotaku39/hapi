@@ -108,31 +108,12 @@ describe('MarkdownTable', () => {
         expect(screen.getByRole('button', { name: 'Open table full screen' })).toBeInTheDocument()
     })
 
-    it('keeps inline table actions as tall as a wrapped header row', async () => {
-        let resizeCallback: ResizeObserverCallback | undefined
-        class TestResizeObserver {
-            constructor(callback: ResizeObserverCallback) {
-                resizeCallback = callback
-            }
-            observe() {}
-            disconnect() {}
-        }
-        vi.stubGlobal('ResizeObserver', TestResizeObserver)
+    it('does not size inline table actions to the wrapped header row', () => {
+        renderTable()
 
-        try {
-            renderTable()
-            const table = screen.getByRole<HTMLTableElement>('table')
-            const row = table.tHead?.rows[0]
-            const actions = table.parentElement?.parentElement?.querySelector<HTMLElement>('.aui-md-table-actions')
-            if (!row || !actions) throw new Error('Inline table action geometry is incomplete')
-
-            vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ height: 56 } as DOMRect)
-            await waitFor(() => expect(resizeCallback).toBeDefined())
-            resizeCallback?.([], {} as ResizeObserver)
-            expect(actions).toHaveStyle({ height: '56px' })
-        } finally {
-            vi.unstubAllGlobals()
-        }
+        const actions = screen.getByRole('button', { name: 'Open table full screen' }).parentElement
+        if (!actions) throw new Error('Inline table action geometry is incomplete')
+        expect(actions).not.toHaveStyle({ height: '56px' })
     })
 
     it('opens an enlarged PC viewer without requesting browser fullscreen or orientation lock', async () => {

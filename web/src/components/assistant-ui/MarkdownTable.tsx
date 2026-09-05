@@ -143,6 +143,7 @@ function TableActionMenu(props: {
                 <Popover.Trigger asChild>
                     <button
                         type="button"
+                        data-hapi-table-viewer-control="true"
                         aria-label={props.label}
                         title={props.label}
                         tabIndex={props.tabIndex}
@@ -1008,6 +1009,7 @@ function TableViewer(props: {
                     >
                         <button
                             type="button"
+                            data-hapi-table-viewer-control="true"
                             tabIndex={toolbarVisible ? 0 : -1}
                             aria-label={t('table.closeFullscreen')}
                             title={t('table.closeFullscreen')}
@@ -1025,6 +1027,7 @@ function TableViewer(props: {
                         <div className="ml-auto flex items-center gap-1">
                             <button
                                 type="button"
+                                data-hapi-table-viewer-control="true"
                                 data-hapi-table-wrap-toggle="true"
                                 tabIndex={toolbarVisible ? 0 : -1}
                                 aria-label={t(wrapEnabled ? 'table.wrap.disable' : 'table.wrap.enable')}
@@ -1041,6 +1044,7 @@ function TableViewer(props: {
                             {isMobileViewer ? (
                                 <button
                                     type="button"
+                                    data-hapi-table-viewer-control="true"
                                     tabIndex={toolbarVisible ? 0 : -1}
                                     aria-label={copied ? t('table.copiedMarkdown') : t('table.copyMarkdownButton')}
                                     title={copied ? t('table.copiedMarkdown') : t('table.copyMarkdownButton')}
@@ -1127,7 +1131,6 @@ export function MarkdownTable(props: TableProps) {
     const chatContext = useOptionalHappyChatContext()
     const { className, children, ...rest } = props
     const inlineTableRef = useRef<HTMLTableElement>(null)
-    const inlineActionsRef = useRef<HTMLDivElement>(null)
     const viewerTableRef = useRef<HTMLTableElement>(null)
     const tableWrapPreferenceKeyRef = useRef<string | undefined>(undefined)
     const [viewerOpen, setViewerOpen] = useState(false)
@@ -1197,23 +1200,6 @@ export function MarkdownTable(props: TableProps) {
         if (wasMobile) leaveMobileTableViewer(enteredFullscreen)
     }, [])
 
-    useLayoutEffect(() => {
-        const row = inlineTableRef.current?.tHead?.rows[0]
-        const actions = inlineActionsRef.current
-        if (!row || !actions) return undefined
-
-        const syncHeight = () => {
-            const height = row.getBoundingClientRect().height
-            if (height > 0) actions.style.height = `${height}px`
-        }
-
-        syncHeight()
-        if (typeof ResizeObserver === 'undefined') return undefined
-        const observer = new ResizeObserver(syncHeight)
-        observer.observe(row)
-        return () => observer.disconnect()
-    }, [children])
-
     const tableProps = { ...rest, className, children }
 
     return (
@@ -1231,7 +1217,7 @@ export function MarkdownTable(props: TableProps) {
                         {children}
                     </table>
                 </div>
-                <div ref={inlineActionsRef} data-hapi-share-export-exclude="true" className="aui-md-table-actions flex items-center">
+                <div data-hapi-share-export-exclude="true" className="aui-md-table-actions flex items-center">
                     <TableActionButton label={t('table.openFullscreen')} onClick={openViewer} variant="ghost">
                         <ExpandIcon className="h-4 w-4" />
                     </TableActionButton>

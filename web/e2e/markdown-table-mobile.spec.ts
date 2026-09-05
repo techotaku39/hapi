@@ -46,6 +46,26 @@ test('mobile markdown table viewer requests landscape and releases orientation c
     await page.setViewportSize({ width: 915, height: 412 })
     const wrapButton = dialog.locator('button[data-hapi-table-wrap-toggle="true"]')
     await expect(wrapButton).toBeVisible()
+    await expect.poll(() => dialog.locator('[data-hapi-table-viewer-heading="true"]').evaluate((element) => getComputedStyle(element).fontSize)).toBe('18px')
+    await expect.poll(() => dialog.locator('[data-hapi-table-viewer-heading="true"]').evaluate((element) => getComputedStyle(element).transform)).toBe('matrix(1, 0, 0, 1, 0, 1)')
+    const mobileToolbarMetrics = await dialog.locator('[data-hapi-table-viewer-toolbar="true"]').evaluate((element) => ({
+        toolbarHeight: Math.round(element.getBoundingClientRect().height),
+        controls: Array.from(element.querySelectorAll('[data-hapi-table-viewer-control="true"]')).map((control) => ({
+            height: Math.round(control.getBoundingClientRect().height),
+            width: Math.round(control.getBoundingClientRect().width),
+            iconHeight: Math.round(control.querySelector('svg')?.getBoundingClientRect().height ?? 0),
+            iconWidth: Math.round(control.querySelector('svg')?.getBoundingClientRect().width ?? 0),
+        })),
+    }))
+    expect(mobileToolbarMetrics).toEqual({
+        toolbarHeight: 36,
+        controls: [
+            { height: 36, width: 36, iconHeight: 20, iconWidth: 20 },
+            { height: 36, width: 36, iconHeight: 20, iconWidth: 20 },
+            { height: 36, width: 36, iconHeight: 20, iconWidth: 20 },
+            { height: 36, width: 36, iconHeight: 20, iconWidth: 20 },
+        ],
+    })
     await expect(wrapButton).toHaveAttribute('aria-pressed', /true|false/)
     await expect(dialog.getByRole('button', { name: 'Copy table as Markdown' })).toBeVisible()
     const downloadButton = dialog.getByRole('button', { name: 'Download table' })
@@ -58,7 +78,7 @@ test('mobile markdown table viewer requests landscape and releases orientation c
         return `${style.paddingLeft}:${style.paddingRight}:${style.paddingTop}:${style.paddingBottom}`
     })).toBe('6px:6px:0px:0px')
     await expect.poll(() => dialog.locator('[data-hapi-table-viewer-toolbar="true"]').evaluate((element) => getComputedStyle(element).columnGap)).toBe('4px')
-    await expect.poll(() => dialog.locator('[data-hapi-table-viewer-heading="true"]').evaluate((element) => getComputedStyle(element).transform)).toBe('none')
+    await expect.poll(() => dialog.locator('[data-hapi-table-viewer-heading="true"]').evaluate((element) => getComputedStyle(element).transform)).toBe('matrix(1, 0, 0, 1, 0, 1)')
     await expect.poll(() => dialog.locator('[data-hapi-table-viewer="true"] thead th').first().evaluate((element) => {
         const thead = element.closest('thead')
         return `${getComputedStyle(thead ?? element).position}:${getComputedStyle(element).position}:${getComputedStyle(element).top}`

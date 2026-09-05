@@ -491,25 +491,38 @@ html:has(.chat-scroll-y) #root {
 
 .aui-md-table-actions {
     position: absolute;
-    top: 0;
-    right: 0.1875rem;
+    top: 3px;
+    right: 3px;
     line-height: normal;
-    min-height: calc(1lh + 1rem);
     align-items: center;
     z-index: 2;
     transition: opacity 150ms ease;
 }
 
-/* Desktop fonts make the Chinese title's visual center sit a pixel lower than
- * the icon row; keep the mobile toolbar unchanged. */
+[data-hapi-table-viewer-heading="true"] {
+    transform: translateY(1px);
+}
+
+/* Desktop fonts use a smaller title while keeping the same optical baseline. */
 @media (hover: hover) and (pointer: fine) {
     [data-hapi-table-viewer-heading="true"] {
-        transform: translateY(-1px);
+        font-size: 1rem;
+        transform: none;
     }
 
     [data-hapi-table-viewer-toolbar="true"] {
         padding-top: 0;
         padding-bottom: 0;
+    }
+
+    [data-hapi-table-viewer-toolbar="true"] [data-hapi-table-viewer-control="true"] {
+        width: 32px;
+        height: 32px;
+    }
+
+    [data-hapi-table-viewer-toolbar="true"] [data-hapi-table-viewer-control="true"] > svg {
+        width: 18px;
+        height: 18px;
     }
 }
 

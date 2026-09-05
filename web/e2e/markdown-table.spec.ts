@@ -23,7 +23,7 @@ test.describe('markdown table actions', () => {
         await expect.poll(() => actions.evaluate((element) => {
             const style = getComputedStyle(element)
             return `${style.top}:${style.right}`
-        })).toBe('0px:3px')
+        })).toBe('3px:3px')
         await expect.poll(() => actions.evaluate((element) => getComputedStyle(element).opacity)).toBe('0')
         await tableFrame.hover()
         await expect.poll(() => actions.evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
@@ -34,14 +34,32 @@ test.describe('markdown table actions', () => {
 
         const viewerHeading = dialog.locator('[data-hapi-table-viewer-heading="true"]')
         await expect(viewerHeading).toHaveText('Table filename fixture')
-        await expect.poll(() => viewerHeading.evaluate((element) => getComputedStyle(element).fontSize)).toBe('18px')
-        await expect.poll(() => viewerHeading.evaluate((element) => getComputedStyle(element).transform)).toBe('matrix(1, 0, 0, 1, 0, -1)')
+        await expect.poll(() => viewerHeading.evaluate((element) => getComputedStyle(element).fontSize)).toBe('16px')
+        await expect.poll(() => viewerHeading.evaluate((element) => getComputedStyle(element).transform)).toBe('none')
         const toolbar = dialog.locator('[data-hapi-table-viewer-toolbar="true"]')
         await expect.poll(() => toolbar.evaluate((element) => getComputedStyle(element).borderBottomWidth)).toBe('0px')
         await expect.poll(() => toolbar.evaluate((element) => `${getComputedStyle(element).paddingLeft}:${getComputedStyle(element).paddingRight}`)).toBe('6px:6px')
         await expect.poll(() => toolbar.evaluate((element) => getComputedStyle(element).columnGap)).toBe('4px')
         await expect.poll(() => toolbar.evaluate((element) => getComputedStyle(element).paddingTop)).toBe('0px')
         await expect.poll(() => toolbar.evaluate((element) => getComputedStyle(element).paddingBottom)).toBe('0px')
+        const desktopToolbarMetrics = await toolbar.evaluate((element) => ({
+            toolbarHeight: Math.round(element.getBoundingClientRect().height),
+            controls: Array.from(element.querySelectorAll('[data-hapi-table-viewer-control="true"]')).map((control) => ({
+                height: Math.round(control.getBoundingClientRect().height),
+                width: Math.round(control.getBoundingClientRect().width),
+                iconHeight: Math.round(control.querySelector('svg')?.getBoundingClientRect().height ?? 0),
+                iconWidth: Math.round(control.querySelector('svg')?.getBoundingClientRect().width ?? 0),
+            })),
+        }))
+        expect(desktopToolbarMetrics).toEqual({
+            toolbarHeight: 32,
+            controls: [
+                { height: 32, width: 32, iconHeight: 18, iconWidth: 18 },
+                { height: 32, width: 32, iconHeight: 18, iconWidth: 18 },
+                { height: 32, width: 32, iconHeight: 18, iconWidth: 18 },
+                { height: 32, width: 32, iconHeight: 18, iconWidth: 18 },
+            ],
+        })
         const toolbarEdges = await toolbar.evaluate((element) => {
             const buttons = element.querySelectorAll('button')
             const first = buttons[0]?.getBoundingClientRect()
@@ -73,7 +91,7 @@ test.describe('markdown table actions', () => {
             const toolbarHeight = (await toolbar.boundingBox())?.height ?? 0
             const headerHeight = await dialog.locator('[data-hapi-table-viewer="true"] thead').evaluate((element) => element.getBoundingClientRect().height)
             return Math.round(toolbarHeight) - Math.round(headerHeight)
-        }).toBe(0)
+        }).toBe(-4)
         const viewerLeftOffset = await dialog.locator('[data-hapi-table-viewer="true"]').evaluate((element) => {
             const table = element.querySelector('table')
             if (!table) return -1
@@ -221,6 +239,33 @@ test.describe('markdown table actions', () => {
 
         expect(filePreviewGeometry).toEqual(chatGeometry)
         expect(filePreviewGeometry.actionHeaderCenterDelta).toBeLessThanOrEqual(2)
+    })
+
+    test('keeps the inline fullscreen action fixed at the table top-right when the header wraps', async ({ page }) => {
+        await page.setViewportSize({ width: 360, height: 900 })
+        await page.goto('/e2e-fixtures/markdown-table-fixture.html')
+
+        const surface = page.locator('[data-testid="markdown-table-fixture"]')
+        const geometry = await surface.evaluate((element) => {
+            const frame = element.querySelector<HTMLElement>('.aui-md-table-frame')
+            const row = frame?.querySelector<HTMLTableRowElement>('thead > tr')
+            const actions = frame?.querySelector<HTMLElement>('.aui-md-table-actions')
+            if (!frame || !row || !actions) throw new Error('Wrapped table geometry is incomplete')
+
+            const frameRect = frame.getBoundingClientRect()
+            const rowRect = row.getBoundingClientRect()
+            const actionRect = actions.getBoundingClientRect()
+            return {
+                headerHeight: Math.round(rowRect.height),
+                actionHeight: Math.round(actionRect.height),
+                topOffset: Math.round(actionRect.top - frameRect.top),
+                rightOffset: Math.round(frameRect.right - actionRect.right),
+            }
+        })
+
+        expect(geometry.headerHeight).toBeGreaterThan(geometry.actionHeight)
+        expect(geometry.topOffset).toBe(3)
+        expect(geometry.rightOffset).toBe(3)
     })
 
     test('defaults an overflowing table to wrapping and remembers an explicit choice', async ({ page }) => {
