@@ -1250,8 +1250,8 @@ export function SessionList(props: {
         [sidebarSessions, selectedSessionId, showActiveSessionsOnly]
     )
     const unreadSessionCount = useMemo(
-        () => getUnreadSessionCount(sidebarSessions),
-        [lastSeenVersion, sidebarSessions]
+        () => getUnreadSessionCount(props.sessions),
+        [lastSeenVersion, props.sessions]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),

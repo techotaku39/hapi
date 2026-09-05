@@ -137,7 +137,7 @@ describe('SessionList mark all as read', () => {
 
     it('marks hidden duplicate session IDs so a dedup winner change stays read', async () => {
         localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
-            visibleWinner: 0,
+            visibleWinner: 2000,
             hiddenDuplicate: 0,
         }))
         const queryClient = new QueryClient({
