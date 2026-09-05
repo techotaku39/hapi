@@ -549,7 +549,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
 
         // Start the browser activation-sensitive request directly from the
         // table button click. The viewer itself is rendered after state updates.
-        void enterMobileTableViewer().then((enteredFullscreen) => {
+        void enterMobileTableViewer(() => previewTableOpenRef.current).then((enteredFullscreen) => {
             if (!previewTableOpenRef.current || previewTableRef.current !== table) {
                 leaveMobileTableViewer(enteredFullscreen)
                 return

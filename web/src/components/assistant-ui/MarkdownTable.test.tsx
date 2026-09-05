@@ -511,6 +511,7 @@ describe('MarkdownTable', () => {
         await waitFor(() => expect(unlock).toHaveBeenCalledTimes(1))
         expect(screen.queryByRole('dialog', { name: 'Table' })).not.toBeInTheDocument()
         resolveLock?.()
+        await waitFor(() => expect(unlock).toHaveBeenCalledTimes(2))
     })
 
     it('cleans up a pending mobile fullscreen request when the table unmounts', async () => {

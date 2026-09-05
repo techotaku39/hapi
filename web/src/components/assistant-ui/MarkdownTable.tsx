@@ -116,6 +116,7 @@ function TableActionMenu(props: {
 }) {
     const [open, setOpen] = useState(false)
     const closeTimerRef = useRef<number | null>(null)
+    const hoverOpenedRef = useRef(false)
 
     const clearCloseTimer = useCallback(() => {
         if (closeTimerRef.current == null) return
@@ -150,8 +151,18 @@ function TableActionMenu(props: {
                         aria-haspopup="menu"
                         aria-expanded={open}
                         onMouseEnter={() => {
+                            hoverOpenedRef.current = true
                             clearCloseTimer()
                             setOpen(true)
+                        }}
+                        onPointerDown={(event) => {
+                            if (!hoverOpenedRef.current) return
+
+                            hoverOpenedRef.current = false
+                            if (!open || event.button !== 0 || event.ctrlKey) return
+
+                            event.currentTarget.focus()
+                            event.preventDefault()
                         }}
                         className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                     >
@@ -176,6 +187,7 @@ function TableActionMenu(props: {
                                     role="menuitem"
                                     disabled={item.disabled}
                                     onClick={() => {
+                                        hoverOpenedRef.current = false
                                         setOpen(false)
                                         item.onSelect()
                                     }}
@@ -723,7 +735,7 @@ export function copyTableImagePromiseToClipboard(imagePromise: Promise<Blob>): P
  * Mobile browsers generally only honor orientation locks from fullscreen.
  * Keep this best-effort so unsupported browsers still get the full table view.
  */
-export async function enterMobileTableViewer(): Promise<boolean> {
+export async function enterMobileTableViewer(isViewerOpen?: () => boolean): Promise<boolean> {
     if (typeof document === 'undefined') return false
 
     let enteredFullscreen = false
@@ -742,7 +754,16 @@ export async function enterMobileTableViewer(): Promise<boolean> {
         : undefined
     if (orientation && typeof orientation.lock === 'function') {
         try {
-            void orientation.lock('landscape').catch(() => undefined)
+            void orientation.lock('landscape').then(() => {
+                const viewerStillOpen = isViewerOpen?.() ?? false
+                if (enteredFullscreen && !document.fullscreenElement && !viewerStillOpen) {
+                    try {
+                        orientation.unlock?.()
+                    } catch {
+                        // Ignore browsers that reject unlock after an interrupted rotation.
+                    }
+                }
+            }).catch(() => undefined)
         } catch {
             // Orientation lock is unavailable on some browsers and iOS versions.
         }
@@ -1164,7 +1185,7 @@ export function MarkdownTable(props: TableProps) {
         mobileViewerRef.current = isMobile
         if (!isMobile) return
 
-        void enterMobileTableViewer().then((enteredFullscreen) => {
+        void enterMobileTableViewer(() => openRef.current).then((enteredFullscreen) => {
             if (!openRef.current) {
                 leaveMobileTableViewer(enteredFullscreen)
                 return

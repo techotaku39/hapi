@@ -119,7 +119,7 @@ test.describe('markdown table actions', () => {
         await expect.poll(() => page.evaluate(() => (window as Window & { __hapiCopiedTableMarkdown?: string }).__hapiCopiedTableMarkdown ?? '')).toContain('| Project | Stars |')
 
         const imageDownloadPromise = page.waitForEvent('download')
-        await dialog.getByRole('button', { name: 'Download table' }).hover()
+        await dialog.getByRole('button', { name: 'Download table' }).click()
         await expect(page.getByRole('menuitem', { name: 'Download PNG' })).toBeVisible()
         await expect(page.getByRole('menuitem', { name: 'Download CSV' })).toBeVisible()
         await page.getByRole('menuitem', { name: 'Download PNG' }).click()
@@ -154,7 +154,7 @@ test.describe('markdown table actions', () => {
         expect(exportedHeight).toBe(Math.ceil(tableExportMetrics.height * scale))
 
         const downloadPromise = page.waitForEvent('download')
-        await dialog.getByRole('button', { name: 'Download table' }).hover()
+        await dialog.getByRole('button', { name: 'Download table' }).click()
         await expect(page.getByRole('menuitem', { name: 'Download CSV' })).toBeVisible()
         await page.getByRole('menuitem', { name: 'Download CSV' }).click()
         const download = await downloadPromise
@@ -173,7 +173,7 @@ test.describe('markdown table actions', () => {
         await expect(dialog).toBeVisible()
 
         const measureMenu = async (triggerName: string) => {
-            await dialog.getByRole('button', { name: triggerName }).hover()
+            await dialog.getByRole('button', { name: triggerName }).click()
             const menu = page.getByRole('menu', { name: triggerName })
             await expect(menu).toBeVisible()
             return menu.evaluate((element) => {
