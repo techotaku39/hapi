@@ -35,6 +35,7 @@ import type {
 } from '@/types/api'
 import type {
     AgyModelsResponse,
+    AgentAvailabilityResponse,
     CodexModelsResponse,
     CursorMigrateOutcome,
     CursorMigrateToAcpRequest,
@@ -849,6 +850,12 @@ export class ApiClient {
                 method: 'POST',
                 body: JSON.stringify({ path, includeHidden: options?.includeHidden === true })
             }
+        )
+    }
+
+    async getMachineAgentAvailability(machineId: string): Promise<AgentAvailabilityResponse> {
+        return await this.request<AgentAvailabilityResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/agent-availability`
         )
     }
 

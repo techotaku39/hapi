@@ -48,7 +48,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 28
+const SCHEMA_VERSION: number = 29
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -359,6 +359,7 @@ export class Store {
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
             27: () => this.migrateFromV27ToV28(),
+            28: () => this.migrateFromV28ToV29(),
         })
 
         if (currentVersion === 0) {
@@ -468,6 +469,12 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
                 ON messages(scheduled_at)
                 WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
+                ON messages(session_id, seq)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
                 session_id TEXT PRIMARY KEY,
@@ -990,6 +997,18 @@ export class Store {
         }
     }
 
+    /** v25→v26: make empty immediate-queue heartbeat replay an indexed lookup. */
+    private migrateFromV25ToV26(): void {
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
+                ON messages(session_id, seq)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+        `)
+    }
+
     /**
      * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
      * Namespace + principal_json required on every events row.
@@ -1049,20 +1068,20 @@ export class Store {
     }
 
     /** Derived FTS index for opt-in session message-content search. */
-    private migrateFromV25ToV26(): void {
+    private migrateFromV26ToV27(): void {
         createMessageContentSearchTable(this.db)
         if (this.getMessageColumnNames().size === 0) return
         rebuildMessageContentSearch(this.db)
     }
 
-    /** Complete the derived message-content index lookup added after v26. */
-    private migrateFromV26ToV27(): void {
+    /** Complete the derived message-content index lookup added after v27. */
+    private migrateFromV27ToV28(): void {
         createMessageContentSearchTable(this.db)
         backfillMessageContentSearchLookup(this.db)
     }
 
     /** Add the indexed short-query n-gram table to the message-content index. */
-    private migrateFromV27ToV28(): void {
+    private migrateFromV28ToV29(): void {
         createMessageContentSearchTable(this.db)
         backfillMessageContentSearchShortIndex(this.db)
     }

@@ -14,7 +14,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migrations through v28', () => {
+describe('schema migrations through v29', () => {
     it('adds events and event_links tables to a V22 database', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v23-'))
         tempDirs.push(dir)
@@ -44,13 +44,13 @@ describe('schema migrations through v28', () => {
             expect(links?.name).toBe('event_links')
             const columns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
             expect(columns.map((column) => column.name)).toContain('delivery_state')
-            expect(version.user_version).toBe(28)
+            expect(version.user_version).toBe(29)
         } finally {
             migrated.close()
         }
     })
 
-    it('creates and backfills the message content search index', () => {
+    it('creates and backfills the message content search index after the v26 schema', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
@@ -68,7 +68,7 @@ describe('schema migrations through v28', () => {
             DROP TABLE IF EXISTS message_content_search;
             DROP TABLE IF EXISTS message_content_search_lookup;
             DROP TABLE IF EXISTS message_content_search_short;
-            PRAGMA user_version = 25;
+            PRAGMA user_version = 26;
         `)
         legacy.close()
 
@@ -77,13 +77,13 @@ describe('schema migrations through v28', () => {
             expect(migrated.messages.searchContent('backfill this', 'default')[0]?.sessionId).toBe(session.id)
             const internalDb = (migrated as unknown as { db: Database }).db
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-            expect(version.user_version).toBe(28)
+            expect(version.user_version).toBe(29)
         } finally {
             migrated.close()
         }
     })
 
-    it('adds the indexed message lookup to an existing v26 search schema', () => {
+    it('adds the indexed message lookup to an existing v27 search schema', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v27-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
@@ -100,7 +100,7 @@ describe('schema migrations through v28', () => {
         legacy.exec(`
             DROP TABLE IF EXISTS message_content_search_lookup;
             DROP TABLE IF EXISTS message_content_search_short;
-            PRAGMA user_version = 26;
+            PRAGMA user_version = 27;
         `)
         legacy.close()
 
@@ -113,13 +113,13 @@ describe('schema migrations through v28', () => {
             ).get() as { name: string } | null
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
             expect(lookup?.name).toBe('message_content_search_lookup')
-            expect(version.user_version).toBe(28)
+            expect(version.user_version).toBe(29)
         } finally {
             migrated.close()
         }
     })
 
-    it('backfills indexed short-query grams for an existing v27 search schema', () => {
+    it('backfills indexed short-query grams for an existing v28 search schema', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v28-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
@@ -148,7 +148,7 @@ describe('schema migrations through v28', () => {
             INSERT INTO message_content_search_lookup (search_rowid, message_id)
             SELECT rowid, message_id FROM message_content_search;
             DROP TABLE IF EXISTS message_content_search_short;
-            PRAGMA user_version = 27;
+            PRAGMA user_version = 28;
         `)
         legacy.close()
 
@@ -176,7 +176,7 @@ describe('schema migrations through v28', () => {
             expect(target?.target_message_id).toBe(message.id)
             expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
             expect(indexed?.searchable_text).toContain('tail-migration-needle')
-            expect(version.user_version).toBe(28)
+            expect(version.user_version).toBe(29)
         } finally {
             migrated.close()
         }
