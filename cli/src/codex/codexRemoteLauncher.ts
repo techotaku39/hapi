@@ -3621,11 +3621,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 ? session.client.getMetadata()?.conversationHistoryTurns
                 : undefined
         )
+        const hadStaleHistory = Boolean(
+            session.client.getMetadata()?.capabilities?.conversationHistory
+        )
         // Session reactivation preserves the last published history capabilities,
         // but this launcher starts without a live in-memory native thread. Hide
         // history actions until the first resume/turn probes the current runtime.
         await publishConversationHistoryCapabilities()
-        if (!await session.client.flushMetadata()) {
+        if (hadStaleHistory && !await session.client.flushMetadata()) {
             throw new Error('Unable to clear stale conversation-history capabilities')
         }
         session.client.rpcHandlerManager.registerHandler(RPC_METHODS.ForkConversation, async (payload: unknown) => {

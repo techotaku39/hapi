@@ -148,6 +148,7 @@ describe('runCodex', () => {
         expect(harness.bootstrapArgs[0]).toEqual(expect.objectContaining({
             sessionId: 'hapi-session-1',
             workingDirectory: '/tmp/project',
+            requireMetadataFlush: true,
             metadataOverrides: {
                 capabilities: {
                     terminal: true,

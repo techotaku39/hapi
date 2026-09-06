@@ -1123,6 +1123,7 @@ function createMode(): EnhancedMode {
 
 type SessionStubOptions = {
     deferMetadataUpdates?: boolean;
+    flushMetadataResult?: boolean;
 };
 
 function createSessionStub(
@@ -1166,6 +1167,7 @@ function createSessionStub(
     let pendingMetadata: Record<string, unknown> | null = null;
     let resolveMetadataFlushStarted: (() => void) | null = null;
     let releaseMetadataFlush: (() => void) | null = null;
+    let metadataFlushCalls = 0;
     const metadataFlushStarted = options.deferMetadataUpdates
         ? new Promise<void>((resolve) => {
             resolveMetadataFlushStarted = resolve;
@@ -1193,8 +1195,9 @@ function createSessionStub(
             }
         },
         async flushMetadata() {
+            metadataFlushCalls += 1;
             if (!options.deferMetadataUpdates) {
-                return true;
+                return options.flushMetadataResult ?? true;
             }
             resolveMetadataFlushStarted?.();
             resolveMetadataFlushStarted = null;
@@ -1205,7 +1208,7 @@ function createSessionStub(
                 metadata = pendingMetadata;
                 pendingMetadata = null;
             }
-            return true;
+            return options.flushMetadataResult ?? true;
         },
         updateAgentState(handler: (state: FakeAgentState) => FakeAgentState) {
             agentState = handler(agentState);
@@ -1289,6 +1292,7 @@ function createSessionStub(
         metadataUpdates,
         metadataFlushStarted,
         releaseMetadataFlush: () => releaseMetadataFlush?.(),
+        metadataFlushCalls: () => metadataFlushCalls,
         emitMessagesConsumed: client.emitMessagesConsumed,
         emitSteerIndeterminate: client.emitSteerIndeterminate,
         setPermissionMode: (nextMode: EnhancedMode['permissionMode']) => {
@@ -1559,6 +1563,23 @@ describe('codexRemoteLauncher', () => {
             capabilities: { otherCapability: true }
         });
         expect(getMetadata().capabilities).not.toHaveProperty('conversationHistory');
+    });
+
+    it('does not require a metadata flush when no stale history capabilities exist', async () => {
+        const { session, rpcHandlers, metadataFlushCalls } = createSessionStub(
+            [],
+            createMode(),
+            false,
+            true,
+            {},
+            { flushMetadataResult: false }
+        );
+
+        await codexRemoteLauncher(session as never);
+
+        expect(metadataFlushCalls()).toBe(0);
+        expect(rpcHandlers.has(RPC_METHODS.ForkConversation)).toBe(true);
+        expect(rpcHandlers.has(RPC_METHODS.RewindConversation)).toBe(true);
     });
 
     it('waits for stale history capability removal to persist before registering history RPC handlers', async () => {

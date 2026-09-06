@@ -50,6 +50,7 @@ export async function runCodex(opts: {
             flavor: 'codex',
             startedBy,
             workingDirectory,
+            requireMetadataFlush: true,
             metadataOverrides: {
                 capabilities: {
                     terminal: true,

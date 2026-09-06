@@ -124,6 +124,7 @@ describe('bootstrapExistingSession', () => {
         expect(result.workingDirectory).toBe('/tmp/project')
         expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
         expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
+        expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
             'hapi-session-1',
             expect.objectContaining({
@@ -279,7 +280,8 @@ describe('bootstrapExistingSession', () => {
                     terminal: true,
                     conversationHistory: undefined
                 }
-            }
+            },
+            requireMetadataFlush: true
         })
         await metadataFlushStarted
         expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
