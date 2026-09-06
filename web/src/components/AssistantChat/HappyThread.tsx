@@ -1019,6 +1019,13 @@ export function HappyThread(props: {
         let wheelIntentUntil = 0
         let wheelLatched = false
 
+        const cancelSearchRecentering = () => {
+            for (const timer of searchTargetScrollTimersRef.current) {
+                window.clearTimeout(timer)
+            }
+            searchTargetScrollTimersRef.current = []
+        }
+
         const hasExplicitUpwardIntent = (intent: ScrollIntent): boolean => {
             return intent.isScrollingUp && (
                 pointerResumeActive
@@ -1161,6 +1168,7 @@ export function HappyThread(props: {
             ) {
                 return
             }
+            cancelSearchRecentering()
             keyboardResumeUntil = Date.now() + KEYBOARD_SCROLL_INTENT_WINDOW_MS
             if (needsViewportCoverageRef.current()) {
                 keyboardResumeUntil = 0
@@ -1178,6 +1186,7 @@ export function HappyThread(props: {
             if (isNestedScrollEvent(event) || event.button !== 0) {
                 return
             }
+            cancelSearchRecentering()
             armPointerIntent()
         }
 
@@ -1195,6 +1204,7 @@ export function HappyThread(props: {
         const handleWindowPointerDown = (event: PointerEvent) => {
             if (isNestedScrollEvent(event)) return
             if (event.button === 0 && isInsideViewport(event.clientX, event.clientY)) {
+                cancelSearchRecentering()
                 armPointerIntent()
             }
         }
@@ -1202,6 +1212,7 @@ export function HappyThread(props: {
         const handleWindowMouseDown = (event: MouseEvent) => {
             if (isNestedScrollEvent(event)) return
             if (event.button === 0 && isInsideViewport(event.clientX, event.clientY)) {
+                cancelSearchRecentering()
                 armPointerIntent()
             }
         }
@@ -1229,6 +1240,7 @@ export function HappyThread(props: {
 
         const handleWheel = (event: WheelEvent) => {
             if (isNestedScrollEvent(event)) return
+            cancelSearchRecentering()
             if (event.deltaY >= 0) {
                 wheelIntentUntil = 0
                 return
@@ -1252,6 +1264,7 @@ export function HappyThread(props: {
 
         const handleTouchStart = (event: TouchEvent) => {
             if (isNestedScrollEvent(event)) return
+            cancelSearchRecentering()
             updatePullToLoadState('idle')
             pullStartY = (
                 viewport.scrollTop <= 0

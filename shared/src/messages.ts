@@ -202,19 +202,29 @@ function normalizeSearchablePlainText(value: string): string | null {
     return text.length > 0 ? text : null
 }
 
-function normalizeSearchableMarkdownText(value: string): string | null {
-    try {
-        return normalizeSearchablePlainText(toString(fromMarkdown(value)))
-    } catch {
-        // Keep indexing malformed/incomplete streamed Markdown rather than
-        // dropping otherwise visible assistant text.
-        return normalizeSearchablePlainText(value)
-    }
+function normalizeSearchableMarkdownText(value: string, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
+    const chunks = Number.isFinite(maxSourceCharacters) && value.length > maxSourceCharacters
+        ? (() => {
+            const headCharacters = Math.max(1, Math.floor((maxSourceCharacters - 1) / 2))
+            const tailCharacters = Math.max(1, maxSourceCharacters - headCharacters - 1)
+            return [value.slice(0, headCharacters), value.slice(-tailCharacters)]
+        })()
+        : [value]
+    const rendered = chunks.map((chunk) => {
+        try {
+            return toString(fromMarkdown(chunk))
+        } catch {
+            // Keep indexing malformed/incomplete streamed Markdown rather than
+            // dropping otherwise visible assistant text.
+            return chunk
+        }
+    }).join(' ')
+    return normalizeSearchablePlainText(rendered)
 }
 
-export function extractUserPlainText(content: unknown): string | null {
+export function extractUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
     if (typeof content === 'string') {
-        return normalizeSearchableMarkdownText(content)
+        return normalizeSearchableMarkdownText(content, maxSourceCharacters)
     }
 
     const blocks = Array.isArray(content) ? content : [content]
@@ -227,10 +237,10 @@ export function extractUserPlainText(content: unknown): string | null {
         })
         .filter((text): text is string => text !== null)
 
-    return normalizeSearchableMarkdownText(textParts.join(' '))
+    return normalizeSearchableMarkdownText(textParts.join(' '), maxSourceCharacters)
 }
 
-function extractClaudeUserPlainText(content: unknown): string | null {
+function extractClaudeUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
     if (!isObject(content) || content.type !== 'output') return null
     const data = isObject(content.data) ? content.data : null
     if (!data || data.type !== 'user' || Boolean(data.isSidechain)) return null
@@ -241,11 +251,12 @@ function extractClaudeUserPlainText(content: unknown): string | null {
         isObject(block) && block.type === 'text' && typeof block.text === 'string'
     ))) return null
 
-    return extractUserPlainText(blocks)
+    return extractUserPlainText(blocks, maxSourceCharacters)
 }
 
 export type SearchableMessageContext = {
     injectedTurnUuids?: ReadonlySet<string>
+    maxSourceCharacters?: number
 }
 
 /** Return the Claude UUID that identifies a system-injected user turn. */
@@ -386,13 +397,13 @@ export function extractSearchableMessageText(
     if (!record) return null
 
     if (record.role === 'user') {
-        const text = extractUserPlainText(record.content)
+        const text = extractUserPlainText(record.content, context?.maxSourceCharacters)
         return text ? { role: 'user', text } : null
     }
 
     if (record.role === 'agent' || record.role === 'assistant') {
         if (isHiddenAssistantOutput(record.content)) return null
-        const claudeUserText = extractClaudeUserPlainText(record.content)
+        const claudeUserText = extractClaudeUserPlainText(record.content, context?.maxSourceCharacters)
         if (claudeUserText) return { role: 'user', text: claudeUserText }
         const renderKey = getMessageRenderKey(record.content)
         const isAgyPlannerMessage = isObject(record.content)
@@ -411,7 +422,7 @@ export function extractSearchableMessageText(
                 ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
                 : (directText ?? extractSearchableAssistantPlainText(record.content, context) ?? '')
         )
-        const text = normalizeSearchableMarkdownText(rawText)
+        const text = normalizeSearchableMarkdownText(rawText, context?.maxSourceCharacters)
         if (!text || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null
         return { role: 'assistant', text, ...(renderKey ? { renderKey } : {}) }
     }

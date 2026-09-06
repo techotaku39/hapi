@@ -80,19 +80,33 @@ type DbSearchLookupRow = {
 const NO_RESPONSE_REQUESTED_TEXTS = new Set(['No response requested.', 'No response requested'])
 
 function getInjectedTurnUuidsForSessions(db: Database, sessionIds?: readonly string[]): ReadonlySet<string> {
-    const rows = sessionIds === undefined
-        ? db.prepare('SELECT content FROM messages').all() as Array<{ content: string | Uint8Array }>
-        : sessionIds.length === 0
-            ? []
-            : db.prepare(`
-                SELECT content
-                FROM messages
-                WHERE session_id IN (${sessionIds.map(() => '?').join(', ')})
-            `).all(...sessionIds) as Array<{ content: string | Uint8Array }>
     const injectedTurnUuids = new Set<string>()
-    for (const row of rows) {
-        const uuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
-        if (uuid) injectedTurnUuids.add(uuid)
+    if (sessionIds?.length === 0) return injectedTurnUuids
+
+    const scope = sessionIds === undefined
+        ? ''
+        : `AND session_id IN (${sessionIds.map(() => '?').join(', ')})`
+    const select = db.prepare(`
+        SELECT rowid AS row_id, content
+        FROM messages
+        WHERE rowid > ? ${scope}
+        ORDER BY rowid ASC
+        LIMIT ?
+    `)
+    let afterRowId = 0
+    while (true) {
+        const rows = (sessionIds === undefined
+            ? select.all(afterRowId, SEARCH_REBUILD_BATCH_SIZE)
+            : select.all(afterRowId, ...sessionIds, SEARCH_REBUILD_BATCH_SIZE)) as Array<{
+                row_id: number
+                content: string | Uint8Array
+            }>
+        if (rows.length === 0) break
+        for (const row of rows) {
+            const uuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
+            if (uuid) injectedTurnUuids.add(uuid)
+        }
+        afterRowId = rows[rows.length - 1]!.row_id
     }
     return injectedTurnUuids
 }
@@ -371,12 +385,14 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
     if (searchKey !== message.id) removeMessageContentSearchIndexByKey(db, searchKey)
     if (message.invokedAt === null) return
 
-    const initialSearchable = extractSearchableMessageText(message.content)
+    const maxSourceCharacters = MAX_INDEXED_MESSAGE_CHARACTERS
+    const initialSearchable = extractSearchableMessageText(message.content, { maxSourceCharacters })
     const parentUuid = extractAssistantParentUuid(message.content)
     const searchable = parentUuid
         && initialSearchable?.role === 'assistant'
         && NO_RESPONSE_REQUESTED_TEXTS.has(initialSearchable.text.trim())
         ? extractSearchableMessageText(message.content, {
+            maxSourceCharacters,
             injectedTurnUuids: getInjectedTurnUuidsForSessions(db, [message.sessionId])
         })
         : initialSearchable
@@ -487,7 +503,10 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
             const searchKey = renderKey ? `${row.session_id}:${renderKey}` : row.id
             removeMessageContentSearchIndex(db, row.id)
             if (searchKey !== row.id) removeMessageContentSearchIndexByKey(db, searchKey)
-            const searchable = extractSearchableMessageText(decodedContent, { injectedTurnUuids })
+            const searchable = extractSearchableMessageText(decodedContent, {
+                injectedTurnUuids,
+                maxSourceCharacters: MAX_INDEXED_MESSAGE_CHARACTERS
+            })
             if (!searchable) continue
             const searchableText = boundSearchableText(searchable.text)
             insertLookup.run(searchKey, row.id)
