@@ -459,6 +459,12 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
                 ON messages(scheduled_at)
                 WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
+                ON messages(session_id, seq)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
                 session_id TEXT PRIMARY KEY,
@@ -1038,12 +1044,19 @@ export class Store {
         `)
     }
 
-    /**
-     * Add the durable assistant reply clock after the upstream v25 schema.
-     * Existing rows start unchecked so startup can backfill them incrementally;
-     * new rows opt into the write-through path immediately.
-     */
+    /** v25→v26: add the immediate-queue index and durable assistant reply clock. */
     private migrateFromV25ToV26(): void {
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
+                ON messages(session_id, seq)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+        `)
+
+        // Existing rows start unchecked so startup can backfill them
+        // incrementally; new rows opt into the write-through path immediately.
         const columns = this.getSessionColumnNames()
         if (columns.size === 0) return
         if (!columns.has('last_assistant_message_at')) {
