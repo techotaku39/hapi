@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v23 to v26', () => {
+describe('schema migration v23 to v27', () => {
     it('adds the durable attachments table when upgrading a V25 database', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
         tempDirs.push(dir)
@@ -34,7 +34,7 @@ describe('schema migration v23 to v26', () => {
 
         expect(table?.name).toBe('attachments')
         expect(columns.map((column) => column.name)).not.toContain('thumbnail_path')
-        expect(version.user_version).toBe(26)
+        expect(version.user_version).toBe(27)
         migrated.close()
     })
 
@@ -61,7 +61,7 @@ describe('schema migration v23 to v26', () => {
         expect(columns.some((col) => col.name === 'push_key')).toBe(true)
         const messageColumns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
         expect(messageColumns.some((col) => col.name === 'delivery_state')).toBe(true)
-        expect(version.user_version).toBe(26)
+        expect(version.user_version).toBe(27)
 
         // Existing Android rows survive with a NULL push key.
         const devices = migrated.fcm.getDevicesByNamespace('default')
@@ -102,7 +102,7 @@ describe('schema migration v23 to v26', () => {
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attachments'"
         ).get() as { name: string } | null
         expect(attachmentTable?.name).toBe('attachments')
-        expect(version.user_version).toBe(26)
+        expect(version.user_version).toBe(27)
         migrated.close()
     })
 })
