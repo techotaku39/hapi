@@ -54,7 +54,8 @@ const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 const MIN_INDEXED_QUERY_LENGTH = 2
 export const MAX_INDEXED_MESSAGE_CHARACTERS = 16_384
-export const MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE = 4_096
+export const MAX_SHORT_SEARCH_TEXT_CHARACTERS = 2_048
+export const MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE = MAX_SHORT_SEARCH_TEXT_CHARACTERS - 1
 const INDEXED_TEXT_SEPARATOR = ' '
 const INDEXED_TEXT_HEAD_CHARACTERS = Math.floor(
     (MAX_INDEXED_MESSAGE_CHARACTERS - INDEXED_TEXT_SEPARATOR.length) / 2
@@ -153,32 +154,25 @@ function getShortSearchGrams(text: string): string[] {
     const characters = Array.from(text.toLocaleLowerCase())
     const grams = new Set<string>()
 
-    // Two-character queries are backed by a bounded index. Alternate from
-    // both ends so the head/tail text retained by boundSearchableText remains
-    // discoverable without allowing one message to issue thousands of writes.
-    let head = 0
-    let tail = characters.length - 2
-    while (head <= tail && grams.size < MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE) {
-        grams.add(`${characters[head]!}${characters[head + 1]!}`)
-        if (tail !== head && grams.size < MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE) {
-            grams.add(`${characters[tail]!}${characters[tail + 1]!}`)
-        }
-        head += 1
-        tail -= 1
+    for (let index = 0; index + 1 < characters.length; index += 1) {
+        if (grams.size >= MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE) break
+        grams.add(`${characters[index]!}${characters[index + 1]!}`)
     }
 
     return [...grams]
 }
 
-function boundSearchableText(text: string): string {
-    if (text.length <= MAX_INDEXED_MESSAGE_CHARACTERS) return text
+function boundSearchableText(text: string, maxCharacters = MAX_INDEXED_MESSAGE_CHARACTERS): string {
+    if (text.length <= maxCharacters) return text
 
     // Slice before converting to code points so a very large message cannot
     // allocate an Array for its entire contents just to index its head and
     // tail. The cap is intentionally expressed in UTF-16 code units to keep
     // this work bounded even for messages containing only astral characters.
-    let head = text.slice(0, INDEXED_TEXT_HEAD_CHARACTERS)
-    let tail = text.slice(text.length - INDEXED_TEXT_TAIL_CHARACTERS)
+    const headCharacters = Math.floor((maxCharacters - INDEXED_TEXT_SEPARATOR.length) / 2)
+    const tailCharacters = maxCharacters - INDEXED_TEXT_SEPARATOR.length - headCharacters
+    let head = text.slice(0, headCharacters)
+    let tail = text.slice(text.length - tailCharacters)
     const headLastCodeUnit = head.charCodeAt(head.length - 1)
     if (headLastCodeUnit >= 0xd800 && headLastCodeUnit <= 0xdbff) {
         head = head.slice(0, -1)
@@ -188,6 +182,10 @@ function boundSearchableText(text: string): string {
         tail = tail.slice(1)
     }
     return `${head}${INDEXED_TEXT_SEPARATOR}${tail}`
+}
+
+function getShortSearchText(text: string): string {
+    return boundSearchableText(text, MAX_SHORT_SEARCH_TEXT_CHARACTERS)
 }
 
 export function backfillMessageContentSearchShortIndex(db: Database): void {
@@ -209,9 +207,9 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
             ORDER BY rowid ASC
             LIMIT ?
         `)
-        const insert = db.prepare(`
+        const insertShortGrams = db.prepare(`
             INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
-            VALUES (?, ?)
+            SELECT value, ? FROM json_each(?)
         `)
         const clearRow = db.prepare(`
             DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE}
@@ -246,9 +244,10 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
                     || searchableText !== row.searchable_text) {
                     updateSearchableText.run(searchableText, row.search_rowid)
                 }
-                for (const gram of getShortSearchGrams(searchableText)) {
-                    insert.run(gram, row.search_rowid)
-                }
+                insertShortGrams.run(
+                    row.search_rowid,
+                    JSON.stringify(getShortSearchGrams(getShortSearchText(searchableText)))
+                )
             }
             afterRowId = rows[rows.length - 1]!.search_rowid
         }
@@ -380,13 +379,14 @@ function insertMessageContentSearchIndex(
         message.createdAt,
         message.role
     )
-    const insertShortGram = db.prepare(`
-        INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
-        VALUES (?, ?)
+    const insertShortGrams = db.prepare(`
+        INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+        SELECT value, ? FROM json_each(?)
     `)
-    for (const gram of getShortSearchGrams(searchableText)) {
-        insertShortGram.run(gram, lookup.search_rowid)
-    }
+    insertShortGrams.run(
+        lookup.search_rowid,
+        JSON.stringify(getShortSearchGrams(getShortSearchText(searchableText)))
+    )
 }
 
 export function indexMessageContent(db: Database, message: IndexableMessage): void {
@@ -474,6 +474,10 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
             rowid, searchable_text, message_id, session_id, seq, created_at, role
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
+    const insertShortGrams = db.prepare(`
+        INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+        SELECT value, ? FROM json_each(?)
+    `)
 
     let selectBatch: ReturnType<Database['prepare']>
     if (sessionIds) {
@@ -537,13 +541,10 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
                 row.created_at,
                 searchable.role
             )
-            const insertShortGram = db.prepare(`
-                INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
-                VALUES (?, ?)
-            `)
-            for (const gram of getShortSearchGrams(searchableText)) {
-                insertShortGram.run(gram, lookup.search_rowid)
-            }
+            insertShortGrams.run(
+                lookup.search_rowid,
+                JSON.stringify(getShortSearchGrams(getShortSearchText(searchableText)))
+            )
         }
 
         afterRowId = rows[rows.length - 1]!.row_id
