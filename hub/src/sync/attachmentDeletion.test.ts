@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, existsSync } from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -313,6 +313,51 @@ describe('SyncEngine.deleteAttachment', () => {
                 releaseUnlink()
             }
         } finally {
+            engine.stop()
+            store.close()
+        }
+    })
+})
+
+describe('SyncEngine.createAttachment', () => {
+    it('reclaims an upload that finishes after its session was deleted', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-upload-delete-race-'))
+        tempDirs.push(root)
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const engine = createEngine(store)
+        let releaseCreate!: () => void
+        let notifyCreateStarted!: () => void
+        const createGate = new Promise<void>((resolve) => { releaseCreate = resolve })
+        const createStarted = new Promise<void>((resolve) => { notifyCreateStarted = resolve })
+        const originalCreate = store.attachments.create.bind(store.attachments)
+        spyOn(store.attachments, 'create').mockImplementation(async (...args) => {
+            notifyCreateStarted()
+            await createGate
+            return await originalCreate(...args)
+        })
+        try {
+            const session = engine.getOrCreateSession(
+                'attachment-upload-delete-race',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const uploading = engine.createAttachment(
+                session.id,
+                'default',
+                'photo.png',
+                Buffer.from('original').toString('base64'),
+                'image/png'
+            )
+            await createStarted
+            expect(store.sessions.deleteSession(session.id, 'default')).toBe(true)
+            releaseCreate()
+
+            await expect(uploading).rejects.toThrow('Session was deleted while uploading')
+            expect(store.sessions.getSessionByNamespace(session.id, 'default')).toBeNull()
+            expect(readdirSync(join(root, 'attachments')).filter((name) => name.endsWith('.original'))).toEqual([])
+        } finally {
+            releaseCreate?.()
             engine.stop()
             store.close()
         }
