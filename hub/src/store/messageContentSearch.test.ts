@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite'
 import { Store } from './index'
 import {
     MAX_INDEXED_MESSAGE_CHARACTERS,
+    MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE,
     removeMessageContentSearchForSessions
 } from './messageContentSearch'
 
@@ -225,7 +226,7 @@ describe('message content search', () => {
 
         expect(indexedText.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
         expect(indexedText.searchable_text).toContain('tail-search-needle')
-        expect(Number(count.count)).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS - 1)
+        expect(Number(count.count)).toBeLessThanOrEqual(MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE)
         expect(store.messages.searchContent('tail-search-needle', 'default'))
             .toMatchObject([{ sessionId: session.id }])
     })

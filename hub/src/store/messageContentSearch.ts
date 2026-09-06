@@ -54,6 +54,7 @@ const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 const MIN_INDEXED_QUERY_LENGTH = 2
 export const MAX_INDEXED_MESSAGE_CHARACTERS = 16_384
+export const MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE = 4_096
 const INDEXED_TEXT_SEPARATOR = ' '
 const INDEXED_TEXT_HEAD_CHARACTERS = Math.floor(
     (MAX_INDEXED_MESSAGE_CHARACTERS - INDEXED_TEXT_SEPARATOR.length) / 2
@@ -152,8 +153,18 @@ function getShortSearchGrams(text: string): string[] {
     const characters = Array.from(text.toLocaleLowerCase())
     const grams = new Set<string>()
 
-    for (let index = 0; index + 1 < characters.length; index += 1) {
-        grams.add(`${characters[index]!}${characters[index + 1]!}`)
+    // Two-character queries are backed by a bounded index. Alternate from
+    // both ends so the head/tail text retained by boundSearchableText remains
+    // discoverable without allowing one message to issue thousands of writes.
+    let head = 0
+    let tail = characters.length - 2
+    while (head <= tail && grams.size < MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE) {
+        grams.add(`${characters[head]!}${characters[head + 1]!}`)
+        if (tail !== head && grams.size < MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE) {
+            grams.add(`${characters[tail]!}${characters[tail + 1]!}`)
+        }
+        head += 1
+        tail -= 1
     }
 
     return [...grams]
@@ -183,8 +194,8 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
     db.transaction(() => {
         ensureMessageContentSearchTable(db)
         // A failed pre-v28 startup may have left a partially populated short
-        // index behind. Remove obsolete unigram rows while preserving any
-        // completed bigrams so a retry can resume without a full reset.
+        // index behind. Remove obsolete unigram rows, then rebuild each row's
+        // grams so a retry cannot retain entries outside the current cap.
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} WHERE length(gram) < 2`)
         const select = db.prepare(`
             SELECT rowid AS search_rowid,
@@ -201,6 +212,10 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
         const insert = db.prepare(`
             INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
             VALUES (?, ?)
+        `)
+        const clearRow = db.prepare(`
+            DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE}
+            WHERE search_rowid = ?
         `)
         const updateSearchableText = db.prepare(`
             UPDATE ${MESSAGE_CONTENT_SEARCH_TABLE}
@@ -225,6 +240,7 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
             if (rows.length === 0) break
 
             for (const row of rows) {
+                clearRow.run(row.search_rowid)
                 const searchableText = boundSearchableText(row.searchable_text)
                 if (row.searchable_text_length > MAX_INDEXED_MESSAGE_CHARACTERS
                     || searchableText !== row.searchable_text) {

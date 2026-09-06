@@ -74,10 +74,14 @@ export function findConversationMessageTextRange(anchor: HTMLElement, query: str
             if (/\s/.test(character)) {
                 if (normalizedText.endsWith(' ')) continue
                 normalizedText += ' '
+                positions.push({ node, offset })
             } else {
-                normalizedText += character.toLocaleLowerCase()
+                const normalizedCharacter = character.toLocaleLowerCase()
+                normalizedText += normalizedCharacter
+                for (let normalizedOffset = 0; normalizedOffset < normalizedCharacter.length; normalizedOffset += 1) {
+                    positions.push({ node, offset })
+                }
             }
-            positions.push({ node, offset })
         }
     }
 

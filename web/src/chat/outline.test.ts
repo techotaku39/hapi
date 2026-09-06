@@ -141,4 +141,16 @@ describe('conversation outline', () => {
         expect(range!.toString()).toBe('KV Cache')
         anchor.remove()
     })
+
+    it('keeps highlights aligned after whitespace collapse and case folding', () => {
+        const anchor = document.createElement('div')
+        anchor.textContent = 'Use   İSTANBUL'
+        document.body.append(anchor)
+
+        const range = findConversationMessageTextRange(anchor, 'use i\u0307stanbul')
+
+        expect(range).not.toBeNull()
+        expect(range!.toString()).toBe('Use   İSTANBUL')
+        anchor.remove()
+    })
 })
