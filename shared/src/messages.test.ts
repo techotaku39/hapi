@@ -169,6 +169,25 @@ describe('extractSearchableMessageText', () => {
         })).toBeNull()
     })
 
+    test('excludes Claude Task/Agent prompts rendered only in the tool card', () => {
+        const content = {
+            type: 'output',
+            data: {
+                type: 'assistant',
+                message: {
+                    content: [
+                        { type: 'text', text: 'Inspect the repository' },
+                        { type: 'tool_use', name: 'Task', input: { prompt: 'Inspect the repository' } },
+                        { type: 'text', text: 'The repository is ready.' },
+                    ]
+                }
+            }
+        }
+
+        expect(extractSearchableMessageText({ role: 'agent', content }))
+            .toEqual({ role: 'assistant', text: 'The repository is ready.' })
+    })
+
     test('extracts visible non-sidechain Claude user records', () => {
         expect(extractSearchableMessageText({
             role: 'agent',

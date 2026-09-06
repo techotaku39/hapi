@@ -244,6 +244,41 @@ function extractClaudeUserPlainText(content: unknown): string | null {
     return extractUserPlainText(blocks)
 }
 
+function extractSearchableAssistantPlainText(content: unknown): string | null {
+    if (!isObject(content) || content.type !== 'output') {
+        return extractAssistantPlainText(content)
+    }
+
+    const data = isObject(content.data) ? content.data : null
+    if (!data || data.type !== 'assistant') {
+        return extractAssistantPlainText(content)
+    }
+
+    const message = isObject(data.message) ? data.message : null
+    const blocks = Array.isArray(message?.content) ? message.content : null
+    if (!blocks) return extractAssistantPlainText(content)
+
+    const hiddenTaskPrompts = new Set(
+        blocks.flatMap((block) => {
+            if (!isObject(block) || block.type !== 'tool_use') return []
+            const name = typeof block.name === 'string' ? block.name : ''
+            const input = isObject(block.input) ? block.input : null
+            const isSubagent = name === 'Task'
+                || name === 'Agent'
+                || name.startsWith('Task:')
+                || name.startsWith('Agent:')
+            return isSubagent && typeof input?.prompt === 'string'
+                ? [input.prompt.trim()]
+                : []
+        })
+    )
+    const textParts = blocks.flatMap((block) => {
+        if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') return []
+        return hiddenTaskPrompts.has(block.text.trim()) ? [] : [block.text]
+    })
+    return textParts.length > 0 ? textParts.join('\n') : null
+}
+
 export type SearchableMessage = {
     role: 'user' | 'assistant'
     text: string
@@ -326,7 +361,7 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
         const rawText = stripNotifySummaryFooter(
             isAgyPlannerMessage
                 ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
-                : (directText ?? extractAssistantPlainText(record.content) ?? '')
+                : (directText ?? extractSearchableAssistantPlainText(record.content) ?? '')
         )
         const text = normalizeSearchableMarkdownText(rawText)
         if (!text || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null

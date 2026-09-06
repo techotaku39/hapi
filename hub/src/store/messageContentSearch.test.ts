@@ -106,6 +106,31 @@ describe('message content search', () => {
         expect(store.messages.searchContent('Another hidden', 'default')).toEqual([])
     })
 
+    it('excludes Claude Task prompts that render only in the tool card', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'task-prompt-search')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            { type: 'text', text: 'Inspect the repository' },
+                            { type: 'tool_use', name: 'Task', input: { prompt: 'Inspect the repository' } },
+                            { type: 'text', text: 'The repository is ready.' },
+                        ]
+                    }
+                }
+            }
+        })
+
+        expect(store.messages.searchContent('Inspect the repository', 'default')).toEqual([])
+        expect(store.messages.searchContent('repository is ready', 'default'))
+            .toMatchObject([{ sessionId: session.id }])
+    })
+
     it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
         const store = new Store(':memory:')
         const defaultSession = makeSession(store, 'cjk-default')
