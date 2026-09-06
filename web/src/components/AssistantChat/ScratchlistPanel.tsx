@@ -993,6 +993,19 @@ function ScratchlistInventory({
         setDeleteRequest(null)
     }, [deletePending])
 
+    const releaseAttachmentPreviewIfUnused = useCallback((
+        attachment: ScratchlistAttachmentMetadata,
+        excludingEntryId: string,
+    ) => {
+        const referencedElsewhere = entriesRef.current.some((entry) =>
+            entry.id !== excludingEntryId
+            && (entry.attachments ?? []).some((candidate) => candidate.id === attachment.id)
+        )
+        if (!referencedElsewhere) {
+            releaseScratchlistAttachmentPreview(attachment.id)
+        }
+    }, [])
+
     const confirmDelete = useCallback(async () => {
         if (!deleteRequest) return
         setDeletePending(true)
@@ -1005,10 +1018,10 @@ function ScratchlistInventory({
             if (!currentEntry) return
 
             if (deleteRequest.kind === 'entry') {
-                for (const attachment of currentEntry.attachments ?? []) {
-                    releaseScratchlistAttachmentPreview(attachment.id)
-                }
                 await onDelete(currentEntry)
+                for (const attachment of currentEntry.attachments ?? []) {
+                    releaseAttachmentPreviewIfUnused(attachment, currentEntry.id)
+                }
                 return
             }
 
@@ -1016,18 +1029,19 @@ function ScratchlistInventory({
                 .find((attachment) => attachment.id === deleteRequest.attachmentId)
             if (!currentAttachment) return
 
-            releaseScratchlistAttachmentPreview(currentAttachment.id)
             const nextAttachments = (currentEntry.attachments ?? [])
                 .filter((attachment) => attachment.id !== currentAttachment.id)
             if (currentEntry.text.trim().length === 0 && nextAttachments.length === 0) {
                 await onDelete(currentEntry)
+                releaseAttachmentPreviewIfUnused(currentAttachment, currentEntry.id)
                 return
             }
             await onUpdate(currentEntry, currentEntry.text, nextAttachments)
+            releaseAttachmentPreviewIfUnused(currentAttachment, currentEntry.id)
         } finally {
             setDeletePending(false)
         }
-    }, [deleteRequest, onDelete, onUpdate])
+    }, [deleteRequest, onDelete, onUpdate, releaseAttachmentPreviewIfUnused])
 
     const handleSend = useCallback((entry: ScratchlistEntry) => {
         void runEntryAction(entry, onSend)

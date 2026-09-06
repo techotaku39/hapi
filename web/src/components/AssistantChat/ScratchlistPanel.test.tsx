@@ -6,6 +6,10 @@ import {
     readScratchlist,
     type ScratchlistEntry,
 } from '@/lib/scratchlist'
+import {
+    clearScratchlistAttachmentPreviewCache,
+    rememberScratchlistAttachmentObjectUrl,
+} from '@/lib/scratchlistAttachmentPreview'
 import { ScratchlistDrawer, ScratchlistPanel } from './ScratchlistPanel'
 
 const SID = 'session-test'
@@ -694,6 +698,60 @@ describe('ScratchlistDrawer disabled operations', () => {
 
         await waitFor(() => expect(within(dialog).getByText('update failed')).toBeInTheDocument())
         expect(screen.getByRole('dialog', { name: 'Delete attachment?' })).toBeInTheDocument()
+    })
+
+    it('keeps a shared preview alive when deleting it from another draft', async () => {
+        const attachment = {
+            id: 'shared-preview-1',
+            filename: 'shared.png',
+            mimeType: 'image/png',
+            size: 4,
+            path: 'hapi-hub:scratchlist/default/session-test/shared-preview-1.png',
+        }
+        const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+        rememberScratchlistAttachmentObjectUrl(attachment, 'blob:shared-preview')
+
+        try {
+            const onUpdate = vi.fn().mockResolvedValue(undefined)
+            const rendered = render(
+                <I18nProvider>
+                    <ScratchlistDrawer
+                        entries={[
+                            makeEntry({ id: 'shared-entry-1', text: 'one', attachments: [attachment] }),
+                            makeEntry({ id: 'shared-entry-2', text: 'two', attachments: [attachment] }),
+                        ]}
+                        sessionId={SID}
+                        api={{} as never}
+                        onUpdate={onUpdate}
+                        onReorder={vi.fn()}
+                        onDelete={vi.fn()}
+                    />
+                </I18nProvider>,
+            )
+
+            expect(screen.getAllByRole('img', { name: 'shared.png' })).toHaveLength(2)
+            fireEvent.click(screen.getAllByRole('button', { name: 'Remove attachment shared.png' })[0])
+            fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete attachment?' })).getByRole('button', { name: 'Delete' }))
+            await waitFor(() => expect(onUpdate).toHaveBeenCalledWith('shared-entry-1', 'one', []))
+            expect(revokeObjectUrl).not.toHaveBeenCalled()
+
+            rendered.rerender(
+                <I18nProvider>
+                    <ScratchlistDrawer
+                        entries={[makeEntry({ id: 'shared-entry-2', text: 'two', attachments: [attachment] })]}
+                        sessionId={SID}
+                        api={{} as never}
+                        onUpdate={onUpdate}
+                        onReorder={vi.fn()}
+                        onDelete={vi.fn()}
+                    />
+                </I18nProvider>,
+            )
+            expect(screen.getByRole('img', { name: 'shared.png' })).toHaveAttribute('src', 'blob:shared-preview')
+        } finally {
+            clearScratchlistAttachmentPreviewCache()
+            revokeObjectUrl.mockRestore()
+        }
     })
 
     it('keeps the draft confirmation open when deletion fails', async () => {
