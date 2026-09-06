@@ -336,7 +336,7 @@ export async function bootstrapExistingSession(options: {
     startedBy?: SessionStartedBy
     workingDirectory: string
     metadataOverrides?: Partial<Metadata>
-    requireMetadataFlush?: boolean
+    requireMetadataFlush?: (metadata: Metadata | null | undefined) => boolean
 }): Promise<SessionBootstrapResult> {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
@@ -371,7 +371,7 @@ export async function bootstrapExistingSession(options: {
 
     const session = api.sessionSyncClient(sessionInfo)
     session.updateMetadata(buildUpdatedMetadata)
-    if (options.requireMetadataFlush === true && !await session.flushMetadata()) {
+    if (options.requireMetadataFlush?.(sessionInfo.metadata) && !await session.flushMetadata()) {
         throw new Error('Unable to persist existing-session metadata')
     }
 

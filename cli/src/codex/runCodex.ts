@@ -50,7 +50,7 @@ export async function runCodex(opts: {
             flavor: 'codex',
             startedBy,
             workingDirectory,
-            requireMetadataFlush: true,
+            requireMetadataFlush: metadata => Boolean(metadata?.capabilities?.conversationHistory),
             metadataOverrides: {
                 capabilities: {
                     terminal: true,

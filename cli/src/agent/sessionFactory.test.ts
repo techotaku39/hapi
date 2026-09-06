@@ -106,7 +106,7 @@ describe('bootstrapExistingSession', () => {
         const session = createSession()
         const sessionClient = {
             updateMetadata: vi.fn(),
-            flushMetadata: vi.fn(async () => true)
+            flushMetadata: vi.fn(async () => false)
         }
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
@@ -116,7 +116,8 @@ describe('bootstrapExistingSession', () => {
         const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
-            workingDirectory: '/tmp/project'
+            workingDirectory: '/tmp/project',
+            requireMetadataFlush: metadata => Boolean(metadata?.capabilities?.conversationHistory)
         })
 
         expect(result.sessionInfo.id).toBe('hapi-session-1')
@@ -281,7 +282,7 @@ describe('bootstrapExistingSession', () => {
                     conversationHistory: undefined
                 }
             },
-            requireMetadataFlush: true
+            requireMetadataFlush: metadata => Boolean(metadata?.capabilities?.conversationHistory)
         })
         await metadataFlushStarted
         expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
