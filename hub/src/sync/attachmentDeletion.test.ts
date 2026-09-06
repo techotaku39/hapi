@@ -190,6 +190,79 @@ describe('SyncEngine.deleteAttachment', () => {
         }
     })
 
+    it('allows idempotent concurrent sends while keeping deletion blocked', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-concurrent-send-'))
+        tempDirs.push(root)
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const engine = createEngine(store)
+        let releaseFirst!: () => void
+        let notifyFirstStarted!: () => void
+        let addCount = 0
+        const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+        const firstStarted = new Promise<void>((resolve) => { notifyFirstStarted = resolve })
+        const originalAdd = store.addMessageForCurrentSession.bind(store)
+        spyOn(store, 'addMessageForCurrentSession').mockImplementation(async (...args) => {
+            addCount += 1
+            if (addCount === 1) {
+                notifyFirstStarted()
+                await firstGate
+            }
+            return await originalAdd(...args)
+        })
+        try {
+            const session = engine.getOrCreateSession(
+                'attachment-concurrent-send',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const attachment = await store.attachments.create({
+                namespace: 'default',
+                sessionId: session.id,
+                filename: 'photo.png',
+                mimeType: 'image/png',
+                original: Buffer.from('original')
+            })
+            const metadata = {
+                id: 'message-attachment',
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                size: attachment.size,
+                attachmentId: attachment.id
+            }
+
+            const first = engine.sendMessage(session.id, {
+                text: 'same request',
+                localId: 'same-local-id',
+                attachments: [metadata]
+            })
+            await firstStarted
+            const second = engine.sendMessage(session.id, {
+                text: 'same request',
+                localId: 'same-local-id',
+                attachments: [metadata]
+            })
+
+            await expect(second).resolves.toBeUndefined()
+            await expect(engine.deleteAttachment(session.id, 'default', attachment.id)).resolves.toEqual({
+                success: false,
+                error: 'Attachment is being sent'
+            })
+            releaseFirst()
+            await expect(first).resolves.toBeUndefined()
+            expect(addCount).toBe(2)
+            expect(store.messages.getAllMessages(session.id)).toHaveLength(1)
+            await expect(engine.deleteAttachment(session.id, 'default', attachment.id)).resolves.toEqual({
+                success: false,
+                error: 'Attachment is already referenced by a message'
+            })
+        } finally {
+            releaseFirst?.()
+            engine.stop()
+            store.close()
+        }
+    })
+
     it('deletes the row before unlink so ownership transfer cannot resurrect it', async () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-transfer-delete-'))
         tempDirs.push(root)

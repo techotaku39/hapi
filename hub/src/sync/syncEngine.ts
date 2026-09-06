@@ -194,7 +194,7 @@ export class SyncEngine {
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
     private readonly deletingAttachmentKeys = new Set<string>()
-    private readonly sendingAttachmentKeys = new Set<string>()
+    private readonly sendingAttachmentCounts = new Map<string, number>()
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly titleSuggestionService: TitleSuggestionService
@@ -1056,11 +1056,8 @@ export class SyncEngine {
         ))) {
             throw new Error('Attachment not found')
         }
-        if (attachmentKeys.some((key) => this.sendingAttachmentKeys.has(key))) {
-            throw new Error('Attachment send already in progress')
-        }
         for (const key of attachmentKeys) {
-            this.sendingAttachmentKeys.add(key)
+            this.sendingAttachmentCounts.set(key, (this.sendingAttachmentCounts.get(key) ?? 0) + 1)
         }
         try {
             const { actualSessionId, createdAt: activeTurnStartedAt } = await this.messageService.sendMessage(sessionId, payload)
@@ -1068,7 +1065,12 @@ export class SyncEngine {
             this.sessionCache.recordSessionActivity(actualSessionId, Date.now())
         } finally {
             for (const key of attachmentKeys) {
-                this.sendingAttachmentKeys.delete(key)
+                const remaining = (this.sendingAttachmentCounts.get(key) ?? 1) - 1
+                if (remaining === 0) {
+                    this.sendingAttachmentCounts.delete(key)
+                } else {
+                    this.sendingAttachmentCounts.set(key, remaining)
+                }
             }
         }
     }
@@ -1085,6 +1087,11 @@ export class SyncEngine {
         messageId: string
     ): Promise<RetryIndeterminateMessageResult> {
         return this.messageService.retryIndeterminateMessage(sessionId, messageId)
+    }
+
+    /** Whether at least one message currently holds this attachment for send. */
+    private isAttachmentSendInProgress(key: string): boolean {
+        return (this.sendingAttachmentCounts.get(key) ?? 0) > 0
     }
 
     /**
@@ -3985,7 +3992,7 @@ export class SyncEngine {
         if (this.deletingAttachmentKeys.has(key)) {
             return { success: false, error: 'Attachment deletion in progress' }
         }
-        if (this.sendingAttachmentKeys.has(key)) {
+        if (this.isAttachmentSendInProgress(key)) {
             return { success: false, error: 'Attachment is being sent' }
         }
         if (!this.store.attachments.getForSession(attachmentId, namespace, access.sessionId)) {

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata } from '@/types/api'
@@ -31,7 +31,8 @@ function renderAttachments(
 }
 
 describe('MessageAttachments', () => {
-    it('loads a durable original while rendering the message card', async () => {
+    it('loads a durable original when the browser has no intersection observer', async () => {
+        vi.stubGlobal('IntersectionObserver', undefined)
         const fetchAttachmentBlob = vi.fn().mockResolvedValue(new Blob(['original'], { type: 'image/png' }))
         vi.stubGlobal('URL', {
             createObjectURL: vi.fn(() => 'blob:original'),
@@ -40,9 +41,40 @@ describe('MessageAttachments', () => {
 
         renderAttachments(fetchAttachmentBlob)
 
-        expect(screen.getByText('Loading…')).toBeInTheDocument()
         await waitFor(() => expect(screen.getByRole('img', { name: 'photo.png' })).toHaveAttribute('src', 'blob:original'))
         expect(fetchAttachmentBlob).toHaveBeenCalledWith('session-1', 'attachment-1')
+    })
+
+    it('defers durable original loading until the attachment intersects the viewport', async () => {
+        let intersectionCallback: IntersectionObserverCallback | undefined
+        const observe = vi.fn()
+        const disconnect = vi.fn()
+        vi.stubGlobal('IntersectionObserver', class {
+            constructor(callback: IntersectionObserverCallback) {
+                intersectionCallback = callback
+            }
+
+            observe = observe
+            disconnect = disconnect
+        })
+        const fetchAttachmentBlob = vi.fn().mockResolvedValue(new Blob(['original'], { type: 'image/png' }))
+        vi.stubGlobal('URL', {
+            createObjectURL: vi.fn(() => 'blob:original'),
+            revokeObjectURL: vi.fn()
+        })
+
+        renderAttachments(fetchAttachmentBlob)
+
+        expect(observe).toHaveBeenCalled()
+        expect(fetchAttachmentBlob).not.toHaveBeenCalled()
+        expect(screen.queryByRole('img', { name: 'photo.png' })).not.toBeInTheDocument()
+
+        await act(async () => {
+            intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+        })
+        await waitFor(() => expect(screen.getByRole('img', { name: 'photo.png' })).toHaveAttribute('src', 'blob:original'))
+        expect(fetchAttachmentBlob).toHaveBeenCalledWith('session-1', 'attachment-1')
+        expect(disconnect).toHaveBeenCalled()
     })
 
     it('uses a legacy preview without fetching a durable original', () => {
@@ -61,6 +93,7 @@ describe('MessageAttachments', () => {
     })
 
     it('keeps the attachment card when the original cannot be loaded', async () => {
+        vi.stubGlobal('IntersectionObserver', undefined)
         const fetchAttachmentBlob = vi.fn().mockRejectedValue(new Error('attachment unavailable'))
         renderAttachments(fetchAttachmentBlob)
 
@@ -70,6 +103,7 @@ describe('MessageAttachments', () => {
     })
 
     it('does not create an object URL after unmount while loading', async () => {
+        vi.stubGlobal('IntersectionObserver', undefined)
         let resolveOriginal!: (blob: Blob) => void
         const originalPromise = new Promise<Blob>(resolve => {
             resolveOriginal = resolve

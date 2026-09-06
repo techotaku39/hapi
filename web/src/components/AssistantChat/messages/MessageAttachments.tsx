@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AttachmentMetadata } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { FileIcon } from '@/components/FileIcon'
@@ -15,9 +15,14 @@ function formatFileSize(bytes: number): string {
 function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient; sessionId: string }) {
     const { attachment } = props
     const { t } = useTranslation()
+    const needsOriginal = Boolean(attachment.attachmentId && !attachment.previewUrl)
+    const originalLoadKey = `${attachment.id}:${attachment.attachmentId ?? ''}`
+    const hostRef = useRef<HTMLDivElement>(null)
+    const [intersectedLoadKey, setIntersectedLoadKey] = useState<string | null>(null)
     const [source, setSource] = useState(attachment.previewUrl ?? '')
-    const [loading, setLoading] = useState(Boolean(attachment.attachmentId && !attachment.previewUrl))
+    const [loading, setLoading] = useState(false)
     const [failed, setFailed] = useState(false)
+    const nearViewport = !needsOriginal || intersectedLoadKey === originalLoadKey
 
     const loadOriginal = useCallback(async (): Promise<string | undefined> => {
         if (!attachment.attachmentId) return undefined
@@ -26,11 +31,29 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
     }, [attachment.attachmentId, props.api, props.sessionId])
 
     useEffect(() => {
+        if (!needsOriginal) return
+        const node = hostRef.current
+        if (!node) return
+        if (typeof IntersectionObserver === 'undefined') {
+            setIntersectedLoadKey(originalLoadKey)
+            return
+        }
+
+        const observer = new IntersectionObserver(([entry]) => {
+            if (!entry?.isIntersecting) return
+            setIntersectedLoadKey(originalLoadKey)
+            observer.disconnect()
+        }, { rootMargin: '300px' })
+        observer.observe(node)
+        return () => observer.disconnect()
+    }, [needsOriginal, originalLoadKey])
+
+    useEffect(() => {
         let cancelled = false
         let objectUrl: string | undefined
         setSource(attachment.previewUrl ?? '')
         setFailed(false)
-        if (!attachment.attachmentId || attachment.previewUrl) {
+        if (!needsOriginal || !nearViewport) {
             setLoading(false)
             return
         }
@@ -60,7 +83,7 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
             cancelled = true
             if (objectUrl) URL.revokeObjectURL(objectUrl)
         }
-    }, [attachment.attachmentId, attachment.previewUrl, loadOriginal])
+    }, [attachment.attachmentId, attachment.previewUrl, loadOriginal, needsOriginal, nearViewport])
 
     const downloadOriginal = async () => {
         const url = await loadOriginal()
@@ -72,10 +95,13 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api: ApiClient
         window.setTimeout(() => URL.revokeObjectURL(url), 0)
     }
 
-    if (loading) {
+    if (needsOriginal && (!nearViewport || loading || (!source && !failed))) {
         return (
-            <div className="flex h-32 w-48 items-center justify-center rounded-lg bg-[var(--app-bg)] text-xs text-[var(--app-hint)]">
-                {t('loading')}
+            <div
+                ref={hostRef}
+                className="flex h-32 w-48 items-center justify-center rounded-lg bg-[var(--app-bg)] text-xs text-[var(--app-hint)]"
+            >
+                {loading ? t('loading') : null}
             </div>
         )
     }
