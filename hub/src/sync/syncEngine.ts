@@ -30,6 +30,7 @@ import { MachineCache, type Machine } from './machineCache'
 import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
 import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
 import { selectForkTranscriptPrefix } from './forkTranscript'
+import { buildForkSessionSummary } from './forkSessionSummary'
 import {
     RpcGateway,
     RpcTargetMissingError,
@@ -1417,11 +1418,13 @@ export class SyncEngine {
         const copiedLocalIds = new Set(
             prefix.flatMap((message) => (message.localId ? [message.localId] : []))
         )
+        const forkSummary = buildForkSessionSummary(source.metadata)
         const childMetadata: Record<string, unknown> = {
             path: directory,
             host: source.metadata?.host ?? 'unknown',
             machineId,
             flavor,
+            ...(forkSummary ? { summary: forkSummary } : {}),
             forkedFrom: sessionId,
             startedBy: 'runner',
             capabilities: source.metadata?.capabilities,
