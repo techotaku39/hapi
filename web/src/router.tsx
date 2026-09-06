@@ -57,6 +57,7 @@ import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
 import { useConsumedMessageTarget } from '@/lib/useConsumedMessageTarget'
+import { normalizeMessageSearchTarget } from '@/lib/messageSearchTarget'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
@@ -366,6 +367,9 @@ function SessionPage() {
         consume: consumeMessageTarget,
         clear: clearConsumedMessageTarget,
     } = useConsumedMessageTarget(sessionId, messageId, messageQuery)
+    const hasCompleteInitialMessageTarget = Boolean(
+        effectiveInitialMessageId?.trim() && effectiveInitialMessageQuery?.trim()
+    )
     const {
         session,
         error: sessionError,
@@ -394,7 +398,7 @@ function SessionPage() {
         setViewMode,
         jumpToTail,
     } = useMessages(api, sessionId, {
-        skipInitialTailSync: Boolean(effectiveInitialMessageId?.trim())
+        skipInitialTailSync: hasCompleteInitialMessageTarget
     })
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
@@ -867,8 +871,8 @@ function SessionPage() {
             onSuppressSendErrorRestore={suppressSendErrorRestore}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
-            initialTargetMessageId={effectiveInitialMessageId}
-            initialTargetMessageQuery={effectiveInitialMessageQuery}
+            initialTargetMessageId={hasCompleteInitialMessageTarget ? effectiveInitialMessageId : undefined}
+            initialTargetMessageQuery={hasCompleteInitialMessageTarget ? effectiveInitialMessageQuery : undefined}
             onLoadMessageContext={loadMessageContextForSession}
             onInitialTargetConsumed={handleInitialMessageConsumed}
             onSearchTargetDismissed={handleSearchTargetDismissed}
@@ -1113,16 +1117,10 @@ const sessionDetailRoute = createRoute({
     path: '$sessionId',
     validateSearch: (search: Record<string, unknown>): { outline?: boolean; messageId?: string; messageQuery?: string } => {
         const outline = search.outline === true || search.outline === 'true'
-        const messageId = typeof search.messageId === 'string' && search.messageId.length > 0
-            ? search.messageId
-            : undefined
-        const messageQuery = typeof search.messageQuery === 'string' && search.messageQuery.length > 0
-            ? search.messageQuery
-            : undefined
+        const messageTarget = normalizeMessageSearchTarget(search.messageId, search.messageQuery)
         return {
             ...(outline ? { outline: true } : {}),
-            ...(messageId ? { messageId } : {}),
-            ...(messageQuery ? { messageQuery } : {})
+            ...messageTarget,
         }
     },
     component: SessionDetailRoute,
