@@ -4,7 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import type {
     AttachmentMetadata,
     CodexCollaborationMode,
@@ -110,10 +110,15 @@ import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
+
+export function isRewindForkFallbackError(error: unknown): boolean {
+    return error instanceof ApiError && error.code === 'ambiguous_native_boundary_fork_safe'
+}
 
 export function resolvePiContextWindow(
     models: PiModelSummary[] | undefined,
@@ -311,6 +316,14 @@ export function shouldRouteToScratchlist(
     // uploads made before scratchlist mode was enabled still have normal
     // CLI paths; the hub rejects those as scratchlist metadata.
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
+}
+
+export function mergeStagedAttachmentsInOrder(
+    attachments: readonly AttachmentMetadata[],
+    staged: readonly AttachmentMetadata[],
+): AttachmentMetadata[] {
+    const stagedById = new Map(staged.map((attachment) => [attachment.id, attachment]))
+    return attachments.map((attachment) => stagedById.get(attachment.id) ?? attachment)
 }
 
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
@@ -561,6 +574,7 @@ function SessionChatInner(props: SessionChatProps) {
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
     const navigate = useNavigate()
     const [historyActionPending, setHistoryActionPending] = useState(false)
+    const [rewindForkFallback, setRewindForkFallback] = useState<string | null>(null)
 
     const onForkConversation = useCallback(async (messageLocalId?: string) => {
         setHistoryActionPending(true)
@@ -581,10 +595,22 @@ function SessionChatInner(props: SessionChatProps) {
         try {
             await props.api.rewindConversation(props.session.id, messageLocalId)
             props.onRefresh()
+        } catch (error) {
+            if (isRewindForkFallbackError(error)) {
+                setRewindForkFallback(messageLocalId)
+                return
+            }
+            throw error
         } finally {
             setHistoryActionPending(false)
         }
     }, [props.api, props.onRefresh, props.session.id])
+
+    const onRewindForkFallback = useCallback(async () => {
+        if (!rewindForkFallback) return
+        await onForkConversation(rewindForkFallback)
+        setRewindForkFallback(null)
+    }, [onForkConversation, rewindForkFallback])
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(
         props.session,
@@ -825,15 +851,15 @@ function SessionChatInner(props: SessionChatProps) {
             const list = attachments ?? []
             const hubItems = list.filter((att) => isHubScratchlistAttachmentPath(att.path))
             if (hubItems.length > 0) {
-                const normalItems = list.filter((att) => !isHubScratchlistAttachmentPath(att.path))
                 const staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,
                     props.session.id,
                     hubItems,
                 )
+                const ordered = mergeStagedAttachmentsInOrder(list, staged)
                 const accepted = await props.onSend(
                     text,
-                    [...normalItems, ...staged],
+                    ordered,
                     scheduledAt,
                     deliveryMode,
                 )
@@ -1564,6 +1590,7 @@ function SessionChatInner(props: SessionChatProps) {
     // turn, so explicit or retry-safe queue intents never stick to later
     // ordinary sends.
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
+    const attachmentOrderRef = useRef<string[]>([])
     const restoredSendErrorIdRef = useRef<number | null>(null)
 
     useEffect(() => {
@@ -1706,6 +1733,7 @@ function SessionChatInner(props: SessionChatProps) {
         isSending: props.isSending,
         isRunning: props.session.thinking || hasRunningChildAgent,
         onSendMessage: handleSend,
+        attachmentOrderRef,
         onAbort: handleAbort,
         attachmentAdapter,
         allowSendWhenInactive: true,
@@ -1880,6 +1908,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
+                        attachmentOrderRef={attachmentOrderRef}
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
@@ -2075,6 +2104,19 @@ function SessionChatInner(props: SessionChatProps) {
                     onReadyChange={setVoiceBackendReady}
                 />
             )}
+
+            <ConfirmDialog
+                isOpen={rewindForkFallback !== null}
+                onClose={() => {
+                    if (!historyActionPending) setRewindForkFallback(null)
+                }}
+                title={t('message.rewind.fallbackTitle')}
+                description={t('message.rewind.fallbackDescription')}
+                confirmLabel={t('message.rewind.fallbackFork')}
+                confirmingLabel={t('message.rewind.fallbackForking')}
+                isPending={historyActionPending}
+                onConfirm={onRewindForkFallback}
+            />
         </div>
     )
 }
