@@ -379,6 +379,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 'Content-Disposition': attachmentContentDisposition(attachment.attachment.filename),
                 'Content-Security-Policy': "sandbox; default-src 'none'",
                 'Cache-Control': 'private, max-age=31536000, immutable',
+                'Vary': 'Authorization',
                 'ETag': `"${attachment.sha256}"`,
                 'X-Hapi-Attachment-Sha256': attachment.sha256,
                 'X-Hapi-Attachment-Size': String(attachment.size),

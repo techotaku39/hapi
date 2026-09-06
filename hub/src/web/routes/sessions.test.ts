@@ -1667,6 +1667,7 @@ describe('durable attachment routes', () => {
         expect(response.headers.get('content-disposition')).toBe('attachment; filename="photo.png"')
         expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'")
         expect(response.headers.get('cache-control')).toContain('immutable')
+        expect(response.headers.get('vary')).toBe('Authorization')
         expect(response.headers.get('etag')).toBe('"hash-1"')
         expect(response.headers.get('x-content-type-options')).toBe('nosniff')
         expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([7, 8, 9])

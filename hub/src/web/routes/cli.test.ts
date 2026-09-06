@@ -319,6 +319,7 @@ describe('cli durable attachment delivery', () => {
         expect(response.headers.get('content-length')).toBe('4')
         expect(response.headers.get('content-disposition')).toBe('attachment; filename="document.pdf"')
         expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'")
+        expect(response.headers.get('vary')).toBe('Authorization')
         expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3, 4])
     })
 
