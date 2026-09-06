@@ -37,6 +37,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ScheduleTimePicker, type PendingSchedule } from './ScheduleTimePicker'
 import {
     getScratchlistAttachmentPreview,
+    retainScratchlistAttachmentPreview,
     releaseScratchlistAttachmentPreview,
     rememberScratchlistAttachmentObjectUrl,
     rememberScratchlistAttachmentPreview,
@@ -254,6 +255,13 @@ function ScratchlistAttachmentThumbnails(props: {
     const [urls, setUrls] = useState<Thumbnail[]>(initialUrls)
     const imageAttachmentsRef = useRef(imageAttachments)
     imageAttachmentsRef.current = imageAttachments
+
+    useEffect(() => {
+        const releaseRefs = imageAttachments.map((attachment) =>
+            retainScratchlistAttachmentPreview(attachment.id)
+        )
+        return () => releaseRefs.forEach((release) => release())
+    }, [imageAttachmentKey, imageAttachments])
 
     useEffect(() => {
         let cancelled = false

@@ -16,6 +16,7 @@ const previews = new Map<string, CachedPreview>()
 const MAX_CACHED_PREVIEWS = 64
 const MAX_CACHED_PREVIEW_BYTES = 20 * 1024 * 1024
 let cachedPreviewBytes = 0
+const activePreviewRefs = new Map<string, number>()
 
 function signature(attachment: ScratchlistAttachmentMetadata): string {
     return [
@@ -57,15 +58,19 @@ function putPreview(
     previews.delete(attachment.id)
     previews.set(attachment.id, next)
     cachedPreviewBytes += next.bytes
+    evictOverBudget()
+    return next.src
+}
+
+function evictOverBudget(): void {
     while (previews.size > MAX_CACHED_PREVIEWS || cachedPreviewBytes > MAX_CACHED_PREVIEW_BYTES) {
-        const oldest = previews.entries().next().value as [string, CachedPreview] | undefined
+        const oldest = [...previews.entries()].find(([id]) => !activePreviewRefs.has(id))
         if (!oldest) break
         const [oldestId, oldestPreview] = oldest
         revokeIfOwned(oldestPreview)
         cachedPreviewBytes -= oldestPreview.bytes
         previews.delete(oldestId)
     }
-    return next.src
 }
 
 /** Remember a preview that already exists in the composer, without fetching it. */
@@ -113,6 +118,21 @@ export function releaseScratchlistAttachmentPreview(attachmentId: string): void 
     revokeIfOwned(cached)
     cachedPreviewBytes -= cached.bytes
     previews.delete(attachmentId)
+    evictOverBudget()
+}
+
+/** Keep a mounted thumbnail's object URL out of budget eviction. */
+export function retainScratchlistAttachmentPreview(attachmentId: string): () => void {
+    activePreviewRefs.set(attachmentId, (activePreviewRefs.get(attachmentId) ?? 0) + 1)
+    let released = false
+    return () => {
+        if (released) return
+        released = true
+        const next = (activePreviewRefs.get(attachmentId) ?? 1) - 1
+        if (next > 0) activePreviewRefs.set(attachmentId, next)
+        else activePreviewRefs.delete(attachmentId)
+        evictOverBudget()
+    }
 }
 
 /** Test/lifecycle hook; also releases cached blob URLs when a page is discarded. */

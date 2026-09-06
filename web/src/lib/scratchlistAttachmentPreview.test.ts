@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     clearScratchlistAttachmentPreviewCache,
     getScratchlistAttachmentPreview,
+    retainScratchlistAttachmentPreview,
     releaseScratchlistAttachmentPreview,
     rememberScratchlistAttachmentObjectUrl,
 } from './scratchlistAttachmentPreview'
@@ -52,6 +53,29 @@ describe('scratchlist attachment preview cache', () => {
 
         expect(getScratchlistAttachmentPreview(first)).toBeUndefined()
         expect(revoke).toHaveBeenCalledWith('blob:first')
+    })
+
+    it('does not evict a preview while its thumbnail is mounted', () => {
+        const revoke = vi.fn()
+        Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke })
+        const first = attachment('mounted-first')
+        const release = retainScratchlistAttachmentPreview(first.id)
+        rememberScratchlistAttachmentObjectUrl(first, 'blob:mounted-first')
+        for (let index = 1; index <= 64; index += 1) {
+            const item = attachment(`mounted-item-${index}`)
+            rememberScratchlistAttachmentObjectUrl(item, `blob:${item.id}`)
+        }
+
+        expect(getScratchlistAttachmentPreview(first)).toBe('blob:mounted-first')
+        expect(revoke).not.toHaveBeenCalledWith('blob:mounted-first')
+
+        release()
+        for (let index = 65; index <= 128; index += 1) {
+            const item = attachment(`mounted-item-${index}`)
+            rememberScratchlistAttachmentObjectUrl(item, `blob:${item.id}`)
+        }
+        expect(getScratchlistAttachmentPreview(first)).toBeUndefined()
+        expect(revoke).toHaveBeenCalledWith('blob:mounted-first')
     })
 
     it('evicts previews when their attachment bytes exceed the cache budget', () => {
