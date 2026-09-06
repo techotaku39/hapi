@@ -212,6 +212,10 @@ describe('message content search', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'markdown-content-search')
         store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'Use **KV Cache** for this path.' }
+        })
+        store.messages.addMessage(session.id, {
             role: 'agent',
             content: {
                 type: 'codex',
@@ -220,6 +224,8 @@ describe('message content search', () => {
         })
 
         expect(store.messages.searchContent('KV Cache', 'default'))
+            .toMatchObject([{ sessionId: session.id }])
+        expect(store.messages.searchContent('Use KV Cache', 'default'))
             .toMatchObject([{ sessionId: session.id }])
     })
 

@@ -144,6 +144,8 @@ describe('extractSearchableMessageText', () => {
     test('extracts user text and normalizes whitespace', () => {
         expect(extractUserPlainText([{ type: 'text', text: ' hello\nworld ' }, { type: 'image' }]))
             .toBe('hello world')
+        expect(extractUserPlainText('Use **KV Cache** for this path.'))
+            .toBe('Use KV Cache for this path.')
         expect(extractSearchableMessageText({
             role: 'user',
             content: { type: 'text', text: 'Find this prompt' }

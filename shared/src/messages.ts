@@ -214,7 +214,7 @@ function normalizeSearchableMarkdownText(value: string): string | null {
 
 export function extractUserPlainText(content: unknown): string | null {
     if (typeof content === 'string') {
-        return normalizeSearchablePlainText(content)
+        return normalizeSearchableMarkdownText(content)
     }
 
     const blocks = Array.isArray(content) ? content : [content]
@@ -227,7 +227,7 @@ export function extractUserPlainText(content: unknown): string | null {
         })
         .filter((text): text is string => text !== null)
 
-    return normalizeSearchablePlainText(textParts.join(' '))
+    return normalizeSearchableMarkdownText(textParts.join(' '))
 }
 
 function extractClaudeUserPlainText(content: unknown): string | null {
