@@ -289,6 +289,34 @@ describe('ScratchlistPanel', () => {
         }
     })
 
+    it('cancels a pending mouse long press when the pointer is released outside the row', () => {
+        vi.useFakeTimers()
+        persistScratchlist(SID, [makeEntry({ id: 'outside-release', text: 'outside release' })])
+        try {
+            renderPanel()
+            expandPanel()
+            const row = screen.getByTestId('scratchlist-entry')
+            firePointerEvent(row, 'pointerdown', {
+                button: 0,
+                pointerId: 7,
+                clientX: 10,
+                clientY: 10,
+            })
+            firePointerEvent(window as unknown as Element, 'pointerup', {
+                pointerId: 7,
+                clientX: 500,
+                clientY: 500,
+            })
+            act(() => {
+                vi.advanceTimersByTime(450)
+            })
+
+            expect(row).not.toHaveAttribute('data-dragging')
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
     it('reorders entries after a touch long press and drag', () => {
         vi.useFakeTimers()
         persistScratchlist(SID, [

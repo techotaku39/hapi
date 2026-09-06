@@ -257,11 +257,11 @@ function ScratchlistAttachmentThumbnails(props: {
     imageAttachmentsRef.current = imageAttachments
 
     useEffect(() => {
-        const releaseRefs = imageAttachments.map((attachment) =>
+        const releaseRefs = imageAttachmentsRef.current.map((attachment) =>
             retainScratchlistAttachmentPreview(attachment.id)
         )
         return () => releaseRefs.forEach((release) => release())
-    }, [imageAttachmentKey, imageAttachments])
+    }, [imageAttachmentKey])
 
     useEffect(() => {
         let cancelled = false
@@ -755,6 +755,21 @@ function ScratchlistInventory({
         setDraggingEntryId(null)
         setDragOverEntryId(null)
     }, [])
+
+    useEffect(() => {
+        const cancelPendingPointer = (event: globalThis.PointerEvent) => {
+            const state = pointerDragRef.current
+            if (state?.pointerId === event.pointerId && !state.active) {
+                clearPointerDrag(state)
+            }
+        }
+        window.addEventListener('pointerup', cancelPendingPointer)
+        window.addEventListener('pointercancel', cancelPendingPointer)
+        return () => {
+            window.removeEventListener('pointerup', cancelPendingPointer)
+            window.removeEventListener('pointercancel', cancelPendingPointer)
+        }
+    }, [clearPointerDrag])
 
     const finishPointerGesture = useCallback((event: ReactPointerEvent<HTMLLIElement>, commit: boolean) => {
         const state = pointerDragRef.current
