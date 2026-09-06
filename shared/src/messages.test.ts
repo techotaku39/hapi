@@ -153,6 +153,19 @@ describe('extractSearchableMessageText', () => {
         })).toEqual({ role: 'user', text: 'Find this prompt' })
     })
 
+    test('bounds oversized structured user text before Markdown normalization', () => {
+        const text = extractUserPlainText([
+            { type: 'text', text: 'Head '.repeat(50) },
+            { type: 'text', text: 'Middle '.repeat(50) },
+            { type: 'text', text: 'Tail phrase' }
+        ], 32)
+
+        expect(text).toMatch(/^Head/)
+        expect(text).toContain('Tail phrase')
+        expect(text).not.toContain('Middle')
+        expect(text?.length).toBeLessThanOrEqual(32)
+    })
+
     test('extracts assistant prose but excludes tool and reasoning records', () => {
         expect(extractSearchableMessageText({
             role: 'agent',

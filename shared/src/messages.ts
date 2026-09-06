@@ -202,14 +202,82 @@ function normalizeSearchablePlainText(value: string): string | null {
     return text.length > 0 ? text : null
 }
 
-function normalizeSearchableMarkdownText(value: string, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
-    const chunks = Number.isFinite(maxSourceCharacters) && value.length > maxSourceCharacters
-        ? (() => {
-            const headCharacters = Math.max(1, Math.floor((maxSourceCharacters - 1) / 2))
-            const tailCharacters = Math.max(1, maxSourceCharacters - headCharacters - 1)
-            return [value.slice(0, headCharacters), value.slice(-tailCharacters)]
-        })()
-        : [value]
+function sliceJoinedText(
+    parts: readonly string[],
+    separator: string,
+    start: number,
+    length: number
+): string {
+    if (length <= 0) return ''
+
+    const end = start + length
+    const chunks: string[] = []
+    let offset = 0
+    for (let index = 0; index < parts.length; index++) {
+        const part = parts[index]!
+        const partStart = offset
+        const partEnd = partStart + part.length
+        if (partEnd > start && partStart < end) {
+            chunks.push(part.slice(
+                Math.max(0, start - partStart),
+                Math.min(part.length, end - partStart)
+            ))
+        }
+        offset = partEnd
+
+        if (index === parts.length - 1) break
+        const separatorStart = offset
+        const separatorEnd = separatorStart + separator.length
+        if (separatorEnd > start && separatorStart < end) {
+            chunks.push(separator.slice(
+                Math.max(0, start - separatorStart),
+                Math.min(separator.length, end - separatorStart)
+            ))
+        }
+        offset = separatorEnd
+        if (offset >= end) break
+    }
+    return chunks.join('')
+}
+
+/**
+ * Join only the bounded head and tail of a multi-part message. In particular,
+ * do not materialize a potentially unbounded structured prompt before the
+ * Markdown parser's source limit is applied.
+ */
+function collectJoinedHeadTail(
+    parts: readonly string[],
+    separator: string,
+    maxSourceCharacters: number
+): string[] {
+    if (parts.length === 0) return []
+    if (!Number.isFinite(maxSourceCharacters)) return [parts.join(separator)]
+
+    const maxCharacters = Math.max(0, Math.floor(maxSourceCharacters))
+    if (maxCharacters === 0) return []
+
+    let totalCharacters = 0
+    for (let index = 0; index < parts.length; index++) {
+        totalCharacters += parts[index]!.length
+        if (index > 0) totalCharacters += separator.length
+    }
+    if (totalCharacters <= maxCharacters) return [parts.join(separator)]
+
+    if (maxCharacters <= separator.length) {
+        return [sliceJoinedText(parts, separator, 0, maxCharacters)]
+    }
+
+    const contentCharacters = maxCharacters - separator.length
+    const headCharacters = Math.ceil(contentCharacters / 2)
+    const tailCharacters = contentCharacters - headCharacters
+    const chunks = [sliceJoinedText(parts, separator, 0, headCharacters)]
+    if (tailCharacters > 0) {
+        chunks.push(sliceJoinedText(parts, separator, totalCharacters - tailCharacters, tailCharacters))
+    }
+    return chunks
+}
+
+function normalizeSearchableMarkdownChunks(chunks: readonly string[]): string | null {
     const rendered = chunks.map((chunk) => {
         try {
             return toString(fromMarkdown(chunk))
@@ -220,6 +288,12 @@ function normalizeSearchableMarkdownText(value: string, maxSourceCharacters = Nu
         }
     }).join(' ')
     return normalizeSearchablePlainText(rendered)
+}
+
+function normalizeSearchableMarkdownText(value: string, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
+    return normalizeSearchableMarkdownChunks(
+        collectJoinedHeadTail([value], ' ', maxSourceCharacters)
+    )
 }
 
 export function extractUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
@@ -237,7 +311,9 @@ export function extractUserPlainText(content: unknown, maxSourceCharacters = Num
         })
         .filter((text): text is string => text !== null)
 
-    return normalizeSearchableMarkdownText(textParts.join(' '), maxSourceCharacters)
+    return normalizeSearchableMarkdownChunks(
+        collectJoinedHeadTail(textParts, ' ', maxSourceCharacters)
+    )
 }
 
 function extractClaudeUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
@@ -332,7 +408,9 @@ function extractSearchableAssistantPlainText(
             return null
         }
     }
-    return textParts.length > 0 ? textParts.join('\n') : null
+    return textParts.length > 0
+        ? collectJoinedHeadTail(textParts, '\n', context?.maxSourceCharacters ?? Number.POSITIVE_INFINITY).join('\n')
+        : null
 }
 
 export type SearchableMessage = {
