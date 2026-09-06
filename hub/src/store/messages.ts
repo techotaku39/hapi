@@ -8,6 +8,7 @@ import type { StoredMessage } from './types'
 import { decodeMessageContent, encodeMessageContent, truncateOversizedMessageContent } from './contentCodec'
 import {
     indexMessageContent,
+    invalidateMessageContentSearchInjectedTurnCache,
     rebuildMessageContentSearchForSessions,
     removeMessageContentSearchIndex
 } from './messageContentSearch'
@@ -1248,6 +1249,7 @@ export function truncateMessagesFromLocalId(
                 OR (COALESCE(invoked_at, created_at) = ? AND seq >= ?)
               )
         `).run(sessionId, target.position_at, target.position_at, target.seq)
+        invalidateMessageContentSearchInjectedTurnCache(db, [sessionId])
         for (const row of deletedRows) removeMessageContentSearchIndex(db, row.id)
 
         let inserted = 0

@@ -193,13 +193,15 @@ describe('extractSearchableMessageText', () => {
                         { type: 'text', text: 'Inspect the repository' },
                         { type: 'tool_use', name: 'Task', input: { prompt: 'Inspect the repository' } },
                         { type: 'text', text: 'The repository is ready.' },
+                        { type: 'tool_use', name: 'Agent', input: { prompt: 'Run the second agent' } },
+                        { type: 'text', text: 'Run the second agent' },
                     ]
                 }
             }
         }
 
         expect(extractSearchableMessageText({ role: 'agent', content }))
-            .toEqual({ role: 'assistant', text: 'The repository is ready.' })
+            .toEqual({ role: 'assistant', text: 'The repository is ready. Run the second agent' })
     })
 
     test('excludes No response requested only when its parent is system-injected', () => {

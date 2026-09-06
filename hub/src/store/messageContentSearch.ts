@@ -16,6 +16,7 @@ export const MAX_CONTENT_SEARCH_SESSION_SCOPE_BYTES = 256 * 1024
 const MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE = 'message_content_search_lookup'
 const MESSAGE_CONTENT_SEARCH_SHORT_TABLE = 'message_content_search_short'
 const initializedDatabases = new WeakSet<object>()
+const injectedTurnUuidCaches = new WeakMap<object, Map<string, Set<string>>>()
 
 export type MessageContentSearchMatch = {
     sessionId: string
@@ -81,15 +82,27 @@ type DbSearchLookupRow = {
 
 const NO_RESPONSE_REQUESTED_TEXTS = new Set(['No response requested.', 'No response requested'])
 
-function getInjectedTurnUuidsForSessions(db: Database, sessionIds?: readonly string[]): ReadonlySet<string> {
-    const injectedTurnUuids = new Set<string>()
-    if (sessionIds?.length === 0) return injectedTurnUuids
+function getInjectedTurnUuidCache(db: Database): Map<string, Set<string>> {
+    let cache = injectedTurnUuidCaches.get(db)
+    if (!cache) {
+        cache = new Map()
+        injectedTurnUuidCaches.set(db, cache)
+    }
+    return cache
+}
+
+function scanInjectedTurnUuidsForSessions(
+    db: Database,
+    sessionIds?: readonly string[]
+): Map<string, Set<string>> {
+    const bySession = new Map<string, Set<string>>()
+    if (sessionIds?.length === 0) return bySession
 
     const scope = sessionIds === undefined
         ? ''
         : `AND session_id IN (${sessionIds.map(() => '?').join(', ')})`
     const select = db.prepare(`
-        SELECT rowid AS row_id, content
+        SELECT rowid AS row_id, session_id, content
         FROM messages
         WHERE rowid > ? ${scope}
         ORDER BY rowid ASC
@@ -101,16 +114,79 @@ function getInjectedTurnUuidsForSessions(db: Database, sessionIds?: readonly str
             ? select.all(afterRowId, SEARCH_REBUILD_BATCH_SIZE)
             : select.all(afterRowId, ...sessionIds, SEARCH_REBUILD_BATCH_SIZE)) as Array<{
                 row_id: number
+                session_id: string
                 content: string | Uint8Array
             }>
         if (rows.length === 0) break
         for (const row of rows) {
             const uuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
-            if (uuid) injectedTurnUuids.add(uuid)
+            if (!uuid) continue
+            const sessionUuids = bySession.get(row.session_id) ?? new Set<string>()
+            sessionUuids.add(uuid)
+            bySession.set(row.session_id, sessionUuids)
         }
         afterRowId = rows[rows.length - 1]!.row_id
     }
+    return bySession
+}
+
+function getInjectedTurnUuidsForSessions(db: Database, sessionIds?: readonly string[]): ReadonlySet<string> {
+    const scanned = scanInjectedTurnUuidsForSessions(db, sessionIds)
+    const cache = getInjectedTurnUuidCache(db)
+    if (sessionIds === undefined) {
+        cache.clear()
+        for (const [sessionId, uuids] of scanned) cache.set(sessionId, uuids)
+    } else {
+        for (const sessionId of sessionIds) {
+            cache.set(sessionId, scanned.get(sessionId) ?? new Set<string>())
+        }
+    }
+
+    const injectedTurnUuids = new Set<string>()
+    if (sessionIds === undefined) {
+        for (const uuids of scanned.values()) {
+            for (const uuid of uuids) injectedTurnUuids.add(uuid)
+        }
+    } else {
+        for (const sessionId of sessionIds) {
+            for (const uuid of scanned.get(sessionId) ?? []) injectedTurnUuids.add(uuid)
+        }
+    }
     return injectedTurnUuids
+}
+
+function getCachedInjectedTurnUuids(db: Database, sessionId: string): ReadonlySet<string> {
+    const cache = getInjectedTurnUuidCache(db)
+    const cached = cache.get(sessionId)
+    if (cached) return cached
+
+    const scanned = scanInjectedTurnUuidsForSessions(db, [sessionId])
+    const uuids = scanned.get(sessionId) ?? new Set<string>()
+    cache.set(sessionId, uuids)
+    return uuids
+}
+
+function rememberInjectedTurnUuid(db: Database, sessionId: string, content: unknown): void {
+    const uuid = extractInjectedTurnUuid(content)
+    if (!uuid) return
+    getInjectedTurnUuidCache(db).get(sessionId)?.add(uuid)
+}
+
+function invalidateInjectedTurnUuidCache(db: Database, sessionIds?: readonly string[]): void {
+    const cache = injectedTurnUuidCaches.get(db)
+    if (!cache) return
+    if (sessionIds === undefined) {
+        cache.clear()
+        return
+    }
+    for (const sessionId of sessionIds) cache.delete(sessionId)
+}
+
+export function invalidateMessageContentSearchInjectedTurnCache(
+    db: Database,
+    sessionIds: readonly string[]
+): void {
+    invalidateInjectedTurnUuidCache(db, sessionIds)
 }
 
 export function serializeContentSearchSessionIds(sessionIds: readonly string[]): string | null {
@@ -394,6 +470,7 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
     // not indexed; the explicit terminal snapshot carries the same render key
     // and is indexed once when the stream finishes.
     if (isLiveStreamSnapshot(message.content)) return
+    rememberInjectedTurnUuid(db, message.sessionId, message.content)
     ensureMessageContentSearchTable(db)
     const renderKey = extractMessageRenderKey(message.content)
     const searchKey = renderKey ? `${message.sessionId}:${renderKey}` : message.id
@@ -409,7 +486,7 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
         && NO_RESPONSE_REQUESTED_TEXTS.has(initialSearchable.text.trim())
         ? extractSearchableMessageText(message.content, {
             maxSourceCharacters,
-            injectedTurnUuids: getInjectedTurnUuidsForSessions(db, [message.sessionId])
+            injectedTurnUuids: getCachedInjectedTurnUuids(db, message.sessionId)
         })
         : initialSearchable
     if (!searchable) return
@@ -506,6 +583,8 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
         `)
     }
 
+    invalidateInjectedTurnUuidCache(db, sessionIds)
+
     // Build the renderer-equivalent system-injected UUID set once per rebuild;
     // doing this inside the batch loop would turn a full rebuild into O(N²).
     const injectedTurnUuids = getInjectedTurnUuidsForSessions(db, sessionIds)
@@ -567,6 +646,7 @@ export function rebuildMessageContentSearchForSessions(
 
 export function removeMessageContentSearchForSessions(db: Database, sessionIds: string[]): void {
     ensureMessageContentSearchTable(db)
+    invalidateInjectedTurnUuidCache(db, sessionIds)
     removeMessageContentSearchRowsForSessions(db, sessionIds)
 }
 

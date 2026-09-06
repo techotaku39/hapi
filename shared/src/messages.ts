@@ -380,23 +380,23 @@ function extractSearchableAssistantPlainText(
     const blocks = Array.isArray(message?.content) ? message.content : null
     if (!blocks) return extractAssistantPlainText(content)
 
-    const hiddenTaskPrompts = new Set(
-        blocks.flatMap((block) => {
-            if (!isObject(block) || block.type !== 'tool_use') return []
-            const name = typeof block.name === 'string' ? block.name : ''
-            const input = isObject(block.input) ? block.input : null
-            const isSubagent = name === 'Task'
-                || name === 'Agent'
-                || name.startsWith('Task:')
-                || name.startsWith('Agent:')
-            return isSubagent && typeof input?.prompt === 'string'
-                ? [input.prompt.trim()]
-                : []
-        })
-    )
+    const taskToolCall = blocks.find((block) => {
+        if (!isObject(block) || block.type !== 'tool_use') return false
+        const name = typeof block.name === 'string' ? block.name : ''
+        return name === 'Task'
+            || name === 'Agent'
+            || name.startsWith('Task:')
+            || name.startsWith('Agent:')
+    })
+    const taskToolInput = isObject(taskToolCall) && isObject(taskToolCall.input)
+        ? taskToolCall.input
+        : null
+    const hiddenTaskPrompt = typeof taskToolInput?.prompt === 'string'
+        ? taskToolInput.prompt.trim()
+        : null
     const textParts = blocks.flatMap((block) => {
         if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') return []
-        return hiddenTaskPrompts.has(block.text.trim()) ? [] : [block.text]
+        return hiddenTaskPrompt && block.text.trim() === hiddenTaskPrompt ? [] : [block.text]
     })
     if (textParts.length === 1) {
         const parentUuid = extractAssistantParentUuid(content)

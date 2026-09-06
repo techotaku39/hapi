@@ -173,6 +173,47 @@ describe('message content search', () => {
         expect(matches).toHaveLength(1)
     })
 
+    it('updates the injected-turn cache when a later system-injected turn arrives', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'sentinel-cache')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'normal-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'later-injected-turn',
+                    message: { content: '<system-reminder>...</system-reminder>' }
+                }
+            }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'later-injected-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        })
+
+        expect(store.messages.searchContent('No response requested', 'default'))
+            .toHaveLength(1)
+    })
+
     it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
         const store = new Store(':memory:')
         const defaultSession = makeSession(store, 'cjk-default')
