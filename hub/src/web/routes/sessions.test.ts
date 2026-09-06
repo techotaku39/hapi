@@ -1678,6 +1678,47 @@ describe('sessions routes', () => {
         expect(await response.json()).toEqual({ error: 'Content search request too large' })
     })
 
+    it('rejects overlong content-search queries consistently across endpoints', async () => {
+        const session = createSession({ id: 'overlong-content-query-session' })
+        const engine = {
+            getSessionsByNamespace: () => [session],
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: session.id, session }),
+            searchSessionContent: () => {
+                throw new Error('must reject before searching')
+            },
+            searchSessionContentMatches: () => {
+                throw new Error('must reject before searching')
+            },
+            getFutureScheduledMessageCounts: () => new Map(),
+            getNextScheduledAtBySessionIds: () => new Map()
+        } as unknown as Partial<SyncEngine>
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const query = 'x'.repeat(201)
+        const expected = { error: 'Content search query too long' }
+        const postResponse = await app.request('/api/sessions/content-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        })
+        const getResponse = await app.request(`/api/sessions/content-search?query=${query}`)
+        const sessionResponse = await app.request(
+            `/api/sessions/${session.id}/content-search?query=${query}`
+        )
+
+        expect(postResponse.status).toBe(400)
+        expect(await postResponse.json()).toEqual(expected)
+        expect(getResponse.status).toBe(400)
+        expect(await getResponse.json()).toEqual(expected)
+        expect(sessionResponse.status).toBe(400)
+        expect(await sessionResponse.json()).toEqual(expected)
+    })
+
     it('lists all content matches for an opened session without exposing its session id', async () => {
         const session = createSession({ id: 'content-session-matches' })
         const engine = {

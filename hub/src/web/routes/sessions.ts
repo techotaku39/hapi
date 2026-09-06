@@ -43,6 +43,7 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 // Leave room for the query, limit, and JSON envelope; the serialized session
 // scope itself remains bounded by MAX_CONTENT_SEARCH_SESSION_SCOPE_BYTES.
 const MAX_CONTENT_SEARCH_REQUEST_BYTES = MAX_CONTENT_SEARCH_SESSION_SCOPE_BYTES + 4 * 1024
+const MAX_CONTENT_SEARCH_QUERY_CHARACTERS = 200
 
 function commandsFromMetadataSlashCommands(names: readonly string[] | undefined): SlashCommand[] {
     if (!names?.length) {
@@ -144,6 +145,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         sessionIds?: readonly string[]
     ) => {
         if (!query) return c.json({ results: [] })
+        if (Array.from(query).length > MAX_CONTENT_SEARCH_QUERY_CHARACTERS) {
+            return c.json({ error: 'Content search query too long' }, 400)
+        }
 
         const namespace = c.get('namespace')
         const sessionsById = new Map(
@@ -156,7 +160,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (scopedSessionIds && serializeContentSearchSessionIds(scopedSessionIds) === null) {
             return c.json({ error: 'sessionIds too large' }, 400)
         }
-        const matches = engine.searchSessionContent(query.slice(0, 200), namespace, limit, scopedSessionIds)
+        const matches = engine.searchSessionContent(query, namespace, limit, scopedSessionIds)
         const matchedSessionIds = matches.map((match) => match.sessionId)
         const scheduledCounts = engine.getFutureScheduledMessageCounts(matchedSessionIds)
         const nextScheduledAt = engine.getNextScheduledAtBySessionIds(matchedSessionIds)
@@ -276,13 +280,16 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         const query = c.req.query('query')?.trim() ?? ''
         if (!query) return c.json({ matches: [], total: 0 })
+        if (Array.from(query).length > MAX_CONTENT_SEARCH_QUERY_CHARACTERS) {
+            return c.json({ error: 'Content search query too long' }, 400)
+        }
 
         const limitRaw = Number(c.req.query('limit'))
         const limit = Number.isFinite(limitRaw)
             ? Math.min(1000, Math.max(1, Math.floor(limitRaw)))
             : 500
         const result = engine.searchSessionContentMatches(
-            query.slice(0, 200),
+            query,
             c.get('namespace'),
             sessionResult.session.id,
             limit
