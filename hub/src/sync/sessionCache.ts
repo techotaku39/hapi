@@ -1325,6 +1325,9 @@ export class SessionCache {
         }
 
         if (options.deleteOldSession) {
+            // Capture durable attachment uploads that completed during the
+            // awaited scratchlist migration above before deleting the source.
+            this.store.attachments.transferSession(namespace, oldSessionId, newSessionId)
             const deleted = this.store.sessions.deleteSession(oldSessionId, namespace)
             if (!deleted) {
                 throw new Error('Failed to delete old session during merge')

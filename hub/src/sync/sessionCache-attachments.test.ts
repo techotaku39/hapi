@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import * as fsPromises from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { SyncEvent } from '@hapi/protocol/types'
-import { Store } from '../store'
+import { Store, type StoredAttachment } from '../store'
 import type { EventPublisher } from './eventPublisher'
 import { SessionCache } from './sessionCache'
 
@@ -25,7 +26,7 @@ function setup() {
     } as unknown as EventPublisher
     const cache = new SessionCache(store, publisher)
     contexts.push({ store, root })
-    return { store, cache }
+    return { store, cache, root }
 }
 
 function makeSessions(cache: SessionCache) {
@@ -61,6 +62,58 @@ describe('durable attachment session lifecycle', () => {
         expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).toBeNull()
         expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).not.toBeNull()
         expect(existsSync(attachment.originalPath)).toBe(true)
+    })
+
+    it('transfers uploads completed during awaited merge work before deleting the source', async () => {
+        const { store, cache, root } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = root
+        const oldScratchDir = join(root, 'scratchlist-attachments', 'default', oldSession.id)
+        let releaseScratchDelete!: () => void
+        let notifyScratchDeleteStarted!: () => void
+        const scratchDeleteGate = new Promise<void>((resolve) => { releaseScratchDelete = resolve })
+        const scratchDeleteStarted = new Promise<void>((resolve) => { notifyScratchDeleteStarted = resolve })
+        const originalRm = fsPromises.rm.bind(fsPromises)
+        const rmSpy = spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+            if (String(path) === oldScratchDir) {
+                notifyScratchDeleteStarted()
+                await scratchDeleteGate
+            }
+            return await originalRm(path, options)
+        })
+        let lateUploadPromise: Promise<StoredAttachment> | undefined
+        const originalTransfer = store.scratchlist.transfer.bind(store.scratchlist)
+        const transferSpy = spyOn(store.scratchlist, 'transfer').mockImplementation((fromSessionId, toSessionId) => {
+            const result = originalTransfer(fromSessionId, toSessionId)
+            lateUploadPromise = store.attachments.create({
+                namespace: 'default',
+                sessionId: oldSession.id,
+                filename: 'late.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('late upload')
+            })
+            return { ...result, moved: Math.max(1, result.moved) }
+        })
+        try {
+            const merging = cache.mergeSessions(oldSession.id, newSession.id, 'default')
+            const lateAttachment = await lateUploadPromise!
+            await scratchDeleteStarted
+            expect(store.attachments.getForSession(lateAttachment.id, 'default', oldSession.id)).not.toBeNull()
+            expect(store.attachments.getForSession(lateAttachment.id, 'default', newSession.id)).toBeNull()
+
+            releaseScratchDelete()
+            await merging
+            expect(store.attachments.getForSession(lateAttachment.id, 'default', oldSession.id)).toBeNull()
+            expect(store.attachments.getForSession(lateAttachment.id, 'default', newSession.id)).not.toBeNull()
+            expect(existsSync(lateAttachment.originalPath)).toBe(true)
+        } finally {
+            releaseScratchDelete?.()
+            rmSpy.mockRestore()
+            transferSpy.mockRestore()
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+        }
     })
 
     it('removes durable attachment metadata and files when a session is deleted', async () => {

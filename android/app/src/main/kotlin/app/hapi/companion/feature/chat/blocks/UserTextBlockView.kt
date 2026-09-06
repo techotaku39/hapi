@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -46,6 +47,8 @@ import app.hapi.companion.ui.theme.HapiTheme
 import app.hapi.protocol.chat.ChatAttachment
 import app.hapi.protocol.chat.UserTextBlock
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 
 /**
  * Operator prompt: right-aligned bubble (whitespace preserved — prompts are
@@ -115,6 +118,7 @@ fun UserTextBlockView(block: UserTextBlock, modifier: Modifier = Modifier) {
 @Composable
 private fun AttachmentView(attachment: ChatAttachment) {
     val media = LocalChatMedia.current
+    val context = LocalContext.current
     val isImage = attachment.mimeType.startsWith("image/")
     val hasInlinePreview = attachment.previewUrl?.startsWith("data:") == true
     val remoteOriginalUrl = remember(attachment.attachmentId) {
@@ -127,6 +131,19 @@ private fun AttachmentView(attachment: ChatAttachment) {
     }
 
     if (!hasInlinePreview) {
+        val originalRequest = remember(remoteOriginalUrl) {
+            remoteOriginalUrl?.let { url ->
+                ImageRequest.Builder(context)
+                    .data(url)
+                    .memoryCachePolicy(CachePolicy.DISABLED)
+                    .diskCachePolicy(CachePolicy.DISABLED)
+                    .build()
+            }
+        }
+        if (originalRequest == null) {
+            AttachmentChip(attachment)
+            return
+        }
         var viewerOpen by remember { mutableStateOf(false) }
         var originalFailed by remember(attachment.attachmentId) { mutableStateOf(false) }
         if (originalFailed) {
@@ -136,7 +153,7 @@ private fun AttachmentView(attachment: ChatAttachment) {
             )
         } else {
             AsyncImage(
-                model = remoteOriginalUrl,
+                model = originalRequest,
                 imageLoader = media.imageLoader!!,
                 contentDescription = attachment.filename,
                 contentScale = ContentScale.Fit,
@@ -160,7 +177,7 @@ private fun AttachmentView(attachment: ChatAttachment) {
                     contentAlignment = Alignment.Center,
                 ) {
                     AsyncImage(
-                        model = remoteOriginalUrl,
+                        model = originalRequest,
                         imageLoader = media.imageLoader!!,
                         contentDescription = attachment.filename,
                         contentScale = ContentScale.Fit,
