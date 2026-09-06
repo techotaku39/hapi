@@ -113,6 +113,31 @@ describe('OpenAI-compatible title provider', () => {
         )
     })
 
+    it('cancels a non-success response body before returning the provider error', async () => {
+        let canceled = false
+        const provider = new OpenAICompatibleTitleProvider(
+            {
+                baseUrl: 'https://example.test/v1',
+                apiKey: 'secret',
+                model: 'small-model'
+            },
+            async () => ({
+                ok: false,
+                status: 503,
+                body: {
+                    cancel: async () => {
+                        canceled = true
+                    }
+                }
+            } as unknown as Response)
+        )
+
+        await expect(provider.suggest('Recent conversation')).rejects.toThrow(
+            'Title provider request failed (HTTP 503): provider service unavailable'
+        )
+        expect(canceled).toBe(true)
+    })
+
     it('reports a timeout when the response body aborts after headers arrive', async () => {
         const provider = new OpenAICompatibleTitleProvider(
             {

@@ -346,6 +346,9 @@ export class OpenAICompatibleTitleProvider {
             })
 
             if (!response.ok) {
+                if (response.body) {
+                    await response.body.cancel().catch(() => undefined)
+                }
                 throw new TitleProviderRequestError(titleProviderHttpError(response.status))
             }
 
