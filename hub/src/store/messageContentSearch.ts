@@ -1,6 +1,8 @@
 import type { Database } from 'bun:sqlite'
 
 import {
+    extractAssistantParentUuid,
+    extractInjectedTurnUuid,
     extractMessageRenderKey,
     extractSearchableMessageText,
     isLiveStreamSnapshot
@@ -73,6 +75,26 @@ type DbSearchRow = {
 
 type DbSearchLookupRow = {
     search_rowid: number
+}
+
+const NO_RESPONSE_REQUESTED_TEXTS = new Set(['No response requested.', 'No response requested'])
+
+function getInjectedTurnUuidsForSessions(db: Database, sessionIds?: readonly string[]): ReadonlySet<string> {
+    const rows = sessionIds === undefined
+        ? db.prepare('SELECT content FROM messages').all() as Array<{ content: string | Uint8Array }>
+        : sessionIds.length === 0
+            ? []
+            : db.prepare(`
+                SELECT content
+                FROM messages
+                WHERE session_id IN (${sessionIds.map(() => '?').join(', ')})
+            `).all(...sessionIds) as Array<{ content: string | Uint8Array }>
+    const injectedTurnUuids = new Set<string>()
+    for (const row of rows) {
+        const uuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
+        if (uuid) injectedTurnUuids.add(uuid)
+    }
+    return injectedTurnUuids
 }
 
 export function serializeContentSearchSessionIds(sessionIds: readonly string[]): string | null {
@@ -349,7 +371,15 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
     if (searchKey !== message.id) removeMessageContentSearchIndexByKey(db, searchKey)
     if (message.invokedAt === null) return
 
-    const searchable = extractSearchableMessageText(message.content)
+    const initialSearchable = extractSearchableMessageText(message.content)
+    const parentUuid = extractAssistantParentUuid(message.content)
+    const searchable = parentUuid
+        && initialSearchable?.role === 'assistant'
+        && NO_RESPONSE_REQUESTED_TEXTS.has(initialSearchable.text.trim())
+        ? extractSearchableMessageText(message.content, {
+            injectedTurnUuids: getInjectedTurnUuidsForSessions(db, [message.sessionId])
+        })
+        : initialSearchable
     if (!searchable) return
 
     insertMessageContentSearchIndex(db, {
@@ -440,6 +470,9 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
         `)
     }
 
+    // Build the renderer-equivalent system-injected UUID set once per rebuild;
+    // doing this inside the batch loop would turn a full rebuild into O(N²).
+    const injectedTurnUuids = getInjectedTurnUuidsForSessions(db, sessionIds)
     let afterRowId = 0
     while (true) {
         const rows = (sessionIds
@@ -454,7 +487,7 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
             const searchKey = renderKey ? `${row.session_id}:${renderKey}` : row.id
             removeMessageContentSearchIndex(db, row.id)
             if (searchKey !== row.id) removeMessageContentSearchIndexByKey(db, searchKey)
-            const searchable = extractSearchableMessageText(decodedContent)
+            const searchable = extractSearchableMessageText(decodedContent, { injectedTurnUuids })
             if (!searchable) continue
             const searchableText = boundSearchableText(searchable.text)
             insertLookup.run(searchKey, row.id)

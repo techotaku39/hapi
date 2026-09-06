@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import {
     extractAssistantPlainText,
+    extractInjectedTurnUuid,
     extractMessageRenderKey,
     extractSearchableMessageText,
     extractUserPlainText,
@@ -186,6 +187,49 @@ describe('extractSearchableMessageText', () => {
 
         expect(extractSearchableMessageText({ role: 'agent', content }))
             .toEqual({ role: 'assistant', text: 'The repository is ready.' })
+    })
+
+    test('excludes No response requested only when its parent is system-injected', () => {
+        const sidechain = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'injected-turn',
+                    message: { content: '<system-reminder>...</system-reminder>' }
+                }
+            }
+        }
+        const sentinel = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'injected-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }
+        const normalSentinel = {
+            ...sentinel,
+            content: {
+                ...sentinel.content,
+                data: {
+                    ...sentinel.content.data,
+                    parentUuid: 'normal-turn'
+                }
+            }
+        }
+
+        expect(extractInjectedTurnUuid(sidechain)).toBe('injected-turn')
+        expect(extractSearchableMessageText(sentinel, {
+            injectedTurnUuids: new Set(['injected-turn'])
+        })).toBeNull()
+        expect(extractSearchableMessageText(normalSentinel, {
+            injectedTurnUuids: new Set(['injected-turn'])
+        })).toEqual({ role: 'assistant', text: 'No response requested.' })
     })
 
     test('extracts visible non-sidechain Claude user records', () => {

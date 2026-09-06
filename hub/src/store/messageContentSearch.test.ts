@@ -131,6 +131,47 @@ describe('message content search', () => {
             .toMatchObject([{ sessionId: session.id }])
     })
 
+    it('excludes injected Claude sentinel replies but keeps normal ones searchable', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'sentinel-search')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'injected-turn',
+                    message: { content: '<system-reminder>...</system-reminder>' }
+                }
+            }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'injected-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'normal-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        })
+
+        const matches = store.messages.searchContent('No response requested', 'default')
+        expect(matches).toHaveLength(1)
+    })
+
     it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
         const store = new Store(':memory:')
         const defaultSession = makeSession(store, 'cjk-default')

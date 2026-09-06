@@ -244,7 +244,42 @@ function extractClaudeUserPlainText(content: unknown): string | null {
     return extractUserPlainText(blocks)
 }
 
-function extractSearchableAssistantPlainText(content: unknown): string | null {
+export type SearchableMessageContext = {
+    injectedTurnUuids?: ReadonlySet<string>
+}
+
+/** Return the Claude UUID that identifies a system-injected user turn. */
+export function extractInjectedTurnUuid(value: unknown): string | null {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (!record || record.role !== 'agent' || !isObject(record.content) || record.content.type !== 'output') {
+        return null
+    }
+    const data = isObject(record.content.data) ? record.content.data : null
+    if (!data || data.type !== 'user') return null
+    const message = isObject(data.message) ? data.message : null
+    const messageContent = message?.content
+    const isSystemInjected = Boolean(data.isSidechain) || typeof messageContent === 'string'
+    if (!isSystemInjected || typeof data.uuid !== 'string' || data.uuid.length === 0) return null
+    return data.uuid
+}
+
+export function extractAssistantParentUuid(content: unknown): string | null {
+    if (!isObject(content) || content.type !== 'output') return null
+    const data = isObject(content.data) ? content.data : null
+    return data?.type === 'assistant' && typeof data.parentUuid === 'string' && data.parentUuid.length > 0
+        ? data.parentUuid
+        : null
+}
+
+function isNoResponseRequestedText(text: string): boolean {
+    const trimmed = text.trim()
+    return trimmed === 'No response requested.' || trimmed === 'No response requested'
+}
+
+function extractSearchableAssistantPlainText(
+    content: unknown,
+    context?: SearchableMessageContext
+): string | null {
     if (!isObject(content) || content.type !== 'output') {
         return extractAssistantPlainText(content)
     }
@@ -276,6 +311,16 @@ function extractSearchableAssistantPlainText(content: unknown): string | null {
         if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') return []
         return hiddenTaskPrompts.has(block.text.trim()) ? [] : [block.text]
     })
+    if (textParts.length === 1) {
+        const parentUuid = extractAssistantParentUuid(content)
+        if (
+            parentUuid
+            && context?.injectedTurnUuids?.has(parentUuid)
+            && isNoResponseRequestedText(textParts[0]!)
+        ) {
+            return null
+        }
+    }
     return textParts.length > 0 ? textParts.join('\n') : null
 }
 
@@ -333,7 +378,10 @@ function isHiddenAssistantOutput(content: unknown): boolean {
 }
 
 /** Extract only user-visible user/assistant prose from a stored role envelope. */
-export function extractSearchableMessageText(value: unknown): SearchableMessage | null {
+export function extractSearchableMessageText(
+    value: unknown,
+    context?: SearchableMessageContext
+): SearchableMessage | null {
     const record = unwrapRoleWrappedRecordEnvelope(value)
     if (!record) return null
 
@@ -361,7 +409,7 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
         const rawText = stripNotifySummaryFooter(
             isAgyPlannerMessage
                 ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
-                : (directText ?? extractSearchableAssistantPlainText(record.content) ?? '')
+                : (directText ?? extractSearchableAssistantPlainText(record.content, context) ?? '')
         )
         const text = normalizeSearchableMarkdownText(rawText)
         if (!text || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null
