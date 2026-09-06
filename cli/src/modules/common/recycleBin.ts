@@ -79,6 +79,11 @@ type ResolvedFile = {
     stats: FileStats
 }
 
+type ResolvedRestoreTarget = {
+    path: string
+    parent: string
+}
+
 function hasGitMetadataSegment(path: string): boolean {
     return path.split(/[\\/]+/).some((segment) => segment.toLowerCase() === '.git')
 }
@@ -478,7 +483,7 @@ async function resolveExistingFile(rawPath: string, root: string, protectedRoot?
     return { path: canonicalPath, stats }
 }
 
-async function resolveRestoreTarget(originalPath: string, root: string, protectedRoot?: string): Promise<string> {
+async function resolveRestoreTarget(originalPath: string, root: string, protectedRoot?: string): Promise<ResolvedRestoreTarget> {
     if (
         !isPathWithin(originalPath, root)
         || hasGitMetadataSegment(originalPath)
@@ -515,7 +520,33 @@ async function resolveRestoreTarget(originalPath: string, root: string, protecte
         if (!isNotFound(error)) throw error
     }
 
-    return target
+    return { path: target, parent: canonicalParent }
+}
+
+async function revalidateRestoreParent(
+    target: string,
+    expectedParent: string,
+    scopeRoot: string,
+    protectedRoot?: string,
+): Promise<string> {
+    let currentParent: string
+    try {
+        currentParent = await realpath(dirname(target))
+    } catch (error) {
+        if (isNotFound(error)) {
+            throw invalidPathError('The original restore directory no longer exists')
+        }
+        throw error
+    }
+    if (
+        normalizeForComparison(currentParent) !== normalizeForComparison(expectedParent)
+        || !isPathWithin(currentParent, scopeRoot)
+        || hasGitMetadataSegment(currentParent)
+        || (protectedRoot && isPathWithin(currentParent, protectedRoot))
+    ) {
+        throw invalidPathError('Restore target changed during restore')
+    }
+    return currentParent
 }
 
 function getEntryDirectory(root: string, entryId: string): string {
@@ -859,8 +890,9 @@ export class RecycleBinManager {
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
                 throw recycleBinEntryNotFound()
             }
-            const originalTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
-            let target = originalTarget
+            const resolvedTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
+            let target = resolvedTarget.path
+            let validatedParent = resolvedTarget.parent
             let targetExists = false
             try {
                 const targetStats = await lstat(target)
@@ -897,15 +929,23 @@ export class RecycleBinManager {
             }
             await assertPayloadIntegrity(entry, payloadPath)
 
+            validatedParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
+            target = join(validatedParent, basename(target))
+
             let stagedPath: string | null = null
             let stagedCreated = false
             try {
-                stagedPath = join(dirname(target), `.hapi-restore-${entry.id}.tmp`)
+                const stagingParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
+                stagedPath = join(stagingParent, `.hapi-restore-${entry.id}.tmp`)
                 await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
                 })
                 stagedCreated = true
+                const publicationParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
+                if (normalizeForComparison(publicationParent) !== normalizeForComparison(stagingParent)) {
+                    throw invalidPathError('Restore target changed during restore')
+                }
                 if (targetExists && conflict === 'overwrite') {
                     await rename(stagedPath, target)
                     await syncParentDirectory(target)

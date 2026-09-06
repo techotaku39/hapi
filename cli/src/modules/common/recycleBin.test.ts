@@ -8,6 +8,12 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     directorySyncFailureAt: undefined as number | undefined,
     replaceSourceBeforeDetach: undefined as { path: string; replacementPath: string } | undefined,
     rejectDetachedUnlink: false,
+    replaceRestoreParentOnRealpath: undefined as {
+        path: string
+        outsidePath: string
+        triggerAt: number
+        seen: number
+    } | undefined,
 }))
 
 vi.mock('node:fs/promises', async () => {
@@ -31,6 +37,18 @@ vi.mock('node:fs/promises', async () => {
                 throw error
             }
             return await actual.unlink(path)
+        }),
+        realpath: vi.fn(async (path: string) => {
+            const replacement = recycleBinIoHarness.replaceRestoreParentOnRealpath
+            if (replacement && path === replacement.path) {
+                replacement.seen += 1
+                if (replacement.seen === replacement.triggerAt) {
+                    recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
+                    await actual.rm(path, { recursive: true, force: true })
+                    await actual.symlink(replacement.outsidePath, replacement.path, process.platform === 'win32' ? 'junction' : undefined)
+                }
+            }
+            return await actual.realpath(path)
         }),
         open: vi.fn(async (...args: [string, string | number, number?]) => {
             const handle = await actual.open(...args)
@@ -111,6 +129,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.directorySyncFailureAt = undefined
         recycleBinIoHarness.replaceSourceBeforeDetach = undefined
         recycleBinIoHarness.rejectDetachedUnlink = false
+        recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -906,6 +925,45 @@ describe('RecycleBinManager', () => {
             })
             await expect(readFile(stagingPath, 'utf8')).resolves.toBe('unrelated outside file')
         } finally {
+            await rm(parentPath, { recursive: true, force: true })
+            if (outsideDir) await rm(outsideDir, { recursive: true, force: true })
+            await cleanup()
+        }
+    })
+
+    it('rejects restore when the original parent is replaced during payload validation', async () => {
+        let outsideDir = ''
+        const parentPath = join(workspaceDir, 'restore-parent-race')
+        try {
+            outsideDir = await createTempDir('hapi-recycle-restore-race')
+            await mkdir(parentPath)
+            const filePath = join(parentPath, 'race.txt')
+            await writeFile(filePath, 'race contents')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            try {
+                const probePath = join(workspaceDir, 'restore-race-symlink-probe')
+                await symlink(outsideDir, probePath, process.platform === 'win32' ? 'junction' : undefined)
+                await rm(probePath, { recursive: true, force: true })
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code
+                if (code === 'EPERM' || code === 'EACCES' || code === 'ENOSYS') return
+                throw error
+            }
+
+            recycleBinIoHarness.replaceRestoreParentOnRealpath = {
+                path: parentPath,
+                outsidePath: outsideDir,
+                triggerAt: 3,
+                seen: 0,
+            }
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({ success: false })
+            await expect(readdir(outsideDir)).resolves.toEqual([])
+        } finally {
+            recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
             await rm(parentPath, { recursive: true, force: true })
             if (outsideDir) await rm(outsideDir, { recursive: true, force: true })
             await cleanup()
