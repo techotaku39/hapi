@@ -622,21 +622,23 @@ async function reconcileEntryStagingFiles(
     entry: StoredRecycleBinEntry,
     protectedRoot?: string,
 ): Promise<boolean> {
-    const workspaceDirectory = await realpath(dirname(entry.originalPath)).catch(() => null)
-    if (
-        !workspaceDirectory
-        || !isPathWithin(workspaceDirectory, entry.scopeRoot)
-        || hasGitMetadataSegment(workspaceDirectory)
-        || (protectedRoot && isPathWithin(workspaceDirectory, protectedRoot))
-    ) {
-        return false
-    }
-
     let clean = true
-    const stagingDirectories = new Set([
-        workspaceDirectory,
-        join(root, entry.id),
-    ])
+    const stagingDirectories = new Set([join(root, entry.id)])
+    try {
+        const workspaceDirectory = await realpath(dirname(entry.originalPath))
+        if (
+            isPathWithin(workspaceDirectory, entry.scopeRoot)
+            && !hasGitMetadataSegment(workspaceDirectory)
+            && !(protectedRoot && isPathWithin(workspaceDirectory, protectedRoot))
+        ) {
+            stagingDirectories.add(workspaceDirectory)
+        }
+    } catch (error) {
+        if (!isNotFound(error)) {
+            logger.debug('[RECYCLE BIN] Failed to resolve staging directory', { entryId: entry.id, error })
+            clean = false
+        }
+    }
     const stagingNames = [
         `.hapi-source-${entry.id}.tmp`,
         `.hapi-restore-${entry.id}.tmp`,
@@ -646,16 +648,21 @@ async function reconcileEntryStagingFiles(
             const stagingPath = join(directory, name)
             try {
                 const stats = await lstat(stagingPath)
-                if (stats.isFile() && !stats.isSymbolicLink() && stats.size === entry.size) {
-                    const contentHash = await hashFile(stagingPath)
-                    const finalStats = await lstat(stagingPath)
-                    if (contentHash !== entry.contentHash || !isSameFileStats(stats, finalStats)) continue
-                    try {
-                        await rm(stagingPath, { force: true })
-                    } catch (error) {
-                        clean = false
-                        logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath, error })
-                    }
+                if (!stats.isFile() || stats.isSymbolicLink() || stats.size !== entry.size) {
+                    clean = false
+                    continue
+                }
+                const contentHash = await hashFile(stagingPath)
+                const finalStats = await lstat(stagingPath)
+                if (contentHash !== entry.contentHash || !isSameFileStats(stats, finalStats)) {
+                    clean = false
+                    continue
+                }
+                try {
+                    await rm(stagingPath, { force: true })
+                } catch (error) {
+                    clean = false
+                    logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath, error })
                 }
             } catch (error) {
                 if (!isNotFound(error)) {

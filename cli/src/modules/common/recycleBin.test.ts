@@ -506,6 +506,32 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('retains metadata when an owned staging file is changed before cleanup', async () => {
+        try {
+            const filePath = join(workspaceDir, 'mutated-staging-file.txt')
+            const content = 'stable staging content'
+            await writeFile(filePath, content)
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDetachedUnlink = true
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            recycleBinIoHarness.rejectDetachedUnlink = false
+
+            const stagingPath = join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`)
+            await writeFile(stagingPath, 'changed staging content')
+            const purged = await manager.purge(moved.entry.id, workspaceDir)
+            expect(purged).toMatchObject({ success: false, error: 'Failed to remove recycle-bin staging data' })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).resolves.toBeDefined()
+
+            await rm(stagingPath, { force: true })
+            await expect(manager.purge(moved.entry.id, workspaceDir)).resolves.toEqual({ success: true })
+        } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await cleanup()
+        }
+    })
+
     it('does not remove a pre-existing restore staging file when staging fails', async () => {
         try {
             const filePath = join(workspaceDir, 'restore-stage-collision.txt')
@@ -659,6 +685,37 @@ describe('RecycleBinManager', () => {
         } finally {
             recycleBinIoHarness.rejectDetachedUnlink = false
             recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await cleanup()
+        }
+    })
+
+    it('removes entries after their original parent directory is gone', async () => {
+        try {
+            const parentPath = join(workspaceDir, 'removed-original-parent')
+            await mkdir(parentPath)
+            let now = 0
+            const manager = createManager(homeDir, () => now, 1)
+            const filePaths = [
+                join(parentPath, 'purge.txt'),
+                join(parentPath, 'empty.txt'),
+                join(parentPath, 'expired.txt'),
+            ]
+            await Promise.all(filePaths.map((path) => writeFile(path, basename(path))))
+            const movedEntryIds: string[] = []
+            for (const filePath of filePaths) {
+                const moved = await manager.moveFile(filePath, workspaceDir)
+                if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+                movedEntryIds.push(moved.entry.id)
+            }
+
+            await rm(parentPath, { recursive: true, force: true })
+            await expect(manager.purge(movedEntryIds[0], workspaceDir)).resolves.toEqual({ success: true })
+            await expect(manager.empty(workspaceDir, [movedEntryIds[1]])).resolves.toEqual({ success: true, deletedCount: 1 })
+
+            now = DAY_MS
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+            await expect(stat(join(getRecycleBinRoot(homeDir), movedEntryIds[2]))).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
             await cleanup()
         }
     })
