@@ -132,15 +132,18 @@ describe('AttachmentStore', () => {
         initial.close()
 
         mkdirSync(attachmentsRoot, { recursive: true })
-        const untrackedOriginal = join(attachmentsRoot, 'untracked.original')
-        const interruptedTemp = join(attachmentsRoot, '.interrupted.original.tmp')
+        const untrackedOriginal = join(attachmentsRoot, `${randomUUID()}.original`)
+        const interruptedTemp = join(attachmentsRoot, `.${randomUUID()}.original.${randomUUID()}.tmp`)
+        const unrelatedFile = join(attachmentsRoot, 'do-not-delete.txt')
         writeFileSync(untrackedOriginal, 'untracked')
         writeFileSync(interruptedTemp, 'interrupted')
+        writeFileSync(unrelatedFile, 'unrelated')
 
         const reopened = new Store(dbPath, { attachmentsRoot })
         expect(await reopened.cleanupOrphanedAttachments()).toBe(2)
         expect(existsSync(untrackedOriginal)).toBe(false)
         expect(existsSync(interruptedTemp)).toBe(false)
+        expect(readFileSync(unrelatedFile, 'utf8')).toBe('unrelated')
         reopened.close()
     })
 

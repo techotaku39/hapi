@@ -16,9 +16,18 @@ afterEach(() => {
 })
 
 function createEngine(store: Store): SyncEngine {
+    const io = {
+        of: () => ({
+            adapter: { rooms: new Map<string, { size: number }>() },
+            to: () => ({
+                emit() {},
+                timeout: () => ({ emit() {} })
+            })
+        })
+    }
     return new SyncEngine(
         store,
-        {} as never,
+        io as never,
         new RpcRegistry(),
         { broadcast() {} } as never
     )
@@ -118,6 +127,64 @@ describe('SyncEngine.deleteAttachment', () => {
             await expect(deletion).resolves.toEqual({ success: true })
         } finally {
             releaseDelete?.()
+            engine.stop()
+            store.close()
+        }
+    })
+
+    it('rejects deletion while a message is persisting an attachment', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-send-delete-race-'))
+        tempDirs.push(root)
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const engine = createEngine(store)
+        let releaseSend!: () => void
+        let notifySendStarted!: () => void
+        const sendGate = new Promise<void>((resolve) => { releaseSend = resolve })
+        const sendStarted = new Promise<void>((resolve) => { notifySendStarted = resolve })
+        const originalAdd = store.addMessageForCurrentSession.bind(store)
+        spyOn(store, 'addMessageForCurrentSession').mockImplementation(async (...args) => {
+            notifySendStarted()
+            await sendGate
+            return await originalAdd(...args)
+        })
+        try {
+            const session = engine.getOrCreateSession(
+                'attachment-send-delete-race',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const attachment = await store.attachments.create({
+                namespace: 'default',
+                sessionId: session.id,
+                filename: 'photo.png',
+                mimeType: 'image/png',
+                original: Buffer.from('original')
+            })
+            const metadata = {
+                id: 'message-attachment',
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                size: attachment.size,
+                attachmentId: attachment.id
+            }
+
+            const sending = engine.sendMessage(session.id, { text: 'persist this', attachments: [metadata] })
+            await sendStarted
+            await expect(engine.deleteAttachment(session.id, 'default', attachment.id)).resolves.toEqual({
+                success: false,
+                error: 'Attachment is being sent'
+            })
+
+            releaseSend()
+            await expect(sending).resolves.toBeUndefined()
+            expect(store.messages.getAllMessages(session.id)).toHaveLength(1)
+            await expect(engine.deleteAttachment(session.id, 'default', attachment.id)).resolves.toEqual({
+                success: false,
+                error: 'Attachment is already referenced by a message'
+            })
+        } finally {
+            releaseSend?.()
             engine.stop()
             store.close()
         }

@@ -55,6 +55,11 @@ const sanitizeFilename = (filename: string): string => {
 
 const hashBytes = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
 
+const isManagedAttachmentFilename = (filename: string): boolean => (
+    /^[0-9a-f-]{36}\.original$/i.test(filename)
+    || /^\.[0-9a-f-]{36}\.original\.[0-9a-f-]{36}\.tmp$/i.test(filename)
+)
+
 const expandHome = (value: string): string => {
     if (value === '~') return homedir()
     if (value.startsWith('~/') || value.startsWith('~\\')) {
@@ -182,7 +187,7 @@ export class AttachmentStore {
 
     /** Remove files in the attachment root that are not referenced by SQLite. */
     async cleanupUntrackedFiles(): Promise<number> {
-        let entries: Array<{ name: string; isDirectory(): boolean }>
+        let entries: Array<{ name: string; isFile(): boolean }>
         try {
             entries = await readdir(this.root, { withFileTypes: true })
         } catch (error) {
@@ -199,7 +204,7 @@ export class AttachmentStore {
         let removed = 0
         let firstError: unknown
         for (const entry of entries) {
-            if (entry.isDirectory()) continue
+            if (!entry.isFile() || !isManagedAttachmentFilename(entry.name)) continue
             const path = join(this.root, entry.name)
             if (trackedPaths.has(resolve(path))) continue
             try {

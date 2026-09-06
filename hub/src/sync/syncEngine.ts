@@ -194,6 +194,7 @@ export class SyncEngine {
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
     private readonly deletingAttachmentKeys = new Set<string>()
+    private readonly sendingAttachmentKeys = new Set<string>()
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly titleSuggestionService: TitleSuggestionService
@@ -1037,15 +1038,39 @@ export class SyncEngine {
             throw new Error('Conversation history action already in progress')
         }
         const session = this.getSession(sessionId)
-        if (session && payload.attachments?.some((attachment) => (
-            attachment.attachmentId
-            && this.deletingAttachmentKeys.has(this.attachmentKey(session.namespace, attachment.attachmentId))
-        ))) {
+        const attachmentIds = session
+            ? Array.from(new Set(
+                (payload.attachments ?? [])
+                    .map((attachment) => attachment.attachmentId)
+                    .filter((attachmentId): attachmentId is string => typeof attachmentId === 'string' && attachmentId.length > 0)
+            ))
+            : []
+        const attachmentKeys = session
+            ? attachmentIds.map((attachmentId) => this.attachmentKey(session.namespace, attachmentId))
+            : []
+        if (attachmentKeys.some((key) => this.deletingAttachmentKeys.has(key))) {
             throw new Error('Attachment deletion in progress')
         }
-        const { actualSessionId, createdAt: activeTurnStartedAt } = await this.messageService.sendMessage(sessionId, payload)
-        this.sessionCache.markMessageQueued(actualSessionId, Date.now(), activeTurnStartedAt)
-        this.sessionCache.recordSessionActivity(actualSessionId, Date.now())
+        if (session && attachmentIds.some((attachmentId) => (
+            !this.store.attachments.getForSession(attachmentId, session.namespace, session.id)
+        ))) {
+            throw new Error('Attachment not found')
+        }
+        if (attachmentKeys.some((key) => this.sendingAttachmentKeys.has(key))) {
+            throw new Error('Attachment send already in progress')
+        }
+        for (const key of attachmentKeys) {
+            this.sendingAttachmentKeys.add(key)
+        }
+        try {
+            const { actualSessionId, createdAt: activeTurnStartedAt } = await this.messageService.sendMessage(sessionId, payload)
+            this.sessionCache.markMessageQueued(actualSessionId, Date.now(), activeTurnStartedAt)
+            this.sessionCache.recordSessionActivity(actualSessionId, Date.now())
+        } finally {
+            for (const key of attachmentKeys) {
+                this.sendingAttachmentKeys.delete(key)
+            }
+        }
     }
 
     async cancelQueuedMessage(
@@ -3959,6 +3984,9 @@ export class SyncEngine {
         const key = this.attachmentKey(namespace, attachmentId)
         if (this.deletingAttachmentKeys.has(key)) {
             return { success: false, error: 'Attachment deletion in progress' }
+        }
+        if (this.sendingAttachmentKeys.has(key)) {
+            return { success: false, error: 'Attachment is being sent' }
         }
         if (!this.store.attachments.getForSession(attachmentId, namespace, access.sessionId)) {
             return { success: false, error: 'Attachment not found' }
