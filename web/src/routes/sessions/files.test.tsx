@@ -22,6 +22,12 @@ const mocks = vi.hoisted(() => ({
         tab: 'directories' as const,
         query: '感',
     },
+    fileSearchResult: null as null | {
+        files: Array<{ fileName: string; filePath: string; fullPath: string; fileType: 'file' }>
+        error: string | null
+        isPathSearch: boolean
+        isLoading: boolean
+    },
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -63,6 +69,12 @@ vi.mock('@/hooks/queries/useGitStatusFiles', () => ({
 vi.mock('@/hooks/queries/useSessionFileSearch', () => ({
     useSessionFileSearch: (...args: unknown[]) => {
         mocks.fileSearch(...args)
+        if (mocks.fileSearchResult) {
+            return {
+                ...mocks.fileSearchResult,
+                refetch: vi.fn(),
+            }
+        }
         return {
             files: [{
                 fileName: '感言.ts',
@@ -71,6 +83,7 @@ vi.mock('@/hooks/queries/useSessionFileSearch', () => ({
                 fileType: 'file' as const,
             }],
             error: null,
+            isPathSearch: false,
             isLoading: false,
             refetch: vi.fn(),
         }
@@ -107,6 +120,8 @@ function renderFilesPage() {
 describe('FilesPage search navigation', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.search.query = '感'
+        mocks.fileSearchResult = null
         window.localStorage.clear()
         window.sessionStorage.clear()
     })
@@ -161,6 +176,21 @@ describe('FilesPage search navigation', () => {
             replace: true,
             resetScroll: false,
         })
+    })
+
+    it('uses path-specific empty copy for an empty path search', () => {
+        mocks.search.query = 'src/nope.ts'
+        mocks.fileSearchResult = {
+            files: [],
+            error: null,
+            isPathSearch: true,
+            isLoading: false,
+        }
+
+        renderFilesPage()
+
+        expect(screen.getByText('No files match your search in this path.')).toBeInTheDocument()
+        expect(screen.queryByText('No files match your search.')).not.toBeInTheDocument()
     })
 })
 
