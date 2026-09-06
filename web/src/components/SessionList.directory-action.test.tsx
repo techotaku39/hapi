@@ -6,6 +6,7 @@ import type { ApiClient } from '@/api/client'
 import type { SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
+import { markSessionSeen, markSessionUnread } from '@/lib/sessionLastSeen'
 import { SessionList } from './SessionList'
 
 const SEARCH_LABEL = 'Search sessions (title, path, Agent, machine name, ID, and more)'
@@ -1168,6 +1169,77 @@ describe('SessionList search toggle', () => {
         } finally {
             vi.useRealTimers()
             localStorage.removeItem('hapi-show-active-sessions-only')
+        }
+    })
+
+    it('refreshes the content-search scope when a session becomes unread', async () => {
+        vi.useFakeTimers()
+        const unreadSession = makeSession({
+            id: 'initially-unread-content-match',
+            updatedAt: 100,
+            metadata: { path: '/work/hapi', name: 'Initially unread', flavor: 'codex' },
+        })
+        const newlyUnreadSession = makeSession({
+            id: 'newly-unread-content-match',
+            updatedAt: 100,
+            metadata: { path: '/work/hapi', name: 'Newly unread', flavor: 'codex' },
+        })
+        markSessionUnread(unreadSession.id, unreadSession.updatedAt)
+        markSessionSeen(newlyUnreadSession.id, newlyUnreadSession.updatedAt)
+        const api = {
+            searchSessionContent: vi.fn().mockResolvedValue({ results: [] }),
+        } as unknown as ApiClient
+
+        try {
+            renderWithProviders(
+                <SessionList
+                    sessions={[unreadSession, newlyUnreadSession]}
+                    selectedSessionId={null}
+                    onSelect={vi.fn()}
+                    onNewSession={vi.fn()}
+                    onRefresh={vi.fn()}
+                    isLoading={false}
+                    renderHeader={false}
+                    api={api}
+                />
+            )
+
+            fireEvent.click(screen.getByRole('button', { name: 'Unread only' }))
+            fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
+            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'content' } })
+
+            await act(async () => {
+                vi.advanceTimersByTime(180)
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+            expect(api.searchSessionContent).toHaveBeenLastCalledWith(
+                'content',
+                50,
+                expect.any(AbortSignal),
+                [unreadSession.id]
+            )
+
+            act(() => markSessionUnread(newlyUnreadSession.id, newlyUnreadSession.updatedAt))
+            await act(async () => {
+                vi.advanceTimersByTime(180)
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+
+            expect(api.searchSessionContent).toHaveBeenLastCalledWith(
+                'content',
+                50,
+                expect.any(AbortSignal),
+                [unreadSession.id, newlyUnreadSession.id]
+            )
+        } finally {
+            vi.useRealTimers()
+            localStorage.removeItem('hapi.sessionLastSeen.v1')
+            localStorage.removeItem('hapi.sessionManualUnread.v1')
+            localStorage.removeItem('hapi.sessionLastSeenBaseline.v1')
         }
     })
 

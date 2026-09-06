@@ -1416,7 +1416,7 @@ export function SessionList(props: {
             : unreadFiltered.filter(session =>
                 (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
             )
-    }, [allSessions, activeMachineFilter, selectedSessionId, showUnreadOnly, timeRange?.start, timeRange?.end])
+    }, [allSessions, activeMachineFilter, selectedSessionId, showUnreadOnly, lastSeenVersion, timeRange?.start, timeRange?.end])
     const contentSearchSessionIds = useMemo(
         () => contentSearchCandidateSessions.map(session => session.id),
         [contentSearchCandidateSessions]
