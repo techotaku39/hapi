@@ -592,6 +592,52 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
             expect(store.messages.lookupQueuedMessage(session.id, msg.id)).toEqual({ status: 'absent' })
             expect(publisher.events.some((event) => event.type === 'message-cancelled')).toBe(true)
         })
+
+        it('releases durable and materialized attachments when discarding an indeterminate row', async () => {
+            const store = makeStore()
+            const session = makeSession(store, 'indeterminate-cancel-attachment')
+            const attachment = makeHubScratchlistAttachment(session.id, 'indeterminate-cancel-attachment')
+            const deletedHubPaths: string[] = []
+            const deletedMaterializedPaths: string[] = []
+            let ackCount = 0
+            const service = new MessageService(
+                store,
+                makeIo((callback) => {
+                    ackCount += 1
+                    callback(null, [{ removed: ackCount > 1 }])
+                }),
+                makePublisher() as any,
+                undefined,
+                {
+                    materializeScheduledAttachments: async (_sessionId, attachments) => attachments.map((candidate) => ({
+                        ...candidate,
+                        path: '/tmp/indeterminate-discard.png',
+                    })),
+                    deleteScheduledAttachments: async (_sessionId, attachments) => {
+                        deletedHubPaths.push(...attachments.map((candidate) => candidate.path))
+                    },
+                    deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                        deletedMaterializedPaths.push(...attachments.map((candidate) => candidate.path))
+                    },
+                },
+            )
+            const message = store.messages.addMessage(
+                session.id,
+                { role: 'user', content: { type: 'text', text: 'discard attachment', attachments: [attachment] } },
+                'local-indeterminate-attachment',
+                Date.now() - 1_000,
+            )
+
+            await service.releaseMatureScheduledMessages(Date.now())
+            await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({ status: 'busy' })
+            await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toEqual({
+                status: 'cancelled',
+                localId: 'local-indeterminate-attachment',
+            })
+
+            expect(deletedHubPaths).toEqual([attachment.path])
+            expect(deletedMaterializedPaths).toEqual(['/tmp/indeterminate-discard.png'])
+        })
     })
 
     describe('Race-A: CLI ack removed:true → DELETE + status=cancelled', () => {
@@ -725,17 +771,22 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
         it('returns invoked only when the CLI explicitly confirms consumption', async () => {
             const store = makeStore()
             const session = makeSession(store, 'race-consumed')
+            const attachment = makeHubScratchlistAttachment(session.id, 'race-consumed')
+            const deletedPaths: string[] = []
             const msg = store.messages.addMessage(
                 session.id,
-                { role: 'user', content: { type: 'text', text: 'hello' } },
-                'local-consumed'
+                { role: 'user', content: { type: 'text', text: 'hello', attachments: [attachment] } },
+                'local-consumed',
+                Date.now() - 1_000,
             )
             const publisher = makePublisher()
-            const io = makeIo((callback) => {
-                callback(null, [{ removed: false, consumed: true }])
-            })
+            const io = makeIo((callback) => callback(null, [{ removed: false, consumed: true }]))
 
-            const service = new MessageService(store, io, publisher as any)
+            const service = new MessageService(store, io, publisher as any, undefined, {
+                deleteScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedPaths.push(...attachments.map((candidate) => candidate.path))
+                },
+            })
             const result = await service.cancelQueuedMessage(session.id, msg.id)
 
             expect(result.status).toBe('invoked')
@@ -744,6 +795,63 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
                 expect(result.message.invokedAt).not.toBeNull()
             }
             expect(publisher.events.filter(e => e.type === 'messages-consumed')).toHaveLength(1)
+            expect(deletedPaths).toEqual([attachment.path])
+        })
+    })
+
+    describe('indeterminate scheduled attachment retry', () => {
+        it('materializes Hub attachments before requeueing an indeterminate message', async () => {
+            const store = makeStore()
+            const session = makeSession(store, 'retry-scheduled-attachment')
+            const attachment = makeHubScratchlistAttachment(session.id, 'retry-scheduled-attachment')
+            const message = store.messages.addMessage(
+                session.id,
+                { role: 'user', content: { type: 'text', text: 'retry attachment', attachments: [attachment] } },
+                'local-retry-scheduled-attachment',
+                Date.now() - 1_000,
+            )
+            store.messages.markMessagesIndeterminate(session.id, [message.localId!])
+
+            let ackCount = 0
+            let retriedUpdate: any
+            const io = {
+                of: () => ({
+                    to: () => ({
+                        timeout: () => ({
+                            emit: (_event: string, data: unknown, callback: AckCallback) => {
+                                ackCount += 1
+                                if (ackCount === 1) {
+                                    callback(null, [{ removed: true }])
+                                } else {
+                                    retriedUpdate = data
+                                    callback(null, [{ removed: false, accepted: true } as any])
+                                }
+                            },
+                        }),
+                        emit: () => {},
+                    }),
+                    adapter: { rooms: { get: () => new Set(['cli']) } },
+                }),
+            } as unknown as Server
+            const service = new MessageService(
+                store,
+                io,
+                makePublisher() as any,
+                undefined,
+                {
+                    materializeScheduledAttachments: async (_sessionId, attachments) => attachments.map((candidate) => ({
+                        ...candidate,
+                        path: '/tmp/retried-scheduled-attachment.png',
+                    })),
+                },
+            )
+
+            await expect(service.retryIndeterminateMessage(session.id, message.id)).resolves.toEqual({
+                status: 'retried',
+                localId: 'local-retry-scheduled-attachment',
+            })
+            expect(retriedUpdate.body.message.content.content.attachments[0].path)
+                .toBe('/tmp/retried-scheduled-attachment.png')
         })
     })
 

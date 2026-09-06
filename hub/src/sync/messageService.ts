@@ -388,13 +388,14 @@ export class MessageService {
         }
     }
 
-    private recordConsumedAcknowledgement(
+    private async recordConsumedAcknowledgement(
         sessionId: string,
         localId: string,
-    ): CancelQueuedMessageResult {
+    ): Promise<CancelQueuedMessageResult> {
         const invokedAt = Date.now()
         this.store.messages.markMessagesInvoked(sessionId, [localId], invokedAt)
         this.publisher.emit({ type: 'messages-consumed', sessionId, localIds: [localId], invokedAt })
+        await this.releaseConsumedScheduledAttachments(sessionId, [localId])
         const settled = this.store.messages.lookupQueuedMessage(sessionId, localId)
         return settled.status === 'invoked'
             ? settled
@@ -729,7 +730,7 @@ export class MessageService {
         if (isDispatching) {
             const ackResult = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
             if (ackResult === 'consumed') {
-                return this.recordConsumedAcknowledgement(sessionId, localId)
+                return await this.recordConsumedAcknowledgement(sessionId, localId)
             }
             // The native request may have reached the agent while the cancel
             // round-trip was pending. Never delete a live dispatch; hold it as
@@ -755,16 +756,18 @@ export class MessageService {
                 ? await this.requestCliCancelAck(sessionId, localId, messageId, 500)
                 : 'timeout' as const
             if (ackResult === 'consumed') {
-                return this.recordConsumedAcknowledgement(sessionId, localId)
+                return await this.recordConsumedAcknowledgement(sessionId, localId)
             }
             if (ackResult === 'in-flight' || ackResult === 'indeterminate' || (ackResult === 'timeout' && cliCount > 0)) {
                 return { status: 'busy', localId }
             }
-            this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+            const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+            if (deleted) await this.releaseCancelledScheduledAttachment(sessionId, message)
             const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
             if (recheck.status === 'invoked') {
                 // The steer won the race while the cancel ACK was in flight;
                 // never broadcast cancellation over a delivered row.
+                await this.releaseInvokedScheduledAttachment(sessionId, message)
                 return recheck
             }
             if (recheck.status !== 'absent') {
@@ -870,7 +873,7 @@ export class MessageService {
         const ackResult = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
 
         if (ackResult === 'consumed') {
-            return this.recordConsumedAcknowledgement(sessionId, localId)
+            return await this.recordConsumedAcknowledgement(sessionId, localId)
         }
         if (ackResult === 'in-flight' || ackResult === 'indeterminate') {
             // The row is inside an async steer (mid-turn delivery): it can
@@ -939,7 +942,7 @@ export class MessageService {
 
         const cancelResult = await this.requestCliCancelAck(sessionId, lookup.localId, messageId, 500)
         if (cancelResult === 'consumed') {
-            const settled = this.recordConsumedAcknowledgement(sessionId, lookup.localId)
+            const settled = await this.recordConsumedAcknowledgement(sessionId, lookup.localId)
             return settled.status === 'invoked'
                 ? { status: 'invoked', message: toDecryptedMessage(settled.message) }
                 : { status: 'not-found' }
@@ -960,6 +963,20 @@ export class MessageService {
         const message = this.store.messages.claimIndeterminateMessage(sessionId, messageId)
         if (!message || !message.localId) return { status: 'not-found' }
 
+        let deliveryContent: unknown
+        try {
+            deliveryContent = await this.getScheduledDeliveryContent(message)
+        } catch {
+            this.store.messages.setMessagesDeliveryState(sessionId, [message.localId], 'indeterminate')
+            this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [message.localId] })
+            return { status: 'retry-unavailable', localId: message.localId }
+        }
+        if (deliveryContent === null) {
+            this.store.messages.setMessagesDeliveryState(sessionId, [message.localId], 'indeterminate')
+            this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [message.localId] })
+            return { status: 'retry-unavailable', localId: message.localId }
+        }
+
         const update = {
             id: message.id,
             seq: message.seq,
@@ -974,7 +991,7 @@ export class MessageService {
                     seq: message.seq,
                     createdAt: message.createdAt,
                     localId: message.localId,
-                    content: contentForDeferredDelivery(message.content)
+                    content: contentForDeferredDelivery(deliveryContent)
                 }
             }
         }
