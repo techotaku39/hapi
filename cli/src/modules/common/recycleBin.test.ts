@@ -8,6 +8,7 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     directorySyncFailureAt: undefined as number | undefined,
     replaceSourceBeforeDetach: undefined as { path: string; replacementPath: string } | undefined,
     rejectDetachedUnlink: false,
+    rejectOwnedStageRemoval: false,
     replaceRestoreParentOnRealpath: undefined as {
         path: string
         outsidePath: string
@@ -37,6 +38,14 @@ vi.mock('node:fs/promises', async () => {
                 throw error
             }
             return await actual.unlink(path)
+        }),
+        rm: vi.fn(async (path: string, options?: Parameters<typeof actual.rm>[1]) => {
+            if (recycleBinIoHarness.rejectOwnedStageRemoval && path.includes('.hapi-source-')) {
+                const error = new Error('Simulated owned-stage removal failure') as NodeJS.ErrnoException
+                error.code = 'EIO'
+                throw error
+            }
+            return await actual.rm(path, options)
         }),
         realpath: vi.fn(async (path: string) => {
             const replacement = recycleBinIoHarness.replaceRestoreParentOnRealpath
@@ -129,6 +138,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.directorySyncFailureAt = undefined
         recycleBinIoHarness.replaceSourceBeforeDetach = undefined
         recycleBinIoHarness.rejectDetachedUnlink = false
+        recycleBinIoHarness.rejectOwnedStageRemoval = false
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
@@ -546,6 +556,109 @@ describe('RecycleBinManager', () => {
             await expect(readFile(filePath, 'utf8')).resolves.toBe('retain the recoverable payload')
         } finally {
             recycleBinIoHarness.rejectDetachedUnlink = false
+            await cleanup()
+        }
+    })
+
+    it('retains the entry when restore cannot remove an owned staging file', async () => {
+        try {
+            const filePath = join(workspaceDir, 'restore-stage-removal-failure.txt')
+            await writeFile(filePath, 'restore-stage-removal-failure')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDetachedUnlink = true
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = true
+
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({ success: false, error: 'Failed to remove recycle-bin staging data' })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).resolves.toBeDefined()
+
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [moved.entry] })
+            await expect(manager.purge(moved.entry.id, workspaceDir)).resolves.toEqual({ success: true })
+        } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await cleanup()
+        }
+    })
+
+    it('retains the entry when purge cannot remove an owned staging file', async () => {
+        try {
+            const filePath = join(workspaceDir, 'purge-stage-removal-failure.txt')
+            await writeFile(filePath, 'purge-stage-removal-failure')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDetachedUnlink = true
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = true
+
+            await expect(manager.purge(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                success: false,
+                error: 'Failed to remove recycle-bin staging data',
+            })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).resolves.toBeDefined()
+
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await expect(manager.purge(moved.entry.id, workspaceDir)).resolves.toEqual({ success: true })
+        } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await cleanup()
+        }
+    })
+
+    it('retains entries when empty-bin cannot remove an owned staging file', async () => {
+        try {
+            const filePath = join(workspaceDir, 'empty-stage-removal-failure.txt')
+            await writeFile(filePath, 'empty-stage-removal-failure')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDetachedUnlink = true
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = true
+
+            await expect(manager.empty(workspaceDir, [moved.entry.id])).resolves.toMatchObject({
+                success: false,
+                error: 'Failed to remove recycle-bin staging data',
+            })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).resolves.toBeDefined()
+
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await expect(manager.empty(workspaceDir, [moved.entry.id])).resolves.toEqual({ success: true, deletedCount: 1 })
+        } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await cleanup()
+        }
+    })
+
+    it('retains expired entries when expiry cleanup cannot remove an owned staging file', async () => {
+        try {
+            let now = 0
+            const filePath = join(workspaceDir, 'expiry-stage-removal-failure.txt')
+            await writeFile(filePath, 'expiry-stage-removal-failure')
+            const manager = createManager(homeDir, () => now, 1)
+            recycleBinIoHarness.rejectDetachedUnlink = true
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = true
+            now = DAY_MS
+
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).resolves.toBeDefined()
+
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).rejects.toMatchObject({ code: 'ENOENT' })
+        } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectOwnedStageRemoval = false
             await cleanup()
         }
     })

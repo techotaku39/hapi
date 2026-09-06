@@ -621,7 +621,7 @@ async function reconcileEntryStagingFiles(
     root: string,
     entry: StoredRecycleBinEntry,
     protectedRoot?: string,
-): Promise<void> {
+): Promise<boolean> {
     const workspaceDirectory = await realpath(dirname(entry.originalPath)).catch(() => null)
     if (
         !workspaceDirectory
@@ -629,9 +629,10 @@ async function reconcileEntryStagingFiles(
         || hasGitMetadataSegment(workspaceDirectory)
         || (protectedRoot && isPathWithin(workspaceDirectory, protectedRoot))
     ) {
-        return
+        return false
     }
 
+    let clean = true
     const stagingDirectories = new Set([
         workspaceDirectory,
         join(root, entry.id),
@@ -649,15 +650,33 @@ async function reconcileEntryStagingFiles(
                     const contentHash = await hashFile(stagingPath)
                     const finalStats = await lstat(stagingPath)
                     if (contentHash !== entry.contentHash || !isSameFileStats(stats, finalStats)) continue
-                    await rm(stagingPath, { force: true })
+                    try {
+                        await rm(stagingPath, { force: true })
+                    } catch (error) {
+                        clean = false
+                        logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath, error })
+                    }
                 }
             } catch (error) {
                 if (!isNotFound(error)) {
+                    clean = false
                     logger.debug('[RECYCLE BIN] Failed to reconcile staging file', { stagingPath, error })
                 }
             }
         }
     }
+    return clean
+}
+
+async function removeEntryUnlocked(
+    root: string,
+    entry: StoredRecycleBinEntry,
+    protectedRoot?: string,
+): Promise<void> {
+    if (!await reconcileEntryStagingFiles(root, entry, protectedRoot)) {
+        throw new Error('Failed to remove recycle-bin staging data')
+    }
+    await rm(join(root, entry.id), { recursive: true, force: true })
 }
 
 async function cleanupExpiredUnlocked(root: string, now: number, protectedRoot?: string): Promise<void> {
@@ -674,10 +693,15 @@ async function cleanupExpiredUnlocked(root: string, now: number, protectedRoot?:
         if (!RECYCLE_ENTRY_ID_PATTERN.test(entryId)) continue
         try {
             const entry = await readStoredEntryMetadata(root, entryId)
-            await reconcileEntryStagingFiles(root, entry, protectedRoot)
             if (entry.expiresAt <= now) {
+                if (!await reconcileEntryStagingFiles(root, entry, protectedRoot)) {
+                    logger.debug('[RECYCLE BIN] Retaining expired entry while staging cleanup is pending', { entryId })
+                    continue
+                }
                 await rm(join(root, entryId), { recursive: true, force: true })
                 removedAny = true
+            } else {
+                await reconcileEntryStagingFiles(root, entry, protectedRoot)
             }
         } catch (error) {
             if (await removeConservativelyStaleEntry(root, entryId, now)) {
@@ -798,7 +822,12 @@ export class RecycleBinManager {
                     }
                 }
                 if (!rollbackError) {
-                    await rm(entryDirectory, { recursive: true, force: true }).catch(() => {})
+                    try {
+                        await removeEntryUnlocked(root, entry, protectedRoot)
+                    } catch (cleanupError) {
+                        logger.debug('[RECYCLE BIN] Failed to remove a failed move entry', { cleanupError })
+                        throw new Error('File move failed and the recycle-bin entry was retained for recovery')
+                    }
                 } else {
                     throw new Error('File move failed and the recycle-bin entry was retained for recovery')
                 }
@@ -957,7 +986,7 @@ export class RecycleBinManager {
                     await unlink(stagedPath)
                     await syncParentDirectory(target)
                 }
-                await rm(join(root, entry.id), { recursive: true, force: true })
+                await removeEntryUnlocked(root, entry, protectedRoot)
                 await syncDirectory(root)
                 return { success: true, restoredPath: target }
             } catch (error) {
@@ -989,7 +1018,7 @@ export class RecycleBinManager {
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
                 throw new Error('Recycle-bin entry not found')
             }
-            await rm(join(root, entry.id), { recursive: true, force: true })
+            await removeEntryUnlocked(root, entry, protectedRoot)
             await syncDirectory(root)
             return { success: true }
         }).catch((error) => ({
@@ -1012,7 +1041,7 @@ export class RecycleBinManager {
             let deletedCount = 0
             try {
                 for (const entry of visible) {
-                    await rm(join(root, entry.id), { recursive: true, force: true })
+                    await removeEntryUnlocked(root, entry, protectedRoot)
                     deletedCount += 1
                 }
             } finally {
