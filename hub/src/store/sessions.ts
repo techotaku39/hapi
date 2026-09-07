@@ -383,14 +383,11 @@ export function setSessionTodos(
             WHERE id = @id
               AND namespace = @namespace
               AND (
+                  todos_source_at IS NULL
+                  OR
                   (todos_source_at IS NOT NULL AND (
                       todos_source_at < @source_at
                       OR (todos_source_at = @source_at AND COALESCE(todos_source_seq, -1) < @source_seq)
-                  ))
-                  OR (todos_source_at IS NULL AND (
-                      todos_updated_at IS NULL
-                      OR todos_updated_at < @source_at
-                      OR (todos_updated_at = @source_at AND COALESCE(todos_source_seq, -1) < @source_seq)
                   ))
               )
         `).run({

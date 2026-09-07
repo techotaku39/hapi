@@ -286,8 +286,7 @@ export class SessionCache {
 
     private isNewerTodoSource(source: { at: number; seq: number }, stored: StoredSession): boolean {
         if (stored.todosSourceAt === null || stored.todosSourceSeq === null) {
-            return stored.todosUpdatedAt === null || stored.todosUpdatedAt < source.at
-                || stored.todosUpdatedAt === source.at
+            return true
         }
         return source.at > stored.todosSourceAt
             || (source.at === stored.todosSourceAt && source.seq > stored.todosSourceSeq)

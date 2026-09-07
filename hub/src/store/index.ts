@@ -1088,13 +1088,6 @@ export class Store {
         if (!columns.has('todos_source_seq')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN todos_source_seq INTEGER')
         }
-        this.db.exec(`
-            UPDATE sessions
-            SET todos_source_at = todos_updated_at,
-                todos_source_seq = -1
-            WHERE todos_source_at IS NULL
-              AND todos_updated_at IS NOT NULL;
-        `)
     }
 
     private getSessionColumnNames(): Set<string> {

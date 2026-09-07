@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -321,5 +322,37 @@ describe('SessionCache structured task backfill', () => {
         } finally {
             reopenedStore.close()
         }
+    })
+
+    it('lets the first canonical scan establish source position after a legacy wall-clock watermark', () => {
+        const store = new Store(':memory:')
+        const created = store.sessions.getOrCreateSession('legacy-wall-clock-watermark', { path: '/tmp', host: 'h' }, null, 'default')
+        store.messages.addMessage(created.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Recover legacy plan', status: 'in_progress' }] }
+                }
+            }
+        }, undefined, undefined, 2_000)
+
+        const internalDb = (store as unknown as { db: Database }).db
+        internalDb.prepare(`
+            UPDATE sessions
+            SET todos = NULL,
+                todos_updated_at = ?
+            WHERE id = ?
+        `).run(Date.now() + 1_000_000, created.id)
+
+        const cache = new SessionCache(store, createPublisher([]))
+        cache.reloadAll()
+
+        expect(cache.getSession(created.id)?.todos).toEqual([
+            { content: 'Recover legacy plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+        ])
+        expect(store.sessions.getSession(created.id)?.todosSourceAt).toBe(2_000)
     })
 })
