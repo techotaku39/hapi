@@ -180,6 +180,26 @@ describe('Codex context details', () => {
         })
     })
 
+    it.each(['total_token_usage', 'totalTokenUsage'] as const)(
+        'normalizes cumulative %s when no last usage is available',
+        (usageKey) => {
+            const details = buildCodexContextDetails({
+                updatedAt: 100,
+                info: {
+                    [usageKey]: {
+                        input_tokens: 12_000,
+                        cached_input_tokens: 9_000
+                    }
+                }
+            })
+
+            expect(details.usage).toEqual({
+                contextTokens: 12_000,
+                cacheReadTokens: 9_000
+            })
+        }
+    )
+
     it('includes configured MCP inventories alongside the injected bridge', () => {
         const details = buildCodexContextDetails({
             updatedAt: 100,

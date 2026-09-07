@@ -190,9 +190,12 @@ export function buildCodexContextDetails(args: {
     updatedAt?: number
 }): ContextDetails {
     const info = asRecord(args.info)
-    const last = asRecord(info?.last ?? info?.lastTokenUsage ?? info?.last_token_usage)
+    const usageRecord =
+        asRecord(info?.last ?? info?.lastTokenUsage ?? info?.last_token_usage)
+        ?? asRecord(info?.total ?? info?.totalTokenUsage ?? info?.total_token_usage)
+        ?? info
     const infoContextTokens = asTokenCount(info?.contextTokens ?? info?.context_tokens)
-    const usage = buildCodexUsage(last ?? info, infoContextTokens)
+    const usage = buildCodexUsage(usageRecord, infoContextTokens)
     const response = asRecord(args.threadResponse)
     const thread = getCodexThreadRecord(args.threadResponse)
     const contextWindow = asTokenCount(
