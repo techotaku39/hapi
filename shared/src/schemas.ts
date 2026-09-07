@@ -558,7 +558,9 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         message: DecryptedMessageSchema
     }),
     SessionChangedSchema.extend({
-        type: z.literal('messages-invalidated')
+        type: z.literal('messages-invalidated'),
+        reason: z.literal('rewind').optional(),
+        truncateFromLocalId: z.string().min(1).optional()
     }),
     SessionChangedSchema.extend({
         type: z.literal('scheduled-matured')

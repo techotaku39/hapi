@@ -1649,7 +1649,13 @@ export class SyncEngine {
             )
             this.scrubHistoryLocators(sessionId, namespace)
             this.sessionCache.rebuildTodosFromTranscript(sessionId)
-            this.eventPublisher.emit({ type: 'messages-invalidated', sessionId, namespace })
+            this.eventPublisher.emit({
+                type: 'messages-invalidated',
+                sessionId,
+                namespace,
+                reason: 'rewind',
+                truncateFromLocalId: rpcResult.truncateFromLocalId ?? messageLocalId
+            })
             this.sessionCache.refreshSession(sessionId)
             return { type: 'success' }
         } catch (error) {
