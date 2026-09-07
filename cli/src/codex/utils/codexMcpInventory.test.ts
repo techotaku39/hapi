@@ -24,6 +24,13 @@ describe('codex MCP inventory', () => {
         expect(JSON.stringify(inventory)).not.toContain('server.js')
     })
 
+    it('distinguishes invalid command output from a successful empty inventory', () => {
+        expect(parseCodexMcpInventoryOutput('not json')).toBeUndefined()
+        expect(parseCodexMcpInventoryOutput('[]')).toEqual([])
+        expect(parseCodexMcpStatusResponse({ data: [] })).toEqual([])
+        expect(parseCodexMcpStatusResponse({ unexpected: [] })).toBeUndefined()
+    })
+
     it('parses resolved server status and tool names', () => {
         expect(parseCodexMcpStatusResponse({
             data: [{

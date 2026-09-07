@@ -19,6 +19,7 @@ const harness = vi.hoisted(() => ({
     listSkillsCalls: [] as unknown[],
     mcpServerStatusPromise: null as Promise<unknown> | null,
     slashCommandsPromise: null as Promise<Array<{ name: string }>> | null,
+    configuredMcpPromise: null as Promise<unknown> | null,
     skillsListResponse: {
         data: [{
             cwd: '/tmp/hapi-update',
@@ -1111,7 +1112,7 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
 }));
 
 vi.mock('./utils/codexMcpInventory', () => ({
-    listConfiguredCodexMcpServers: async () => [],
+    listConfiguredCodexMcpServers: async () => harness.configuredMcpPromise ?? [],
     mergeCodexMcpInventories: (...inventories: Array<Array<unknown>>) => inventories.flat(),
     parseCodexMcpStatusResponse: () => []
 }));
@@ -1141,7 +1142,8 @@ function createSessionStub(
     messages = ['hello from launcher test'],
     mode = createMode(),
     isolateMessages = false,
-    closeQueue = true
+    closeQueue = true,
+    initialMetadata: Record<string, unknown> = {}
 ) {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
     messages.forEach((message, index) => {
@@ -1172,7 +1174,7 @@ function createSessionStub(
         requests: {},
         completedRequests: {}
     };
-    let metadata: Record<string, unknown> = {};
+    let metadata: Record<string, unknown> = initialMetadata;
 
     const rpcHandlers = new Map<string, (params: unknown) => unknown>();
     const client = {
@@ -1314,6 +1316,73 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startThreadParams).toHaveLength(1);
         releaseCommands([]);
         await Promise.resolve();
+    });
+
+    it('preserves saved Codex inventories while discovery is unfinished', async () => {
+        harness.slashCommandsPromise = new Promise(() => {});
+        harness.configuredMcpPromise = new Promise(() => {});
+        harness.mcpServerStatusPromise = new Promise(() => {});
+        harness.skillsListResponse = {
+            data: [{
+                cwd: '/tmp/hapi-update',
+                skills: [],
+                errors: ['temporary discovery failure']
+            }]
+        };
+        const previous = {
+            contextDetails: {
+                version: 1,
+                updatedAt: 100,
+                provider: 'codex',
+                codex: {
+                    slashCommands: ['/old'],
+                    skills: [{ name: 'old-skill' }],
+                    mcpServers: [{ name: 'old-server' }]
+                }
+            }
+        };
+        const { session, getMetadata } = createSessionStub(['hello'], createMode(), false, true, previous);
+
+        await codexRemoteLauncher(session as never);
+
+        expect(getMetadata().contextDetails).toMatchObject({
+            codex: previous.contextDetails.codex
+        });
+    });
+
+    it('clears saved Codex inventories after successful empty discovery', async () => {
+        harness.slashCommandsPromise = Promise.resolve([]);
+        harness.configuredMcpPromise = Promise.resolve([]);
+        harness.skillsListResponse = {
+            data: [{
+                cwd: '/tmp/hapi-update',
+                skills: [],
+                errors: []
+            }]
+        };
+        const previous = {
+            contextDetails: {
+                version: 1,
+                updatedAt: 100,
+                provider: 'codex',
+                codex: {
+                    slashCommands: ['/old'],
+                    skills: [{ name: 'old-skill' }],
+                    mcpServers: [{ name: 'old-server' }]
+                }
+            }
+        };
+        const { session, getMetadata } = createSessionStub(['hello'], createMode(), false, true, previous);
+
+        await codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(getMetadata().contextDetails).toMatchObject({
+            codex: {
+                slashCommands: [],
+                skills: [],
+                mcpServers: []
+            }
+        }));
     });
 
     it('steers a queued message into the active turn and acks on dispatch', async () => {
@@ -1468,6 +1537,7 @@ describe('codexRemoteLauncher', () => {
         harness.listSkillsCalls = [];
         harness.mcpServerStatusPromise = null;
         harness.slashCommandsPromise = null;
+        harness.configuredMcpPromise = null;
         harness.skillsListResponse = {
             data: [{
                 cwd: '/tmp/hapi-update',

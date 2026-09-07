@@ -29,13 +29,14 @@ function asToolNames(value: unknown): string[] | undefined {
     return names.length > 0 ? Array.from(new Set(names)) : undefined
 }
 
-function parseInventoryEntries(value: unknown): CodexMcpServerInventory[] {
+function parseInventoryEntries(value: unknown): CodexMcpServerInventory[] | undefined {
     const record = asRecord(value)
     const entries = Array.isArray(value)
         ? value
         : Array.isArray(record?.data)
             ? record.data
-            : []
+            : null
+    if (!entries) return undefined
 
     return entries.flatMap((entry) => {
         const item = asRecord(entry)
@@ -58,15 +59,15 @@ function parseInventoryEntries(value: unknown): CodexMcpServerInventory[] {
     })
 }
 
-export function parseCodexMcpInventoryOutput(output: string): CodexMcpServerInventory[] {
+export function parseCodexMcpInventoryOutput(output: string): CodexMcpServerInventory[] | undefined {
     try {
         return parseInventoryEntries(JSON.parse(output))
     } catch {
-        return []
+        return undefined
     }
 }
 
-export function parseCodexMcpStatusResponse(value: unknown): CodexMcpServerInventory[] {
+export function parseCodexMcpStatusResponse(value: unknown): CodexMcpServerInventory[] | undefined {
     return parseInventoryEntries(value)
 }
 
@@ -92,7 +93,7 @@ export function mergeCodexMcpInventories(
     return Array.from(byName.values()).sort((left, right) => left.name.localeCompare(right.name))
 }
 
-export function listConfiguredCodexMcpServers(cwd?: string): Promise<CodexMcpServerInventory[]> {
+export function listConfiguredCodexMcpServers(cwd?: string): Promise<CodexMcpServerInventory[] | undefined> {
     const resolved = resolveCodexCommand()
     return new Promise((resolveInventory) => {
         let stdout = ''
@@ -107,7 +108,7 @@ export function listConfiguredCodexMcpServers(cwd?: string): Promise<CodexMcpSer
             ...(cwd ? { cwd } : {}),
             windowsHide: process.platform === 'win32'
         })
-        const finish = (inventory: CodexMcpServerInventory[]): void => {
+        const finish = (inventory: CodexMcpServerInventory[] | undefined): void => {
             if (settled) return
             settled = true
             clearTimeout(timeout)
@@ -115,15 +116,15 @@ export function listConfiguredCodexMcpServers(cwd?: string): Promise<CodexMcpSer
         }
         const timeout = setTimeout(() => {
             child.kill()
-            finish([])
+            finish(undefined)
         }, CODEX_MCP_LIST_TIMEOUT_MS)
         child.stdout?.setEncoding('utf8')
         child.stdout?.on('data', (chunk: string) => {
             stdout += chunk
         })
-        child.on('error', () => finish([]))
+        child.on('error', () => finish(undefined))
         child.on('close', (code) => {
-            finish(code === 0 ? parseCodexMcpInventoryOutput(stdout) : [])
+            finish(code === 0 ? parseCodexMcpInventoryOutput(stdout) : undefined)
         })
     })
 }

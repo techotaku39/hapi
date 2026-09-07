@@ -367,7 +367,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let latestCodexThreadResponse: unknown = null;
         let latestCodexThreadParams: ThreadStartParams | undefined;
         let availableSlashCommands: string[] = [];
+        let slashCommandsLoaded = false;
         let codexMcpServerInventory: CodexMcpServerInventory[] = [];
+        let mcpInventoryLoaded = false;
         let publishCodexInventoryContext: (() => void) | null = null;
 
         const normalizeCommand = (value: unknown): string | undefined => {
@@ -3250,10 +3252,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     threadId,
                     threadResponse: latestCodexThreadResponse,
                     threadParams: latestCodexThreadParams,
-                    slashCommands: availableSlashCommands,
-                    skills: nativeSkills,
-                    mcpServers,
-                    mcpServerInventory: codexMcpServerInventory
+                    slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
+                    skills: nativeSkillsAvailable ? nativeSkills : undefined,
+                    mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
+                    mcpServerInventory: mcpInventoryLoaded ? codexMcpServerInventory : undefined
                 });
                 publishContextDetails(session.client, details);
                 session.sendAgentMessage({
@@ -3570,10 +3572,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 threadResponse: response,
                 threadParams: params,
                 threadId: threadId ?? asString(asRecord(asRecord(response)?.thread)?.id),
-                slashCommands: availableSlashCommands,
-                skills: nativeSkills,
-                mcpServers,
-                mcpServerInventory: codexMcpServerInventory
+                slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
+                skills: nativeSkillsAvailable ? nativeSkills : undefined,
+                mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
+                mcpServerInventory: mcpInventoryLoaded ? codexMcpServerInventory : undefined
             }));
         };
 
@@ -3584,19 +3586,19 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 threadResponse: response,
                 threadParams: latestCodexThreadParams,
                 threadId: this.currentThreadId,
-                slashCommands: availableSlashCommands,
-                skills: nativeSkills,
-                mcpServers,
-                mcpServerInventory: codexMcpServerInventory
+                slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
+                skills: nativeSkillsAvailable ? nativeSkills : undefined,
+                mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
+                mcpServerInventory: mcpInventoryLoaded ? codexMcpServerInventory : undefined
             }));
         };
 
         const initialCodexContextDetails = buildCodexContextDetails({
             threadParams: undefined,
-            slashCommands: availableSlashCommands,
-            skills: nativeSkills,
-            mcpServers,
-            mcpServerInventory: codexMcpServerInventory
+            slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
+            skills: nativeSkillsAvailable ? nativeSkills : undefined,
+            mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
+            mcpServerInventory: mcpInventoryLoaded ? codexMcpServerInventory : undefined
         });
         if (initialCodexContextDetails.codex) {
             publishContextDetails(session.client, initialCodexContextDetails);
@@ -3605,6 +3607,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             .then((commands) => {
                 if (this.shouldExit) return;
                 availableSlashCommands = commands.map((command) => command.name);
+                slashCommandsLoaded = true;
                 publishCodexInventoryContext?.();
             })
             .catch((error) => {
@@ -3613,7 +3616,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         void listConfiguredCodexMcpServers(session.path)
             .then((inventory) => {
                 if (this.shouldExit) return;
+                if (inventory === undefined) return;
                 codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, inventory);
+                mcpInventoryLoaded = true;
                 publishCodexInventoryContext?.();
             })
             .catch((error) => {
@@ -3656,8 +3661,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             .then((response) => {
                 if (this.shouldExit) return;
                 const statusInventory = parseCodexMcpStatusResponse(response);
-                if (statusInventory.length === 0) return;
+                if (statusInventory === undefined) return;
                 codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, statusInventory);
+                mcpInventoryLoaded = true;
                 publishCodexInventoryContext?.();
             })
             .catch((error) => {

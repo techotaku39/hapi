@@ -87,7 +87,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     let availableSkills: Array<{ name: string; enabled: boolean }> = [];
     let slashCommandsLoaded = false;
     let skillsLoaded = false;
-    let mcpServerInventory: Awaited<ReturnType<typeof listConfiguredCodexMcpServers>> = [];
+    let mcpInventoryLoaded = false;
+    let mcpServerInventory: Awaited<ReturnType<typeof listConfiguredCodexMcpServers>> = undefined;
 
     // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
@@ -95,7 +96,12 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     const inventoryTask = Promise.all([
         listConfiguredCodexMcpServers(effectiveCodexCwd)
             .then((inventory) => {
+                if (inventory === undefined) return;
                 mcpServerInventory = inventory;
+                mcpInventoryLoaded = true;
+            })
+            .catch((error) => {
+                logger.debug(`[codex-local]: Failed to list configured MCP servers: ${error instanceof Error ? error.message : String(error)}`);
             }),
         listSlashCommands('codex', effectiveCodexCwd)
             .then((commands) => {
@@ -118,8 +124,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
         publishContextDetails(session.client, buildCodexContextDetails({
             slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
             skills: skillsLoaded ? availableSkills : undefined,
-            mcpServers,
-            mcpServerInventory
+            mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
+            mcpServerInventory: mcpInventoryLoaded ? mcpServerInventory : undefined
         }));
     });
     void inventoryTask.catch((error) => {
@@ -263,8 +269,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                         threadId: primarySessionId,
                         slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
                         skills: skillsLoaded ? availableSkills : undefined,
-                        mcpServers,
-                        mcpServerInventory
+                        mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
+                        mcpServerInventory: mcpInventoryLoaded ? mcpServerInventory : undefined
                     }));
                 }
                 const scopedMessage = message.type !== 'token_count'
