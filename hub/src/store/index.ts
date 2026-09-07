@@ -24,6 +24,7 @@ export type {
     StoredFcmDevice,
     StoredScratchlistEntry,
     StoredSession,
+    SessionTodoSource,
     StoredUser,
     VersionedUpdateResult
 } from './types'
@@ -44,7 +45,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 27
+const SCHEMA_VERSION: number = 28
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -354,6 +355,7 @@ export class Store {
             24: () => this.migrateFromV24ToV25(),
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
+            27: () => this.migrateFromV27ToV28(),
         })
 
         if (currentVersion === 0) {
@@ -418,6 +420,8 @@ export class Store {
                 service_tier TEXT,
                 todos TEXT,
                 todos_updated_at INTEGER,
+                todos_source_at INTEGER,
+                todos_source_seq INTEGER,
                 team_state TEXT,
                 team_state_updated_at INTEGER,
                 pinned INTEGER NOT NULL DEFAULT 0,
@@ -1072,6 +1076,24 @@ export class Store {
                 migration_id TEXT PRIMARY KEY,
                 completed_at INTEGER NOT NULL
             );
+        `)
+    }
+
+    /** v27→v28: persist the canonical source position for structured tasks. */
+    private migrateFromV27ToV28(): void {
+        const columns = this.getSessionColumnNames()
+        if (!columns.has('todos_source_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN todos_source_at INTEGER')
+        }
+        if (!columns.has('todos_source_seq')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN todos_source_seq INTEGER')
+        }
+        this.db.exec(`
+            UPDATE sessions
+            SET todos_source_at = todos_updated_at,
+                todos_source_seq = -1
+            WHERE todos_source_at IS NULL
+              AND todos_updated_at IS NOT NULL;
         `)
     }
 

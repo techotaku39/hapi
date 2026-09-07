@@ -13,32 +13,34 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v26 through v28', () => {
-    it('adds the durable migration state table to a V26 database', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v27-'))
+describe('schema migration v27 to v28', () => {
+    it('adds the structured task source position columns to a V27 database', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v28-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
         new Store(dbPath).close()
         const legacy = new Database(dbPath)
         legacy.exec(`
-            DROP TABLE migration_state;
-            PRAGMA user_version = 26;
+            ALTER TABLE sessions DROP COLUMN todos_source_seq;
+            ALTER TABLE sessions DROP COLUMN todos_source_at;
+            PRAGMA user_version = 27;
         `)
         legacy.close()
 
         const migrated = new Store(dbPath)
         const internalDb = (migrated as unknown as { db: Database }).db
-        const tableStatement = internalDb.prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'migration_state'"
-        )
-        const table = tableStatement.get() as { name: string } | null
-        tableStatement.finalize()
+        const columnStatement = internalDb.prepare('PRAGMA table_info(sessions)')
+        const columns = columnStatement.all() as Array<{ name: string }>
+        columnStatement.finalize()
         const versionStatement = internalDb.prepare('PRAGMA user_version')
         const version = versionStatement.get() as { user_version: number }
         versionStatement.finalize()
 
-        expect(table?.name).toBe('migration_state')
+        expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+            'todos_source_at',
+            'todos_source_seq'
+        ]))
         expect(version.user_version).toBe(28)
         migrated.close()
     })

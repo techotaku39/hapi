@@ -153,7 +153,12 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
 
         const todos = extractSessionTodosFromMessageContent(content)
         if (todos) {
-            const updated = store.sessions.setSessionTodos(sid, todos, msg.createdAt, session.namespace)
+            const updated = store.sessions.setSessionTodos(
+                sid,
+                todos,
+                { at: msg.invokedAt ?? msg.createdAt, seq: msg.seq },
+                session.namespace
+            )
             if (updated) {
                 const stored = store.sessions.getSession(sid)
                 onWebappEvent?.({

@@ -262,6 +262,53 @@ describe('cli session handlers', () => {
         })
     })
 
+    it('keeps the later live plan when replay messages share a createdAt timestamp', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('same-ms-live-plan-session', { path: '/tmp', host: 'h' }, null, 'default')
+        const socket = new FakeSocket()
+        const webEvents: SyncEvent[] = []
+
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onWebappEvent: (event) => {
+                webEvents.push(event)
+            }
+        })
+
+        const sendPlan = (step: string, status: 'pending' | 'in_progress') => {
+            socket.trigger('message', {
+                sid: session.id,
+                createdAt: 2_000,
+                message: {
+                    role: 'agent',
+                    content: {
+                        type: 'codex',
+                        data: {
+                            type: 'tool-call',
+                            name: 'update_plan',
+                            input: { plan: [{ step, status }] }
+                        }
+                    }
+                }
+            })
+        }
+
+        sendPlan('First snapshot', 'pending')
+        sendPlan('Later snapshot', 'in_progress')
+
+        const stored = store.sessions.getSession(session.id)
+        expect(stored?.todos).toEqual([
+            { content: 'Later snapshot', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+        ])
+        expect(stored?.todosSourceAt).toBe(2_000)
+        expect(stored?.todosSourceSeq).toBe(2)
+        expect(webEvents.filter((event) => event.type === 'session-updated')).toHaveLength(2)
+    })
+
     it('emits a structured metadata patch on update-metadata RPC (closes second half of #884)', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession(

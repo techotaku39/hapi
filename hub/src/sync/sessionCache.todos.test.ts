@@ -62,7 +62,7 @@ describe('SessionCache structured task backfill', () => {
         const newAt = 2_000
         const oldTodos = [{ content: 'Old task state', priority: 'medium', status: 'pending', id: 'old-1' }]
 
-        store.sessions.setSessionTodos(created.id, oldTodos, oldAt, 'default')
+        store.sessions.setSessionTodos(created.id, oldTodos, { at: oldAt, seq: 0 }, 'default')
         store.messages.addMessage(created.id, {
             role: 'agent',
             content: {
@@ -89,7 +89,8 @@ describe('SessionCache structured task backfill', () => {
                 id: 'plan-1'
             }
         ])
-        expect(reopened?.todosUpdatedAt).toBe(newAt)
+        expect(reopened?.todosUpdatedAt).toBeGreaterThan(newAt)
+        expect(store.sessions.getSession(created.id)?.todosSourceAt).toBe(newAt)
     })
 
     it('finds a newer structured plan beyond the latest 200 messages', () => {
@@ -100,7 +101,7 @@ describe('SessionCache structured task backfill', () => {
 
         store.sessions.setSessionTodos(created.id, [
             { content: 'Old task state', priority: 'medium', status: 'pending', id: 'old-1' }
-        ], oldAt, 'default')
+        ], { at: oldAt, seq: 0 }, 'default')
         store.messages.addMessage(created.id, {
             role: 'agent',
             content: {
@@ -170,7 +171,8 @@ describe('SessionCache structured task backfill', () => {
                 id: 'plan-1'
             }
         ])
-        expect(reopened?.todosUpdatedAt).toBe(2_000)
+        expect(reopened?.todosUpdatedAt).toBeGreaterThan(2_000)
+        expect(store.sessions.getSession(created.id)?.todosSourceAt).toBe(2_000)
     })
 
     it('rebuilds fork and rewind task state in transcript order after out-of-order replay', () => {

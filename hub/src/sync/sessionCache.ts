@@ -110,19 +110,22 @@ export class SessionCache {
             return byTime || a.seq - b.seq
         })
         let foundTodos: unknown | null = null
+        let foundSource: { at: number; seq: number } | null = null
         for (let i = messages.length - 1; i >= 0; i -= 1) {
             const message = messages[i]
             if (!message) continue
             const todos = extractSessionTodosFromMessageContent(message.content)
             if (todos) {
                 foundTodos = todos
+                foundSource = { at: message.invokedAt ?? message.createdAt, seq: message.seq }
                 break
             }
         }
         this.store.sessions.replaceSessionTodos(
             sessionId,
             foundTodos,
-            stored.namespace
+            stored.namespace,
+            foundSource
         )
         this.todoBackfillAttemptedSessionIds.add(sessionId)
         this.refreshSession(sessionId)
@@ -232,14 +235,14 @@ export class SessionCache {
 
     private backfillStructuredTodosForSession(stored: StoredSession): StoredSession {
         const latest = this.findLatestStructuredTodos(stored.id)
-        if (!latest || (stored.todosUpdatedAt !== null && latest.createdAt <= stored.todosUpdatedAt)) {
+        if (!latest || !this.isNewerTodoSource(latest.source, stored)) {
             return stored
         }
 
         const updated = this.store.sessions.setSessionTodos(
             stored.id,
             latest.todos,
-            latest.createdAt,
+            latest.source,
             stored.namespace
         )
         if (!updated) {
@@ -253,7 +256,7 @@ export class SessionCache {
 
     private findLatestStructuredTodos(
         sessionId: string
-    ): { todos: NonNullable<ReturnType<typeof extractSessionTodosFromMessageContent>>; createdAt: number } | null {
+    ): { todos: NonNullable<ReturnType<typeof extractSessionTodosFromMessageContent>>; source: { at: number; seq: number } } | null {
         let before: { at: number; seq: number } | undefined
 
         while (true) {
@@ -266,7 +269,12 @@ export class SessionCache {
                 const message = page[i]
                 if (!message) continue
                 const todos = extractSessionTodosFromMessageContent(message.content)
-                if (todos) return { todos, createdAt: message.createdAt }
+                if (todos) {
+                    return {
+                        todos,
+                        source: { at: message.invokedAt ?? message.createdAt, seq: message.seq }
+                    }
+                }
             }
 
             if (page.length < STRUCTURED_TODOS_BACKFILL_PAGE_SIZE) return null
@@ -274,6 +282,15 @@ export class SessionCache {
             if (!oldest) return null
             before = { at: oldest.invokedAt ?? oldest.createdAt, seq: oldest.seq }
         }
+    }
+
+    private isNewerTodoSource(source: { at: number; seq: number }, stored: StoredSession): boolean {
+        if (stored.todosSourceAt === null || stored.todosSourceSeq === null) {
+            return stored.todosUpdatedAt === null || stored.todosUpdatedAt < source.at
+                || stored.todosUpdatedAt === source.at
+        }
+        return source.at > stored.todosSourceAt
+            || (source.at === stored.todosSourceAt && source.seq > stored.todosSourceSeq)
     }
 
     setSessionPinned(sessionId: string, pinned: boolean): void {
@@ -1325,7 +1342,10 @@ export class SessionCache {
             this.store.sessions.setSessionTodos(
                 newSessionId,
                 oldStored.todos,
-                oldStored.todosUpdatedAt,
+                {
+                    at: oldStored.todosSourceAt ?? oldStored.todosUpdatedAt,
+                    seq: oldStored.todosSourceSeq ?? -1
+                },
                 namespace
             )
         }
