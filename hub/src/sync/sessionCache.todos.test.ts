@@ -19,7 +19,7 @@ const tempDirs: string[] = []
 
 afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
-        rmSync(dir, { recursive: true, force: true })
+        rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
     }
 })
 
@@ -132,6 +132,47 @@ describe('SessionCache structured task backfill', () => {
         ])
     })
 
+    it('selects the newest transcript position when replay arrival order is out of order', () => {
+        const store = new Store(':memory:')
+        const created = store.sessions.getOrCreateSession('out-of-order-plan-replay', { path: '/tmp', host: 'h' }, null, 'default')
+
+        store.messages.addMessage(created.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Newer transcript plan', status: 'in_progress' }] }
+                }
+            }
+        }, undefined, undefined, 2_000)
+        store.messages.addMessage(created.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Older transcript plan', status: 'pending' }] }
+                }
+            }
+        }, undefined, undefined, 1_000)
+
+        const cache = new SessionCache(store, createPublisher([]))
+        const reopened = cache.refreshSession(created.id)
+
+        expect(reopened?.todos).toEqual([
+            {
+                content: 'Newer transcript plan',
+                priority: 'medium',
+                status: 'in_progress',
+                id: 'plan-1'
+            }
+        ])
+        expect(reopened?.todosUpdatedAt).toBe(2_000)
+    })
+
     it('persists the one-time backfill marker and skips the scan after restart', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-structured-todos-backfill-'))
         tempDirs.push(dir)
@@ -151,10 +192,10 @@ describe('SessionCache structured task backfill', () => {
         })
 
         let scanCount = 0
-        const originalGetMessagesBeforeSeq = store.messages.getMessagesBeforeSeq.bind(store.messages)
-        store.messages.getMessagesBeforeSeq = (...args) => {
+        const originalGetMessagesByPosition = store.messages.getMessagesByPosition.bind(store.messages)
+        store.messages.getMessagesByPosition = (...args) => {
             scanCount += 1
-            return originalGetMessagesBeforeSeq(...args)
+            return originalGetMessagesByPosition(...args)
         }
 
         const firstCache = new SessionCache(store, createPublisher([]))
@@ -167,10 +208,10 @@ describe('SessionCache structured task backfill', () => {
 
         const reopenedStore = new Store(dbPath)
         try {
-            const restartedOriginalGetMessagesBeforeSeq = reopenedStore.messages.getMessagesBeforeSeq.bind(reopenedStore.messages)
-            reopenedStore.messages.getMessagesBeforeSeq = (...args) => {
+            const restartedOriginalGetMessagesByPosition = reopenedStore.messages.getMessagesByPosition.bind(reopenedStore.messages)
+            reopenedStore.messages.getMessagesByPosition = (...args) => {
                 scanCount += 1
-                return restartedOriginalGetMessagesBeforeSeq(...args)
+                return restartedOriginalGetMessagesByPosition(...args)
             }
             const restartedCache = new SessionCache(reopenedStore, createPublisher([]))
             restartedCache.reloadAll()

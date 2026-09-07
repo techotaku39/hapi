@@ -251,13 +251,13 @@ export class SessionCache {
     private findLatestStructuredTodos(
         sessionId: string
     ): { todos: NonNullable<ReturnType<typeof extractSessionTodosFromMessageContent>>; createdAt: number } | null {
-        let beforeSeq: number | undefined
+        let before: { at: number; seq: number } | undefined
 
         while (true) {
-            const page = this.store.messages.getMessagesBeforeSeq(
+            const page = this.store.messages.getMessagesByPosition(
                 sessionId,
-                beforeSeq,
-                STRUCTURED_TODOS_BACKFILL_PAGE_SIZE
+                STRUCTURED_TODOS_BACKFILL_PAGE_SIZE,
+                before
             )
             for (let i = page.length - 1; i >= 0; i -= 1) {
                 const message = page[i]
@@ -269,7 +269,7 @@ export class SessionCache {
             if (page.length < STRUCTURED_TODOS_BACKFILL_PAGE_SIZE) return null
             const oldest = page[0]
             if (!oldest) return null
-            beforeSeq = oldest.seq
+            before = { at: oldest.invokedAt ?? oldest.createdAt, seq: oldest.seq }
         }
     }
 
