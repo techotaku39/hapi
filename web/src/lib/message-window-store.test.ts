@@ -281,6 +281,37 @@ describe('message tail synchronization', () => {
         expect(getMessageWindowState(id).messages).toEqual([])
     })
 
+    it('deduplicates delayed rewind events across consecutive boundaries', async () => {
+        const id = sessionId('rewind-delayed-event')
+        const prefix = makeAgentMessage({ id: 'prefix', seq: 1, at: 1_000 })
+        const firstBoundary = makeUserMessage({
+            id: 'first-boundary',
+            seq: 2,
+            localId: 'first-boundary-local-id',
+            createdAt: 2_000,
+            invokedAt: 2_000
+        })
+        const secondBoundary = makeUserMessage({
+            id: 'second-boundary',
+            seq: 3,
+            localId: 'second-boundary-local-id',
+            createdAt: 3_000,
+            invokedAt: 3_000
+        })
+        const suffix = makeAgentMessage({ id: 'suffix', seq: 4, at: 4_000 })
+        const getMessages = vi.fn(async () => latestResponse(
+            [prefix, firstBoundary, secondBoundary, suffix],
+            { epoch: 1 }
+        ))
+
+        await syncTailMessages(createApi(getMessages), id)
+        rewindMessageWindow(id, 'second-boundary-local-id')
+        rewindMessageWindow(id, 'first-boundary-local-id')
+        rewindMessageWindow(id, 'second-boundary-local-id')
+
+        expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['prefix'])
+    })
+
     it('retains the current window while a latest reset is in flight', async () => {
         const id = sessionId('invalidation-preserves-window')
         const current = makeAgentMessage({ id: 'current', seq: 10, at: 10_000 })

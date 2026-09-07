@@ -80,7 +80,7 @@ type TailSyncController = {
 const states = new Map<string, InternalState>()
 const listeners = new Map<string, Set<() => void>>()
 const tailSyncControllers = new Map<string, TailSyncController>()
-const appliedRewindLocalIds = new Map<string, string>()
+const appliedRewindLocalIds = new Map<string, Set<string>>()
 
 const NOTIFY_THROTTLE_MS = 150
 const PERSIST_THROTTLE_MS = 200
@@ -1142,9 +1142,12 @@ export function invalidateMessageWindow(sessionId: string): void {
  */
 export function rewindMessageWindow(sessionId: string, messageLocalId: string): void {
     const previous = states.get(sessionId)
-    if (!previous || appliedRewindLocalIds.get(sessionId) === messageLocalId) return
+    if (!previous) return
 
-    appliedRewindLocalIds.set(sessionId, messageLocalId)
+    const applied = appliedRewindLocalIds.get(sessionId) ?? new Set<string>()
+    if (applied.has(messageLocalId)) return
+    applied.add(messageLocalId)
+    appliedRewindLocalIds.set(sessionId, applied)
 
     const boundaryIndex = previous.messages.findIndex((message) => message.localId === messageLocalId)
     if (boundaryIndex < 0) {
