@@ -10,7 +10,8 @@ const harness = {
     runBarrier: null as Promise<void> | null,
     inventorySlashCommands: null as Promise<Array<{ name: string }>> | null,
     inventorySkills: null as Promise<Array<{ name: string; description?: string }>> | null,
-    inventoryMcp: null as Promise<unknown[]> | null
+    inventoryMcp: null as Promise<unknown[] | undefined> | null,
+    bridgeMcpServers: {} as Record<string, unknown>
 };
 
 vi.mock('./codexLocal', () => ({
@@ -25,7 +26,7 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
             url: 'http://localhost:0',
             stop: () => {}
         },
-        mcpServers: {}
+        mcpServers: harness.bridgeMcpServers
     })
 }));
 
@@ -226,6 +227,7 @@ describe('codexLocalLauncher', () => {
         harness.inventorySlashCommands = null;
         harness.inventorySkills = null;
         harness.inventoryMcp = null;
+        harness.bridgeMcpServers = {};
     });
 
     afterEach(async () => {
@@ -381,6 +383,33 @@ describe('codexLocalLauncher', () => {
                 mcpServers: []
             }
         });
+    });
+
+    it('publishes the injected HAPI MCP server when local discovery fails', async () => {
+        harness.bridgeMcpServers = {
+            hapi: {
+                command: 'hapi',
+                args: ['mcp'],
+                tools: { change_title: {} }
+            }
+        };
+        harness.inventoryMcp = Promise.reject(new Error('MCP discovery unavailable'));
+        const { session, getContextDetails } = createSessionStub('default');
+        let releaseRunBarrier!: () => void;
+        harness.runBarrier = new Promise((resolve) => {
+            releaseRunBarrier = resolve;
+        });
+
+        const launcherPromise = codexLocalLauncher(session as never);
+        try {
+            await vi.waitFor(() => expect(getContextDetails()).toMatchObject({
+                provider: 'codex',
+                codex: { mcpServers: [{ name: 'hapi', toolNames: ['change_title'] }] }
+            }));
+        } finally {
+            releaseRunBarrier();
+            await launcherPromise;
+        }
     });
 
     it('starts local Codex without waiting for slow capability discovery', async () => {

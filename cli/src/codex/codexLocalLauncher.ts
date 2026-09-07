@@ -93,6 +93,15 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
     logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
+    const getMcpContextArgs = () => {
+        const savedMcpServers = session.client.getMetadata()?.contextDetails?.codex?.mcpServers;
+        const includeKnownBridge = mcpInventoryLoaded
+            || ((savedMcpServers?.length ?? 0) === 0 && Object.keys(mcpServers).length > 0);
+        return {
+            mcpServers: includeKnownBridge ? mcpServers : undefined,
+            mcpServerInventory: mcpInventoryLoaded ? mcpServerInventory : undefined
+        };
+    };
     const inventoryTask = Promise.all([
         listConfiguredCodexMcpServers(effectiveCodexCwd, session.codexArgs)
             .then((inventory) => {
@@ -124,8 +133,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
         publishContextDetails(session.client, buildCodexContextDetails({
             slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
             skills: skillsLoaded ? availableSkills : undefined,
-            mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
-            mcpServerInventory: mcpInventoryLoaded ? mcpServerInventory : undefined
+            ...getMcpContextArgs()
         }));
     });
     void inventoryTask.catch((error) => {
@@ -269,8 +277,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                         threadId: primarySessionId,
                         slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
                         skills: skillsLoaded ? availableSkills : undefined,
-                        mcpServers: mcpInventoryLoaded ? mcpServers : undefined,
-                        mcpServerInventory: mcpInventoryLoaded ? mcpServerInventory : undefined
+                        ...getMcpContextArgs()
                     }));
                 }
                 const scopedMessage = message.type !== 'token_count'
