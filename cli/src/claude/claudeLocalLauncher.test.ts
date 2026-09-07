@@ -173,6 +173,34 @@ describe('claudeLocalLauncher message filtering', () => {
         expect(sentMessages).toHaveLength(2)
     })
 
+    it('publishes local Claude context details from assistant context_usage', async () => {
+        const { session, getMetadata } = createSessionStub()
+        await claudeLocalLauncher(session as never)
+
+        harness.scannerOnMessage!({
+            type: 'assistant',
+            uuid: 'assistant-context-details',
+            context_usage: {
+                total_tokens: 26_697,
+                raw_max_tokens: 262_144,
+                mcp_tools: [{ name: 'mcp__hapi__list_peers', server_name: 'hapi' }]
+            },
+            message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'hello' }]
+            }
+        })
+
+        expect(getMetadata().contextDetails).toMatchObject({
+            provider: 'claude',
+            contextWindow: 262_144,
+            usage: { contextTokens: 26_697 },
+            claude: {
+                mcpTools: [{ name: 'mcp__hapi__list_peers', serverName: 'hapi' }]
+            }
+        })
+    })
+
     it('filters out isMeta messages (e.g. skill injections)', async () => {
         const { session, sentMessages } = createSessionStub()
         await claudeLocalLauncher(session as never)
