@@ -200,6 +200,24 @@ describe('Codex context details', () => {
         }
     )
 
+    it('prefers the explicit outer context token count over envelope input totals', () => {
+        const details = buildCodexContextDetails({
+            updatedAt: 100,
+            info: {
+                contextTokens: 13_879,
+                last: {
+                    inputTokens: 8_119,
+                    cachedInputTokens: 6_000
+                }
+            }
+        })
+
+        expect(details.usage).toEqual({
+            contextTokens: 13_879,
+            cacheReadTokens: 6_000
+        })
+    })
+
     it('includes configured MCP inventories alongside the injected bridge', () => {
         const details = buildCodexContextDetails({
             updatedAt: 100,

@@ -174,13 +174,16 @@ export function buildClaudeContextDetails(args: {
     }
 }
 
-function buildCodexUsage(value: unknown, fallbackContextTokens?: number): ContextUsageSnapshot | undefined {
+function buildCodexUsage(value: unknown, explicitContextTokens?: number): ContextUsageSnapshot | undefined {
     const usage = normalizeCodexUsageSnapshot(value)
-    if (!usage) return undefined
-    if (usage.contextTokens === undefined && fallbackContextTokens !== undefined) {
-        return { ...usage, contextTokens: fallbackContextTokens }
+    if (!usage) {
+        return explicitContextTokens === undefined
+            ? undefined
+            : { contextTokens: explicitContextTokens }
     }
-    return usage
+    return explicitContextTokens === undefined
+        ? usage
+        : { ...usage, contextTokens: explicitContextTokens }
 }
 
 function getCodexThreadRecord(response: unknown): JsonRecord | null {

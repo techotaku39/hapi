@@ -15,19 +15,22 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
         workingDirectory: session.path,
         onMessage: (message) => {
             const rawMessage = message as unknown as Record<string, unknown>;
-            if (rawMessage.type === 'system' && typeof rawMessage.model === 'string') {
-                lastSystemModel = rawMessage.model;
-            }
-            if (rawMessage.type === 'assistant' || rawMessage.type === 'system' || rawMessage.type === 'result') {
-                const details = buildClaudeContextDetails({
-                    contextUsage: rawMessage.context_usage,
-                    system: rawMessage.type === 'system' ? rawMessage : undefined,
-                    result: rawMessage.type === 'result' ? rawMessage : undefined,
-                    messageUsage: (rawMessage.message as Record<string, unknown> | undefined)?.usage ?? rawMessage.usage,
-                    model: typeof rawMessage.model === 'string' ? rawMessage.model : lastSystemModel
-                });
-                if (details) {
-                    publishContextDetails(session.client, details);
+            const isSidechain = rawMessage.isSidechain === true;
+            if (!isSidechain) {
+                if (rawMessage.type === 'system' && typeof rawMessage.model === 'string') {
+                    lastSystemModel = rawMessage.model;
+                }
+                if (rawMessage.type === 'assistant' || rawMessage.type === 'system' || rawMessage.type === 'result') {
+                    const details = buildClaudeContextDetails({
+                        contextUsage: rawMessage.context_usage,
+                        system: rawMessage.type === 'system' ? rawMessage : undefined,
+                        result: rawMessage.type === 'result' ? rawMessage : undefined,
+                        messageUsage: (rawMessage.message as Record<string, unknown> | undefined)?.usage ?? rawMessage.usage,
+                        model: typeof rawMessage.model === 'string' ? rawMessage.model : lastSystemModel
+                    });
+                    if (details) {
+                        publishContextDetails(session.client, details);
+                    }
                 }
             }
 

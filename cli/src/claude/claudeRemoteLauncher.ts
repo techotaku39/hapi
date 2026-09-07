@@ -163,36 +163,40 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
         let lastSystemModel = session.getModel();
 
         function onMessage(message: SDKMessage) {
-            if (message.type === 'system') {
-                const systemMessage = message as SDKSystemMessage;
-                if (systemMessage.model) {
-                    lastSystemModel = systemMessage.model;
-                }
-                const details = buildClaudeContextDetails({ system: systemMessage, model: systemMessage.model });
-                if (details) {
-                    publishContextDetails(session.client, details);
-                }
-            } else if (message.type === 'assistant') {
-                const assistantMessage = message as SDKAssistantMessage;
-                const rawAssistantPayload = assistantMessage as unknown as Record<string, unknown>;
-                const rawMessage = assistantMessage.message as unknown as Record<string, unknown>;
-                const details = buildClaudeContextDetails({
-                    contextUsage: assistantMessage.context_usage ?? rawAssistantPayload.context_usage,
-                    messageUsage: rawMessage.usage,
-                    model: assistantMessage.model ?? (typeof rawAssistantPayload.model === 'string' ? rawAssistantPayload.model : null)
-                });
-                if (details) {
-                    publishContextDetails(session.client, details);
-                }
-            } else if (message.type === 'result') {
-                const resultMessage = message as SDKResultMessage;
-                const details = buildClaudeContextDetails({
-                    result: resultMessage,
-                    messageUsage: resultMessage.usage,
-                    model: resultMessage.model ?? lastSystemModel
-                });
-                if (details) {
-                    publishContextDetails(session.client, details);
+            const rawPayload = message as unknown as Record<string, unknown>;
+            const isSidechain = typeof rawPayload.parent_tool_use_id === 'string';
+            if (!isSidechain) {
+                if (message.type === 'system') {
+                    const systemMessage = message as SDKSystemMessage;
+                    if (systemMessage.model) {
+                        lastSystemModel = systemMessage.model;
+                    }
+                    const details = buildClaudeContextDetails({ system: systemMessage, model: systemMessage.model });
+                    if (details) {
+                        publishContextDetails(session.client, details);
+                    }
+                } else if (message.type === 'assistant') {
+                    const assistantMessage = message as SDKAssistantMessage;
+                    const rawAssistantPayload = assistantMessage as unknown as Record<string, unknown>;
+                    const rawMessage = assistantMessage.message as unknown as Record<string, unknown>;
+                    const details = buildClaudeContextDetails({
+                        contextUsage: assistantMessage.context_usage ?? rawAssistantPayload.context_usage,
+                        messageUsage: rawMessage.usage,
+                        model: assistantMessage.model ?? (typeof rawAssistantPayload.model === 'string' ? rawAssistantPayload.model : null)
+                    });
+                    if (details) {
+                        publishContextDetails(session.client, details);
+                    }
+                } else if (message.type === 'result') {
+                    const resultMessage = message as SDKResultMessage;
+                    const details = buildClaudeContextDetails({
+                        result: resultMessage,
+                        messageUsage: resultMessage.usage,
+                        model: resultMessage.model ?? lastSystemModel
+                    });
+                    if (details) {
+                        publishContextDetails(session.client, details);
+                    }
                 }
             }
 
