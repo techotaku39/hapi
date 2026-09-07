@@ -175,7 +175,8 @@ export function ContextDetailsDialog(props: {
             </DialogTrigger>
             <DialogContent
                 aria-describedby={undefined}
-                className="flex max-h-[min(44rem,calc(100vh-2rem))] flex-col overflow-hidden px-2 py-4 sm:max-w-3xl"
+                overlayClassName="z-[70]"
+                className="z-[70] flex max-h-[min(44rem,calc(100vh-2rem))] flex-col overflow-hidden px-2 py-4 sm:max-w-3xl"
                 closeButtonClassName="top-2 z-20"
             >
                 <DialogHeader className="relative z-10 shrink-0 items-center bg-[var(--app-dialog-bg)] pb-4 pr-0 text-center sm:text-center">

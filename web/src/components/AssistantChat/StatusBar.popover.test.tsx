@@ -293,6 +293,10 @@ describe('StatusBar context details dialog', () => {
 
         expect(screen.getByRole('heading', { name: 'Agent details' })).toBeInTheDocument()
         const dialog = screen.getByRole('dialog')
+        expect(dialog.className.split(' ')).toContain('z-[70]')
+        const openDialogLayers = Array.from(document.querySelectorAll('[data-state="open"]'))
+        const overlay = openDialogLayers.find((layer) => layer.className.split(' ').includes('bg-black/50'))
+        expect(overlay?.className.split(' ')).toContain('z-[70]')
         expect(dialog.className.split(' ')).toContain('overflow-hidden')
         expect(dialog.querySelector('.agent-details-scroll-y')?.className.split(' ')).toEqual(
             expect.arrayContaining(['min-h-0', 'flex-1', 'overflow-y-auto'])
