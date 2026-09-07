@@ -249,7 +249,7 @@ afterEach(() => {
 })
 
 describe('message tail synchronization', () => {
-    it('removes the rewound suffix immediately and keeps the window pending reset', async () => {
+    it('removes the rewound suffix immediately and applies duplicate invalidations once', async () => {
         const id = sessionId('rewind-suffix')
         const prefix = makeAgentMessage({ id: 'prefix', seq: 1, at: 1_000 })
         const target = makeUserMessage({
@@ -263,6 +263,7 @@ describe('message tail synchronization', () => {
         const getMessages = vi.fn(async () => latestResponse([prefix, target, suffix], { epoch: 1 }))
 
         await syncTailMessages(createApi(getMessages), id)
+        rewindMessageWindow(id, 'target-local-id')
         rewindMessageWindow(id, 'target-local-id')
 
         expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['prefix'])
