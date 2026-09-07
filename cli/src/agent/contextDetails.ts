@@ -43,14 +43,24 @@ function normalizeUsageSnapshot(value: unknown): ContextUsageSnapshot | undefine
     const record = asRecord(value)
     if (!record) return undefined
 
+    const cacheReadTokens = asTokenCount(
+        record.cachedInputTokens
+        ?? record.cached_input_tokens
+        ?? record.cacheReadInputTokens
+        ?? record.cache_read_input_tokens
+    )
+    const inputTokens = asTokenCount(record.inputTokens ?? record.input_tokens)
+    const cacheCreationTokens = asTokenCount(
+        record.cacheCreationInputTokens
+        ?? record.cache_creation_input_tokens
+    ) ?? 0
+    const contextTokens = asTokenCount(record.contextTokens ?? record.context_tokens)
+        ?? (inputTokens === undefined
+            ? undefined
+            : inputTokens + cacheCreationTokens + (cacheReadTokens ?? 0))
     const usage: ContextUsageSnapshot = {
-        contextTokens: asTokenCount(record.contextTokens ?? record.context_tokens),
-        cacheReadTokens: asTokenCount(
-            record.cachedInputTokens
-            ?? record.cached_input_tokens
-            ?? record.cacheReadInputTokens
-            ?? record.cache_read_input_tokens
-        ),
+        contextTokens,
+        cacheReadTokens,
     }
 
     const hasValue = Object.values(usage).some((value) => value !== undefined)

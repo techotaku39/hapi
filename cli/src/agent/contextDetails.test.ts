@@ -81,7 +81,7 @@ describe('Claude context details', () => {
         expect(details).toMatchObject({
             model: 'claude-opus',
             contextWindow: 200_000,
-            usage: { cacheReadTokens: 3_000 }
+            usage: { contextTokens: 7_100, cacheReadTokens: 3_000 }
         })
     })
 
