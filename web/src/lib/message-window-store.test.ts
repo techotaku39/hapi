@@ -269,6 +269,17 @@ describe('message tail synchronization', () => {
         expect(getMessageWindowState(id).isSyncingTail).toBe(true)
     })
 
+    it('clears the window when the rewind boundary is outside the loaded page', async () => {
+        const id = sessionId('rewind-boundary-not-loaded')
+        const current = makeAgentMessage({ id: 'current', seq: 40, at: 40_000 })
+        const getMessages = vi.fn(async () => latestResponse([current], { epoch: 1 }))
+
+        await syncTailMessages(createApi(getMessages), id)
+        rewindMessageWindow(id, 'boundary-not-loaded')
+
+        expect(getMessageWindowState(id).messages).toEqual([])
+    })
+
     it('retains the current window while a latest reset is in flight', async () => {
         const id = sessionId('invalidation-preserves-window')
         const current = makeAgentMessage({ id: 'current', seq: 10, at: 10_000 })

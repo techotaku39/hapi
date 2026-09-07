@@ -1144,9 +1144,15 @@ export function rewindMessageWindow(sessionId: string, messageLocalId: string): 
     if (!previous) return
 
     const boundaryIndex = previous.messages.findIndex((message) => message.localId === messageLocalId)
-    const messages = boundaryIndex >= 0
-        ? previous.messages.slice(0, boundaryIndex)
-        : previous.messages
+    if (boundaryIndex < 0) {
+        // The boundary may be outside the current latest window. Without a
+        // local boundary, retaining rows could show messages removed by the
+        // rewind until the authoritative tail sync completes.
+        clearMessageWindow(sessionId)
+        return
+    }
+
+    const messages = previous.messages.slice(0, boundaryIndex)
 
     markMessageWindowForLatestReset(sessionId, messages)
 }
