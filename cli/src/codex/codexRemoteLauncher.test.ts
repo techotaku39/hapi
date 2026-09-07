@@ -18,6 +18,7 @@ const harness = vi.hoisted(() => ({
     failListCollaborationModes: false,
     listSkillsCalls: [] as unknown[],
     mcpServerStatusPromise: null as Promise<unknown> | null,
+    mcpServerStatusError: false,
     slashCommandsPromise: null as Promise<Array<{ name: string }>> | null,
     configuredMcpPromise: null as Promise<unknown> | null,
     skillsListResponse: {
@@ -155,6 +156,9 @@ vi.mock('./codexAppServerClient', () => {
         }
 
         async listMcpServerStatuses(): Promise<unknown> {
+            if (harness.mcpServerStatusError) {
+                throw new Error('status unavailable');
+            }
             return harness.mcpServerStatusPromise ?? { data: [] };
         }
 
@@ -1114,7 +1118,9 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
 vi.mock('./utils/codexMcpInventory', () => ({
     listConfiguredCodexMcpServers: async () => harness.configuredMcpPromise ?? [],
     mergeCodexMcpInventories: (...inventories: Array<Array<unknown>>) => inventories.flat(),
-    parseCodexMcpStatusResponse: () => []
+    parseCodexMcpStatusResponse: (value: unknown) => value && typeof value === 'object' && 'data' in value
+        ? (value as { data: unknown[] }).data
+        : []
 }));
 
 vi.mock('@/modules/common/slashCommands', () => ({
@@ -1385,6 +1391,33 @@ describe('codexRemoteLauncher', () => {
         }));
     });
 
+    it.each([
+        ['configured discovery fails while status succeeds', 'configured-fails'],
+        ['configured discovery succeeds while status fails', 'status-fails']
+    ])('preserves saved MCP inventory when %s', async (_label, scenario) => {
+        harness.configuredMcpPromise = scenario === 'configured-fails'
+            ? Promise.resolve(undefined)
+            : Promise.resolve([{ name: 'configured-server' }]);
+        harness.mcpServerStatusError = scenario === 'status-fails';
+        const previous = {
+            contextDetails: {
+                version: 1,
+                updatedAt: 100,
+                provider: 'codex',
+                codex: {
+                    mcpServers: [{ name: 'old-server' }]
+                }
+            }
+        };
+        const { session, getMetadata } = createSessionStub(['hello'], createMode(), false, true, previous);
+
+        await codexRemoteLauncher(session as never);
+
+        expect(getMetadata().contextDetails).toMatchObject({
+            codex: { mcpServers: [{ name: 'old-server' }] }
+        });
+    });
+
     it('steers a queued message into the active turn and acks on dispatch', async () => {
         harness.suppressTurnCompletion = true;
         const { session, rpcHandlers, emitMessagesConsumed } = createSessionStub(['first'], createMode(), false, false);
@@ -1536,6 +1569,7 @@ describe('codexRemoteLauncher', () => {
         harness.failListCollaborationModes = false;
         harness.listSkillsCalls = [];
         harness.mcpServerStatusPromise = null;
+        harness.mcpServerStatusError = false;
         harness.slashCommandsPromise = null;
         harness.configuredMcpPromise = null;
         harness.skillsListResponse = {

@@ -53,6 +53,11 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
             if (!isClaudeChatVisibleMessage(message)) {
                 return
             }
+            if (message.type === 'assistant') {
+                const { context_usage: _contextUsage, ...outboundMessage } = message
+                session.client.sendClaudeSessionMessage(outboundMessage)
+                return
+            }
             session.client.sendClaudeSessionMessage(message)
         }
     });

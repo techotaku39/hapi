@@ -174,7 +174,7 @@ describe('claudeLocalLauncher message filtering', () => {
     })
 
     it('publishes local Claude context details from assistant context_usage', async () => {
-        const { session, getMetadata } = createSessionStub()
+        const { session, sentMessages, getMetadata } = createSessionStub()
         await claudeLocalLauncher(session as never)
 
         harness.scannerOnMessage!({
@@ -199,6 +199,7 @@ describe('claudeLocalLauncher message filtering', () => {
                 mcpTools: [{ name: 'mcp__hapi__list_peers', serverName: 'hapi' }]
             }
         })
+        expect(sentMessages[0]).not.toHaveProperty('context_usage')
     })
 
     it('filters out isMeta messages (e.g. skill injections)', async () => {

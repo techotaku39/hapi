@@ -370,6 +370,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let slashCommandsLoaded = false;
         let codexMcpServerInventory: CodexMcpServerInventory[] = [];
         let mcpInventoryLoaded = false;
+        let configuredMcpServerInventory: CodexMcpServerInventory[] | undefined;
+        let statusMcpServerInventory: CodexMcpServerInventory[] | undefined;
         let publishCodexInventoryContext: (() => void) | null = null;
 
         const normalizeCommand = (value: unknown): string | undefined => {
@@ -3593,6 +3595,16 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }));
         };
 
+        const publishMcpInventoryIfComplete = (): void => {
+            if (configuredMcpServerInventory === undefined || statusMcpServerInventory === undefined) return;
+            codexMcpServerInventory = mergeCodexMcpInventories(
+                configuredMcpServerInventory,
+                statusMcpServerInventory
+            );
+            mcpInventoryLoaded = true;
+            publishCodexInventoryContext?.();
+        };
+
         const initialCodexContextDetails = buildCodexContextDetails({
             threadParams: undefined,
             slashCommands: slashCommandsLoaded ? availableSlashCommands : undefined,
@@ -3617,9 +3629,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             .then((inventory) => {
                 if (this.shouldExit) return;
                 if (inventory === undefined) return;
-                codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, inventory);
-                mcpInventoryLoaded = true;
-                publishCodexInventoryContext?.();
+                configuredMcpServerInventory = inventory;
+                publishMcpInventoryIfComplete();
             })
             .catch((error) => {
                 logger.debug(`[Codex] failed to list configured MCP servers: ${errorMessage(error)}`);
@@ -3662,9 +3673,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 if (this.shouldExit) return;
                 const statusInventory = parseCodexMcpStatusResponse(response);
                 if (statusInventory === undefined) return;
-                codexMcpServerInventory = mergeCodexMcpInventories(codexMcpServerInventory, statusInventory);
-                mcpInventoryLoaded = true;
-                publishCodexInventoryContext?.();
+                statusMcpServerInventory = statusInventory;
+                publishMcpInventoryIfComplete();
             })
             .catch((error) => {
                 logger.debug(`[Codex] mcpServerStatus/list failed: ${errorMessage(error)}`);
