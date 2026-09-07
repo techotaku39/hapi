@@ -173,6 +173,46 @@ describe('SessionCache structured task backfill', () => {
         expect(reopened?.todosUpdatedAt).toBe(2_000)
     })
 
+    it('rebuilds fork and rewind task state in transcript order after out-of-order replay', () => {
+        const store = new Store(':memory:')
+        const created = store.sessions.getOrCreateSession('out-of-order-rebuild', { path: '/tmp', host: 'h' }, null, 'default')
+
+        store.messages.addMessage(created.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Newer rebuilt plan', status: 'in_progress' }] }
+                }
+            }
+        }, undefined, undefined, 2_000)
+        store.messages.addMessage(created.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Older rebuilt plan', status: 'pending' }] }
+                }
+            }
+        }, undefined, undefined, 1_000)
+
+        const cache = new SessionCache(store, createPublisher([]))
+        cache.rebuildTodosFromTranscript(created.id)
+
+        expect(cache.getSession(created.id)?.todos).toEqual([
+            {
+                content: 'Newer rebuilt plan',
+                priority: 'medium',
+                status: 'in_progress',
+                id: 'plan-1'
+            }
+        ])
+    })
+
     it('persists the one-time backfill marker and skips the scan after restart', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-structured-todos-backfill-'))
         tempDirs.push(dir)

@@ -105,7 +105,10 @@ export class SessionCache {
         if (!stored) return
 
         this.todoBackfillAttemptedSessionIds.delete(sessionId)
-        const messages = this.store.messages.getAllMessages(sessionId)
+        const messages = this.store.messages.getAllMessages(sessionId).sort((a, b) => {
+            const byTime = (a.invokedAt ?? a.createdAt) - (b.invokedAt ?? b.createdAt)
+            return byTime || a.seq - b.seq
+        })
         let foundTodos: unknown | null = null
         for (let i = messages.length - 1; i >= 0; i -= 1) {
             const message = messages[i]
