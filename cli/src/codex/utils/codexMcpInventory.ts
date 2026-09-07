@@ -5,6 +5,35 @@ import type { CodexMcpServerInventory } from '@/agent/contextDetails'
 
 export const CODEX_MCP_LIST_TIMEOUT_MS = 5_000
 
+const CODEX_INVENTORY_VALUE_FLAGS = new Set([
+    '-c',
+    '--config',
+    '-p',
+    '--profile',
+    '--enable',
+    '--disable'
+])
+
+export function filterCodexInventoryArgs(args?: readonly string[]): string[] {
+    if (!args || args.length === 0) return []
+    const filtered: string[] = []
+    for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index]
+        if (arg === '--') break
+        const equalsIndex = arg.indexOf('=')
+        if (equalsIndex > 0 && CODEX_INVENTORY_VALUE_FLAGS.has(arg.slice(0, equalsIndex))) {
+            filtered.push(arg)
+            continue
+        }
+        if (!CODEX_INVENTORY_VALUE_FLAGS.has(arg)) continue
+        const value = args[index + 1]
+        if (value === undefined || value === '--') continue
+        filtered.push(arg, value)
+        index += 1
+    }
+    return filtered
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value && typeof value === 'object' && !Array.isArray(value)
         ? value as Record<string, unknown>
@@ -93,13 +122,17 @@ export function mergeCodexMcpInventories(
     return Array.from(byName.values()).sort((left, right) => left.name.localeCompare(right.name))
 }
 
-export function listConfiguredCodexMcpServers(cwd?: string): Promise<CodexMcpServerInventory[] | undefined> {
+export function listConfiguredCodexMcpServers(
+    cwd?: string,
+    args?: readonly string[]
+): Promise<CodexMcpServerInventory[] | undefined> {
     const resolved = resolveCodexCommand()
     return new Promise((resolveInventory) => {
         let stdout = ''
         let settled = false
         const child = spawn(resolved.command, [
             ...resolved.args,
+            ...filterCodexInventoryArgs(args),
             'mcp',
             'list',
             '--json'

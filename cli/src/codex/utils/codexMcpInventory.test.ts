@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    filterCodexInventoryArgs,
     mergeCodexMcpInventories,
     parseCodexMcpInventoryOutput,
     parseCodexMcpStatusResponse
@@ -29,6 +30,25 @@ describe('codex MCP inventory', () => {
         expect(parseCodexMcpInventoryOutput('[]')).toEqual([])
         expect(parseCodexMcpStatusResponse({ data: [] })).toEqual([])
         expect(parseCodexMcpStatusResponse({ unexpected: [] })).toBeUndefined()
+    })
+
+    it('passes only configuration selectors to the MCP inventory command', () => {
+        expect(filterCodexInventoryArgs([
+            '--profile', 'work',
+            '-c', 'model="gpt-5.6"',
+            '--config=mcp_servers.qmd.enabled=true',
+            '--enable', 'feature-x',
+            '--disable=feature-y',
+            '--sandbox', 'workspace-write',
+            '--model', 'gpt-5.6',
+            'resume', '--last'
+        ])).toEqual([
+            '--profile', 'work',
+            '-c', 'model="gpt-5.6"',
+            '--config=mcp_servers.qmd.enabled=true',
+            '--enable', 'feature-x',
+            '--disable=feature-y'
+        ])
     })
 
     it('parses resolved server status and tool names', () => {

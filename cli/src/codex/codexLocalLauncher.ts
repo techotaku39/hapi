@@ -94,7 +94,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
     logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
     const inventoryTask = Promise.all([
-        listConfiguredCodexMcpServers(effectiveCodexCwd)
+        listConfiguredCodexMcpServers(effectiveCodexCwd, session.codexArgs)
             .then((inventory) => {
                 if (inventory === undefined) return;
                 mcpServerInventory = inventory;
