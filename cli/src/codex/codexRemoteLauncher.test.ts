@@ -1391,14 +1391,8 @@ describe('codexRemoteLauncher', () => {
         }));
     });
 
-    it.each([
-        ['configured discovery fails while status succeeds', 'configured-fails'],
-        ['configured discovery succeeds while status fails', 'status-fails']
-    ])('preserves saved MCP inventory when %s', async (_label, scenario) => {
-        harness.configuredMcpPromise = scenario === 'configured-fails'
-            ? Promise.resolve(undefined)
-            : Promise.resolve([{ name: 'configured-server' }]);
-        harness.mcpServerStatusError = scenario === 'status-fails';
+    it('preserves saved MCP inventory when configured discovery fails while status succeeds', async () => {
+        harness.configuredMcpPromise = Promise.resolve(undefined);
         const previous = {
             contextDetails: {
                 version: 1,
@@ -1416,6 +1410,19 @@ describe('codexRemoteLauncher', () => {
         expect(getMetadata().contextDetails).toMatchObject({
             codex: { mcpServers: [{ name: 'old-server' }] }
         });
+    });
+
+    it('uses configured MCP inventory when runtime status discovery fails', async () => {
+        harness.configuredMcpPromise = Promise.resolve([{ name: 'configured-server' }]);
+        harness.mcpServerStatusError = true;
+        const { session, getMetadata } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(getMetadata().contextDetails).toMatchObject({
+            provider: 'codex',
+            codex: { mcpServers: [{ name: 'configured-server' }] }
+        }));
     });
 
     it('steers a queued message into the active turn and acks on dispatch', async () => {

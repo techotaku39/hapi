@@ -3595,12 +3595,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }));
         };
 
-        const publishMcpInventoryIfComplete = (): void => {
-            if (configuredMcpServerInventory === undefined || statusMcpServerInventory === undefined) return;
-            codexMcpServerInventory = mergeCodexMcpInventories(
-                configuredMcpServerInventory,
-                statusMcpServerInventory
-            );
+        const publishMcpInventoryIfAvailable = (): void => {
+            const availableInventories = [configuredMcpServerInventory, statusMcpServerInventory]
+                .filter((inventory): inventory is CodexMcpServerInventory[] => inventory !== undefined);
+            const complete = configuredMcpServerInventory !== undefined
+                && statusMcpServerInventory !== undefined;
+            const mergedInventory = mergeCodexMcpInventories(...availableInventories);
+            if (!complete && mergedInventory.length === 0) return;
+            codexMcpServerInventory = mergedInventory;
             mcpInventoryLoaded = true;
             publishCodexInventoryContext?.();
         };
@@ -3630,7 +3632,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 if (this.shouldExit) return;
                 if (inventory === undefined) return;
                 configuredMcpServerInventory = inventory;
-                publishMcpInventoryIfComplete();
+                publishMcpInventoryIfAvailable();
             })
             .catch((error) => {
                 logger.debug(`[Codex] failed to list configured MCP servers: ${errorMessage(error)}`);
@@ -3674,7 +3676,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 const statusInventory = parseCodexMcpStatusResponse(response);
                 if (statusInventory === undefined) return;
                 statusMcpServerInventory = statusInventory;
-                publishMcpInventoryIfComplete();
+                publishMcpInventoryIfAvailable();
             })
             .catch((error) => {
                 logger.debug(`[Codex] mcpServerStatus/list failed: ${errorMessage(error)}`);
