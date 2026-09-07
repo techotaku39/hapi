@@ -1397,7 +1397,18 @@ describe('Codex Desktop import routes', () => {
         const engineSession = store.sessions.getOrCreateSession('engine-session', { codexSessionId: 'codex-thread-1' }, {}, 'default')
         store.messages.addMessage(storedSession.id, { type: 'text', text: 'first stored message' }, 'stored-1')
         store.messages.addMessage(storedSession.id, { type: 'text', text: 'second stored message' }, 'stored-2')
-        store.messages.addMessage(engineSession.id, { type: 'text', text: 'engine-only message' }, 'engine-1')
+        store.messages.addMessage(engineSession.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Imported duplicate plan', status: 'in_progress' }] }
+                }
+            }
+        }, 'engine-plan')
+        const engineSessionCache = new SessionCache(store, { emit: () => {} } as unknown as EventPublisher)
         const engine = {
             getSessionsByNamespace: () => [engineSession],
             deleteSession: async (sessionId: string) => {
@@ -1406,6 +1417,9 @@ describe('Codex Desktop import routes', () => {
             handleRealtimeEvent: () => {},
             recordSessionActivity: (sessionId: string, updatedAt: number) => {
                 store.sessions.touchSessionUpdatedAt(sessionId, updatedAt, 'default')
+            },
+            rebuildSessionTodos: (sessionId: string) => {
+                engineSessionCache.rebuildTodosFromTranscript(sessionId)
             }
         } as unknown as SyncEngine
         app.route('/api', createCodexDesktopRoutes({
@@ -1428,6 +1442,9 @@ describe('Codex Desktop import routes', () => {
             const sessions = store.sessions.getSessionsByNamespace('default')
             expect(sessions.map((session) => session.id)).toEqual([storedSession.id])
             expect(store.messages.getAllMessages(storedSession.id)).toHaveLength(3)
+            expect(store.sessions.getSession(storedSession.id)?.todos).toEqual([
+                { content: 'Imported duplicate plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+            ])
         } finally {
             store.close()
         }
