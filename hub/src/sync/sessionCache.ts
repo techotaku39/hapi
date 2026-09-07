@@ -100,7 +100,7 @@ export class SessionCache {
      * ratchets inside `replaceSessionTodos` — do not pass the remaining
      * message's older `createdAt` as the SSE version.
      */
-    rebuildTodosFromTranscript(sessionId: string): void {
+    rebuildTodosFromTranscript(sessionId: string, options: { touchUpdatedAt?: boolean } = {}): void {
         const stored = this.store.sessions.getSession(sessionId)
         if (!stored) return
 
@@ -125,7 +125,8 @@ export class SessionCache {
             sessionId,
             foundTodos,
             stored.namespace,
-            foundSource
+            foundSource,
+            options
         )
         this.todoBackfillAttemptedSessionIds.add(sessionId)
         this.refreshSession(sessionId)

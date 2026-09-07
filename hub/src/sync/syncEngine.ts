@@ -606,8 +606,8 @@ export class SyncEngine {
     }
 
     /** Rebuild structured task state after a transcript is imported directly. */
-    rebuildSessionTodos(sessionId: string): void {
-        this.sessionCache.rebuildTodosFromTranscript(sessionId)
+    rebuildSessionTodos(sessionId: string, options?: { touchUpdatedAt?: boolean }): void {
+        this.sessionCache.rebuildTodosFromTranscript(sessionId, options)
     }
 
     /**

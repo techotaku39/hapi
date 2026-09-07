@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -1395,8 +1396,8 @@ describe('Codex Desktop import routes', () => {
         const store = new Store(':memory:')
         const storedSession = store.sessions.getOrCreateSession('stored-session', { codexSessionId: 'codex-thread-1' }, {}, 'default')
         const engineSession = store.sessions.getOrCreateSession('engine-session', { codexSessionId: 'codex-thread-1' }, {}, 'default')
-        store.messages.addMessage(storedSession.id, { type: 'text', text: 'first stored message' }, 'stored-1')
-        store.messages.addMessage(storedSession.id, { type: 'text', text: 'second stored message' }, 'stored-2')
+        store.messages.addMessage(storedSession.id, { type: 'text', text: 'first stored message' }, 'stored-1', undefined, 100)
+        store.messages.addMessage(storedSession.id, { type: 'text', text: 'second stored message' }, 'stored-2', undefined, 150)
         store.messages.addMessage(engineSession.id, {
             role: 'agent',
             content: {
@@ -1407,7 +1408,11 @@ describe('Codex Desktop import routes', () => {
                     input: { plan: [{ step: 'Imported duplicate plan', status: 'in_progress' }] }
                 }
             }
-        }, 'engine-plan')
+        }, 'engine-plan', undefined, 200)
+        const internalDb = (store as unknown as { db: Database }).db
+        internalDb.prepare('UPDATE sessions SET updated_at = 1000 WHERE id IN (?, ?)').run(storedSession.id, engineSession.id)
+        engineSession.updatedAt = 1_000
+        const canonicalUpdatedAt = store.sessions.getSession(storedSession.id)?.updatedAt
         const engineSessionCache = new SessionCache(store, { emit: () => {} } as unknown as EventPublisher)
         const engine = {
             getSessionsByNamespace: () => [engineSession],
@@ -1418,8 +1423,8 @@ describe('Codex Desktop import routes', () => {
             recordSessionActivity: (sessionId: string, updatedAt: number) => {
                 store.sessions.touchSessionUpdatedAt(sessionId, updatedAt, 'default')
             },
-            rebuildSessionTodos: (sessionId: string) => {
-                engineSessionCache.rebuildTodosFromTranscript(sessionId)
+            rebuildSessionTodos: (sessionId: string, options?: { touchUpdatedAt?: boolean }) => {
+                engineSessionCache.rebuildTodosFromTranscript(sessionId, options)
             }
         } as unknown as SyncEngine
         app.route('/api', createCodexDesktopRoutes({
@@ -1445,6 +1450,7 @@ describe('Codex Desktop import routes', () => {
             expect(store.sessions.getSession(storedSession.id)?.todos).toEqual([
                 { content: 'Imported duplicate plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }
             ])
+            expect(store.sessions.getSession(storedSession.id)?.updatedAt).toBe(canonicalUpdatedAt)
         } finally {
             store.close()
         }

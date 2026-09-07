@@ -423,7 +423,8 @@ export function replaceSessionTodos(
     id: string,
     todos: unknown,
     namespace: string,
-    source: SessionTodoSource | null = null
+    source: SessionTodoSource | null = null,
+    options: { touchUpdatedAt?: boolean } = {}
 ): boolean {
     try {
         const json = todos === null || todos === undefined ? null : JSON.stringify(todos)
@@ -447,7 +448,11 @@ export function replaceSessionTodos(
                     WHEN todos_source_at = @source_at AND COALESCE(todos_source_seq, -1) < @source_seq THEN @source_seq
                     ELSE todos_source_seq
                 END,
-                updated_at = CASE WHEN updated_at > @now THEN updated_at ELSE @now END,
+                updated_at = CASE
+                    WHEN @touch_updated_at = 1
+                        THEN CASE WHEN updated_at > @now THEN updated_at ELSE @now END
+                    ELSE updated_at
+                END,
                 seq = seq + 1
             WHERE id = @id
               AND namespace = @namespace
@@ -457,6 +462,7 @@ export function replaceSessionTodos(
             now,
             source_at: source?.at ?? null,
             source_seq: source?.seq ?? null,
+            touch_updated_at: options.touchUpdatedAt === false ? 0 : 1,
             namespace
         })
         return result.changes === 1
