@@ -1078,6 +1078,13 @@ export function mergeSessionMessages(
             db.prepare(
                 'UPDATE messages SET seq = seq + ? WHERE session_id = ?'
             ).run(oldMaxSeq, toSessionId)
+            db.prepare(`
+                UPDATE sessions
+                SET todos_source_seq = todos_source_seq + @offset
+                WHERE id = @sessionId
+                  AND todos_source_at IS NOT NULL
+                  AND todos_source_seq >= 0
+            `).run({ offset: oldMaxSeq, sessionId: toSessionId })
         }
 
         const collisions = db.prepare(`

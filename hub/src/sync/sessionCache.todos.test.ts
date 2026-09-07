@@ -215,6 +215,57 @@ describe('SessionCache structured task backfill', () => {
         ])
     })
 
+    it('keeps the later target plan after merge rebases message sequence positions', async () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const source = cache.getOrCreateSession('merge-source-task-position', { path: '/tmp', host: 'h' }, null, 'default')
+        const target = cache.getOrCreateSession('merge-target-task-position', { path: '/tmp', host: 'h' }, null, 'default')
+
+        store.messages.addMessage(source.id, { role: 'assistant', content: 'source preface' }, undefined, undefined, 2_000)
+        const sourcePlan = store.messages.addMessage(source.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Earlier source plan', status: 'pending' }] }
+                }
+            }
+        }, undefined, undefined, 3_000)
+        const targetPlan = store.messages.addMessage(target.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Later target plan', status: 'in_progress' }] }
+                }
+            }
+        }, undefined, undefined, 3_000)
+
+        store.sessions.setSessionTodos(
+            source.id,
+            [{ content: 'Earlier source plan', priority: 'medium', status: 'pending', id: 'plan-1' }],
+            { at: sourcePlan.createdAt, seq: sourcePlan.seq },
+            'default'
+        )
+        store.sessions.setSessionTodos(
+            target.id,
+            [{ content: 'Later target plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }],
+            { at: targetPlan.createdAt, seq: targetPlan.seq },
+            'default'
+        )
+
+        await cache.mergeSessionHistory(source.id, target.id, 'default', { mergeAgentState: false })
+
+        expect(store.sessions.getSession(target.id)?.todos).toEqual([
+            { content: 'Later target plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+        ])
+        expect(store.sessions.getSession(target.id)?.todosSourceSeq).toBe(sourcePlan.seq + targetPlan.seq)
+    })
+
     it('persists the one-time backfill marker and skips the scan after restart', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-structured-todos-backfill-'))
         tempDirs.push(dir)
