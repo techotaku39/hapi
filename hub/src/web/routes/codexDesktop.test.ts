@@ -7,6 +7,8 @@ import { Hono } from 'hono'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import { Store } from '../../store'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
+import { SessionCache } from '../../sync/sessionCache'
+import type { EventPublisher } from '../../sync/eventPublisher'
 import type { WebAppEnv } from '../middleware/auth'
 import { createCodexDesktopRoutes, getDarwinCodexOpenArgs, importSelectedCodexSessions } from './codexDesktop'
 
@@ -40,6 +42,36 @@ function createTranscript(codexHome: string, sessionId: string, cwd = 'C:\\work\
                 type: 'message',
                 role: 'assistant',
                 content: [{ type: 'output_text', text: 'normal assistant message' }]
+            }
+        }
+    ]
+    writeFileSync(transcriptPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf-8')
+}
+
+function createPlanTranscript(codexHome: string, sessionId: string): void {
+    const sessionDir = join(codexHome, 'sessions', '2026', '06', '04')
+    mkdirSync(sessionDir, { recursive: true })
+    const transcriptPath = join(sessionDir, `rollout-${sessionId}.jsonl`)
+    const lines = [
+        {
+            type: 'session_meta',
+            payload: { id: sessionId, cwd: 'C:/work/project', originator: 'codex_cli_rs', cli_version: '0.0.0-test' }
+        },
+        {
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: 'import this plan' }]
+            }
+        },
+        {
+            type: 'response_item',
+            payload: {
+                type: 'function_call',
+                name: 'update_plan',
+                call_id: 'call-import-plan',
+                arguments: JSON.stringify({ plan: [{ step: 'Imported task', status: 'in_progress' }] })
             }
         }
     ]
@@ -338,6 +370,7 @@ function createMachine(id: string, workspaceRoots: string[], namespace = 'defaul
 }
 
 function createImportSyncEngine(store: Store, machines: Machine[]): SyncEngine {
+    const sessionCache = new SessionCache(store, { emit: () => {} } as unknown as EventPublisher)
     return {
         getOnlineMachinesByNamespace: (namespace: string) => machines.filter((machine) => (
             machine.namespace === namespace && machine.active
@@ -356,6 +389,9 @@ function createImportSyncEngine(store: Store, machines: Machine[]): SyncEngine {
         handleRealtimeEvent: () => {},
         recordSessionActivity: (sessionId: string, updatedAt: number) => {
             store.sessions.touchSessionUpdatedAt(sessionId, updatedAt, 'default')
+        },
+        rebuildSessionTodos: (sessionId: string) => {
+            sessionCache.rebuildTodosFromTranscript(sessionId)
         }
     } as unknown as SyncEngine
 }
@@ -430,6 +466,50 @@ describe('Codex Desktop import routes', () => {
         } finally {
             store.close()
             rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('rebuilds structured tasks after a direct transcript import and restart', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-plan-import-test-'))
+        const dbDir = mkdtempSync(join(tmpdir(), 'hapi-codex-plan-db-test-'))
+        const dbPath = join(dbDir, 'hapi.db')
+        const store = new Store(dbPath)
+        const codexSessionId = '13131313-1313-4131-8131-131313131313'
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            createPlanTranscript(codexHome, codexSessionId)
+            store.migrations.markCompleted('structured-session-todos-v1')
+
+            const result = await importSelectedCodexSessions({
+                codexSessionIds: [codexSessionId],
+                store,
+                namespace: 'default',
+                getSyncEngine: () => createImportSyncEngine(store, [])
+            })
+
+            expect(result.success).toBe(true)
+            const imported = store.sessions.getSessionsByNamespace('default')[0]
+            expect(imported).toBeDefined()
+            expect(imported?.todos).toEqual([
+                { content: 'Imported task', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+            ])
+
+            store.close()
+            const restartedStore = new Store(dbPath)
+            try {
+                const restartedCache = new SessionCache(restartedStore, { emit: () => {} } as unknown as EventPublisher)
+                restartedCache.reloadAll()
+                expect(restartedCache.getSession(imported!.id)?.todos).toEqual([
+                    { content: 'Imported task', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+                ])
+            } finally {
+                restartedStore.close()
+            }
+        } finally {
+            try { store.close() } catch {}
+            rmSync(codexHome, { recursive: true, force: true })
+            rmSync(dbDir, { recursive: true, force: true })
         }
     })
 

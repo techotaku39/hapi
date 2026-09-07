@@ -927,6 +927,26 @@ describe('replaceSessionTodos: watermark ratchet (PR #897 rewind race)', () => {
         store.close()
     })
 
+    it('does not move session activity to wall clock during historical task backfill', () => {
+        const store = makeStore()
+        const session = store.sessions.getOrCreateSession(
+            'historical-todos-activity',
+            { path: '/tmp/project' },
+            null,
+            'default'
+        )
+        const before = store.sessions.getSession(session.id)?.updatedAt
+
+        expect(store.sessions.setSessionTodos(
+            session.id,
+            [{ content: 'historical', status: 'pending' }],
+            { at: 1_000, seq: 1 },
+            'default'
+        )).toBe(true)
+        expect(store.sessions.getSession(session.id)?.updatedAt).toBe(before)
+        store.close()
+    })
+
     it('stamps Date.now() when replacing into a null watermark', () => {
         const store = makeStore()
         const session = store.sessions.getOrCreateSession(

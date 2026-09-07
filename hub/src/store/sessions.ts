@@ -378,7 +378,7 @@ export function setSessionTodos(
                 END,
                 todos_source_at = @source_at,
                 todos_source_seq = @source_seq,
-                updated_at = CASE WHEN updated_at > @now THEN updated_at ELSE @now END,
+                updated_at = CASE WHEN updated_at > @source_at THEN updated_at ELSE @source_at END,
                 seq = seq + 1
             WHERE id = @id
               AND namespace = @namespace

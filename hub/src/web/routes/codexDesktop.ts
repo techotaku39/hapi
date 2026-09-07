@@ -2085,6 +2085,9 @@ function importSingleCodexSession(options: {
         if (!created) {
             emitImportedMessageEvents(engine, sessionId, appendedMessages)
         }
+        if (appendedMessages.length > 0) {
+            engine?.rebuildSessionTodos(sessionId)
+        }
 
         const output = [
             `Codex thread: ${options.codexSessionId}`,
