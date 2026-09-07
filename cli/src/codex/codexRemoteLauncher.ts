@@ -3601,7 +3601,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             const complete = configuredMcpServerInventory !== undefined
                 && statusMcpServerInventory !== undefined;
             const mergedInventory = mergeCodexMcpInventories(...availableInventories);
-            if (!complete && mergedInventory.length === 0) return;
+            if (!complete && mergedInventory.length === 0) {
+                const savedMcpServers = session.client.getMetadata()?.contextDetails?.codex?.mcpServers;
+                if ((savedMcpServers?.length ?? 0) > 0 || Object.keys(mcpServers).length === 0) return;
+            }
             codexMcpServerInventory = mergedInventory;
             mcpInventoryLoaded = true;
             publishCodexInventoryContext?.();

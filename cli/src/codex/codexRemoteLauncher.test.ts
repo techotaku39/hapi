@@ -99,7 +99,8 @@ const harness = vi.hoisted(() => ({
     emitRunningChildTurnBeforeSuppressedParent: false,
     emitCompletedChildTurnBeforeSuppressedParent: false,
     emitTurnAbortedOnInterrupt: false,
-    bridgeOptions: [] as unknown[]
+    bridgeOptions: [] as unknown[],
+    bridgeMcpServers: {} as Record<string, unknown>
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -1110,7 +1111,7 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
         server: {
             stop: () => {}
         },
-        mcpServers: {}
+        mcpServers: harness.bridgeMcpServers
         };
     }
 }));
@@ -1425,6 +1426,26 @@ describe('codexRemoteLauncher', () => {
         }));
     });
 
+    it('publishes the injected HAPI MCP server when configured discovery is empty and status fails', async () => {
+        harness.bridgeMcpServers = {
+            hapi: {
+                command: 'hapi',
+                args: ['mcp'],
+                tools: { change_title: {} }
+            }
+        };
+        harness.configuredMcpPromise = Promise.resolve([]);
+        harness.mcpServerStatusError = true;
+        const { session, getMetadata } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(getMetadata().contextDetails).toMatchObject({
+            provider: 'codex',
+            codex: { mcpServers: [{ name: 'hapi', toolNames: ['change_title'] }] }
+        }));
+    });
+
     it('steers a queued message into the active turn and acks on dispatch', async () => {
         harness.suppressTurnCompletion = true;
         const { session, rpcHandlers, emitMessagesConsumed } = createSessionStub(['first'], createMode(), false, false);
@@ -1579,6 +1600,7 @@ describe('codexRemoteLauncher', () => {
         harness.mcpServerStatusError = false;
         harness.slashCommandsPromise = null;
         harness.configuredMcpPromise = null;
+        harness.bridgeMcpServers = {};
         harness.skillsListResponse = {
             data: [{
                 cwd: '/tmp/hapi-update',
