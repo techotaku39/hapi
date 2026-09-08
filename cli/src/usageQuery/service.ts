@@ -35,6 +35,11 @@ type CachedResult = {
     lastError: string | null
 }
 
+type InFlightRequest = {
+    fingerprint: string
+    request: Promise<UsageQueryResult>
+}
+
 function templateFingerprint(template: UsageQueryTemplate): string {
     // The template has already passed the strict schema, so JSON.stringify is
     // a compact deterministic-enough identity for cache invalidation. A user
@@ -130,7 +135,7 @@ export class UsageQueryService {
     private readonly resolveCredentials: (agent: UsageQueryAgent) => Promise<ResolvedUsageCredentials>
     private readonly settingsFile: string
     private readonly cache = new Map<UsageQueryAgent, CachedResult>()
-    private readonly inFlight = new Map<UsageQueryAgent, Promise<UsageQueryResult>>()
+    private readonly inFlight = new Map<UsageQueryAgent, InFlightRequest>()
     private settingsWriteQueue: Promise<void> = Promise.resolve()
 
     constructor(options: UsageQueryServiceOptions) {
@@ -225,14 +230,14 @@ export class UsageQueryService {
             }
         }
         const existing = this.inFlight.get(agent)
-        if (existing) return await existing
+        if (existing?.fingerprint === fingerprint) return await existing.request
 
         const request = this.runQuery(agent, configured, usableCached, now)
-        this.inFlight.set(agent, request)
+        this.inFlight.set(agent, { fingerprint, request })
         try {
             return await request
         } finally {
-            this.inFlight.delete(agent)
+            if (this.inFlight.get(agent)?.request === request) this.inFlight.delete(agent)
         }
     }
 

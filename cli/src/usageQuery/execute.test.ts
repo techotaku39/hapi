@@ -155,6 +155,18 @@ describe('usage query executor', () => {
         const embeddedCredentials = makeTemplate({ request: { ...DEFAULT_USAGE_QUERY_TEMPLATE.request, url: 'https://user:pass@provider.example/usage' } })
         await expect(executeUsageQueryTemplate('codex', embeddedCredentials, credentials, { fetchImpl: async () => response({}) }))
             .rejects.toThrow('embedded credentials')
+
+        const redirectTemplate = DEFAULT_USAGE_QUERY_TEMPLATES.find((item) => item.id === 'kimi-coding-plan')!
+        const redirected = await executeUsageQueryTemplate('claude', redirectTemplate, credentials, {
+            fetchImpl: async (_url, init) => {
+                expect(init.redirect).toBe('error')
+                return response({
+                    limits: [{ detail: { remaining: 25, limit: 100, resetTime: '2026-09-07T00:00:00.000Z' } }],
+                    usage: { remaining: 900, limit: 1000, resetTime: '2026-09-08T00:00:00.000Z' }
+                })
+            }
+        })
+        expect(redirected.status).toBe('success')
     })
 
     it('rejects non-success and oversized responses without exposing the body', async () => {
