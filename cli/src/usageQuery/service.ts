@@ -233,8 +233,9 @@ export class UsageQueryService {
             ? cached
             : undefined
         if (!force && usableCached) {
-            if (now - usableCached.cachedAt < USAGE_QUERY_CACHE_TTL_MS) return usableCached.result
-            if (usableCached.lastError && now - usableCached.lastAttemptAt < USAGE_QUERY_RETRY_COOLDOWN_MS) {
+            if (usableCached.lastError) {
+                if (now - usableCached.lastAttemptAt < USAGE_QUERY_RETRY_COOLDOWN_MS) return usableCached.result
+            } else if (now - usableCached.cachedAt < USAGE_QUERY_CACHE_TTL_MS) {
                 return usableCached.result
             }
         }
