@@ -21,6 +21,13 @@ the release build:
 Do not wait until after the tag is created to add the entry: that would publish
 a build whose About page still ends at the previous version.
 
+During preparation, the catalog test only requires the current
+`__APP_VERSION__` to exist somewhere in the history. This allows the next
+release entry to be prepared at the top of the list while the repository still
+has the previous version in `shared/src/buildInfo.ts`. At release time,
+`release-all.ts` performs the stricter check that the requested version is the
+first catalog entry before it starts the build.
+
 ## Source of truth
 
 Use the official GitHub Release body, merged pull requests, and the changed

@@ -123,10 +123,13 @@ async function main(): Promise<void> {
     // Release notes must be present before the embedded Web build runs.
     const releaseNotesPath = join(repoRoot, 'web', 'src', 'lib', 'releaseNotes.ts');
     const releaseNotes = readFileSync(releaseNotesPath, 'utf-8');
-    if (!releaseNotes.includes(`releaseNote('${version}'`)) {
-        throw new Error(`Add release notes for ${version} to ${releaseNotesPath} before building the release`);
+    const latestReleaseVersion = releaseNotes.match(
+        /export const RELEASE_NOTES = \[\s*releaseNote\('([^']+)'/,
+    )?.[1];
+    if (latestReleaseVersion !== version) {
+        throw new Error(`Put release notes for ${version} first in ${releaseNotesPath} before building the release`);
     }
-    console.log(`   ✓ Release notes present for v${version}`);
+    console.log(`   ✓ Release notes are first for v${version}`);
 
     // Pre-check: Ensure npm is logged in (skip in dry-run mode)
     if (!dryRun) {
