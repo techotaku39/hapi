@@ -530,6 +530,21 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       let spawnDirectory = directory;
       let worktreeInfo: WorktreeInfo | null = null;
       let happyProcess: ReturnType<typeof spawnHappyCLI> | null = null;
+      let copiedCodexConfigPath: string | null = null;
+
+      const cleanupCopiedCodexConfig = async (reason: string): Promise<void> => {
+        const configPath = copiedCodexConfigPath;
+        copiedCodexConfigPath = null;
+        if (!configPath) {
+          return;
+        }
+        try {
+          await fs.rm(configPath, { force: true });
+          logger.debug(`[RUNNER RUN] Removed temporary Codex config after ${reason}`);
+        } catch (error) {
+          logger.debug(`[RUNNER RUN] Failed to remove temporary Codex config after ${reason}`, error);
+        }
+      };
 
       if (sessionType === 'simple') {
         const validation = await validateWorkspaceDirectory(directory, {
@@ -649,7 +664,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             const codexHomeDir = await fs.mkdtemp(join(os.tmpdir(), 'hapi-codex-'));
 
             // Preserve user MCP/config settings while keeping token auth isolated.
-            await copyCodexConfigFile(resolveCodexHome(), codexHomeDir);
+            copiedCodexConfigPath = await copyCodexConfigFile(resolveCodexHome(), codexHomeDir);
 
             // Write the token to the temporary directory
             await fs.writeFile(join(codexHomeDir, 'auth.json'), options.token);
@@ -706,6 +721,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             ...extraEnv
           }
         });
+        happyProcess.once('exit', () => {
+          void cleanupCopiedCodexConfig('child-exit');
+        });
 
         happyProcess.stderr?.on('data', (data) => {
           stderrTail = appendTail(stderrTail, data);
@@ -732,6 +750,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               message: errorMessage
             }
           });
+          await cleanupCopiedCodexConfig('no-pid');
           await maybeCleanupWorktree('no-pid');
           return {
             type: 'error',
@@ -857,7 +876,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             // (the actual claude/codex agent) are also reaped, and that
             // SIGTERM → SIGKILL escalation kicks in if needed.
             if (happyProcess) {
-              void killProcessByChildProcess(happyProcess);
+              void killProcessByChildProcess(happyProcess).finally(() => {
+                void cleanupCopiedCodexConfig('webhook-timeout');
+              });
+            } else {
+              void cleanupCopiedCodexConfig('webhook-timeout');
             }
 
             // If this was a worktree session, the worktree can only be
@@ -914,6 +937,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger.debug('[RUNNER RUN] Failed to spawn session:', error);
+        await cleanupCopiedCodexConfig('exception');
         await maybeCleanupWorktree('exception');
         reportSpawnOutcomeToHub?.({
           type: 'error',

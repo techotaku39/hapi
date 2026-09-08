@@ -21,7 +21,7 @@ type StdioProxySpec = {
     env_vars?: string[];
 };
 
-const NODE_STDIO_PROXY_SCRIPT = `
+export const NODE_STDIO_PROXY_SCRIPT = `
 const { readFileSync } = require('node:fs');
 const { spawn, execFileSync } = require('node:child_process');
 const spec = JSON.parse(readFileSync(process.argv[1], 'utf8'));
@@ -42,11 +42,30 @@ for (const name of envVars) {
     } catch {}
 }
 
-const child = spawn(spec.command, spec.args, {
+const resolveWindowsCommand = (command) => {
+    if (process.platform !== 'win32' || /[\\/]/.test(command) || /\\.(exe|cmd|bat)$/i.test(command)) {
+        return command;
+    }
+    try {
+        const entries = execFileSync('where.exe', [command], {
+            encoding: 'utf8',
+            windowsHide: true
+        })
+            .split(/\\r?\\n/)
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+        return entries.find((entry) => /\\.(exe|cmd|bat)$/i.test(entry)) ?? entries[0] ?? command;
+    } catch {
+        return command;
+    }
+};
+
+const resolvedCommand = resolveWindowsCommand(spec.command);
+const child = spawn(resolvedCommand, spec.args, {
     cwd: process.cwd(),
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
-    shell: process.platform === 'win32' && /\\.(cmd|bat)$/i.test(spec.command),
+    shell: process.platform === 'win32' && /\\.(cmd|bat)$/i.test(resolvedCommand),
     windowsHide: process.platform === 'win32'
 });
 process.stdin.on('data', (chunk) => child.stdin.write(chunk));

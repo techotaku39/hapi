@@ -1597,8 +1597,15 @@ describe('codexRemoteLauncher', () => {
             enabled: true,
             tool_timeout_sec: 60
         }));
-        expect(freshPackageManager?.command).toBe('node');
-        expect(freshPackageManager?.args?.[0]).toBe('-e');
+        if (process.platform === 'win32') {
+            expect(freshPackageManager?.command).toBe('node');
+            expect(freshPackageManager?.args?.[0]).toBe('-e');
+        } else {
+            expect(freshPackageManager).toMatchObject({
+                command: 'uvx',
+                args: ['example-mcp', 'serve']
+            });
+        }
 
         harness.startThreadParams = [];
         const resumed = createSessionStub();
@@ -1615,8 +1622,15 @@ describe('codexRemoteLauncher', () => {
             }
         });
         expect(resumedPackageManager).toBeDefined();
-        expect(resumedPackageManager?.command).toBe('node');
-        expect(resumedPackageManager?.args?.[0]).toBe('-e');
+        if (process.platform === 'win32') {
+            expect(resumedPackageManager?.command).toBe('node');
+            expect(resumedPackageManager?.args?.[0]).toBe('-e');
+        } else {
+            expect(resumedPackageManager).toMatchObject({
+                command: 'uvx',
+                args: ['example-mcp', 'serve']
+            });
+        }
     });
 
     it('keeps remote sessions working when config/read is unavailable', async () => {

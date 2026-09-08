@@ -14,17 +14,18 @@ export function resolveCodexHome(env: NodeJS.ProcessEnv = process.env): string {
  * Copying config.toml preserves user MCP settings without copying auth files
  * or unrelated state. A missing source config is a valid first-run state.
  */
-export async function copyCodexConfigFile(sourceHome: string, targetHome: string): Promise<boolean> {
+export async function copyCodexConfigFile(sourceHome: string, targetHome: string): Promise<string | null> {
     if (resolve(sourceHome) === resolve(targetHome)) {
-        return false;
+        return null;
     }
 
+    const targetConfigPath = join(targetHome, 'config.toml');
     try {
-        await copyFile(join(sourceHome, 'config.toml'), join(targetHome, 'config.toml'));
-        return true;
+        await copyFile(join(sourceHome, 'config.toml'), targetConfigPath);
+        return targetConfigPath;
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            return false;
+            return null;
         }
         throw error;
     }

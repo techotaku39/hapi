@@ -27,7 +27,8 @@ describe('codexHome', () => {
         await writeFile(join(sourceHome, 'config.toml'), '[mcp_servers.example]\ncommand = "server"\n');
         await writeFile(join(sourceHome, 'auth.json'), '{"access_token":"not-copied"}\n');
 
-        await expect(copyCodexConfigFile(sourceHome, targetHome)).resolves.toBe(true);
+        await expect(copyCodexConfigFile(sourceHome, targetHome))
+            .resolves.toBe(join(targetHome, 'config.toml'));
         await expect(readFile(join(targetHome, 'config.toml'), 'utf8'))
             .resolves.toBe('[mcp_servers.example]\ncommand = "server"\n');
         await expect(readFile(join(targetHome, 'auth.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
@@ -37,6 +38,6 @@ describe('codexHome', () => {
         const sourceHome = await createTemporaryDirectory();
         const targetHome = await createTemporaryDirectory();
 
-        await expect(copyCodexConfigFile(sourceHome, targetHome)).resolves.toBe(false);
+        await expect(copyCodexConfigFile(sourceHome, targetHome)).resolves.toBeNull();
     });
 });

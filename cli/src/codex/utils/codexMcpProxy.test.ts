@@ -1,12 +1,18 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
+    NODE_STDIO_PROXY_SCRIPT,
     prepareCodexMcpServers,
     shouldProxyCodexMcpStdio
 } from './codexMcpProxy';
+
+const windowsIt = process.platform === 'win32' ? it : it.skip;
 
 describe('codexMcpProxy', () => {
     it('limits the compatibility proxy to Windows command shims', () => {
@@ -79,5 +85,84 @@ describe('codexMcpProxy', () => {
         const cleanedProxy = prepared.servers['package-manager'] as { args: string[] };
         expect(existsSync(cleanedProxy.args.at(-1) as string)).toBe(false);
         await prepared.cleanup();
+    });
+
+    windowsIt('launches a bare command through a temporary Windows shim', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'hapi-codex-mcp-shim-test-'));
+        const serverPath = join(directory, 'server.js');
+        const shimPath = join(directory, 'example-mcp.cmd');
+        const specPath = join(directory, 'spec.json');
+        const originalPath = process.env.PATH ?? '';
+        const serverScript = [
+            "let buffer = '';",
+            "process.stdin.setEncoding('utf8');",
+            "process.stdin.on('data', (chunk) => {",
+            "    buffer += chunk;",
+            "    const newline = buffer.indexOf('\\n');",
+            "    if (newline < 0) return;",
+            "    const request = JSON.parse(buffer.slice(0, newline));",
+            "    if (request.method === 'initialize') {",
+            "        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: request.params.protocolVersion, capabilities: {}, serverInfo: { name: 'shim-test', version: '1' } } }) + '\\n');",
+            "    }",
+            "});"
+        ].join('\n');
+
+        try {
+            await writeFile(serverPath, serverScript, 'utf8');
+            await writeFile(shimPath, '@echo off\r\nnode "%~dp0server.js"\r\n', 'utf8');
+            await writeFile(specPath, JSON.stringify({ command: 'example-mcp', args: [] }), 'utf8');
+
+            const child = spawn(process.execPath, ['-e', NODE_STDIO_PROXY_SCRIPT, specPath], {
+                env: { ...process.env, PATH: `${directory};${originalPath}` },
+                stdio: ['pipe', 'pipe', 'pipe'],
+                windowsHide: true
+            });
+
+            const response = await new Promise<Record<string, unknown>>((resolve, reject) => {
+                let output = '';
+                const timeout = setTimeout(() => {
+                    child.kill();
+                    reject(new Error('Timed out waiting for the Windows MCP shim response'));
+                }, 5_000);
+                const finish = (error: Error | null, value?: Record<string, unknown>) => {
+                    clearTimeout(timeout);
+                    if (error) {
+                        reject(error);
+                    } else if (value) {
+                        resolve(value);
+                    }
+                };
+                child.once('error', (error) => finish(error));
+                child.stdout.setEncoding('utf8');
+                child.stdout.on('data', (chunk) => {
+                    output += chunk;
+                    const newline = output.indexOf('\n');
+                    if (newline < 0) return;
+                    try {
+                        finish(null, JSON.parse(output.slice(0, newline)) as Record<string, unknown>);
+                    } catch (error) {
+                        finish(error instanceof Error ? error : new Error(String(error)));
+                    }
+                    child.kill();
+                });
+                child.stderr.resume();
+                child.stdin.write(JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'initialize',
+                    params: { protocolVersion: '2025-06-18' }
+                }) + '\n');
+            });
+
+            expect(response).toMatchObject({
+                jsonrpc: '2.0',
+                id: 1,
+                result: {
+                    serverInfo: { name: 'shim-test' }
+                }
+            });
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
     });
 });
