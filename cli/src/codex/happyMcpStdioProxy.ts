@@ -5,8 +5,9 @@
  * bridge Windows command shims without requiring a separate Node runtime.
  */
 
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import spawn from 'cross-spawn';
 
 type StdioProxySpec = {
     command: string;
@@ -110,9 +111,8 @@ export async function runHappyMcpStdioProxy(argv: string[]): Promise<void> {
             cwd: spec.cwd ?? process.cwd(),
             env: { ...process.env },
             stdio: ['pipe', 'pipe', 'pipe'],
-            shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(command),
             windowsHide: process.platform === 'win32'
-        });
+        }) as unknown as ChildProcessWithoutNullStreams;
 
         child.stdout.on('data', (chunk) => process.stdout.write(chunk));
         child.stderr.on('data', (chunk) => process.stderr.write(chunk));

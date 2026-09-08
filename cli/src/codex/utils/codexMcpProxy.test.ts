@@ -92,7 +92,14 @@ describe('codexMcpProxy', () => {
         const shimPath = join(directory, 'example-mcp.cmd');
         const specPath = join(directory, 'spec.json');
         const originalPath = process.env.PATH ?? '';
+        const shimArgs = [
+            'C:\\Users\\Jane Doe\\repo',
+            'literal&value',
+            'percent%value',
+            'caret^value'
+        ];
         const serverScript = [
+            "const receivedArgs = JSON.stringify(process.argv.slice(2));",
             "let buffer = '';",
             "process.stdin.setEncoding('utf8');",
             "process.stdin.on('data', (chunk) => {",
@@ -101,15 +108,15 @@ describe('codexMcpProxy', () => {
             "    if (newline < 0) return;",
             "    const request = JSON.parse(buffer.slice(0, newline));",
             "    if (request.method === 'initialize') {",
-            "        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: request.params.protocolVersion, capabilities: {}, serverInfo: { name: 'shim-test', version: '1' } } }) + '\\n');",
+            "        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: request.params.protocolVersion, capabilities: {}, serverInfo: { name: 'shim-test', version: receivedArgs } } }) + '\\n');",
             "    }",
             "});"
         ].join('\n');
 
         try {
             await writeFile(serverPath, serverScript, 'utf8');
-            await writeFile(shimPath, '@echo off\r\nnode "%~dp0server.js"\r\n', 'utf8');
-            await writeFile(specPath, JSON.stringify({ command: 'example-mcp', args: [] }), 'utf8');
+            await writeFile(shimPath, '@echo off\r\nnode "%~dp0server.js" %*\r\n', 'utf8');
+            await writeFile(specPath, JSON.stringify({ command: 'example-mcp', args: shimArgs }), 'utf8');
 
             const proxyCommand = getHappyCliCommand(['mcp-proxy', '--spec', specPath]);
             const child = spawn(proxyCommand.command, proxyCommand.args, {
@@ -158,7 +165,7 @@ describe('codexMcpProxy', () => {
                 jsonrpc: '2.0',
                 id: 1,
                 result: {
-                    serverInfo: { name: 'shim-test' }
+                    serverInfo: { name: 'shim-test', version: JSON.stringify(shimArgs) }
                 }
             });
         } finally {
