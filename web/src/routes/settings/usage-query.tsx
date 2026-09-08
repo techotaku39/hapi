@@ -82,7 +82,12 @@ export default function SettingsUsageQueryPage() {
     const { t } = useTranslation()
     const { api } = useAppContext()
     const queryClient = useQueryClient()
-    const { machines, isLoading: machinesLoading } = useMachines(api, true)
+    const {
+        machines,
+        isLoading: machinesLoading,
+        error: machinesError,
+        refetch: refetchMachines
+    } = useMachines(api, true)
     const [machineId, setMachineId] = useState('')
     const [agent, setAgent] = useState<UsageQueryAgent>('claude')
     const [templateText, setTemplateText] = useState('')
@@ -189,7 +194,12 @@ export default function SettingsUsageQueryPage() {
         <SettingsPageContent description={t('settings.usageQuery.description')}>
             <SettingsSection title={t('settings.usageQuery.target')}>
                 <SettingsRow label={t('settings.usageQuery.machine')} contentClassName="flex-1">
-                    {machinesLoading ? <div className="text-sm text-[var(--app-hint)]">{t('settings.usageQuery.loadingMachines')}</div> : (
+                    {machinesError ? (
+                        <div className="flex items-center justify-between gap-3 text-sm text-red-600">
+                            <span>{machinesError}</span>
+                            <button type="button" className="underline" onClick={() => void refetchMachines()}>{t('button.retry')}</button>
+                        </div>
+                    ) : machinesLoading ? <div className="text-sm text-[var(--app-hint)]">{t('settings.usageQuery.loadingMachines')}</div> : (
                         <SelectMenu
                             aria-label={t('settings.usageQuery.machine')}
                             value={machineId}

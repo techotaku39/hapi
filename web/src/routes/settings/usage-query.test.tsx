@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_USAGE_QUERY_TEMPLATE, DEFAULT_USAGE_QUERY_TEMPLATES } from '@hapi/protocol/usageQuery'
 import { I18nProvider } from '@/lib/i18n-context'
 import { queryKeys } from '@/lib/query-keys'
@@ -8,6 +8,23 @@ import SettingsUsageQueryPage from './usage-query'
 
 const testUsageQuery = vi.fn()
 const saveUsageQuery = vi.fn()
+const useMachinesMock = vi.hoisted(() => vi.fn())
+
+const defaultMachines = [{
+    id: 'machine-1',
+    metadata: { host: 'workstation.local', platform: 'win32' }
+}]
+
+beforeEach(() => {
+    testUsageQuery.mockReset()
+    saveUsageQuery.mockReset()
+    useMachinesMock.mockReturnValue({
+        machines: defaultMachines,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn()
+    })
+})
 
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({ api: {
@@ -34,15 +51,7 @@ vi.mock('@/lib/app-context', () => ({
 }))
 
 vi.mock('@/hooks/queries/useMachines', () => ({
-    useMachines: () => ({
-        machines: [{
-            id: 'machine-1',
-            metadata: { host: 'workstation.local', platform: 'win32' }
-        }],
-        isLoading: false,
-        error: null,
-        refetch: vi.fn()
-    })
+    useMachines: useMachinesMock
 }))
 
 describe('SettingsUsageQueryPage', () => {
@@ -146,5 +155,23 @@ describe('SettingsUsageQueryPage', () => {
 
         await waitFor(() => expect(queryClient.getQueryData(queryKeys.machineUsageQuery('machine-1', 'claude'))).toMatchObject(saved))
         expect(queryClient.getQueryData(queryKeys.machineUsageQuery('machine-1', 'kimi'))).not.toMatchObject(saved)
+    })
+
+    it('surfaces machine-list errors and exposes a retry action', async () => {
+        const refetch = vi.fn()
+        useMachinesMock.mockReturnValue({ machines: [], isLoading: false, error: 'machines unavailable', refetch })
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={queryClient}>
+                <I18nProvider>
+                    <SettingsUsageQueryPage />
+                </I18nProvider>
+            </QueryClientProvider>
+        )
+
+        expect(await screen.findByText('machines unavailable')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+        expect(refetch).toHaveBeenCalledTimes(1)
+        expect(screen.queryByRole('combobox', { name: 'Machine' })).not.toBeInTheDocument()
     })
 })

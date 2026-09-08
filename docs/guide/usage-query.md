@@ -59,7 +59,8 @@ environment and the standard Claude, Codex, and Kimi configuration files.
 OAuth-only login state is intentionally not treated as an API key; it needs a
 reviewed provider adapter in a later change. Kimi CLI credentials are resolved
 from `KIMI_BASE_URL` / `KIMI_API_KEY` or the active provider in
-`~/.kimi/config.toml` (with the `KIMI_CODE_HOME` override).
+`~/.kimi-code/config.toml`, falling back to the legacy `~/.kimi/config.toml`
+(with the `KIMI_CODE_HOME` override).
 
 Use **Test** before saving. A successful test returns sanitized `5H` and `7D`
 values. After enabling and saving, open the session's context control to view
