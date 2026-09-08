@@ -50,6 +50,18 @@ describe('usage query protocol', () => {
         expect(UsageQueryTemplateSchema.safeParse(template).success).toBe(false)
     })
 
+    it('rejects mismatched save template IDs', () => {
+        const template = DEFAULT_USAGE_QUERY_TEMPLATES[0]
+        const parsed = SaveUsageQuerySettingsRequestSchema.safeParse({
+            agent: 'claude',
+            enabled: true,
+            templateId: 'different-template',
+            template
+        })
+        expect(parsed.success).toBe(false)
+        if (!parsed.success) expect(parsed.error.issues[0]?.path).toEqual(['templateId'])
+    })
+
     it('rejects unknown agents and malformed query requests', () => {
         expect(QueryUsageRequestSchema.safeParse({ agent: 'gemini' }).success).toBe(false)
         expect(QueryUsageRequestSchema.safeParse({ agent: 'codex', force: 'yes' }).success).toBe(false)

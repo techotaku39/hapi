@@ -156,11 +156,10 @@ function parseKimiJson(config: JsonObject): KimiConfigSnapshot {
 }
 
 function chooseKimiProvider(snapshot: KimiConfigSnapshot): KimiProviderConfig | null {
-    const activeProvider = snapshot.defaultModel
+    const providerName = snapshot.defaultModel
         ? snapshot.modelProviders.get(snapshot.defaultModel)
-        : null
-    if (activeProvider && snapshot.providers.has(activeProvider)) return snapshot.providers.get(activeProvider) ?? null
-    return snapshot.providers.values().next().value ?? null
+        : undefined
+    return providerName ? snapshot.providers.get(providerName) ?? null : null
 }
 
 async function readKimiConfig(env: NodeJS.ProcessEnv, userHome = homedir()): Promise<KimiConfigSnapshot> {

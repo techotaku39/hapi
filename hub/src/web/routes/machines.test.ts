@@ -118,6 +118,30 @@ describe('machines routes', () => {
             expect(denied.status).toBe(403)
         })
 
+        it('rejects mismatched save template IDs at the HTTP boundary', async () => {
+            const machine = createMachine()
+            let saveCalls = 0
+            const app = createUsageApp({
+                getMachine: () => machine,
+                saveUsageQuerySettings: async () => {
+                    saveCalls += 1
+                    return null as never
+                }
+            } as Partial<SyncEngine>)
+            const response = await app.request('/api/machines/machine-1/usage-query/settings', {
+                method: 'PUT',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    agent: 'claude',
+                    enabled: true,
+                    templateId: 'different-template',
+                    template: DEFAULT_USAGE_QUERY_TEMPLATE
+                })
+            })
+            expect(response.status).toBe(400)
+            expect(saveCalls).toBe(0)
+        })
+
         it('returns RPC target missing as a retryable 503', async () => {
             const machine = createMachine()
             const app = createUsageApp({

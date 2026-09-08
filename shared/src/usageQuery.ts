@@ -119,7 +119,10 @@ export const SaveUsageQuerySettingsRequestSchema = z.object({
     enabled: z.boolean(),
     templateId: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
     template: UsageQueryTemplateSchema
-}).strict()
+}).strict().refine(
+    (value) => value.templateId === value.template.id,
+    { path: ['templateId'], message: 'templateId must match template.id' }
+)
 
 export type SaveUsageQuerySettingsRequest = z.infer<typeof SaveUsageQuerySettingsRequestSchema>
 
