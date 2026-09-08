@@ -33,6 +33,8 @@ supports:
 - `{{baseOrigin}}` — the configured endpoint's scheme, host, and port, useful for
   provider adapters with canonical paths;
 - `{{apiKey}}` — the selected Agent's configured credential;
+- `GET` requests only; quota templates are read-only. A provider that requires a
+  mutating method or a custom signature needs a reviewed Runner adapter;
 - dot and numeric bracket paths such as `usage.resetTime` and
   `limits[0].detail.remaining`;
 - direct percentages (`percentPath`) or `used`/`remaining` plus `limit`.
@@ -83,5 +85,6 @@ than grant arbitrary code execution.
 
 Templates are not JavaScript programs. They cannot run shell commands, read
 files, inspect environment variables, or send requests to a different origin.
-For that reason, a provider requiring a custom signature or multi-step
-authentication needs a dedicated reviewed Runner adapter in a later change.
+For that reason, a provider requiring a custom signature, multi-step
+authentication, or a mutating request needs a dedicated reviewed Runner adapter
+in a later change.
