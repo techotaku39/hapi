@@ -71,6 +71,7 @@ import SettingsMachinesPage from '@/routes/settings/machines'
 import SettingsAboutPage from '@/routes/settings/about'
 import SettingsStoragePage from '@/routes/settings/storage'
 import SettingsUsagePage from '@/routes/settings/usage'
+import SettingsUsageQueryPage from '@/routes/settings/usage-query'
 import SharePage from '@/routes/share'
 import { retargetSharePendingTransfer, setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, parseShareSearch } from '@/lib/shareTransfer'
@@ -1255,6 +1256,12 @@ const settingsUsageRoute = createRoute({
     component: SettingsUsagePage,
 })
 
+const settingsUsageQueryRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'usage-query',
+    component: SettingsUsageQueryPage,
+})
+
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
 // intercepts the manifest's `POST /share` and 303-redirects here with an
 // IDB transfer id. `error=ingest` is set when the SW failed to write IDB.
@@ -1290,6 +1297,7 @@ export const routeTree = rootRoute.addChildren([
         settingsMachinesRoute,
         settingsStorageRoute,
         settingsUsageRoute,
+        settingsUsageQueryRoute,
         settingsAboutRoute,
     ]),
     shareRoute,
