@@ -196,15 +196,13 @@ describe('UsageQueryService', () => {
             request: {
                 ...DEFAULT_USAGE_QUERY_TEMPLATES[0].request,
                 url: `${credentials.baseUrl}/usage`,
-                headers: { Authorization: `Bearer ${credentials.apiKey}` },
-                body: JSON.stringify({ key: credentials.apiKey })
+                headers: { Authorization: `Bearer ${credentials.apiKey}` }
             }
         }
         await service.saveSettings('claude', { enabled: false, templateId: template.id, template })
         const returned = await service.getSettings('claude')
         expect(returned.template.request.url).toBe('{{baseUrl}}/usage')
         expect(returned.template.request.headers.Authorization).toBe('Bearer {{apiKey}}')
-        expect(returned.template.request.body).toBe('{"key":"{{apiKey}}"}')
         expect(await readFile(join(root, 'usage-query.json'), 'utf8')).not.toContain(credentials.apiKey)
     })
 

@@ -42,6 +42,14 @@ describe('usage query protocol', () => {
         expect(UsageQueryTemplateSchema.safeParse(template).success).toBe(false)
     })
 
+    it('rejects request bodies in read-only templates', () => {
+        const template = {
+            ...DEFAULT_USAGE_QUERY_TEMPLATES[0],
+            request: { ...DEFAULT_USAGE_QUERY_TEMPLATES[0].request, body: '{}' }
+        }
+        expect(UsageQueryTemplateSchema.safeParse(template).success).toBe(false)
+    })
+
     it('rejects unknown agents and malformed query requests', () => {
         expect(QueryUsageRequestSchema.safeParse({ agent: 'gemini' }).success).toBe(false)
         expect(QueryUsageRequestSchema.safeParse({ agent: 'codex', force: 'yes' }).success).toBe(false)

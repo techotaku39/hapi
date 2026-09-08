@@ -43,8 +43,7 @@ export type UsageQueryWindowSpec = z.infer<typeof UsageQueryWindowSpecSchema>
 export const UsageQueryRequestSchema = z.object({
     url: z.string().trim().min(1).max(2048),
     method: UsageQueryHttpMethodSchema,
-    headers: z.record(z.string().trim().min(1).max(128), z.string().max(2048)).default({}),
-    body: z.string().max(64 * 1024).optional()
+    headers: z.record(z.string().trim().min(1).max(128), z.string().max(2048)).default({})
 }).strict()
 
 export type UsageQueryRequest = z.infer<typeof UsageQueryRequestSchema>

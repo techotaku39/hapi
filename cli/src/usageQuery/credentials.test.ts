@@ -100,4 +100,35 @@ describe('usage query credential resolution', () => {
             await rm(root, { recursive: true, force: true })
         }
     })
+
+    it('prefers the current Kimi Code home over the legacy home', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-home-precedence-'))
+        try {
+            const currentHome = join(root, '.kimi-code')
+            const legacyHome = join(root, '.kimi')
+            await mkdir(currentHome, { recursive: true })
+            await mkdir(legacyHome, { recursive: true })
+            const config = (model: string, baseUrl: string, apiKey: string) => [
+                `default_model = "${model}"`,
+                `[providers.${model}]`,
+                'type = "kimi"',
+                `base_url = "${baseUrl}"`,
+                `api_key = "${apiKey}"`,
+                `[models.${model}]`,
+                `provider = "${model}"`
+            ].join('\n')
+            await writeFile(join(currentHome, 'config.toml'), config('current', 'https://current.kimi.example', 'current-secret'))
+            await writeFile(join(legacyHome, 'config.toml'), config('legacy', 'https://legacy.kimi.example', 'legacy-secret'))
+
+            const resolved = await resolveUsageCredentials('kimi', {}, root)
+            expect(resolved).toMatchObject({
+                baseUrl: 'https://current.kimi.example',
+                apiKey: 'current-secret',
+                baseUrlSource: 'config',
+                apiKeySource: 'config'
+            })
+        } finally {
+            await rm(root, { recursive: true, force: true })
+        }
+    })
 })

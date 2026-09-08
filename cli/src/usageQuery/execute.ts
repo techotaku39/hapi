@@ -25,7 +25,6 @@ export type UsageQueryFetch = (
     init: {
         method: string
         headers: Record<string, string>
-        body?: string
         signal: AbortSignal
         redirect: 'error'
     }
@@ -380,7 +379,6 @@ export async function executeUsageQueryTemplate(
         response = await fetchImpl(requestUrl.toString(), {
             method: template.request.method,
             headers,
-            ...(template.request.body !== undefined ? { body: substitute(template.request.body, normalizedCredentials, normalizedBase.origin) } : {}),
             redirect: 'error',
             signal
         })
