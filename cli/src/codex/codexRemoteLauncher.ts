@@ -21,6 +21,11 @@ import {
     buildTurnStartParams,
     type CodexContextManagementConfig
 } from './utils/appServerConfig';
+import {
+    extractCodexMcpServers,
+    mergeCodexMcpServers,
+    type CodexMcpServersConfig
+} from './utils/codexMcpServers';
 import type { SkillMetadata, ThreadGoal, ThreadGoalStatus } from './appServerTypes';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
@@ -3528,7 +3533,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             failPendingAgentStartsForSpawnArgumentError(spawnAgentError);
         });
 
-        const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client, {
+        const { server: happyServer, mcpServers: hapiMcpServers } = await buildHapiMcpBridge(session.client, {
             // In app-server/collab mode, child agents share this MCP bridge.
             // If the MCP handler writes the title directly, child title calls
             // leak into the parent HAPI session. Defer the side effect until
@@ -3537,6 +3542,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             emitTitleSummary: false
         });
         this.happyServer = happyServer;
+        let mcpServers: CodexMcpServersConfig = hapiMcpServers;
 
         this.setupAbortHandlers(session.client.rpcHandlerManager, {
             onAbort: () => this.handleAbort(),
@@ -3576,6 +3582,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 cwd: session.path,
                 includeLayers: false
             })).config;
+            try {
+                const userMcpServers = extractCodexMcpServers(effectiveConfig);
+                mcpServers = mergeCodexMcpServers(userMcpServers, hapiMcpServers);
+                if (Object.keys(userMcpServers).length > 0) {
+                    logger.debug(`[Codex] Loaded ${Object.keys(userMcpServers).length} user MCP server(s)`);
+                }
+            } catch (error) {
+                logger.warn(`[Codex] Failed to merge user MCP servers; using HAPI bridge only: ${errorMessage(error)}`);
+            }
             const modelContextWindow = effectiveConfig.model_context_window;
             const modelAutoCompactTokenLimit = effectiveConfig.model_auto_compact_token_limit;
             contextManagementConfig = {

@@ -31,6 +31,7 @@ import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity'
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
 import { agentUnavailableMessage, getAgentAvailability } from '@/agent/agentAvailability';
+import { copyCodexConfigFile, resolveCodexHome } from '@/codex/utils/codexHome';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -646,6 +647,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
             // Create a temporary directory for Codex
             const codexHomeDir = await fs.mkdtemp(join(os.tmpdir(), 'hapi-codex-'));
+
+            // Preserve user MCP/config settings while keeping token auth isolated.
+            await copyCodexConfigFile(resolveCodexHome(), codexHomeDir);
 
             // Write the token to the temporary directory
             await fs.writeFile(join(codexHomeDir, 'auth.json'), options.token);

@@ -92,6 +92,14 @@ See `src/ui/doctor.ts`.
 - `hapi hub` - Start the bundled hub (single binary workflow).
 - `hapi server` - Alias for `hapi hub`.
 
+### Codex MCP servers
+
+Codex sessions keep the MCP servers configured in the user's Codex
+`config.toml`. HAPI adds its own `hapi` bridge without replacing other user
+servers. Runner-spawned Codex sessions copy only `config.toml` into their
+temporary `CODEX_HOME`, so MCP settings are preserved while authentication
+state remains isolated. The `hapi` server name is reserved by HAPI.
+
 ## Configuration
 
 See `src/configuration.ts` for all options.

@@ -1560,6 +1560,56 @@ describe('codexRemoteLauncher', () => {
         });
     });
 
+    it('forwards user-configured MCP servers into fresh and resumed threads', async () => {
+        harness.configReadResponse = {
+            config: {
+                mcp_servers: {
+                    'novelai-image': {
+                        command: 'uvx',
+                        args: ['novelai-image-mcp', 'serve'],
+                        environment_id: 'local',
+                        enabled: true,
+                        tool_timeout_sec: 60
+                    },
+                    remote: {
+                        url: 'https://example.test/mcp',
+                        bearer_token_env_var: 'REMOTE_MCP_TOKEN'
+                    }
+                }
+            }
+        };
+
+        const fresh = createSessionStub();
+        await codexRemoteLauncher(fresh.session as never);
+        expect(harness.startThreadParams[0]?.config).toMatchObject({
+            'mcp_servers.novelai-image': {
+                command: 'uvx',
+                args: ['novelai-image-mcp', 'serve'],
+                environment_id: 'local',
+                enabled: true,
+                tool_timeout_sec: 60
+            },
+            'mcp_servers.remote': {
+                url: 'https://example.test/mcp',
+                bearer_token_env_var: 'REMOTE_MCP_TOKEN'
+            }
+        });
+
+        harness.startThreadParams = [];
+        const resumed = createSessionStub();
+        resumed.session.sessionId = 'thread-existing';
+        await codexRemoteLauncher(resumed.session as never);
+        expect(harness.resumeThreadParams[0]?.config).toMatchObject({
+            'mcp_servers.novelai-image': {
+                command: 'uvx',
+                args: ['novelai-image-mcp', 'serve']
+            },
+            'mcp_servers.remote': {
+                url: 'https://example.test/mcp'
+            }
+        });
+    });
+
     it('keeps remote sessions working when config/read is unavailable', async () => {
         harness.failConfigRead = true;
         const { session } = createSessionStub();
