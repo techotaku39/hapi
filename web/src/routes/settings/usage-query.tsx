@@ -252,8 +252,9 @@ export default function SettingsUsageQueryPage() {
                             description={t('settings.usageQuery.enabledDescription')}
                             checked={settingsQuery.data.enabled}
                             onChange={(enabled) => {
-                                if (!currentTemplate || saveMutation.isPending) return
-                                saveMutation.mutate({ machineId, agent, template: currentTemplate, enabled })
+                                const template = validateEditor()
+                                if (!template || saveMutation.isPending) return
+                                saveMutation.mutate({ machineId, agent, template, enabled })
                             }}
                         />
                         <SettingsRow label="{{baseUrl}}" description={t('settings.usageQuery.baseUrlDescription')} trailing={
@@ -281,10 +282,10 @@ export default function SettingsUsageQueryPage() {
                             />
                             {editorError ? <div role="alert" className="mt-2 text-sm text-red-500">{editorError}</div> : null}
                             <div className="mt-3 flex flex-wrap justify-end gap-2">
-                                <button type="button" onClick={handleTest} disabled={!machineId || !currentTemplate || testMutation.isPending} className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50">
+                                <button type="button" onClick={handleTest} disabled={!machineId || testMutation.isPending} className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50">
                                     {testMutation.isPending ? t('settings.usageQuery.testing') : t('settings.usageQuery.test')}
                                 </button>
-                                <button type="button" onClick={handleSave} disabled={!machineId || !currentTemplate || saveMutation.isPending} className="rounded-lg bg-[var(--app-button)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] hover:opacity-90 disabled:opacity-50">
+                                <button type="button" onClick={handleSave} disabled={!machineId || saveMutation.isPending} className="rounded-lg bg-[var(--app-button)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] hover:opacity-90 disabled:opacity-50">
                                     {saveMutation.isPending ? t('settings.usageQuery.saving') : t('settings.usageQuery.save')}
                                 </button>
                             </div>

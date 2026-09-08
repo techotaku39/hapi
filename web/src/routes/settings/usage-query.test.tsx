@@ -174,4 +174,24 @@ describe('SettingsUsageQueryPage', () => {
         expect(refetch).toHaveBeenCalledTimes(1)
         expect(screen.queryByRole('combobox', { name: 'Machine' })).not.toBeInTheDocument()
     })
+
+    it('validates malformed templates from Test, Save, and Enable actions', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={queryClient}>
+                <I18nProvider>
+                    <SettingsUsageQueryPage />
+                </I18nProvider>
+            </QueryClientProvider>
+        )
+
+        await screen.findByRole('combobox', { name: 'Template' })
+        fireEvent.change(screen.getByRole('textbox', { name: 'Usage query template JSON' }), { target: { value: '{' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Template JSON is invalid or missing required fields.')
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Enable quota query' }))
+        expect(testUsageQuery).not.toHaveBeenCalled()
+        expect(saveUsageQuery).not.toHaveBeenCalled()
+    })
 })
