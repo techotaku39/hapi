@@ -71,6 +71,13 @@ function UsageResultPreview(props: { result: UsageQueryResult | undefined; now: 
     )
 }
 
+type SaveInput = {
+    machineId: string
+    agent: UsageQueryAgent
+    template: UsageQueryTemplate
+    enabled: boolean
+}
+
 export default function SettingsUsageQueryPage() {
     const { t } = useTranslation()
     const { api } = useAppContext()
@@ -131,14 +138,14 @@ export default function SettingsUsageQueryPage() {
         mutationFn: async (template: UsageQueryTemplate) => await api.testMachineUsageQuery(machineId, agent, template)
     })
     const saveMutation = useMutation({
-        mutationFn: async (input: { template: UsageQueryTemplate; enabled: boolean }) => await api.saveMachineUsageQuerySettings(machineId, agent, {
+        mutationFn: async (input: SaveInput) => await api.saveMachineUsageQuerySettings(input.machineId, input.agent, {
             enabled: input.enabled,
             templateId: input.template.id,
             template: input.template
         }),
-        onSuccess: (data) => {
-            queryClient.setQueryData(queryKeys.machineUsageQuery(machineId, agent), data)
-            queryClient.removeQueries({ queryKey: queryKeys.machineUsageQueryResult(machineId, agent) })
+        onSuccess: (data, input) => {
+            queryClient.setQueryData(queryKeys.machineUsageQuery(input.machineId, input.agent), data)
+            queryClient.removeQueries({ queryKey: queryKeys.machineUsageQueryResult(input.machineId, input.agent) })
         }
     })
 
@@ -175,7 +182,7 @@ export default function SettingsUsageQueryPage() {
     const handleSave = () => {
         const template = validateEditor()
         if (!template || !machineId) return
-        saveMutation.mutate({ template, enabled: settingsQuery.data?.enabled ?? false })
+        saveMutation.mutate({ machineId, agent, template, enabled: settingsQuery.data?.enabled ?? false })
     }
 
     return (
@@ -236,7 +243,7 @@ export default function SettingsUsageQueryPage() {
                             checked={settingsQuery.data.enabled}
                             onChange={(enabled) => {
                                 if (!currentTemplate || saveMutation.isPending) return
-                                saveMutation.mutate({ template: currentTemplate, enabled })
+                                saveMutation.mutate({ machineId, agent, template: currentTemplate, enabled })
                             }}
                         />
                         <SettingsRow label="{{baseUrl}}" description={t('settings.usageQuery.baseUrlDescription')} trailing={

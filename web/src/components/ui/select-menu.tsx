@@ -87,11 +87,6 @@ export function SelectMenu(props: SelectMenuProps) {
         ?? firstEnabled(props.options)
 
     useEffect(() => {
-        if (!open) return
-        setHighlightedValue(props.value)
-    }, [open, props.value])
-
-    useEffect(() => {
         if (!open || !highlighted) return
         optionRefs.current.get(highlighted.value)?.focus()
     }, [open, highlighted?.value])

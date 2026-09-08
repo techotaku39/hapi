@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_USAGE_QUERY_TEMPLATE, DEFAULT_USAGE_QUERY_TEMPLATES } from '@hapi/protocol/usageQuery'
 import { I18nProvider } from '@/lib/i18n-context'
+import { queryKeys } from '@/lib/query-keys'
 import SettingsUsageQueryPage from './usage-query'
 
 const testUsageQuery = vi.fn()
@@ -115,5 +116,35 @@ describe('SettingsUsageQueryPage', () => {
         expect(await screen.findByText('42%')).toBeInTheDocument()
         expect(screen.getByText('18%')).toBeInTheDocument()
         expect(DEFAULT_USAGE_QUERY_TEMPLATES).toHaveLength(6)
+    })
+
+    it('keys an async save result by its original Agent selection', async () => {
+        let resolveSave!: (value: unknown) => void
+        saveUsageQuery.mockReset()
+        saveUsageQuery.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve }))
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={queryClient}>
+                <I18nProvider>
+                    <SettingsUsageQueryPage />
+                </I18nProvider>
+            </QueryClientProvider>
+        )
+
+        await screen.findByRole('combobox', { name: 'Template' })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(saveUsageQuery).toHaveBeenCalledWith(
+            'machine-1',
+            'claude',
+            expect.objectContaining({ enabled: false, templateId: DEFAULT_USAGE_QUERY_TEMPLATE.id })
+        ))
+
+        fireEvent.click(screen.getByRole('combobox', { name: 'Agent' }))
+        fireEvent.click(screen.getByRole('option', { name: 'Kimi CLI' }))
+        const saved = { agent: 'claude', enabled: true, templateId: 'saved-template' }
+        resolveSave(saved)
+
+        await waitFor(() => expect(queryClient.getQueryData(queryKeys.machineUsageQuery('machine-1', 'claude'))).toMatchObject(saved))
+        expect(queryClient.getQueryData(queryKeys.machineUsageQuery('machine-1', 'kimi'))).not.toMatchObject(saved)
     })
 })

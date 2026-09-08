@@ -43,4 +43,17 @@ describe('SelectMenu', () => {
         fireEvent.keyDown(screen.getByRole('option', { name: 'Generic rate-limit windows' }), { key: 'Enter' })
         expect(onChange).toHaveBeenLastCalledWith('generic')
     })
+
+    it('keeps Home and End boundary highlights when opening from the trigger', () => {
+        render(<SelectMenu aria-label="Template" value="generic" options={options} onChange={vi.fn()} />)
+
+        const trigger = screen.getByRole('combobox', { name: 'Template' })
+        fireEvent.keyDown(trigger, { key: 'Home' })
+        expect(screen.getByRole('option', { name: 'Kimi Coding Plan' })).toHaveAttribute('tabindex', '0')
+        expect(screen.getByRole('option', { name: 'Custom JSON paths' })).toHaveAttribute('tabindex', '-1')
+
+        fireEvent.keyDown(trigger, { key: 'End' })
+        expect(screen.getByRole('option', { name: 'Kimi Coding Plan' })).toHaveAttribute('tabindex', '-1')
+        expect(screen.getByRole('option', { name: 'Custom JSON paths' })).toHaveAttribute('tabindex', '0')
+    })
 })
