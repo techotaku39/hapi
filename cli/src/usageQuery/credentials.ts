@@ -192,7 +192,6 @@ async function readKimiConfig(env: NodeJS.ProcessEnv, userHome = homedir()): Pro
 export function parseCodexBaseUrl(configText: string): string | null {
     let activeProvider: string | null = null
     let currentProvider: string | null = null
-    let fallbackBaseUrl: string | null = null
 
     for (const rawLine of configText.split(/\r?\n/)) {
         const line = stripTomlComment(rawLine).trim()
@@ -218,11 +217,10 @@ export function parseCodexBaseUrl(configText: string): string | null {
         if (!baseUrlMatch || currentProvider === null) continue
         const baseUrl = nonEmptyString(unquoteTomlString(baseUrlMatch[1]))
         if (!baseUrl) continue
-        if (fallbackBaseUrl === null) fallbackBaseUrl = baseUrl
         if (activeProvider !== null && currentProvider === activeProvider) return baseUrl
     }
 
-    return activeProvider === null ? fallbackBaseUrl : null
+    return null
 }
 
 async function resolveClaudeCredentials(env: NodeJS.ProcessEnv): Promise<ResolvedUsageCredentials> {
