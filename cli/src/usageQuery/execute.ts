@@ -27,6 +27,7 @@ export type UsageQueryFetch = (
         headers: Record<string, string>
         body?: string
         signal: AbortSignal
+        redirect: 'error'
     }
 ) => Promise<FetchResponseLike>
 
@@ -375,6 +376,7 @@ export async function executeUsageQueryTemplate(
             method: template.request.method,
             headers,
             ...(template.request.body !== undefined ? { body: substitute(template.request.body, normalizedCredentials, normalizedBase.origin) } : {}),
+            redirect: 'error',
             signal
         })
     } catch (error) {

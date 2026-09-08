@@ -133,6 +133,41 @@ describe('UsageQueryService', () => {
         expect(calls).toBe(2)
     })
 
+    it('does not reuse an in-flight request after switching templates', async () => {
+        root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
+        let calls = 0
+        let releaseFirst!: () => void
+        let firstStarted!: () => void
+        const firstStartedPromise = new Promise<void>((resolve) => { firstStarted = resolve })
+        const fetchImpl: UsageQueryFetch = async () => {
+            calls += 1
+            if (calls === 1) {
+                firstStarted()
+                return await new Promise((resolve) => { releaseFirst = () => resolve(makeResponse(10)) })
+            }
+            return makeResponse(50)
+        }
+        const service = new UsageQueryService({
+            settingsFile: join(root, 'usage-query.json'),
+            fetchImpl,
+            resolveCredentials: async () => credentials
+        })
+        const first = DEFAULT_USAGE_QUERY_TEMPLATES[0]
+        await service.saveSettings('claude', { enabled: true, templateId: first.id, template: first })
+        const firstRequest = service.query('claude')
+        await firstStartedPromise
+
+        const second: UsageQueryTemplate = { ...first, name: 'Changed while querying' }
+        await service.saveSettings('claude', { enabled: true, templateId: second.id, template: second })
+        const secondResult = await service.query('claude')
+        expect(secondResult.fiveHour?.usedPercent).toBe(50)
+        expect(calls).toBe(2)
+
+        releaseFirst()
+        const firstResult = await firstRequest
+        expect(firstResult.fiveHour?.usedPercent).toBe(90)
+    })
+
     it('redacts credentials from provider error messages', async () => {
         root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
         const service = new UsageQueryService({
