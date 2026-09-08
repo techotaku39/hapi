@@ -34,6 +34,18 @@ describe('usage query credential resolution', () => {
         })
     })
 
+    it('prefers the Claude Code OAuth token environment credential', async () => {
+        const result = await resolveUsageCredentials('claude', {
+            CLAUDE_CODE_OAUTH_TOKEN: 'oauth-secret',
+            ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+            ANTHROPIC_API_KEY: 'api-secret'
+        })
+        expect(result).toMatchObject({
+            apiKey: 'oauth-secret',
+            apiKeySource: 'environment'
+        })
+    })
+
     it('reads Claude env entries and Codex config files without returning them to callers', async () => {
         const root = await mkdtemp(join(tmpdir(), 'hapi-usage-credentials-'))
         try {
