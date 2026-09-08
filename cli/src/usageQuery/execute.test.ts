@@ -10,6 +10,7 @@ import {
     executeUsageQueryTemplate,
     getUsageJsonPath,
     normalizeUsageWindow,
+    parseResetTimestamp,
     type UsageQueryFetch
 } from './execute'
 import type { ResolvedUsageCredentials } from './credentials'
@@ -96,6 +97,11 @@ describe('usage query executor', () => {
         )?.resetsAt).toBe(1_780_000_000_000)
     })
 
+    it('honors explicit units for numeric epoch strings', () => {
+        expect(parseResetTimestamp('1780000000', 'seconds')).toBe(1_780_000_000_000)
+        expect(parseResetTimestamp('1780000000000', 'milliseconds')).toBe(1_780_000_000_000)
+    })
+
     it('normalizes ZenMux, Zhipu, and MiniMax reviewed adapters', async () => {
         const run = async (adapter: UsageQueryTemplate['adapter'], body: unknown) => {
             const template = UsageQueryTemplateSchema.parse({
@@ -157,16 +163,13 @@ describe('usage query executor', () => {
             .rejects.toThrow('embedded credentials')
 
         const redirectTemplate = DEFAULT_USAGE_QUERY_TEMPLATES.find((item) => item.id === 'kimi-coding-plan')!
-        const redirected = await executeUsageQueryTemplate('claude', redirectTemplate, credentials, {
+        const redirected = executeUsageQueryTemplate('claude', redirectTemplate, credentials, {
             fetchImpl: async (_url, init) => {
                 expect(init.redirect).toBe('error')
-                return response({
-                    limits: [{ detail: { remaining: 25, limit: 100, resetTime: '2026-09-07T00:00:00.000Z' } }],
-                    usage: { remaining: 900, limit: 1000, resetTime: '2026-09-08T00:00:00.000Z' }
-                })
+                return response({}, { ok: false, status: 302 })
             }
         })
-        expect(redirected.status).toBe('success')
+        await expect(redirected).rejects.toThrow('HTTP 302')
     })
 
     it('rejects non-success and oversized responses without exposing the body', async () => {

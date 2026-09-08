@@ -145,13 +145,18 @@ export function getUsageJsonPath(value: unknown, path: string | undefined): unkn
 }
 
 export function parseResetTimestamp(value: unknown, unit: UsageQueryWindowSpec['resetUnit']): number | null {
+    if (unit === 'seconds' || unit === 'milliseconds') {
+        const number = parseNumber(value)
+        if (number === null || number <= 0) return null
+        return unit === 'milliseconds' ? Math.round(number) : Math.round(number * 1000)
+    }
     if (typeof value === 'string') {
         const timestamp = Date.parse(value)
         return Number.isFinite(timestamp) ? timestamp : null
     }
     const number = parseNumber(value)
     if (number === null || number <= 0) return null
-    if (unit === 'milliseconds' || (unit !== 'seconds' && number >= 1_000_000_000_000)) return Math.round(number)
+    if (number >= 1_000_000_000_000) return Math.round(number)
     return Math.round(number * 1000)
 }
 

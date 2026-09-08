@@ -248,32 +248,37 @@ export class UsageQueryService {
         startedAt: number
     ): Promise<UsageQueryResult> {
         let credentials: ResolvedUsageCredentials | undefined
+        const fingerprint = templateFingerprint(configured.template)
         try {
             credentials = await this.resolveCredentials(agent)
             const result = await executeUsageQueryTemplate(agent, configured.template, credentials, {
                 fetchImpl: this.fetchImpl,
                 now: startedAt
             })
-            this.cache.set(agent, {
-                templateId: configured.templateId,
-                templateFingerprint: templateFingerprint(configured.template),
-                result,
-                cachedAt: startedAt,
-                lastAttemptAt: startedAt,
-                lastError: null
-            })
+            if (this.inFlight.get(agent)?.fingerprint === fingerprint) {
+                this.cache.set(agent, {
+                    templateId: configured.templateId,
+                    templateFingerprint: fingerprint,
+                    result,
+                    cachedAt: startedAt,
+                    lastAttemptAt: startedAt,
+                    lastError: null
+                })
+            }
             return result
         } catch (error) {
             const message = sanitizeError(error, credentials)
             const result = emptyResult(agent, configured.templateId, startedAt, message, cached?.result)
-            this.cache.set(agent, {
-                templateId: configured.templateId,
-                templateFingerprint: templateFingerprint(configured.template),
-                result,
-                cachedAt: cached?.cachedAt ?? 0,
-                lastAttemptAt: startedAt,
-                lastError: message
-            })
+            if (this.inFlight.get(agent)?.fingerprint === fingerprint) {
+                this.cache.set(agent, {
+                    templateId: configured.templateId,
+                    templateFingerprint: fingerprint,
+                    result,
+                    cachedAt: cached?.cachedAt ?? 0,
+                    lastAttemptAt: startedAt,
+                    lastError: message
+                })
+            }
             return result
         }
     }
