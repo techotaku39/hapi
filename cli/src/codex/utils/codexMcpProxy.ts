@@ -53,6 +53,11 @@ export function shouldProxyCodexMcpStdio(command: string, platform = process.pla
         || baseName.endsWith('.bat');
 }
 
+function runsOnRemoteEnvironment(server: Record<string, unknown>): boolean {
+    return server.experimental_environment === 'remote'
+        || (typeof server.environment_id === 'string' && server.environment_id !== 'local');
+}
+
 async function writeProxySpec(spec: StdioProxySpec): Promise<{ directory: string; path: string }> {
     const directory = await mkdtemp(join(tmpdir(), 'hapi-codex-mcp-'));
     const path = join(directory, `${randomUUID()}.json`);
@@ -76,7 +81,11 @@ export async function prepareCodexMcpServers(
 
     try {
         for (const [name, server] of Object.entries(servers)) {
-            if (typeof server.command !== 'string' || !shouldProxyCodexMcpStdio(server.command, platform)) {
+            if (
+                typeof server.command !== 'string'
+                || runsOnRemoteEnvironment(server)
+                || !shouldProxyCodexMcpStdio(server.command, platform)
+            ) {
                 prepared[name] = server;
                 continue;
             }

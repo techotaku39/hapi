@@ -37,6 +37,12 @@ describe('codexMcpProxy', () => {
                 args: ['server.js'],
                 enabled: true
             },
+            remoteShim: {
+                command: 'uvx',
+                args: ['remote-mcp', 'serve'],
+                environment_id: 'remote',
+                enabled: true
+            },
             remote: {
                 url: 'https://example.test/mcp',
                 bearer_token_env_var: 'REMOTE_MCP_TOKEN'
@@ -71,6 +77,12 @@ describe('codexMcpProxy', () => {
             expect(prepared.servers.nodeServer).toEqual({
                 command: 'node',
                 args: ['server.js'],
+                enabled: true
+            });
+            expect(prepared.servers.remoteShim).toEqual({
+                command: 'uvx',
+                args: ['remote-mcp', 'serve'],
+                environment_id: 'remote',
                 enabled: true
             });
             expect(prepared.servers.remote).toEqual({
