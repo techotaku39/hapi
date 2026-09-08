@@ -34,6 +34,14 @@ describe('usage query protocol', () => {
         expect(parsed.success).toBe(true)
     })
 
+    it('rejects mutating HTTP methods in user templates', () => {
+        const template = {
+            ...DEFAULT_USAGE_QUERY_TEMPLATES[0],
+            request: { ...DEFAULT_USAGE_QUERY_TEMPLATES[0].request, method: 'POST' }
+        }
+        expect(UsageQueryTemplateSchema.safeParse(template).success).toBe(false)
+    })
+
     it('rejects unknown agents and malformed query requests', () => {
         expect(QueryUsageRequestSchema.safeParse({ agent: 'gemini' }).success).toBe(false)
         expect(QueryUsageRequestSchema.safeParse({ agent: 'codex', force: 'yes' }).success).toBe(false)
