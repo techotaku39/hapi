@@ -97,6 +97,12 @@ describe('usage query executor', () => {
         )?.resetsAt).toBe(1_780_000_000_000)
     })
 
+    it('does not coerce blank or non-scalar quota values to numbers', () => {
+        const spec = { percentPath: 'value', resetUnit: 'iso' as const }
+        expect(normalizeUsageWindow({ value: '  ' }, spec)).toBeNull()
+        expect(normalizeUsageWindow({ value: [] }, spec)).toBeNull()
+    })
+
     it('honors explicit units for numeric epoch strings', () => {
         expect(parseResetTimestamp('1780000000', 'seconds')).toBe(1_780_000_000_000)
         expect(parseResetTimestamp('1780000000000', 'milliseconds')).toBe(1_780_000_000_000)

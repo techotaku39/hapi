@@ -38,8 +38,11 @@ export class UsageQueryExecutionError extends Error {
 }
 
 function parseNumber(value: unknown): number | null {
-    if (typeof value === 'boolean' || value === null || value === undefined) return null
-    const number = typeof value === 'number' ? value : Number(String(value).trim())
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const number = Number(trimmed)
     return Number.isFinite(number) ? number : null
 }
 

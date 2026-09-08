@@ -68,9 +68,8 @@ function redactTemplateCredentials(template: UsageQueryTemplate, credentials: Re
     const replacements: Array<[string, string]> = []
     if (credentials.apiKey) replacements.push([credentials.apiKey, '{{apiKey}}'])
     if (credentials.baseUrl) {
-        replacements.push([credentials.baseUrl, '{{baseUrl}}'])
         const normalizedBaseUrl = credentials.baseUrl.replace(/\/+$/, '')
-        if (normalizedBaseUrl !== credentials.baseUrl) replacements.push([normalizedBaseUrl, '{{baseUrl}}'])
+        if (normalizedBaseUrl) replacements.push([normalizedBaseUrl, '{{baseUrl}}'])
     }
     if (replacements.length === 0) return cloneTemplate(template)
 

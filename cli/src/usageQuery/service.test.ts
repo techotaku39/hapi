@@ -306,6 +306,24 @@ describe('UsageQueryService', () => {
         expect(await readFile(join(root, 'usage-query.json'), 'utf8')).not.toContain(credentials.apiKey)
     })
 
+    it('preserves the separator when redacting slash-terminated base URLs', async () => {
+        root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
+        const slashCredentials = { ...credentials, baseUrl: 'https://provider.example/' }
+        const service = new UsageQueryService({
+            settingsFile: join(root, 'usage-query.json'),
+            resolveCredentials: async () => slashCredentials
+        })
+        const template = {
+            ...DEFAULT_USAGE_QUERY_TEMPLATES[0],
+            request: {
+                ...DEFAULT_USAGE_QUERY_TEMPLATES[0].request,
+                url: 'https://provider.example/usage'
+            }
+        }
+        await service.saveSettings('claude', { enabled: false, templateId: template.id, template })
+        expect((await service.getSettings('claude')).template.request.url).toBe('{{baseUrl}}/usage')
+    })
+
     it('serializes concurrent Claude and Codex settings writes', async () => {
         root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
         const service = new UsageQueryService({
