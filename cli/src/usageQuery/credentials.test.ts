@@ -18,6 +18,10 @@ describe('usage query credential resolution', () => {
             [model_providers.Other]
             base_url = "https://other.example"
         `)).toBeNull()
+        expect(parseCodexBaseUrl(`
+            [model_providers.Other]
+            base_url = "https://other.example"
+        `)).toBeNull()
     })
 
     it('prefers environment credentials and does not read config when they are complete', async () => {
