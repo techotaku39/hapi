@@ -100,6 +100,15 @@ servers. Runner-spawned Codex sessions copy only `config.toml` into their
 temporary `CODEX_HOME`, so MCP settings are preserved while authentication
 state remains isolated. The `hapi` server name is reserved by HAPI.
 
+On Windows, known package-manager shims (`uvx`, `npx`, `npm`, `pnpm`, `yarn`,
+`bunx`, and `.cmd`/`.bat` commands) use a short-lived Node stdio compatibility
+proxy before reaching the configured MCP server. The proxy keeps the original
+command and arguments in a session-temporary file and forwards MCP JSON-RPC
+bytes without putting environment-variable values into arguments or that file.
+Secret and network variables still need to be listed in the MCP entry's
+`env_vars` (or supplied through `env`); HAPI does not forward the whole host
+environment automatically.
+
 ## Configuration
 
 See `src/configuration.ts` for all options.

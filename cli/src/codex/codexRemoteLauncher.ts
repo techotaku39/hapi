@@ -26,6 +26,7 @@ import {
     mergeCodexMcpServers,
     type CodexMcpServersConfig
 } from './utils/codexMcpServers';
+import { prepareCodexMcpServers } from './utils/codexMcpProxy';
 import type { SkillMetadata, ThreadGoal, ThreadGoalStatus } from './appServerTypes';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
@@ -237,6 +238,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     private reasoningProcessor: ReasoningProcessor | null = null;
     private diffProcessor: DiffProcessor | null = null;
     private happyServer: HappyServer | null = null;
+    private mcpProxyCleanup: (() => Promise<void>) | null = null;
     private abortController: AbortController = new AbortController();
     /** Invalidates queued-message steer handlers after abort or cleanup. */
     private steerEpoch = 0;
@@ -3584,9 +3586,16 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             })).config;
             try {
                 const userMcpServers = extractCodexMcpServers(effectiveConfig);
-                mcpServers = mergeCodexMcpServers(userMcpServers, hapiMcpServers);
+                const preparedMcpServers = await prepareCodexMcpServers(userMcpServers);
+                this.mcpProxyCleanup = preparedMcpServers.cleanup;
+                mcpServers = mergeCodexMcpServers(preparedMcpServers.servers, hapiMcpServers);
                 if (Object.keys(userMcpServers).length > 0) {
                     logger.debug(`[Codex] Loaded ${Object.keys(userMcpServers).length} user MCP server(s)`);
+                }
+                if (preparedMcpServers.proxiedServerNames.length > 0) {
+                    logger.debug(
+                        `[Codex] Added stdio compatibility proxy for ${preparedMcpServers.proxiedServerNames.length} Windows MCP server(s)`
+                    );
                 }
             } catch (error) {
                 logger.warn(`[Codex] Failed to merge user MCP servers; using HAPI bridge only: ${errorMessage(error)}`);
@@ -4345,6 +4354,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         if (this.happyServer) {
             this.happyServer.stop();
             this.happyServer = null;
+        }
+
+        if (this.mcpProxyCleanup) {
+            try {
+                await this.mcpProxyCleanup();
+            } catch (error) {
+                logger.debug('[codex-remote]: Error cleaning MCP proxy specs', error);
+            }
+            this.mcpProxyCleanup = null;
         }
 
         this.permissionHandler?.reset();

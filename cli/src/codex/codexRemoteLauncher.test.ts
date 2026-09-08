@@ -1564,9 +1564,9 @@ describe('codexRemoteLauncher', () => {
         harness.configReadResponse = {
             config: {
                 mcp_servers: {
-                    'novelai-image': {
+                    'package-manager': {
                         command: 'uvx',
-                        args: ['novelai-image-mcp', 'serve'],
+                        args: ['example-mcp', 'serve'],
                         environment_id: 'local',
                         enabled: true,
                         tool_timeout_sec: 60
@@ -1581,33 +1581,42 @@ describe('codexRemoteLauncher', () => {
 
         const fresh = createSessionStub();
         await codexRemoteLauncher(fresh.session as never);
+        const freshConfig = harness.startThreadParams[0]?.config as Record<string, unknown> | undefined;
+        const freshPackageManager = freshConfig?.['mcp_servers.package-manager'] as {
+            command?: string;
+            args?: string[];
+        } | undefined;
         expect(harness.startThreadParams[0]?.config).toMatchObject({
-            'mcp_servers.novelai-image': {
-                command: 'uvx',
-                args: ['novelai-image-mcp', 'serve'],
-                environment_id: 'local',
-                enabled: true,
-                tool_timeout_sec: 60
-            },
             'mcp_servers.remote': {
                 url: 'https://example.test/mcp',
                 bearer_token_env_var: 'REMOTE_MCP_TOKEN'
             }
         });
+        expect(freshPackageManager).toEqual(expect.objectContaining({
+            environment_id: 'local',
+            enabled: true,
+            tool_timeout_sec: 60
+        }));
+        expect(freshPackageManager?.command).toBe('node');
+        expect(freshPackageManager?.args?.[0]).toBe('-e');
 
         harness.startThreadParams = [];
         const resumed = createSessionStub();
         resumed.session.sessionId = 'thread-existing';
         await codexRemoteLauncher(resumed.session as never);
+        const resumedConfig = harness.resumeThreadParams[0]?.config as Record<string, unknown> | undefined;
+        const resumedPackageManager = resumedConfig?.['mcp_servers.package-manager'] as {
+            command?: string;
+            args?: string[];
+        } | undefined;
         expect(harness.resumeThreadParams[0]?.config).toMatchObject({
-            'mcp_servers.novelai-image': {
-                command: 'uvx',
-                args: ['novelai-image-mcp', 'serve']
-            },
             'mcp_servers.remote': {
                 url: 'https://example.test/mcp'
             }
         });
+        expect(resumedPackageManager).toBeDefined();
+        expect(resumedPackageManager?.command).toBe('node');
+        expect(resumedPackageManager?.args?.[0]).toBe('-e');
     });
 
     it('keeps remote sessions working when config/read is unavailable', async () => {
