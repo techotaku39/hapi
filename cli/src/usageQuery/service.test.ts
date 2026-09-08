@@ -96,6 +96,39 @@ describe('UsageQueryService', () => {
         expect(calls).toBe(2)
     })
 
+    it('retries a forced failure after cooldown even when the prior success is fresh', async () => {
+        root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
+        let now = 1_780_000_000_000
+        let calls = 0
+        const service = new UsageQueryService({
+            settingsFile: join(root, 'usage-query.json'),
+            now: () => now,
+            fetchImpl: async () => {
+                calls += 1
+                if (calls === 1) return makeResponse(25)
+                throw new Error('provider unavailable')
+            },
+            resolveCredentials: async () => credentials
+        })
+        const template = DEFAULT_USAGE_QUERY_TEMPLATES[0]
+        await service.saveSettings('claude', { enabled: true, templateId: template.id, template })
+        await service.query('claude')
+
+        now += 60_000
+        const forced = await service.query('claude', true)
+        expect(forced).toMatchObject({ status: 'error', stale: true, fiveHour: { usedPercent: 75 } })
+        expect(calls).toBe(2)
+
+        now += 10_000
+        await service.query('claude')
+        expect(calls).toBe(2)
+
+        now += 21_000
+        const retried = await service.query('claude')
+        expect(retried.status).toBe('error')
+        expect(calls).toBe(3)
+    })
+
     it('keeps stale windows after an error and suppresses automatic retries for 30 seconds', async () => {
         root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
         let now = 1_780_000_000_000
