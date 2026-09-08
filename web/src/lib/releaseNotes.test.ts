@@ -33,15 +33,16 @@ describe('release notes catalog', () => {
         }
     })
 
-    it('puts additions before fixes in the recently curated releases', () => {
-        for (const release of RELEASE_NOTES.slice(0, 3)) {
-            expect(release.summary?.en.trim().length).toBeGreaterThan(0)
-            expect(release.summary?.['zh-CN'].trim().length).toBeGreaterThan(0)
+    it('puts additions before fixes in every release', () => {
+        for (const release of RELEASE_NOTES) {
+            expect(release.summary.en.trim().length).toBeGreaterThan(0)
+            expect(release.summary['zh-CN'].trim().length).toBeGreaterThan(0)
             const changes = release.groups.flatMap((releaseGroup) => releaseGroup.changes)
-            const firstFixIndex = changes.findIndex((change) => change.kind === 'fix')
-            if (firstFixIndex === -1) continue
-            expect(changes.slice(0, firstFixIndex).every((change) => change.kind === 'feature')).toBe(true)
-            expect(changes.slice(firstFixIndex).every((change) => change.kind === 'fix')).toBe(true)
+            let seenFix = false
+            for (const change of changes) {
+                if (change.kind === 'fix') seenFix = true
+                if (change.kind === 'feature') expect(seenFix).toBe(false)
+            }
         }
     })
 })

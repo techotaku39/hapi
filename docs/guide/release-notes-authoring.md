@@ -2,7 +2,24 @@
 
 The in-app release history is maintained in `web/src/lib/releaseNotes.ts`. It
 is bundled with the Web app so users can read it offline. Keep the catalog
-newest-first and update it when a release is tagged.
+newest-first. Add the target version before the release build starts; the
+release script builds the embedded Web app before it creates the commit and
+tag.
+
+## Release sequencing
+
+Release authors should prepare and merge the release-note entry before running
+the release build:
+
+1. Add the target version, date, bilingual summary, and grouped changes.
+2. Run the focused release-note tests and review the generated copy.
+3. Merge the release-note change into `main`.
+4. Run the release script. It verifies that the target version is present
+   before building the embedded Web app.
+5. Let the release script commit, tag, and push the built version.
+
+Do not wait until after the tag is created to add the entry: that would publish
+a build whose About page still ends at the previous version.
 
 ## Source of truth
 

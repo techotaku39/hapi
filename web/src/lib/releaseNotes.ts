@@ -163,10 +163,14 @@ export const RELEASE_NOTES = [
         [
             group('Peer discovery and runner capabilities', '对等发现与 Runner 能力', [
                 change('feature', 'Expose list_peers and runner-to-Hub authentication so the CLI can discover other HAPI peers.', '提供 list_peers 和 Runner 到 Hub 的认证能力，让 CLI 可以发现其他 HAPI 对等端。'),
-                change('fix', 'Advertise runner capabilities consistently at registration time and on reconnect.', '在 Runner 注册和重连时保持能力信息一致上报。'),
             ]),
             group('Session display preferences', '会话显示偏好', [
                 change('feature', 'Add a setting to keep explored reasoning collapsed by default.', '增加“默认折叠已展开思考”的设置。'),
+            ]),
+            group('Runner registration', 'Runner 注册', [
+                change('fix', 'Advertise runner capabilities consistently at registration time and on reconnect.', '在 Runner 注册和重连时保持能力信息一致上报。'),
+            ]),
+            group('Session filter', '会话筛选', [
                 change('fix', 'Keep the session date filter directly accessible instead of hiding it behind an indirect control.', '让会话日期筛选保持直接可用，不再隐藏在间接入口中。'),
             ]),
         ]),
@@ -224,28 +228,24 @@ export const RELEASE_NOTES = [
             ]),
         ]),
     releaseNote('0.25.3', '2026-08-02',
-        'Expand session collaboration, machine and storage visibility, Scratchlist sharing, and preview controls; improve resume, rendering, file handling, and agent-tool reliability.',
-        '扩展会话协作、设备与存储信息、Scratchlist 分享和预览控制；改进恢复、渲染、文件处理及 Agent 工具稳定性。',
+        'Improve composer and session navigation, share and browse surfaces, OpenCode compaction, skill discovery, and cross-platform rendering and transport reliability.',
+        '改进输入框与会话导航、分享与浏览界面、OpenCode 压缩、技能发现，以及跨平台渲染和传输稳定性。',
         [
-            group('Session collaboration and metadata', '会话协作与元数据', [
-                change('feature', 'Cite other sessions with title-based @ autocomplete and inspect_peer, name machines from Web settings, and show machine and last-active metadata in session details.', '支持通过基于标题的 @ 自动补全和 inspect_peer 引用其他会话；可在 Web 设置中命名设备，并在会话详情显示设备及最后活动信息。'),
-                change('feature', 'Show authoritative subagent model metadata and expose configurable session-header status information.', '显示可信的子 Agent 模型元数据，并支持配置会话头部状态信息。'),
+            group('Composer and navigation', '输入框与导航', [
+                change('feature', 'Replace session-list refresh with pull-to-refresh, refine the composer status bar, and collapse mobile machine filtering into the header menu.', '用下拉刷新替代会话列表刷新按钮；优化输入框状态栏；将移动端设备筛选收进头部菜单。'),
+                change('feature', 'Make session-header metadata configurable, preserve local TUI permission mode across handoff, and migrate the Web UI to assistant-ui 0.14.', '支持配置会话头部元数据；本地切换到远程时继承 TUI 权限模式；将 Web 界面迁移到 assistant-ui 0.14。'),
             ]),
-            group('Scratchlist, storage, and sharing', 'Scratchlist、存储与分享', [
-                change('feature', 'Move Scratchlist v2.2 attachments into Hub storage, include Scratchlist content in session exports, and show Hub SQLite storage usage.', '将 Scratchlist v2.2 附件存入 Hub；导出会话时包含 Scratchlist 内容；显示 Hub SQLite 存储用量。'),
-                change('feature', 'Make shared-image previews interactive and keep share-picker titles consistent with the session sidebar.', '让共享图片预览可交互，并使分享选择器标题与会话侧栏保持一致。'),
+            group('Agent tooling', 'Agent 工具', [
+                change('feature', 'Bridge OpenCode native compaction, add Codex /personality and in-session app-server parameters, and refresh skill inventories across supported Agents.', '接入 OpenCode 原生压缩；增加 Codex /personality 和会话内 app-server 参数；刷新各类 Agent 的技能清单。'),
+                change('fix', 'Discover symlinked skills, separate Claude skills from slash commands, use native Codex skills, and expose Pi skills through $ completion.', '发现符号链接技能目录；分离 Claude 技能与斜杠命令；使用 Codex 原生技能；通过 $ 补全提供 Pi 技能。'),
             ]),
-            group('Preview and composer experience', '预览与输入框体验', [
-                change('feature', 'Add stepwise session-preview controls and refine composer status, toolbar, and session-switch interactions.', '增加分步会话预览控制，并优化输入框状态、工具栏和切换会话交互。'),
-                change('fix', 'Preserve preview state while searching, keep file-search state when returning from previews, and prevent duplicate session creation.', '搜索时保留预览展开状态；从预览返回时保留文件搜索状态；避免重复创建会话。'),
+            group('Sharing and rendering', '分享与渲染', [
+                change('fix', 'Preserve share-export layout, stabilize chat scrolling and mobile alignment, keep wrapped code line numbers clear, and align browse controls and compact dialog titles.', '保持分享导出布局；稳定聊天滚动和移动端对齐；换行时保持代码行号清晰；统一浏览控件和紧凑对话框标题。'),
+                change('fix', 'Open Windows absolute paths correctly and stop the reconnecting banner from flashing during self-healing SSE recovery.', '正确打开 Windows 绝对路径，并避免 SSE 自愈重连时重连提示闪烁。'),
             ]),
-            group('Resume, files, and rendering reliability', '恢复、文件与渲染稳定性', [
-                change('fix', 'Restore Pi resume and surface real Cursor ACP load errors; keep archived sessions, native titles, and inactive-session state intact.', '恢复 Pi 会话恢复并显示真实的 Cursor ACP 加载错误；保留已归档会话、原生标题和非活动会话状态。'),
-                change('fix', 'Stabilize sticky headers, scrolling, reasoning chaining, line wrapping, timestamps, share exports, Windows paths, and tool-detail layouts.', '稳定粘性标题、滚动、思考区联动、换行、时间戳、分享导出、Windows 路径和工具详情布局。'),
-            ]),
-            group('Agent tooling and performance', 'Agent 工具与性能', [
-                change('fix', 'Bridge OpenCode native compaction, refresh skill and slash inventories, discover symlinked skills, and keep context/cache and unseen-message counts accurate.', '接入 OpenCode 原生压缩；刷新技能和斜杠命令清单；发现符号链接技能目录；确保上下文/缓存及未读消息数量准确。'),
-                change('fix', 'Gzip SSE streams without delaying delivery and avoid reconnect or session-cache work for state changes that do not affect the user.', '压缩 SSE 流且不延迟投递；对于不影响用户的状态变化，避免不必要的重连和会话缓存写入。'),
+            group('Session state and performance', '会话状态与性能', [
+                change('fix', 'Keep Codex mode gates and context-window calculations accurate, preserve archived Pi sessions, and keep session and skill inventories stable.', '保持 Codex 模式门控和上下文窗口计算准确；保留已归档 Pi 会话；稳定会话和技能清单。'),
+                change('fix', 'Gzip SSE streams without delaying delivery and keep state changes from causing unnecessary reconnect or cache work.', '压缩 SSE 流且不延迟投递，并避免状态变化引发不必要的重连或缓存处理。'),
             ]),
         ]),
     releaseNote('0.25.2', '2026-08-02',
@@ -455,25 +455,23 @@ export const RELEASE_NOTES = [
             ]),
         ]),
     releaseNote('0.20.0', '2026-06-05',
-        'Add Kimi Code, OpenCode controls, voice backends, Scratchlist workbench, image and conversation tools, session status indicators, and Codex imports; improve message semantics and recovery.',
-        '增加 Kimi Code、OpenCode 控制、语音后端、Scratchlist 工作台、图片与对话工具、会话状态指示和 Codex 导入；改进消息语义与恢复。',
+        'Add Codex imports, Scratchlist and voice workbenches, conversation export, work-directory browsing, and mobile dialog controls; improve Windows, ACP, and message handling.',
+        '增加 Codex 导入、Scratchlist 与语音工作台、对话导出、工作目录浏览和移动端对话框控制；改进 Windows、ACP 和消息处理。',
         [
-            group('Agent integrations', 'Agent 集成', [
-                change('feature', 'Add Kimi Code support, Cursor model selection, OpenCode plan/reasoning/status telemetry and slash commands, and native Codex session import.', '增加 Kimi Code、Cursor 模型选择、OpenCode 计划/思考/状态遥测与斜杠命令，以及原生 Codex 会话导入。'),
-                change('feature', 'Support Cursor summarize/clear commands, Claude effort levels, and per-flavor skill completion.', '支持 Cursor summarize/clear 命令、Claude 思考强度，以及按 Agent 类型区分的技能补全。'),
+            group('Session tools and sharing', '会话工具与分享', [
+                change('feature', 'Import local Codex sessions, show and filter work directories, add a per-session Scratchlist workbench, and export conversations.', '导入本地 Codex 会话；显示并筛选工作目录；增加每会话 Scratchlist 工作台；支持导出对话。'),
+                change('feature', 'Add a backend voice picker with advanced controls and support pluggable Gemini Live and Qwen Realtime backends.', '增加带高级控制的语音后端选择器，并支持可插拔的 Gemini Live 与 Qwen Realtime 后端。'),
             ]),
-            group('Voice, media, and Scratchlist', '语音、媒体与 Scratchlist', [
-                change('feature', 'Add pluggable Gemini Live and Qwen Realtime voice backends, dynamic voice selection, previews, and advanced controls.', '增加可插拔的 Gemini Live 与 Qwen Realtime 语音后端、动态语音选择、预览和高级控制。'),
-                change('feature', 'Add per-session Scratchlist workbench, inline display_image, chat-image lightbox, image attachments, and conversation export.', '增加每会话 Scratchlist 工作台、内联 display_image、聊天图片灯箱、图片附件和对话导出。'),
+            group('Agent and message controls', 'Agent 与消息控制', [
+                change('feature', 'Add inline display_image, chat-image lightboxes, and a close button for mobile dialogs.', '增加内联 display_image、聊天图片灯箱和移动端对话框关闭按钮。'),
+                change('fix', 'Apply mid-turn Claude permission changes, preserve user prompt line breaks, and keep queued attachments and message roles correct.', '应用回合中的 Claude 权限变更；保留用户提示换行；确保排队附件和消息角色正确。'),
             ]),
-            group('Session visibility and controls', '会话可见性与控制', [
-                change('feature', 'Show chat timestamps, attention and scheduled indicators, work-directory filters, terminal metadata, and richer session status.', '显示聊天时间戳、关注和定时指示器、工作目录筛选、终端元数据和更丰富的会话状态。'),
-                change('feature', 'Add model/effort controls, image previews, schedule actions, closeable mobile dialogs, and tool-detail previews.', '增加模型/思考强度控制、图片预览、定时操作、可关闭的移动端对话框和工具详情预览。'),
+            group('Runtime and platform fixes', '运行时与平台修复', [
+                change('fix', 'Hide Windows spawn windows, fix Codex PowerShell execution, stabilize Runner replacement and Telegram context, and keep process cleanup safe.', '隐藏 Windows 启动窗口；修复 Codex PowerShell 执行；稳定 Runner 替换和 Telegram 上下文；确保进程清理安全。'),
+                change('fix', 'Intercept fabricated Cursor questions, preserve OpenCode and ACP state, and keep session resume and permission transitions reliable.', '拦截伪造的 Cursor 问题结果；保留 OpenCode 和 ACP 状态；确保会话恢复与权限切换可靠。'),
             ]),
-            group('Message and runtime reliability', '消息与运行时稳定性', [
-                change('fix', 'Keep assistant and user message roles, IDs, line breaks, context usage, and session summaries accurate across local, remote, and ACP paths.', '在本地、远程和 ACP 路径中保持助手/用户角色、消息 ID、换行、上下文用量和会话摘要准确。'),
-                change('fix', 'Stabilize queued bars, inactive-session resume, runner replacement, Windows process handling, permission changes, and Telegram notification context.', '稳定队列提示栏、非活动会话恢复、Runner 替换、Windows 进程处理、权限变更和 Telegram 通知上下文。'),
-                change('fix', 'Preserve streaming chunks and tool states, prevent client remount storms, and isolate integration tests from the production Hub.', '保留流式分块和工具状态；避免客户端反复重挂载；让集成测试与生产 Hub 隔离。'),
+            group('Integration and compatibility', '集成与兼容性', [
+                change('fix', 'Keep voice backends, agent tool state, queued-session delivery, and integration-test isolation consistent across transports.', '保持语音后端、Agent 工具状态、队列会话投递和集成测试隔离在不同传输路径中一致。'),
             ]),
         ]),
     releaseNote('0.19.0', '2026-06-01',
@@ -521,28 +519,30 @@ export const RELEASE_NOTES = [
             ]),
             group('Web conversation experience', 'Web 对话体验', [
                 change('feature', 'Group consecutive tool-use cards, aggregate tool-use presentation, and preview image files.', '聚合连续工具使用卡片，优化工具使用展示，并支持图片文件预览。'),
-                change('fix', 'Compact terminal tool cards, complete Files-page translations, and load workspace directories after initialization.', '默认收起终端工具卡片；补齐 Files 页面翻译；初始化后正确加载 workspace 目录。'),
             ]),
             group('Storage and agent compatibility', '存储与 Agent 兼容性', [
                 change('feature', 'Add SQLite support to the OpenCode storage scanner.', '为 OpenCode 存储扫描器增加 SQLite 支持。'),
+            ]),
+            group('Web and Codex fixes', 'Web 与 Codex 修复', [
+                change('fix', 'Compact terminal tool cards, complete Files-page translations, and load workspace directories after initialization.', '默认收起终端工具卡片；补齐 Files 页面翻译；初始化后正确加载 workspace 目录。'),
                 change('fix', 'Keep Codex plan rendering and tool state reliable across the Web UI and imported sessions.', '确保 Web 界面和导入会话中的 Codex 计划渲染与工具状态可靠。'),
             ]),
         ]),
     releaseNote('0.17.4', '2026-05-08',
-        'Add Codex 0.129 compatibility, conversation outlines, subagent traces, slash controls, multi-root workspaces, and richer session metadata; stabilize history recovery and agent interactions.',
-        '增加 Codex 0.129 兼容、对话大纲、子 Agent 轨迹、斜杠控制、多 workspace 根目录和更多会话元数据；稳定历史恢复与 Agent 交互。',
+        'Add Codex and OpenCode controls, multi-root workspaces, multi-agent timelines, queued-message cancellation, and richer chat metadata; improve recovery and Agent compatibility.',
+        '增加 Codex 与 OpenCode 控制、多 workspace 根目录、多 Agent 时间线、队列消息取消和更丰富的聊天元数据；改进恢复与 Agent 兼容性。',
         [
-            group('Conversation and workspace tools', '对话与 workspace 工具', [
-                change('feature', 'Add a conversation outline, sidebar search, per-group preview limits, collapsible code and terminal previews, queued-message display, and configurable Enter behavior.', '增加对话大纲、侧栏搜索、分组预览数量限制、可折叠代码和终端预览、排队消息展示及可配置 Enter 行为。'),
-                change('feature', 'Support multiple workspace roots, Codex multi-agent timelines, OpenCode model selection, and message metadata on demand.', '支持多个 workspace 根目录、Codex 多 Agent 时间线、OpenCode 模型选择，并可按需查看消息元数据。'),
+            group('Agent controls and workspace', 'Agent 控制与 workspace', [
+                change('feature', 'Add Codex clear/compact slash commands, OpenCode model selection and mid-session model changes, multiple workspace roots, and Codex multi-agent timelines.', '增加 Codex clear/compact 斜杠命令、OpenCode 模型选择与会话中切换模型、多 workspace 根目录和 Codex 多 Agent 时间线。'),
+                change('feature', 'Cancel queued messages, configure composer Enter behavior, and show invoke time, duration, and model metadata on messages.', '支持取消排队消息、配置输入框 Enter 行为，并在消息中显示调用时间、耗时和模型元数据。'),
             ]),
-            group('Agent commands and recovery', 'Agent 命令与恢复', [
-                change('feature', 'Add Codex clear/compact and slash controls with skill discovery, plus queued-message cancellation.', '增加 Codex clear/compact 和带技能发现的斜杠控制，并支持取消排队消息。'),
-                change('fix', 'Preserve permission modes when resuming inactive sessions, improve Gemini model and tool rendering, and stabilize session-history recovery.', '恢复非活动会话时保留权限模式；改进 Gemini 模型和工具渲染；稳定会话历史恢复。'),
+            group('Conversation navigation', '对话导航', [
+                change('feature', 'Add sidebar search, per-group preview limits, collapsible code and terminal previews, and richer chat rendering.', '增加侧栏搜索、分组预览数量限制、可折叠代码和终端预览，以及更丰富的聊天渲染。'),
+                change('fix', 'Preserve session history recovery, keep Agent tool dialogs aligned with the TUI, and localize runtime toasts while retaining full session rows.', '稳定会话历史恢复，让 Agent 工具对话框与 TUI 对齐，并在本地化运行时提示时保留完整会话行。'),
             ]),
-            group('Runtime and Web fixes', '运行时与 Web 修复', [
-                change('fix', 'Hide Windows cleanup and Codex console windows, localize runtime toasts, keep full session rows, and align remote-session interactions.', '隐藏 Windows 清理和 Codex 控制台窗口；本地化运行时提示；保留完整会话行；统一远程会话交互。'),
-                change('fix', 'Keep session search and ordering stable, normalize Agent tool dialogs, and preserve compatibility with Codex Spark and Claude question answers.', '稳定会话搜索和排序；统一 Agent 工具对话框；保持 Codex Spark 和 Claude 问题回答兼容。'),
+            group('Runtime compatibility', '运行时兼容性', [
+                change('fix', 'Hide Windows taskkill and Codex app-server windows, switch Gemini edit/write content into the shared input shape, and consolidate recovery fixes.', '隐藏 Windows taskkill 和 Codex app-server 窗口；将 Gemini edit/write 内容转换为统一输入结构；合并恢复相关修复。'),
+                change('fix', 'Handle Claude AskUserQuestion answer shapes and omit unsupported Codex Spark reasoning summaries.', '兼容 Claude AskUserQuestion 回答结构，并省略不支持的 Codex Spark 思考摘要。'),
             ]),
         ]),
     releaseNote('0.17.3', '2026-05-06',
@@ -658,16 +658,15 @@ export const RELEASE_NOTES = [
             ]),
         ]),
     releaseNote('0.16.3', '2026-03-20',
-        'Add Gemini YOLO, Claude skill discovery, Codex reasoning controls, terminal font sizing, and model-agnostic Agent interfaces; improve spawn diagnostics and working-directory handling.',
-        '增加 Gemini YOLO、Claude 技能发现、Codex 思考控制、终端字号和与模型无关的 Agent 接口；改进启动诊断与工作目录处理。',
+        'Add terminal font sizing and model-agnostic Agent interfaces; improve Windows performance, push notification navigation, and working-directory handling.',
+        '增加终端字号和与模型无关的 Agent 接口；改进 Windows 性能、推送通知导航和工作目录处理。',
         [
             group('Agent capabilities', 'Agent 能力', [
-                change('feature', 'Add Gemini YOLO, Codex reasoning effort, Claude skill-directory scanning, terminal font-size settings, and model-agnostic Agent interfaces.', '增加 Gemini YOLO、Codex 思考强度、Claude 技能目录扫描、终端字号设置和与模型无关的 Agent 接口。'),
-                change('feature', 'Improve spawn error reporting across CLI, Hub, and Web.', '改进 CLI、Hub 和 Web 全链路的启动错误报告。'),
+                change('feature', 'Add terminal font-size settings and model-agnostic Agent interfaces.', '增加终端字号设置和与模型无关的 Agent 接口。'),
             ]),
-            group('Session and machine reliability', '会话与设备稳定性', [
-                change('fix', 'Preserve requested working directories for local and Runner launches, pass session cwd to Codex, and restart Runner when Hub identity changes.', '保留本地和 Runner 启动时请求的工作目录；向 Codex 传递 session cwd；Hub 身份变化时重启 Runner。'),
-                change('fix', 'Keep Codex reuse and local-session timeouts non-fatal, notify Hub when Gemini aborts, and warn before creating missing directories.', '让 Codex 复用和本地会话超时不再导致致命失败；Gemini 中止时通知 Hub；创建缺失目录前给出提示。'),
+            group('Working-directory and Web fixes', '工作目录与 Web 修复', [
+                change('fix', 'Pass session cwd to Codex, preserve cwd for Runner launches, and warn before creating missing directories.', '向 Codex 传递会话目录，保留 Runner 启动目录，并在创建缺失目录前警告。'),
+                change('fix', 'Improve Windows performance for long conversations and fix push-notification clicks on GitHub Pages.', '改进 Windows 长对话性能，并修复 GitHub Pages 上的推送通知点击跳转。'),
             ]),
         ]),
     releaseNote('0.16.2', '2026-03-18',
