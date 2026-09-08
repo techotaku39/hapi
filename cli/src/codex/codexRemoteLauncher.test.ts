@@ -1598,8 +1598,7 @@ describe('codexRemoteLauncher', () => {
             tool_timeout_sec: 60
         }));
         if (process.platform === 'win32') {
-            expect(freshPackageManager?.command).toBe('node');
-            expect(freshPackageManager?.args?.[0]).toBe('-e');
+            expect(freshPackageManager?.args).toContain('mcp-proxy');
         } else {
             expect(freshPackageManager).toMatchObject({
                 command: 'uvx',
@@ -1623,8 +1622,7 @@ describe('codexRemoteLauncher', () => {
         });
         expect(resumedPackageManager).toBeDefined();
         if (process.platform === 'win32') {
-            expect(resumedPackageManager?.command).toBe('node');
-            expect(resumedPackageManager?.args?.[0]).toBe('-e');
+            expect(resumedPackageManager?.args).toContain('mcp-proxy');
         } else {
             expect(resumedPackageManager).toMatchObject({
                 command: 'uvx',

@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import type { CodexMcpServersConfig } from './codexMcpServers';
 
 const WINDOWS_COMMAND_SHIMS = new Set([
@@ -18,65 +19,8 @@ const WINDOWS_COMMAND_SHIMS = new Set([
 type StdioProxySpec = {
     command: string;
     args: string[];
-    env_vars?: string[];
+    cwd?: string;
 };
-
-export const NODE_STDIO_PROXY_SCRIPT = `
-const { readFileSync } = require('node:fs');
-const { spawn, execFileSync } = require('node:child_process');
-const spec = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-if (typeof spec.command !== 'string' || !Array.isArray(spec.args) || spec.args.some((arg) => typeof arg !== 'string')) {
-    throw new Error('Invalid MCP proxy spec');
-}
-
-const env = { ...process.env };
-const envVars = Array.isArray(spec.env_vars)
-    ? spec.env_vars.filter((name) => typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
-    : [];
-for (const name of envVars) {
-    if (env[name]) continue;
-    try {
-        const command = '[Environment]::GetEnvironmentVariable(' + JSON.stringify(name) + ', "User")';
-        const value = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8' }).trim();
-        if (value) env[name] = value;
-    } catch {}
-}
-
-const resolveWindowsCommand = (command) => {
-    if (process.platform !== 'win32' || /[\\/]/.test(command) || /\\.(exe|cmd|bat)$/i.test(command)) {
-        return command;
-    }
-    try {
-        const entries = execFileSync('where.exe', [command], {
-            encoding: 'utf8',
-            windowsHide: true
-        })
-            .split(/\\r?\\n/)
-            .map((entry) => entry.trim())
-            .filter(Boolean);
-        return entries.find((entry) => /\\.(exe|cmd|bat)$/i.test(entry)) ?? entries[0] ?? command;
-    } catch {
-        return command;
-    }
-};
-
-const resolvedCommand = resolveWindowsCommand(spec.command);
-const child = spawn(resolvedCommand, spec.args, {
-    cwd: process.cwd(),
-    env,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    shell: process.platform === 'win32' && /\\.(cmd|bat)$/i.test(resolvedCommand),
-    windowsHide: process.platform === 'win32'
-});
-process.stdin.on('data', (chunk) => child.stdin.write(chunk));
-child.stdout.on('data', (chunk) => process.stdout.write(chunk));
-child.stderr.on('data', () => {});
-child.on('error', (error) => {
-    process.stderr.write('[hapi-mcp-proxy] ' + error.message + '\\n');
-    process.exitCode = 1;
-});
-child.on('close', (code) => process.exit(code == null ? 1 : code));
-`;
 
 export type PreparedCodexMcpServers = {
     servers: CodexMcpServersConfig;
@@ -142,16 +86,17 @@ export async function prepareCodexMcpServers(
                 args: Array.isArray(server.args)
                     ? server.args.filter((arg): arg is string => typeof arg === 'string')
                     : [],
-                ...(Array.isArray(server.env_vars)
-                    ? { env_vars: server.env_vars.filter((name): name is string => typeof name === 'string') }
+                ...(typeof server.cwd === 'string' && server.cwd.trim().length > 0
+                    ? { cwd: server.cwd }
                     : {})
             });
             temporaryDirectories.push(spec.directory);
 
+            const proxyCommand = getHappyCliCommand(['mcp-proxy', '--spec', spec.path]);
             prepared[name] = {
                 ...server,
-                command: 'node',
-                args: ['-e', NODE_STDIO_PROXY_SCRIPT, spec.path]
+                command: proxyCommand.command,
+                args: proxyCommand.args
             };
             proxiedServerNames.push(name);
         }

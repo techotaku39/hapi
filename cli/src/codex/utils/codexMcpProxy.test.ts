@@ -6,8 +6,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import {
-    NODE_STDIO_PROXY_SCRIPT,
     prepareCodexMcpServers,
     shouldProxyCodexMcpStdio
 } from './codexMcpProxy';
@@ -54,19 +54,18 @@ describe('codexMcpProxy', () => {
                 enabled: true,
                 tool_timeout_sec: 60
             }));
-            expect(proxied.command).toBe('node');
-            expect(proxied.args[0]).toBe('-e');
 
             const specPath = proxied.args.at(-1);
             expect(typeof specPath).toBe('string');
             if (!specPath) {
                 throw new Error('Expected a proxy spec path');
             }
+            expect(proxied.args).toContain('mcp-proxy');
+            expect(proxied.command).toBe(getHappyCliCommand(['mcp-proxy', '--spec', specPath]).command);
             expect(existsSync(specPath)).toBe(true);
             await expect(readFile(specPath, 'utf8')).resolves.toBe(JSON.stringify({
                 command: 'uvx',
-                args: ['--from', 'example-mcp==1.0.0', 'example-mcp', 'serve'],
-                env_vars: ['EXAMPLE_TOKEN']
+                args: ['--from', 'example-mcp==1.0.0', 'example-mcp', 'serve']
             }));
 
             expect(prepared.servers.nodeServer).toEqual({
@@ -112,7 +111,8 @@ describe('codexMcpProxy', () => {
             await writeFile(shimPath, '@echo off\r\nnode "%~dp0server.js"\r\n', 'utf8');
             await writeFile(specPath, JSON.stringify({ command: 'example-mcp', args: [] }), 'utf8');
 
-            const child = spawn(process.execPath, ['-e', NODE_STDIO_PROXY_SCRIPT, specPath], {
+            const proxyCommand = getHappyCliCommand(['mcp-proxy', '--spec', specPath]);
+            const child = spawn(proxyCommand.command, proxyCommand.args, {
                 env: { ...process.env, PATH: `${directory};${originalPath}` },
                 stdio: ['pipe', 'pipe', 'pipe'],
                 windowsHide: true

@@ -26,3 +26,11 @@ jobs:
             - uses: oven-sh/setup-bun@v2
             - run: bun install --frozen-lockfile
             - run: bun run test:cli:integration
+
+    windows-codex-mcp:
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+            - run: bun install --frozen-lockfile
+            - run: bun run --cwd cli test -- src/codex/utils/codexMcpProxy.test.ts

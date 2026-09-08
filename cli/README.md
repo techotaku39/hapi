@@ -101,7 +101,7 @@ temporary `CODEX_HOME`, so MCP settings are preserved while authentication
 state remains isolated. The `hapi` server name is reserved by HAPI.
 
 On Windows, known package-manager shims (`uvx`, `npx`, `npm`, `pnpm`, `yarn`,
-`bunx`, and `.cmd`/`.bat` commands) use a short-lived Node stdio compatibility
+`bunx`, and `.cmd`/`.bat` commands) use a short-lived HAPI stdio compatibility
 proxy before reaching the configured MCP server. The proxy keeps the original
 command and arguments in a session-temporary file and forwards MCP JSON-RPC
 bytes without putting environment-variable values into arguments or that file.
