@@ -14,7 +14,8 @@ export const UsageQueryAdapterSchema = z.enum([
 ])
 export type UsageQueryAdapter = z.infer<typeof UsageQueryAdapterSchema>
 
-export const UsageQueryHttpMethodSchema = z.enum(['GET', 'POST'])
+/** Quota templates are read-only; mutating provider calls require a reviewed adapter. */
+export const UsageQueryHttpMethodSchema = z.literal('GET')
 export type UsageQueryHttpMethod = z.infer<typeof UsageQueryHttpMethodSchema>
 
 export const UsageQueryResetUnitSchema = z.enum(['iso', 'seconds', 'milliseconds'])
