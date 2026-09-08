@@ -33,8 +33,9 @@ supports:
 - `{{baseOrigin}}` — the configured endpoint's scheme, host, and port, useful for
   provider adapters with canonical paths;
 - `{{apiKey}}` — the selected Agent's configured credential;
-- `GET` requests only; quota templates are read-only. A provider that requires a
-  mutating method or a custom signature needs a reviewed Runner adapter;
+- `GET` requests without a body only; quota templates are read-only. A provider
+  that requires a mutating method, request body, or custom signature needs a
+  reviewed Runner adapter;
 - dot and numeric bracket paths such as `usage.resetTime` and
   `limits[0].detail.remaining`;
 - direct percentages (`percentPath`) or `used`/`remaining` plus `limit`.
