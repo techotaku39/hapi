@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
     DEFAULT_USAGE_QUERY_TEMPLATE,
     USAGE_QUERY_CACHE_TTL_MS,
@@ -28,7 +28,7 @@ type UsageQueryServiceOptions = {
 
 type CachedResult = {
     templateId: string
-    templateFingerprint: string
+    queryFingerprint: string
     result: UsageQueryResult
     cachedAt: number
     lastAttemptAt: number
@@ -40,11 +40,16 @@ type InFlightRequest = {
     request: Promise<UsageQueryResult>
 }
 
-function templateFingerprint(template: UsageQueryTemplate): string {
-    // The template has already passed the strict schema, so JSON.stringify is
-    // a compact deterministic-enough identity for cache invalidation. A user
-    // edit must not reuse a result from an in-flight request that shares its id.
-    return JSON.stringify(template)
+function queryFingerprint(template: UsageQueryTemplate, credentials: ResolvedUsageCredentials): string {
+    // Keep credentials in the in-memory identity so a long-lived Runner cannot
+    // reuse or join quota data after an Agent account/configuration changes.
+    return createHash('sha256')
+        .update(JSON.stringify(template))
+        .update('\0')
+        .update(credentials.baseUrl)
+        .update('\0')
+        .update(credentials.apiKey)
+        .digest('hex')
 }
 
 function cloneTemplate(template: UsageQueryTemplate): UsageQueryTemplate {
@@ -208,20 +213,25 @@ export class UsageQueryService {
         const configured = settings[agent]
         const now = this.now()
         const cached = this.cache.get(agent)
+        if (!configured.enabled) {
+            return emptyResult(agent, configured.templateId, now, 'Usage query is disabled')
+        }
+        let credentials: ResolvedUsageCredentials
+        try {
+            credentials = await this.resolveCredentials(agent)
+        } catch (error) {
+            return emptyResult(agent, configured.templateId, now, sanitizeError(error))
+        }
         // A saved template change invalidates the old value semantically even
         // before the in-memory cache entry is cleared (for example, when a
-        // settings write races an already-running query). Never present a
-        // result produced by a different template as the current template's
-        // stale data.
-        const fingerprint = templateFingerprint(configured.template)
+        // settings write races an already-running query). Credential changes
+        // use the same rule, so never present another account's stale data.
+        const fingerprint = queryFingerprint(configured.template, credentials)
         const usableCached = cached !== undefined
             && cached.templateId === configured.templateId
-            && cached.templateFingerprint === fingerprint
+            && cached.queryFingerprint === fingerprint
             ? cached
             : undefined
-        if (!configured.enabled) {
-            return emptyResult(agent, configured.templateId, now, 'Usage query is disabled', usableCached?.result)
-        }
         if (!force && usableCached) {
             if (now - usableCached.cachedAt < USAGE_QUERY_CACHE_TTL_MS) return usableCached.result
             if (usableCached.lastError && now - usableCached.lastAttemptAt < USAGE_QUERY_RETRY_COOLDOWN_MS) {
@@ -231,7 +241,7 @@ export class UsageQueryService {
         const existing = this.inFlight.get(agent)
         if (existing?.fingerprint === fingerprint) return await existing.request
 
-        const request = this.runQuery(agent, configured, usableCached, now)
+        const request = this.runQuery(agent, configured, credentials, usableCached, now, fingerprint)
         this.inFlight.set(agent, { fingerprint, request })
         try {
             return await request
@@ -243,13 +253,12 @@ export class UsageQueryService {
     private async runQuery(
         agent: UsageQueryAgent,
         configured: UsageQueryAgentSettings,
+        credentials: ResolvedUsageCredentials,
         cached: CachedResult | undefined,
-        startedAt: number
+        startedAt: number,
+        fingerprint: string
     ): Promise<UsageQueryResult> {
-        let credentials: ResolvedUsageCredentials | undefined
-        const fingerprint = templateFingerprint(configured.template)
         try {
-            credentials = await this.resolveCredentials(agent)
             const result = await executeUsageQueryTemplate(agent, configured.template, credentials, {
                 fetchImpl: this.fetchImpl,
                 now: startedAt
@@ -257,7 +266,7 @@ export class UsageQueryService {
             if (this.inFlight.get(agent)?.fingerprint === fingerprint) {
                 this.cache.set(agent, {
                     templateId: configured.templateId,
-                    templateFingerprint: fingerprint,
+                    queryFingerprint: fingerprint,
                     result,
                     cachedAt: startedAt,
                     lastAttemptAt: startedAt,
@@ -271,7 +280,7 @@ export class UsageQueryService {
             if (this.inFlight.get(agent)?.fingerprint === fingerprint) {
                 this.cache.set(agent, {
                     templateId: configured.templateId,
-                    templateFingerprint: fingerprint,
+                    queryFingerprint: fingerprint,
                     result,
                     cachedAt: cached?.cachedAt ?? 0,
                     lastAttemptAt: startedAt,

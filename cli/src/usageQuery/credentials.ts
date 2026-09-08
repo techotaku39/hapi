@@ -227,7 +227,8 @@ export function parseCodexBaseUrl(configText: string): string | null {
 
 async function resolveClaudeCredentials(env: NodeJS.ProcessEnv): Promise<ResolvedUsageCredentials> {
     let baseUrl = nonEmptyString(env.ANTHROPIC_BASE_URL)
-    let apiKey = nonEmptyString(env.ANTHROPIC_AUTH_TOKEN)
+    let apiKey = nonEmptyString(env.CLAUDE_CODE_OAUTH_TOKEN)
+        ?? nonEmptyString(env.ANTHROPIC_AUTH_TOKEN)
         ?? nonEmptyString(env.ANTHROPIC_API_KEY)
     let baseUrlSource: UsageQueryCredentialStatus['source'] = baseUrl ? 'environment' : 'none'
     let apiKeySource: UsageQueryCredentialStatus['source'] = apiKey ? 'environment' : 'none'
@@ -242,7 +243,7 @@ async function resolveClaudeCredentials(env: NodeJS.ProcessEnv): Promise<Resolve
         if (baseUrl) baseUrlSource = 'config'
     }
     if (!apiKey) {
-        apiKey = firstObjectString(settingsEnv, ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY']) ?? ''
+        apiKey = firstObjectString(settingsEnv, ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY']) ?? ''
         if (apiKey) apiKeySource = 'config'
     }
 

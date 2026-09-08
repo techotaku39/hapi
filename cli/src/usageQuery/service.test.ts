@@ -68,6 +68,34 @@ describe('UsageQueryService', () => {
         expect(calls).toBe(2)
     })
 
+    it('does not reuse cached data after credential rotation', async () => {
+        root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
+        let now = 1_780_000_000_000
+        let activeCredentials = credentials
+        let calls = 0
+        const fetchImpl: UsageQueryFetch = async (_url, init) => {
+            calls += 1
+            expect(init.headers.Authorization).toBe(`Bearer ${activeCredentials.apiKey}`)
+            return makeResponse(calls === 1 ? 25 : 50)
+        }
+        const service = new UsageQueryService({
+            settingsFile: join(root, 'usage-query.json'),
+            now: () => now,
+            fetchImpl,
+            resolveCredentials: async () => activeCredentials
+        })
+        const template = DEFAULT_USAGE_QUERY_TEMPLATES[0]
+        await service.saveSettings('claude', { enabled: true, templateId: template.id, template })
+
+        const first = await service.query('claude')
+        expect(first.fiveHour?.usedPercent).toBe(75)
+        activeCredentials = { ...credentials, apiKey: 'rotated-key' }
+        now += 60_000
+        const rotated = await service.query('claude')
+        expect(rotated.fiveHour?.usedPercent).toBe(50)
+        expect(calls).toBe(2)
+    })
+
     it('keeps stale windows after an error and suppresses automatic retries for 30 seconds', async () => {
         root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
         let now = 1_780_000_000_000
@@ -169,6 +197,45 @@ describe('UsageQueryService', () => {
 
         const thirdResult = await service.query('claude')
         expect(thirdResult.fiveHour?.usedPercent).toBe(50)
+        expect(calls).toBe(2)
+    })
+
+    it('does not join an in-flight request after credential rotation', async () => {
+        root = await mkdtemp(join(tmpdir(), 'hapi-usage-service-'))
+        let activeCredentials = credentials
+        let calls = 0
+        let releaseFirst!: () => void
+        let firstStarted!: () => void
+        const firstStartedPromise = new Promise<void>((resolve) => { firstStarted = resolve })
+        const fetchImpl: UsageQueryFetch = async (_url, init) => {
+            calls += 1
+            expect(init.headers.Authorization).toBe(`Bearer ${activeCredentials.apiKey}`)
+            if (calls === 1) {
+                firstStarted()
+                return await new Promise((resolve) => { releaseFirst = () => resolve(makeResponse(10)) })
+            }
+            return makeResponse(50)
+        }
+        const service = new UsageQueryService({
+            settingsFile: join(root, 'usage-query.json'),
+            fetchImpl,
+            resolveCredentials: async () => activeCredentials
+        })
+        const template = DEFAULT_USAGE_QUERY_TEMPLATES[0]
+        await service.saveSettings('claude', { enabled: true, templateId: template.id, template })
+        const firstRequest = service.query('claude')
+        await firstStartedPromise
+
+        activeCredentials = { ...credentials, apiKey: 'rotated-key' }
+        const rotatedResult = await service.query('claude')
+        expect(rotatedResult.fiveHour?.usedPercent).toBe(50)
+        expect(calls).toBe(2)
+
+        releaseFirst()
+        const firstResult = await firstRequest
+        expect(firstResult.fiveHour?.usedPercent).toBe(90)
+        const cachedRotated = await service.query('claude')
+        expect(cachedRotated.fiveHour?.usedPercent).toBe(50)
         expect(calls).toBe(2)
     })
 
