@@ -147,4 +147,44 @@ describe('usage query credential resolution', () => {
             await rm(root, { recursive: true, force: true })
         }
     })
+
+    it('does not infer an inactive Kimi provider without an active model selection', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-inactive-provider-'))
+        try {
+            const providerConfig = [
+                '[providers.inactive]',
+                'type = "kimi"',
+                'base_url = "https://inactive.kimi.example"',
+                'api_key = "config-secret"'
+            ].join('\n')
+            await writeFile(join(root, 'config.toml'), providerConfig)
+            const noDefault = await resolveUsageCredentials('kimi', {
+                KIMI_CODE_HOME: root,
+                KIMI_API_KEY: 'environment-secret'
+            })
+            expect(noDefault).toMatchObject({
+                baseUrl: '',
+                apiKey: 'environment-secret',
+                baseUrlSource: 'none',
+                apiKeySource: 'environment'
+            })
+
+            await writeFile(join(root, 'config.toml'), [
+                'default_model = "missing-model"',
+                providerConfig
+            ].join('\n'))
+            const unmapped = await resolveUsageCredentials('kimi', {
+                KIMI_CODE_HOME: root,
+                KIMI_API_KEY: 'environment-secret'
+            })
+            expect(unmapped).toMatchObject({
+                baseUrl: '',
+                apiKey: 'environment-secret',
+                baseUrlSource: 'none',
+                apiKeySource: 'environment'
+            })
+        } finally {
+            await rm(root, { recursive: true, force: true })
+        }
+    })
 })
