@@ -75,7 +75,6 @@ function redactTemplateCredentials(template: UsageQueryTemplate, credentials: Re
     cloned.request.headers = Object.fromEntries(
         Object.entries(cloned.request.headers).map(([name, value]) => [name, redact(value)])
     )
-    if (cloned.request.body !== undefined) cloned.request.body = redact(cloned.request.body)
     return cloned
 }
 

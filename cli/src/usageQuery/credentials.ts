@@ -163,12 +163,12 @@ function chooseKimiProvider(snapshot: KimiConfigSnapshot): KimiProviderConfig | 
     return snapshot.providers.values().next().value ?? null
 }
 
-async function readKimiConfig(env: NodeJS.ProcessEnv): Promise<KimiConfigSnapshot> {
+async function readKimiConfig(env: NodeJS.ProcessEnv, userHome = homedir()): Promise<KimiConfigSnapshot> {
     const explicitHome = nonEmptyString(env.KIMI_CODE_HOME) ?? nonEmptyString(env.KIMI_SHARE_DIR)
     const homes = [
         explicitHome,
-        join(homedir(), '.kimi'),
-        join(homedir(), '.kimi-code')
+        join(userHome, '.kimi-code'),
+        join(userHome, '.kimi')
     ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
 
     for (const home of homes) {
@@ -283,13 +283,13 @@ async function resolveCodexCredentials(env: NodeJS.ProcessEnv): Promise<Resolved
     }
 }
 
-async function resolveKimiCredentials(env: NodeJS.ProcessEnv): Promise<ResolvedUsageCredentials> {
+async function resolveKimiCredentials(env: NodeJS.ProcessEnv, userHome = homedir()): Promise<ResolvedUsageCredentials> {
     let baseUrl = nonEmptyString(env.KIMI_BASE_URL)
     let apiKey = nonEmptyString(env.KIMI_API_KEY)
     let baseUrlSource: UsageQueryCredentialStatus['source'] = baseUrl ? 'environment' : 'none'
     let apiKeySource: UsageQueryCredentialStatus['source'] = apiKey ? 'environment' : 'none'
 
-    const provider = chooseKimiProvider(await readKimiConfig(env))
+    const provider = chooseKimiProvider(await readKimiConfig(env, userHome))
     if (!baseUrl) {
         baseUrl = provider?.baseUrl ?? ''
         if (baseUrl) baseUrlSource = 'config'
@@ -309,9 +309,10 @@ async function resolveKimiCredentials(env: NodeJS.ProcessEnv): Promise<ResolvedU
 
 export async function resolveUsageCredentials(
     agent: UsageQueryAgent,
-    env: NodeJS.ProcessEnv = process.env
+    env: NodeJS.ProcessEnv = process.env,
+    userHome = homedir()
 ): Promise<ResolvedUsageCredentials> {
     if (agent === 'claude') return await resolveClaudeCredentials(env)
     if (agent === 'codex') return await resolveCodexCredentials(env)
-    return await resolveKimiCredentials(env)
+    return await resolveKimiCredentials(env, userHome)
 }
