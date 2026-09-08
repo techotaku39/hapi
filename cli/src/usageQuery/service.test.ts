@@ -166,6 +166,10 @@ describe('UsageQueryService', () => {
         releaseFirst()
         const firstResult = await firstRequest
         expect(firstResult.fiveHour?.usedPercent).toBe(90)
+
+        const thirdResult = await service.query('claude')
+        expect(thirdResult.fiveHour?.usedPercent).toBe(50)
+        expect(calls).toBe(2)
     })
 
     it('redacts credentials from provider error messages', async () => {
