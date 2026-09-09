@@ -25,7 +25,7 @@ test('renders localized release announcements on the mobile About page', async (
     await page.setViewportSize({ width: 1280, height: 844 })
     await expect(releaseSummary.getByText('🌟', { exact: true })).toBeHidden()
     await expect(releaseSummary.getByText('⭐', { exact: true })).toBeVisible()
-    await expect(page.locator('details').first().getByText('Added', { exact: true }).first()).toHaveClass(/sm:top-\[0\.5px\]/)
+    await expect(page.locator('details').first().getByText(releaseKindLabels[latestReleaseChanges[0].kind].en, { exact: true }).first()).toHaveClass(/sm:top-\[0\.5px\]/)
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(releaseSummary.getByText('🌟', { exact: true })).toBeVisible()
     await expect(page.getByText(latestRelease.groups[0].changes[0].text.en)).toBeVisible()
