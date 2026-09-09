@@ -163,7 +163,7 @@ vi.mock('./secureFileOperations', async () => {
                 await fs.writeFile(sourceReplacement.replacementPath, 'concurrent replacement')
                 await fs.rm(sourceReplacement.path, { force: true })
                 await fs.rename(sourceReplacement.replacementPath, sourceReplacement.path)
-                throw new Error('File changed before the recycle-bin operation completed')
+                return await fs.rename(sourcePath, destinationPath)
             }
             return await fs.rename(sourcePath, destinationPath)
         }),
@@ -1101,14 +1101,15 @@ describe('RecycleBinManager', () => {
             recycleBinIoHarness.rejectRestoreStageRemoval = true
             const failed = await manager.restore(moved.entry.id, workspaceDir, 'fail')
             expect(failed).toMatchObject({ success: false, error: 'Simulated restore-stage write failure' })
-            await expect(readdir(workspaceDir)).resolves.toEqual(expect.arrayContaining([expect.stringMatching(/^\.hapi-restore-/)]))
+            const entryDirectory = join(getRecycleBinRoot(homeDir), moved.entry.id)
+            await expect(readdir(entryDirectory)).resolves.toEqual(expect.arrayContaining([expect.stringMatching(/^\.hapi-restore-/)]))
 
             recycleBinIoHarness.rejectRestoreWrite = false
             recycleBinIoHarness.rejectRestoreStageRemoval = false
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
             expect(restored).toEqual({ success: true, restoredPath: filePath })
             await expect(readFile(filePath, 'utf8')).resolves.toBe(content)
-            await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-restore-/))
+            await expect(stat(entryDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
         } finally {
             recycleBinIoHarness.rejectRestoreWrite = false
             recycleBinIoHarness.rejectRestoreStageRemoval = false

@@ -439,7 +439,23 @@ async function copyFileWithoutReplacing(
             })
             sourceRemoved = true
             const detachedStats = await lstat(detachedPath)
-            if (!isSameFileStats(detachedStats, openedStats)) throw new Error('File changed before the recycle-bin operation completed')
+            if (!isSameFileStats(detachedStats, openedStats)) {
+                try {
+                    await secureRename(detachedPath, sourcePath, {
+                        sourceDirectoryIdentity: options.sourceDirectoryIdentity,
+                        targetDirectoryIdentity: options.sourceDirectoryIdentity,
+                        sourceFileIdentity: fileIdentityFromStats(detachedStats),
+                    })
+                    sourceRemoved = false
+                    await options.onStagingFileRemoved?.(detachedPath)
+                } catch (rollbackError) {
+                    logger.debug('[RECYCLE BIN] Failed to restore a concurrently replaced source', {
+                        detachedPath,
+                        rollbackError,
+                    })
+                }
+                throw new Error('File changed before the recycle-bin operation completed')
+            }
             await options.onStagingFileCreated?.(detachedPath, detachedStats, options.stagingFileKind ?? 'source')
             try {
                 await secureUnlink(detachedPath, options.sourceDirectoryIdentity, fileIdentityFromStats(detachedStats))
@@ -1161,6 +1177,7 @@ export class RecycleBinManager {
             const resolvedTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
             let target = resolvedTarget.path
             let validatedParent = resolvedTarget.parent.path
+            let validatedParentIdentity = resolvedTarget.parent.identity
             let targetExists = false
             try {
                 const targetStats = await lstat(target)
@@ -1207,16 +1224,15 @@ export class RecycleBinManager {
 
             const firstValidatedParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
             validatedParent = firstValidatedParent.path
+            validatedParentIdentity = firstValidatedParent.identity
             target = join(validatedParent, basename(target))
 
             let stagedPath: string | null = null
             let stagedCreated = false
             let stagedStats: FileStats | null = null
-            let stagingParentIdentity: string | null = null
+            const stagingParentIdentity = await getSecureDirectoryIdentity(join(root, entry.id))
             try {
-                const stagingParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
-                stagingParentIdentity = stagingParent.identity
-                stagedPath = join(stagingParent.path, `.hapi-restore-${entry.id}-${randomUUID()}.tmp`)
+                stagedPath = join(root, entry.id, `.hapi-restore-${entry.id}-${randomUUID()}.tmp`)
                 stagedStats = await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
@@ -1226,8 +1242,8 @@ export class RecycleBinManager {
                 stagedCreated = true
                 const publicationParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
                 if (
-                    normalizeForComparison(publicationParent.path) !== normalizeForComparison(stagingParent.path)
-                    || publicationParent.identity !== stagingParentIdentity
+                    normalizeForComparison(publicationParent.path) !== normalizeForComparison(validatedParent)
+                    || publicationParent.identity !== validatedParentIdentity
                 ) {
                     throw invalidPathError('Restore target changed during restore')
                 }
