@@ -812,7 +812,7 @@ export default {
   'settings.usage.sessions': '{count} sessions with usage',
   'settings.general.description': 'Language, companion pairing, and general application preferences.',
   'settings.general.sessionSummary.title': 'Session status summaries',
-  'settings.general.sessionSummary.description': 'Choose whether supported agents emit a machine-readable status summary and whether it appears in chat.',
+  'settings.general.sessionSummary.description': 'Choose whether supported agents emit status summaries and whether they appear in chat.',
   'settings.general.sessionSummaryContract': 'Emit status summaries',
   'settings.general.sessionSummaryContract.desc': 'Off by default. When enabled, supported agents are asked to add a trailing AGENT_NOTIFY_SUMMARY line after each turn for notifications and background work records. Applies to new/resumed sessions. (Supported: Claude, Codex, OpenCode, remote Grok; not yet supported: local Grok, Cursor)',
   'settings.general.sessionSummaryInChat': 'Show status summaries in chat',
