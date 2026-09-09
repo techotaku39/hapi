@@ -205,4 +205,25 @@ describe('SessionList machine filter', () => {
 
         expect(screen.queryByRole('button', { name: SEARCH_SCOPE_LABEL })).toBeNull()
     })
+
+    it('returns focus to the input so an outside blur still collapses search', () => {
+        renderSessionList([
+            makeSession({
+                id: 'session-focus',
+                updatedAt: 100,
+                metadata: { path: '/work/focus', machineId: 'machine-1', name: 'Focus test' }
+            })
+        ])
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_SCOPE_LABEL }))
+        fireEvent.click(screen.getByRole('button', { name: 'Exclude' }))
+
+        expect(input).toHaveFocus()
+        fireEvent.blur(input, { relatedTarget: document.body })
+
+        expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
+        expect(screen.getByRole('button', { name: SEARCH_LABEL })).toBeTruthy()
+    })
 })
