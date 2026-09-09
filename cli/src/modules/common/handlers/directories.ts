@@ -1,5 +1,5 @@
 import { logger } from '@/ui/logger'
-import { readdir, stat } from 'fs/promises'
+import { readdir, realpath, stat } from 'fs/promises'
 import { basename, join, resolve } from 'path'
 import type { DirectoryEntry, FileMetadataEntry, ListDirectoryResponse, StatFilesResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
@@ -109,9 +109,22 @@ export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, 
             }
         }
 
+        if (data.paths.length === 0) {
+            return { success: true, entries: [] }
+        }
+
+        const resolvedWorkingDirectory = await realpath(workingDirectory).catch(() => null)
+        if (!resolvedWorkingDirectory) {
+            return { success: true, entries: data.paths.map((path) => ({ path })) }
+        }
+
         const entries = await Promise.all(data.paths.map(async (path) => {
             try {
-                const resolvedPath = await resolveRealPathWithinWorkingDirectory(path, workingDirectory)
+                const resolvedPath = await resolveRealPathWithinWorkingDirectory(
+                    path,
+                    workingDirectory,
+                    resolvedWorkingDirectory
+                )
                 if (!resolvedPath) {
                     return { path }
                 }

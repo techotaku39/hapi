@@ -36,18 +36,19 @@ export function validatePath(targetPath: string, workingDirectory: string): Path
 /** Resolve a path and verify that its canonical target remains in the workspace. */
 export async function resolveRealPathWithinWorkingDirectory(
     targetPath: string,
-    workingDirectory: string
+    workingDirectory: string,
+    resolvedWorkingDirectory?: string
 ): Promise<string | null> {
     if (!validatePath(targetPath, workingDirectory).valid) {
         return null
     }
 
     try {
-        const [resolvedTarget, resolvedWorkingDirectory] = await Promise.all([
+        const [resolvedTarget, canonicalWorkingDirectory] = await Promise.all([
             realpath(resolve(workingDirectory, targetPath)),
-            realpath(workingDirectory)
+            resolvedWorkingDirectory ?? realpath(workingDirectory)
         ])
-        return validatePath(resolvedTarget, resolvedWorkingDirectory).valid
+        return validatePath(resolvedTarget, canonicalWorkingDirectory).valid
             ? resolvedTarget
             : null
     } catch {
