@@ -164,6 +164,10 @@ describe('usage query executor', () => {
         await expect(executeUsageQueryTemplate('codex', keyInUrl, credentials, { fetchImpl: async () => response({}) }))
             .rejects.toThrow('API key cannot appear')
 
+        const literalKeyInUrl = makeTemplate({ request: { ...DEFAULT_USAGE_QUERY_TEMPLATE.request, url: 'https://provider.example/usage?key=secret-value' } })
+        await expect(executeUsageQueryTemplate('codex', literalKeyInUrl, credentials, { fetchImpl: async () => response({}) }))
+            .rejects.toThrow('API key cannot appear')
+
         const embeddedCredentials = makeTemplate({ request: { ...DEFAULT_USAGE_QUERY_TEMPLATE.request, url: 'https://user:pass@provider.example/usage' } })
         await expect(executeUsageQueryTemplate('codex', embeddedCredentials, credentials, { fetchImpl: async () => response({}) }))
             .rejects.toThrow('embedded credentials')

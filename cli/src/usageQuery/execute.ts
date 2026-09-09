@@ -81,7 +81,7 @@ function substitute(value: string, credentials: ResolvedUsageCredentials, baseOr
 }
 
 function resolveRequestUrl(rawUrl: string, credentials: ResolvedUsageCredentials, baseOrigin: string): URL {
-    if (rawUrl.includes('{{apiKey}}')) {
+    if (rawUrl.includes('{{apiKey}}') || (credentials.apiKey && rawUrl.includes(credentials.apiKey))) {
         throw new UsageQueryExecutionError('API key cannot appear in the request URL')
     }
     const baseUrl = normalizeBaseUrl(credentials.baseUrl)
