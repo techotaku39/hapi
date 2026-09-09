@@ -17,14 +17,6 @@ export type SecureRenameOptions = {
     sourceFileIdentity?: FileIdentity
 }
 
-export type SecureOverwriteOptions = {
-    targetDirectoryIdentity: string
-    sourceFileIdentity: FileIdentity
-    targetFileIdentity: FileIdentity
-    size: number
-    mode: number
-}
-
 const IS_WINDOWS = process.platform === 'win32'
 const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY
     | (constants.O_DIRECTORY ?? 0)
@@ -367,57 +359,6 @@ export async function secureUnlink(path: string, directoryIdentity: string, file
         if (result !== 0) throw new Error(`unlinkat failed with errno ${-result}`)
     } finally {
         await closeSecureDirectory(directory)
-    }
-}
-
-export async function secureOverwriteFile(
-    sourcePath: string,
-    targetPath: string,
-    options: SecureOverwriteOptions,
-): Promise<void> {
-    const targetDirectory = await openSecureDirectory(dirname(targetPath), options.targetDirectoryIdentity)
-    const sourceFlags = IS_WINDOWS ? 'r' : constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
-    const targetFlags = IS_WINDOWS ? 'r+' : constants.O_RDWR | (constants.O_NOFOLLOW ?? 0)
-    const sourceHandle = await open(sourcePath, sourceFlags)
-    let targetHandle: FileHandle | null = null
-    try {
-        const sourceStats = await sourceHandle.stat()
-        await assertFileIdentity(sourcePath, options.sourceFileIdentity)
-        if (!sourceStats.isFile() || sourceStats.size !== options.size) {
-            throw new Error('Secure overwrite source changed during the operation')
-        }
-        targetHandle = await open(targetPath, targetFlags)
-        const targetStats = await targetHandle.stat()
-        await assertFileIdentity(targetPath, options.targetFileIdentity)
-        if (!targetStats.isFile() || identityKey(identityFromStats(targetStats)) !== identityKey(options.targetFileIdentity)) {
-            throw new Error('Secure overwrite target changed during the operation')
-        }
-
-        const buffer = Buffer.allocUnsafe(1024 * 1024)
-        let offset = 0
-        while (offset < sourceStats.size) {
-            const readResult = await sourceHandle.read(buffer, 0, Math.min(buffer.length, sourceStats.size - offset), offset)
-            if (readResult.bytesRead === 0) throw new Error('Secure overwrite source changed during the operation')
-            let written = 0
-            while (written < readResult.bytesRead) {
-                const writeResult = await targetHandle.write(
-                    buffer,
-                    written,
-                    readResult.bytesRead - written,
-                    offset + written,
-                )
-                if (writeResult.bytesWritten === 0) throw new Error('Secure overwrite target write failed')
-                written += writeResult.bytesWritten
-            }
-            offset += written
-        }
-        await targetHandle.truncate(sourceStats.size)
-        await targetHandle.chmod(options.mode & 0o7777)
-        await targetHandle.sync()
-    } finally {
-        if (targetHandle) await targetHandle.close()
-        await sourceHandle.close()
-        await closeSecureDirectory(targetDirectory)
     }
 }
 

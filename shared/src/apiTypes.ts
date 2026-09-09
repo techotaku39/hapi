@@ -719,7 +719,7 @@ export type RestoreRecycleBinEntryResponse = {
     success: boolean
     restoredPath?: string
     cancelled?: boolean
-    code?: 'target_exists' | 'entry_not_found' | 'invalid_path'
+    code?: 'target_exists' | 'overwrite_unavailable' | 'entry_not_found' | 'invalid_path'
     targetPath?: string
     error?: string
 }

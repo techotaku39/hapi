@@ -2,7 +2,6 @@ import { constants, type Stats } from 'node:fs'
 import {
     fileIdentityFromStats,
     getSecureDirectoryIdentity,
-    secureOverwriteFile,
     secureRename,
     secureUnlink,
 } from './secureFileOperations'
@@ -130,13 +129,6 @@ function isSameFileStats(left: FileStats, right: FileStats): boolean {
         && left.ino === right.ino
         && left.size === right.size
         && left.mtimeMs === right.mtimeMs
-}
-
-function isSameFileIdentity(left: FileStats, right: FileStats): boolean {
-    return left.isFile()
-        && right.isFile()
-        && left.dev === right.dev
-        && left.ino === right.ino
 }
 
 function isNotFound(error: unknown): boolean {
@@ -1170,11 +1162,9 @@ export class RecycleBinManager {
             let target = resolvedTarget.path
             let validatedParent = resolvedTarget.parent.path
             let targetExists = false
-            let expectedTargetStats: FileStats | null = null
             try {
                 const targetStats = await lstat(target)
                 targetExists = true
-                expectedTargetStats = targetStats
                 if (targetStats.isSymbolicLink() || !targetStats.isFile()) {
                     throw invalidPathError('The restore target is not a regular file')
                 }
@@ -1184,6 +1174,14 @@ export class RecycleBinManager {
 
             if (targetExists && conflict === 'cancel') {
                 return { success: true, cancelled: true, targetPath: target }
+            }
+            if (targetExists && conflict === 'overwrite') {
+                return {
+                    success: false,
+                    code: 'overwrite_unavailable',
+                    targetPath: target,
+                    error: 'Overwrite restore is temporarily unavailable; choose restore with a new name',
+                }
             }
             if (targetExists && conflict === 'fail') {
                 return {
@@ -1233,38 +1231,14 @@ export class RecycleBinManager {
                 ) {
                     throw invalidPathError('Restore target changed during restore')
                 }
-                if (targetExists && conflict === 'overwrite') {
-                    const currentTargetStats = await lstat(target)
-                    if (!expectedTargetStats || !isSameFileStats(currentTargetStats, expectedTargetStats)) {
-                        throw invalidPathError('Restore target changed during restore')
-                    }
-                }
                 if (!stagedPath || !stagedStats || !stagingParentIdentity) {
                     throw new Error('Restore staging state is unavailable')
                 }
-                const overwriting = targetExists && conflict === 'overwrite'
-                if (overwriting) {
-                    if (!expectedTargetStats) throw invalidPathError('Restore target changed during restore')
-                    await secureOverwriteFile(stagedPath, target, {
-                        targetDirectoryIdentity: publicationParent.identity,
-                        sourceFileIdentity: fileIdentityFromStats(stagedStats),
-                        targetFileIdentity: fileIdentityFromStats(expectedTargetStats),
-                        size: entry.size,
-                        mode: entry.mode,
-                    })
-                    const finalTargetStats = await lstat(target)
-                    if (!isSameFileIdentity(finalTargetStats, expectedTargetStats)) {
-                        throw invalidPathError('Restore target changed during restore')
-                    }
-                    await secureUnlink(stagedPath, stagingParentIdentity, fileIdentityFromStats(stagedStats))
-                    await syncStagingParentIfPresent(stagedPath)
-                } else {
-                    await secureRename(stagedPath, target, {
-                        sourceDirectoryIdentity: stagingParentIdentity,
-                        targetDirectoryIdentity: publicationParent.identity,
-                        sourceFileIdentity: fileIdentityFromStats(stagedStats),
-                    })
-                }
+                await secureRename(stagedPath, target, {
+                    sourceDirectoryIdentity: stagingParentIdentity,
+                    targetDirectoryIdentity: publicationParent.identity,
+                    sourceFileIdentity: fileIdentityFromStats(stagedStats),
+                })
                 await clearEntryStagingFile(root, entry, stagedPath)
                 await syncParentDirectory(target)
                 await removeEntryUnlocked(root, entry, protectedRoot)

@@ -35,7 +35,7 @@ describe('RecycleBinDialog', () => {
         window.sessionStorage.clear()
     })
 
-    it('lists entries, previews content, and offers all restore conflict choices', async () => {
+    it('lists entries, previews content, and offers safe restore conflict choices', async () => {
         let currentEntries = [entry]
         const listRecycleBin = vi.fn(async () => ({
             success: true,
@@ -65,6 +65,7 @@ describe('RecycleBinDialog', () => {
         renderDialog({ listRecycleBin, restoreRecycleBinEntry, readRecycleBinEntry }, onChanged)
 
         expect(await screen.findByText('notes.md')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Overwrite existing file' })).not.toBeInTheDocument()
         expect(screen.getByRole('heading', { name: 'HAPI Recycle Bin' })).toHaveClass('text-center')
         expect(screen.queryByText('Deleted files are kept locally for up to 14 days.')).not.toBeInTheDocument()
         const actionRow = screen.getByRole('button', { name: 'Preview' }).parentElement

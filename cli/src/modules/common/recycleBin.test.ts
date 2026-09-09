@@ -26,14 +26,6 @@ const recycleBinIoHarness = vi.hoisted(() => ({
         triggerAt: number
         seen: number
     } | undefined,
-    replaceRestoreTargetBeforePublish: undefined as {
-        path: string
-        replacementPath: string
-    } | undefined,
-    replaceRestoreTargetDuringSecurePublish: undefined as {
-        path: string
-        replacementPath: string
-    } | undefined,
 }))
 
 vi.mock('node:fs/promises', async () => {
@@ -94,13 +86,6 @@ vi.mock('node:fs/promises', async () => {
         }),
         open: vi.fn(async (...args: [string, string | number, number?]) => {
             const handle = await actual.open(...args)
-            const targetReplacement = recycleBinIoHarness.replaceRestoreTargetBeforePublish
-            if (targetReplacement && args[1] === 'wx' && args[0].includes('.hapi-restore-')) {
-                recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
-                await actual.writeFile(targetReplacement.replacementPath, 'concurrent target replacement')
-                await actual.rm(targetReplacement.path, { force: true })
-                await actual.rename(targetReplacement.replacementPath, targetReplacement.path)
-            }
             const isDestinationHandle = args[1] === 'wx'
             const isDirectoryHandle = typeof args[1] === 'number'
             if ((!isDestinationHandle || (!recycleBinIoHarness.shortWrite
@@ -171,17 +156,6 @@ vi.mock('./secureFileOperations', async () => {
     return {
         ...actual,
         getSecureDirectoryIdentity: vi.fn(async (path: string) => path),
-        secureOverwriteFile: vi.fn(async (sourcePath: string, targetPath: string) => {
-            const targetReplacement = recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish
-            if (targetReplacement && targetPath === targetReplacement.path) {
-                recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
-                await fs.writeFile(targetReplacement.replacementPath, 'concurrent target replacement')
-                await fs.rm(targetReplacement.path, { force: true })
-                await fs.rename(targetReplacement.replacementPath, targetReplacement.path)
-                throw new Error('Secure file operation source changed during the operation')
-            }
-            return await fs.copyFile(sourcePath, targetPath)
-        }),
         secureRename: vi.fn(async (sourcePath: string, destinationPath: string) => {
             const sourceReplacement = recycleBinIoHarness.replaceSourceBeforeDetach
             if (sourceReplacement && sourcePath === sourceReplacement.path && destinationPath.includes('.hapi-source-')) {
@@ -190,14 +164,6 @@ vi.mock('./secureFileOperations', async () => {
                 await fs.rm(sourceReplacement.path, { force: true })
                 await fs.rename(sourceReplacement.replacementPath, sourceReplacement.path)
                 throw new Error('File changed before the recycle-bin operation completed')
-            }
-            const targetReplacement = recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish
-            if (targetReplacement && destinationPath === targetReplacement.path) {
-                recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
-                await fs.writeFile(targetReplacement.replacementPath, 'concurrent target replacement')
-                await fs.rm(targetReplacement.path, { force: true })
-                await fs.rename(targetReplacement.replacementPath, targetReplacement.path)
-                throw new Error('Secure file operation source changed during the operation')
             }
             return await fs.rename(sourcePath, destinationPath)
         }),
@@ -268,8 +234,6 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.rejectStagingParentSync = false
         recycleBinIoHarness.stagingParentPath = undefined
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
-        recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
-        recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -989,7 +953,7 @@ describe('RecycleBinManager', () => {
         }
     })
 
-    it('supports cancel, overwrite, and restore-with-new-name conflict choices', async () => {
+    it('supports cancel, fail, and restore-with-new-name conflict choices', async () => {
         try {
             const filePath = join(workspaceDir, 'conflict.txt')
             await writeFile(filePath, 'original')
@@ -1006,6 +970,14 @@ describe('RecycleBinManager', () => {
             expect(cancelled).toMatchObject({ success: true, cancelled: true, targetPath: filePath })
             expect((await manager.list(workspaceDir)).entries).toHaveLength(1)
 
+            const overwrite = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
+            expect(overwrite).toMatchObject({
+                success: false,
+                code: 'overwrite_unavailable',
+                targetPath: filePath,
+            })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('current')
+
             const newName = await manager.restore(moved.entry.id, workspaceDir, 'new-name')
             expect(newName.success).toBe(true)
             if (!newName.success || !newName.restoredPath) throw new Error('new-name restore did not return a path')
@@ -1018,7 +990,7 @@ describe('RecycleBinManager', () => {
         }
     })
 
-    it('overwrites an existing regular file only when explicitly requested', async () => {
+    it('does not overwrite an existing regular file', async () => {
         try {
             const filePath = join(workspaceDir, 'overwrite.txt')
             await writeFile(filePath, 'old')
@@ -1026,64 +998,11 @@ describe('RecycleBinManager', () => {
             const moved = await manager.moveFile(filePath, workspaceDir)
             if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
             await writeFile(filePath, 'new')
-            const legacyBackupPath = join(workspaceDir, `.${basename(filePath)}.${moved.entry.id}.hapi-restore-backup`)
-            await writeFile(legacyBackupPath, 'unrelated backup')
-
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
-            expect(restored).toEqual({ success: true, restoredPath: filePath })
-            await expect(readFile(filePath, 'utf8')).resolves.toBe('old')
-            await expect(readFile(legacyBackupPath, 'utf8')).resolves.toBe('unrelated backup')
-            expect((await readdir(workspaceDir)).some((name) => name.startsWith('.hapi-restore-'))).toBe(false)
-            expect((await manager.list(workspaceDir)).entries).toHaveLength(0)
+            expect(restored).toMatchObject({ success: false, code: 'overwrite_unavailable', targetPath: filePath })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('new')
+            expect((await manager.list(workspaceDir)).entries).toHaveLength(1)
         } finally {
-            await cleanup()
-        }
-    })
-
-    it('does not overwrite a target replaced during payload staging', async () => {
-        try {
-            const filePath = join(workspaceDir, 'overwrite-target-race.txt')
-            await writeFile(filePath, 'original contents')
-            const manager = createManager(homeDir)
-            const moved = await manager.moveFile(filePath, workspaceDir)
-            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
-            await writeFile(filePath, 'current contents')
-            const replacementPath = join(workspaceDir, 'overwrite-target-race-replacement.tmp')
-            recycleBinIoHarness.replaceRestoreTargetBeforePublish = { path: filePath, replacementPath }
-
-            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
-            expect(restored).toMatchObject({ success: false, error: 'Restore target changed during restore' })
-            await expect(readFile(filePath, 'utf8')).resolves.toBe('concurrent target replacement')
-            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
-                success: true,
-                content: Buffer.from('original contents').toString('base64'),
-            })
-        } finally {
-            recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
-            await cleanup()
-        }
-    })
-
-    it('does not overwrite a target replaced after final parent validation', async () => {
-        try {
-            const filePath = join(workspaceDir, 'overwrite-final-publish-race.txt')
-            await writeFile(filePath, 'original contents')
-            const manager = createManager(homeDir)
-            const moved = await manager.moveFile(filePath, workspaceDir)
-            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
-            await writeFile(filePath, 'current contents')
-            const replacementPath = join(workspaceDir, 'overwrite-final-publish-replacement.tmp')
-            recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = { path: filePath, replacementPath }
-
-            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
-            expect(restored).toMatchObject({ success: false, error: 'Secure file operation source changed during the operation' })
-            await expect(readFile(filePath, 'utf8')).resolves.toBe('concurrent target replacement')
-            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
-                success: true,
-                content: Buffer.from('original contents').toString('base64'),
-            })
-        } finally {
-            recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
             await cleanup()
         }
     })
@@ -1197,26 +1116,6 @@ describe('RecycleBinManager', () => {
         }
     })
 
-    it('keeps the existing target until a staged overwrite restore is ready', async () => {
-        try {
-            const filePath = join(workspaceDir, 'staged-overwrite.txt')
-            await writeFile(filePath, 'original')
-            const manager = createManager(homeDir)
-            const moved = await manager.moveFile(filePath, workspaceDir)
-            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
-            await writeFile(filePath, 'current')
-
-            recycleBinIoHarness.rejectSync = true
-            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
-            expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin sync failure' })
-            await expect(readFile(filePath, 'utf8')).resolves.toBe('current')
-            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [moved.entry] })
-            await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-restore-/))
-        } finally {
-            await cleanup()
-        }
-    })
-
     it('keeps a copied restore destination after source unlink when parent sync fails', async () => {
         try {
             const filePath = join(workspaceDir, 'source-sync-failure.txt')
@@ -1231,31 +1130,6 @@ describe('RecycleBinManager', () => {
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
             expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('restore destination')
-        } finally {
-            await cleanup()
-        }
-    })
-
-    it('keeps the recycle payload after a staged replacement is installed but root sync fails', async () => {
-        try {
-            const filePath = join(workspaceDir, 'replacement-sync-failure.txt')
-            await writeFile(filePath, 'original')
-            const manager = createManager(homeDir)
-            const moved = await manager.moveFile(filePath, workspaceDir)
-            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
-            await writeFile(filePath, 'current')
-
-            recycleBinIoHarness.directorySyncCalls = 0
-            recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 4
-            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
-            expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
-            await expect(readFile(filePath, 'utf8')).resolves.toBe('original')
-            recycleBinIoHarness.rejectDirectorySync = false
-            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
-                success: true,
-                content: Buffer.from('original').toString('base64'),
-            })
         } finally {
             await cleanup()
         }

@@ -1,11 +1,10 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
     fileIdentityFromStats,
     getSecureDirectoryIdentity,
-    secureOverwriteFile,
     secureRename,
     secureUnlink,
 } from './secureFileOperations'
@@ -63,44 +62,5 @@ describe('secureFileOperations', () => {
         } finally {
             await rm(otherDirectory, { recursive: true, force: true })
         }
-    })
-
-    secureIt('does not overwrite a target whose identity changed after authorization', async () => {
-        const sourcePath = join(root, 'source.txt')
-        const targetPath = join(root, 'target.txt')
-        await writeFile(sourcePath, 'new content')
-        await writeFile(targetPath, 'old content')
-        const directoryIdentity = await getSecureDirectoryIdentity(root)
-        const sourceIdentity = fileIdentityFromStats(await stat(sourcePath))
-        const targetIdentity = fileIdentityFromStats(await stat(targetPath))
-        await writeFile(targetPath, 'concurrent content')
-
-        await expect(secureOverwriteFile(sourcePath, targetPath, {
-            targetDirectoryIdentity: directoryIdentity,
-            sourceFileIdentity: sourceIdentity,
-            targetFileIdentity: targetIdentity,
-            size: Buffer.byteLength('new content'),
-            mode: (await stat(sourcePath)).mode,
-        })).rejects.toThrow('source changed')
-        await expect(readFile(targetPath, 'utf8')).resolves.toBe('concurrent content')
-    })
-
-    secureIt('overwrites through an already opened target identity', async () => {
-        const sourcePath = join(root, 'source.txt')
-        const targetPath = join(root, 'target.txt')
-        await writeFile(sourcePath, 'new content')
-        await writeFile(targetPath, 'old content')
-        const directoryIdentity = await getSecureDirectoryIdentity(root)
-        const sourceIdentity = fileIdentityFromStats(await stat(sourcePath))
-        const targetIdentity = fileIdentityFromStats(await stat(targetPath))
-
-        await secureOverwriteFile(sourcePath, targetPath, {
-            targetDirectoryIdentity: directoryIdentity,
-            sourceFileIdentity: sourceIdentity,
-            targetFileIdentity: targetIdentity,
-            size: Buffer.byteLength('new content'),
-            mode: (await stat(sourcePath)).mode,
-        })
-        await expect(readFile(targetPath, 'utf8')).resolves.toBe('new content')
     })
 })

@@ -412,9 +412,6 @@ export function RecycleBinDialog(props: RecycleBinDialogProps) {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="mt-4 grid gap-2">
-                        <Button type="button" variant="destructive" disabled={pendingAction !== null} onClick={() => conflictEntry && void handleRestore(conflictEntry, 'overwrite')}>
-                            {t('recycleBin.restoreConflictOverwrite')}
-                        </Button>
                         <Button type="button" variant="outline" disabled={pendingAction !== null} onClick={() => conflictEntry && void handleRestore(conflictEntry, 'new-name')}>
                             {t('recycleBin.restoreConflictNewName')}
                         </Button>
