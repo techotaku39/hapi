@@ -73,6 +73,7 @@ describe('Pi conversation-history hub integration', () => {
                 machineId: 'machine-1',
                 flavor: 'pi',
                 piSessionId: 'pi-source-native',
+                summary: { text: 'Pi source title', updatedAt: 100 },
                 capabilities: { conversationHistory: { forkCurrent: true, forkAtMessage: true, rewindToMessage: true } },
                 conversationHistoryPoints: { local1: true, local2: true },
                 conversationHistoryEntryIds: { local1: 'entry-1', local2: 'entry-2' },
@@ -150,6 +151,7 @@ describe('Pi conversation-history hub integration', () => {
             expect(capturedChildMetadata).toMatchObject({
                 flavor: 'pi',
                 piSessionId: 'pi-clone-native',
+                summary: { text: 'Fork: Pi source title', updatedAt: expect.any(Number) },
                 conversationHistoryEntryIds: { local1: 'entry-1', local2: 'entry-2', local3: 'entry-3' },
                 conversationHistoryPoints: { local1: true, local2: true, local3: true },
             })
@@ -162,6 +164,10 @@ describe('Pi conversation-history hub integration', () => {
             expect((await store.attachments.readForSessionAsync(copiedAttachmentId, 'default', result.sessionId))?.data)
                 .toEqual(Buffer.from('fork original'))
             expect(store.attachments.getForSession(sourceAttachment.id, 'default', source.id)).not.toBeNull()
+            expect(engine.getSession(result.sessionId)?.metadata?.summary).toMatchObject({
+                text: 'Fork: Pi source title',
+                updatedAt: expect.any(Number),
+            })
             expect(exactBinds).toEqual([[result.sessionId, 'pi-clone-native', 'piSessionId', true]])
             expect(spawnArgs[3]).toBeUndefined()
             expect(spawnArgs[9]).toBeUndefined()
