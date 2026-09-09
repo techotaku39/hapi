@@ -29,7 +29,7 @@ struct LastSeenStoreTests {
         store.initializeBaseline(scopeKey: "hub-a", sessions: [pending])
         store.markUnread(sessionId: "legacy", activityAt: 6_000)
         #expect(store.lastSeenAt("legacy") == 5_999)
-        store.markUnread(sessionId: "legacy", activityAt: 5_500)
+        store.markUnread(sessionId: "legacy", activityAt: 6_500)
         #expect(store.lastSeenAt("legacy") == 5_999)
 
         pending.lastAssistantMessageAt = 6_000
