@@ -112,11 +112,13 @@ describe('useHubScratchlist - initial fetch', () => {
 describe('useHubScratchlist - add', () => {
     it('optimistically inserts the new entry then reconciles with the hub-returned row', async () => {
         const sid = makeSid()
+        let hubEntries: HubEntry[] = []
         const api = createMockApi({
-            getScratchlist: async () => ({ entries: [] }),
-            createScratchlistEntry: async (_s, body) => ({
-                entry: { entryId: 'hub-id', text: body.text, createdAt: 5000, updatedAt: 5000 }
-            })
+            getScratchlist: async () => ({ entries: hubEntries }),
+            createScratchlistEntry: async (_s, body) => {
+                hubEntries = [{ entryId: 'hub-id', text: body.text, createdAt: 5000, updatedAt: 5000 }]
+                return { entry: hubEntries[0]! }
+            }
         })
         const { result } = renderHook(() => useHubScratchlist(sid, api), { wrapper: createWrapper() })
         await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -140,12 +142,13 @@ describe('useHubScratchlist - add', () => {
         })
         const sid = makeSid()
         const canonical: HubEntry = { entryId: 'hub-id', text: 'new note', createdAt: 5000, updatedAt: 5000 }
+        let hubEntries: HubEntry[] = []
         let releaseCreate: (value: { entry: HubEntry }) => void = () => undefined
         const createDeferred = new Promise<{ entry: HubEntry }>((resolve) => {
             releaseCreate = resolve
         })
         const api = createMockApi({
-            getScratchlist: async () => ({ entries: [] }),
+            getScratchlist: async () => ({ entries: hubEntries }),
             createScratchlistEntry: async () => createDeferred
         })
         const wrapper = ({ children }: { children: ReactNode }) => (
@@ -178,6 +181,7 @@ describe('useHubScratchlist - add', () => {
         })
 
         await act(async () => {
+            hubEntries = [canonical]
             releaseCreate({ entry: canonical })
             await addPromise
         })
@@ -186,6 +190,63 @@ describe('useHubScratchlist - add', () => {
             expect(result.current.entries.filter((e) => e.id === 'hub-id')).toHaveLength(1)
         })
         expect(result.current.entries).toHaveLength(1)
+    })
+
+    it('refetches after add success instead of applying an older response over newer SSE data', async () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false, gcTime: Infinity },
+                mutations: { retry: false },
+            },
+        })
+        const sid = makeSid()
+        let fetchCount = 0
+        let createStarted = false
+        let hubEntries: HubEntry[] = []
+        let resolveCreate!: (value: { entry: HubEntry }) => void
+        const createResponse = new Promise<{ entry: HubEntry }>((resolve) => {
+            resolveCreate = resolve
+        })
+        const olderResponse: HubEntry = {
+            entryId: 'hub-id', text: 'local note', createdAt: 5000, updatedAt: 5
+        }
+        const newer = [
+            { entryId: 'remote-id', text: 'remote first', createdAt: 4000, updatedAt: 7 },
+            { entryId: 'hub-id', text: 'edited elsewhere', createdAt: 5000, updatedAt: 8 },
+        ]
+        const api = createMockApi({
+            getScratchlist: async () => {
+                fetchCount += 1
+                return { entries: hubEntries }
+            },
+            createScratchlistEntry: async () => {
+                createStarted = true
+                return createResponse
+            },
+        })
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        )
+        const { result } = renderHook(() => useHubScratchlist(sid, api), { wrapper })
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        let addPromise: Promise<boolean> | undefined
+        await act(async () => {
+            addPromise = result.current.add('local note')
+        })
+        await waitFor(() => expect(createStarted).toBe(true))
+        await waitFor(() => expect(result.current.entries[0]?.text).toBe('local note'))
+
+        hubEntries = newer
+        queryClient.setQueryData(queryKeys.scratchlist(sid), { entries: newer })
+        resolveCreate({ entry: olderResponse })
+        await act(async () => {
+            await addPromise
+        })
+
+        await waitFor(() => expect(result.current.entries.map((entry) => entry.id)).toEqual(['remote-id', 'hub-id']))
+        expect(result.current.entries[1]?.text).toBe('edited elsewhere')
+        expect(fetchCount).toBe(2)
     })
 
     it('rolls back when the hub rejects the create', async () => {
