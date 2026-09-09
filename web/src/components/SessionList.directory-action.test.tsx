@@ -822,6 +822,42 @@ describe('SessionList collapse behavior', () => {
         expect(projectPanel?.getAttribute('data-open')).toBeNull()
     })
 
+    it('restores a selected group collapse after filtering excludes the selected session', async () => {
+        const sessions = [
+            makeSession({
+                id: 'session-selected',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Selected task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-match',
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Matching task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, 'session-selected'))
+
+        const projectHeader = screen.getByTitle('/work/hapi')
+        const projectPanel = projectHeader.nextElementSibling
+        await waitFor(() => {
+            expect(projectPanel?.getAttribute('data-open')).toBe('true')
+        })
+
+        fireEvent.click(projectHeader)
+        expect(projectPanel?.getAttribute('data-open')).toBeNull()
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const searchInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(searchInput, { target: { value: 'Matching' } })
+        expect(screen.queryByRole('button', { name: /Selected task/ })).toBeNull()
+        expect(screen.getByRole('button', { name: /Matching task/ })).toBeInTheDocument()
+
+        fireEvent.change(searchInput, { target: { value: '' } })
+        await waitFor(() => {
+            expect(projectPanel?.getAttribute('data-open')).toBeNull()
+        })
+    })
+
     it('toggles the running section with the keyboard', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [

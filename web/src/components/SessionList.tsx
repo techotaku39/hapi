@@ -1740,7 +1740,9 @@ export function SessionList(props: {
             // (e.g. it moved to the pinned "in progress" section). Drop the
             // guard so it auto-expands again when it transitions back into a
             // group later.
-            autoExpandedSelectedSessionKeyRef.current = null
+            if (!isFiltering) {
+                autoExpandedSelectedSessionKeyRef.current = null
+            }
             return
         }
 
@@ -1748,8 +1750,9 @@ export function SessionList(props: {
         if (autoExpandedSelectedSessionKeyRef.current === autoExpandKey) return
         autoExpandedSelectedSessionKeyRef.current = autoExpandKey
 
-        setCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
-    }, [selectedSessionId, groups])
+        const setOverrides = isFiltering ? setFilterCollapseOverrides : setCollapseOverrides
+        setOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
+    }, [selectedSessionId, groups, isFiltering])
 
     // Clean up stale collapse overrides
     useEffect(() => {
