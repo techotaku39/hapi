@@ -776,6 +776,23 @@ describe('conversation-start loading', () => {
 })
 
 describe('pending history navigation', () => {
+    it('starts prompt feedback before an active prepend settles', async () => {
+        let settleLoad!: (value: boolean) => void
+        const pendingLoad = new Promise<boolean>((resolve) => {
+            settleLoad = resolve
+        })
+        const feedbackStarted = vi.fn()
+        const action = vi.fn(() => true)
+
+        const navigation = runAfterPendingHistoryLoad(pendingLoad, action, feedbackStarted)
+        expect(feedbackStarted).toHaveBeenCalledOnce()
+        expect(action).not.toHaveBeenCalled()
+
+        settleLoad(true)
+        await expect(navigation).resolves.toBe(true)
+        expect(action).toHaveBeenCalledOnce()
+    })
+
     it('waits for the active prepend before scrolling to a loaded prompt', async () => {
         let settleLoad!: (value: boolean) => void
         const pendingLoad = new Promise<boolean>((resolve) => {

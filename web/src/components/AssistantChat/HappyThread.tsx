@@ -408,10 +408,12 @@ async function waitForViewportTop(
 
 export async function runAfterPendingHistoryLoad(
     pendingLoad: Promise<unknown> | null,
-    action: () => boolean
+    action: () => boolean | Promise<boolean>,
+    onStart?: () => void
 ): Promise<boolean> {
+    onStart?.()
     if (pendingLoad) await pendingLoad
-    return action()
+    return await action()
 }
 
 export async function loadOlderForNavigationWithRetry(
@@ -1851,9 +1853,21 @@ export function HappyThread(props: {
             // message anchor is already rendered. A direct scroll to the
             // replyToMessageId can race assistant-ui's tail restoration and
             // leave the viewport at its previous position.
-            if (pendingLoadPromiseRef.current) await pendingLoadPromiseRef.current
-            if (isCancelled()) return false
-            return await scrollToPromptForMessage(messageId, replyToMessageId, isCancelled)
+            return await runAfterPendingHistoryLoad(
+                pendingLoadPromiseRef.current,
+                () => {
+                    if (isCancelled()) return false
+                    return scrollToPromptForMessage(messageId, replyToMessageId, isCancelled)
+                },
+                () => {
+                    if (promptNavigationTimerRef.current !== null) {
+                        window.clearTimeout(promptNavigationTimerRef.current)
+                        promptNavigationTimerRef.current = null
+                    }
+                    setLoadingPromptMessageId(messageId)
+                    setPromptNavigationStatus('loading')
+                }
+            )
         } finally {
             if (!isCancelled()) {
                 historyNavigationRef.current = false
