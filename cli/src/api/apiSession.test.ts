@@ -976,6 +976,63 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('does not deliver a backfill row canceled while its live copy is deferred', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const backfill = deferred<{ data: { messages: unknown[] } }>()
+        axiosHarness.get.mockImplementation((url: string) => (
+            url.includes('/messages') ? backfill.promise : Promise.resolve({ data: Buffer.from('unused'), headers: {} })
+        ))
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'cursor-before-cancel',
+            seq: 1,
+            text: 'establish cursor',
+            sentFrom: 'webapp'
+        })
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledWith(
+            expect.stringContaining('/messages'),
+            expect.anything()
+        ))
+
+        const message = {
+            id: 'canceled-backfill-message',
+            localId: 'canceled-backfill-local-id',
+            seq: 2,
+            content: {
+                role: 'user' as const,
+                content: { type: 'text' as const, text: 'must stay canceled' },
+                meta: { sentFrom: 'webapp' as const }
+            }
+        }
+        socket.trigger('update', {
+            body: { t: 'new-message', message }
+        })
+        const ack = vi.fn()
+        socket.trigger('update', {
+            body: {
+                t: 'cancel-queued-message',
+                messageId: message.id,
+                localId: message.localId
+            }
+        }, ack)
+        expect(ack).toHaveBeenCalledWith({ removed: true })
+
+        backfill.resolve({ data: { messages: [message] } })
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        expect(onUserMessage.mock.calls.map(([received]) => received.content.text))
+            .toEqual(['establish cursor'])
+        client.close()
+    })
+
     it('retries transient attachment downloads before delivering the prompt', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()

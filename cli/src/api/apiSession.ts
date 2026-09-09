@@ -248,6 +248,7 @@ export class ApiSessionClient extends EventEmitter {
     private incomingMessagePending = 0
     private readonly materializingLocalIdCounts = new Map<string, number>()
     private readonly cancelledMaterializingLocalIds = new Set<string>()
+    private readonly cancelledIncomingMessageIds = new Set<string>()
     private cancelQueuedMessageCallback: ((localId: string) => boolean | 'in-flight' | 'indeterminate' | 'consumed') | null = null
     private retryQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
@@ -508,6 +509,9 @@ export class ApiSessionClient extends EventEmitter {
                             consumed: result === 'consumed'
                         })
                     } else {
+                        if (removed && data.body.messageId) {
+                            this.cancelledIncomingMessageIds.add(data.body.messageId)
+                        }
                         ack?.({ removed })
                     }
                     return
@@ -929,6 +933,9 @@ export class ApiSessionClient extends EventEmitter {
         if (this.isClosed()) return
         const accepted = this.incomingFilter.accept({ id: message.id, seq: message.seq })
         if (!force && !accepted) {
+            return
+        }
+        if (!force && message.id && this.cancelledIncomingMessageIds.has(message.id)) {
             return
         }
         if (userMessage) {
@@ -1724,6 +1731,7 @@ export class ApiSessionClient extends EventEmitter {
         this.pendingOutboundEvents.length = 0
         this.materializingLocalIdCounts.clear()
         this.cancelledMaterializingLocalIds.clear()
+        this.cancelledIncomingMessageIds.clear()
         void this.attachmentMaterializer.close()
         this.rpcHandlerManager.onSocketDisconnect()
         this.terminalManager.closeAll()
