@@ -126,9 +126,9 @@ describe('assistant prompt lookup', () => {
         const viewport = document.createElement('div')
         viewport.innerHTML = `
             <div class="happy-thread-messages">
-                <div id="hapi-message-user-text:first" data-hapi-message-role="user"></div>
+                <div id="hapi-message-user-text:first" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
                 <div id="hapi-message-agent-text:first-answer"></div>
-                <div id="hapi-message-user-text:second" data-hapi-message-role="user"></div>
+                <div id="hapi-message-user-text:second" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
                 <div id="hapi-message-agent-text:second-answer"></div>
             </div>
         `
@@ -152,7 +152,7 @@ describe('assistant prompt lookup', () => {
         const viewport = document.createElement('div')
         viewport.innerHTML = `
             <div class="happy-thread-messages">
-                <div id="hapi-message-cli-output:command" data-hapi-message-role="user"></div>
+                <div id="hapi-message-cli-output:command" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
                 <div id="hapi-message-cli-output:result"></div>
             </div>
         `
@@ -165,7 +165,7 @@ describe('assistant prompt lookup', () => {
         const viewport = document.createElement('div')
         viewport.innerHTML = `
             <div class="happy-thread-messages">
-                <div id="hapi-message-user-text:prompt" data-hapi-message-role="user"></div>
+                <div id="hapi-message-user-text:prompt" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
                 <div id="hapi-message-agent-text:answer"></div>
                 <div id="hapi-message-user-text:queued" data-hapi-message-role="user"></div>
             </div>
@@ -179,12 +179,28 @@ describe('assistant prompt lookup', () => {
         )?.id).toBe('hapi-message-user-text:prompt')
     })
 
+    it('ignores queued user rows when the stable response target is unavailable', () => {
+        const viewport = document.createElement('div')
+        viewport.innerHTML = `
+            <div class="happy-thread-messages">
+                <div id="hapi-message-agent-text:answer"></div>
+                <div id="hapi-message-user-text:queued" data-hapi-message-role="user"></div>
+            </div>
+        `
+
+        expect(findPromptTarget(
+            viewport,
+            'agent-text:answer',
+            { current: false, nextAnchorId: null }
+        )).toBeNull()
+    })
+
     it('bounds prompt lookup when prepending re-keys the selected assistant card', () => {
         const viewport = document.createElement('div')
         viewport.innerHTML = `
             <div class="happy-thread-messages">
                 <div id="hapi-message-agent-text:answer"></div>
-                <div id="hapi-message-user-text:later" data-hapi-message-role="user"></div>
+                <div id="hapi-message-user-text:later" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
                 <div id="hapi-message-agent-text:later-answer"></div>
             </div>
         `
@@ -195,10 +211,10 @@ describe('assistant prompt lookup', () => {
 
         viewport.innerHTML = `
             <div class="happy-thread-messages">
-                <div id="hapi-message-user-text:older" data-hapi-message-role="user"></div>
-                <div id="hapi-message-user-text:prompt" data-hapi-message-role="user"></div>
+                <div id="hapi-message-user-text:older" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
+                <div id="hapi-message-user-text:prompt" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
                 <div id="hapi-message-agent-text:older-answer"></div>
-                <div id="hapi-message-user-text:later" data-hapi-message-role="user"></div>
+                <div id="hapi-message-user-text:later" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
                 <div id="hapi-message-agent-text:later-answer"></div>
             </div>
         `

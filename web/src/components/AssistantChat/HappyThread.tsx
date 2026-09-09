@@ -311,7 +311,7 @@ export function findPreviousUserMessage(
     const messageIndex = messages.findIndex((message) => message.id === messageAnchorId)
     if (messageIndex < 0) return null
     for (let index = messageIndex - 1; index >= 0; index -= 1) {
-        if (messages[index].dataset.hapiMessageRole === 'user') {
+        if (messages[index].dataset.hapiTurnInput === 'true') {
             return messages[index]
         }
     }
@@ -328,7 +328,7 @@ export function findPromptTarget(
         const replyTargetAnchorId = getConversationMessageAnchorId(replyToMessageId)
         const replyTarget = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
             .find((message) => message.id === replyTargetAnchorId)
-        if (replyTarget?.dataset.hapiMessageRole === 'user') return replyTarget
+        if (replyTarget?.dataset.hapiTurnInput === 'true') return replyTarget
     }
 
     const assistantAnchorId = getConversationMessageAnchorId(messageId)
@@ -351,12 +351,12 @@ export function findPromptTarget(
         : messages.length
     if (boundaryIndex >= 0) {
         for (let index = boundaryIndex - 1; index >= 0; index -= 1) {
-            if (messages[index].dataset.hapiMessageRole === 'user') return messages[index]
+            if (messages[index].dataset.hapiTurnInput === 'true') return messages[index]
         }
         return null
     }
 
-    return messages.filter((message) => message.dataset.hapiMessageRole === 'user').at(-1) ?? null
+    return messages.filter((message) => message.dataset.hapiTurnInput === 'true').at(-1) ?? null
 }
 
 async function findPreviousUserMessageAfterRender(
