@@ -333,6 +333,7 @@ describe('responsive settings pages', () => {
         renderPage(<SettingsAboutPage />)
         const latestReleaseNote = getVisibleReleaseNotes(__APP_VERSION__, RELEASE_NOTES)[0]
         const latestReleaseChanges = latestReleaseNote.groups.flatMap((group) => group.changes)
+        const releaseKindLabels = { feature: 'Added', fix: 'Fixed', note: 'Note' } as const
         expect(screen.queryByText('Companion')).not.toBeInTheDocument()
         expect(screen.getByText('App Version')).toBeInTheDocument()
         expect(screen.getByText(String(__APP_VERSION__))).toBeInTheDocument()
@@ -346,9 +347,10 @@ describe('responsive settings pages', () => {
         expect(latestReleaseElement?.textContent).toContain(latestReleaseNote.summary.en)
         expect(within(latestReleaseElement as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
         expect(within(latestReleaseElement as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
-        expect(within(latestReleaseElement as HTMLElement).getAllByText('Added', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'feature').length)
-        expect(within(latestReleaseElement as HTMLElement).getAllByText('Fixed', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'fix').length)
-        expect(within(latestReleaseElement as HTMLElement).getAllByText('Added', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
+        for (const kind of ['feature', 'fix', 'note'] as const) {
+            expect(within(latestReleaseElement as HTMLElement).queryAllByText(releaseKindLabels[kind], { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === kind).length)
+        }
+        expect(within(latestReleaseElement as HTMLElement).getAllByText(releaseKindLabels[latestReleaseChanges[0].kind], { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
         expect(screen.getByRole('link', { name: `Open release page for v${latestReleaseNote.version}` })).toHaveAttribute('href', latestReleaseNote.url)
         expect(screen.getByRole('link', { name: `Open release page for v${latestReleaseNote.version}` })).toHaveAttribute('rel', 'noopener noreferrer')
         expect(screen.queryByText('View full release notes')).not.toBeInTheDocument()
@@ -360,6 +362,7 @@ describe('responsive settings pages', () => {
         renderPage(<SettingsAboutPage />)
         const latestReleaseNote = getVisibleReleaseNotes(__APP_VERSION__, RELEASE_NOTES)[0]
         const latestReleaseChanges = latestReleaseNote.groups.flatMap((group) => group.changes)
+        const releaseKindLabels = { feature: '新增', fix: '修复', note: '说明' } as const
         expect(screen.getByText('更新公告')).toBeInTheDocument()
         expect(screen.getByText(latestReleaseNote.groups[0].changes[0].text['zh-CN'])).toBeInTheDocument()
         const latestReleaseElement = screen.getByRole('link', { name: `打开 v${latestReleaseNote.version} 发行页` }).closest('details')
@@ -367,9 +370,10 @@ describe('responsive settings pages', () => {
         expect(latestReleaseElement?.textContent).toContain(latestReleaseNote.summary['zh-CN'])
         expect(within(latestReleaseElement as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
         expect(within(latestReleaseElement as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
-        expect(within(latestReleaseElement as HTMLElement).getAllByText('新增', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'feature').length)
-        expect(within(latestReleaseElement as HTMLElement).getAllByText('修复', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'fix').length)
-        expect(within(latestReleaseElement as HTMLElement).getAllByText('新增', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
+        for (const kind of ['feature', 'fix', 'note'] as const) {
+            expect(within(latestReleaseElement as HTMLElement).queryAllByText(releaseKindLabels[kind], { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === kind).length)
+        }
+        expect(within(latestReleaseElement as HTMLElement).getAllByText(releaseKindLabels[latestReleaseChanges[0].kind], { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
         expect(screen.getByRole('link', { name: `打开 v${latestReleaseNote.version} 发行页` })).toBeInTheDocument()
         expect(screen.queryByText('查看完整发行说明')).not.toBeInTheDocument()
     })

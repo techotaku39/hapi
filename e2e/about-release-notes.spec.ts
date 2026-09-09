@@ -5,6 +5,12 @@ import { getVisibleReleaseNotes, RELEASE_NOTES } from '../web/src/lib/releaseNot
 const fixture = '/e2e-fixtures/about-fixture.html'
 const visibleReleaseNotes = getVisibleReleaseNotes(APP_VERSION, RELEASE_NOTES)
 const latestRelease = visibleReleaseNotes[0]
+const latestReleaseChanges = latestRelease.groups.flatMap((group) => group.changes)
+const releaseKindLabels = {
+    feature: { en: 'Added', 'zh-CN': '新增' },
+    fix: { en: 'Fixed', 'zh-CN': '修复' },
+    note: { en: 'Note', 'zh-CN': '说明' },
+} as const
 
 test('renders localized release announcements on the mobile About page', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -23,7 +29,7 @@ test('renders localized release announcements on the mobile About page', async (
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(releaseSummary.getByText('🌟', { exact: true })).toBeVisible()
     await expect(page.getByText(latestRelease.groups[0].changes[0].text.en)).toBeVisible()
-    await expect(page.locator('details').first().getByText('Added', { exact: true }).first()).toBeVisible()
+    await expect(page.locator('details').first().getByText(releaseKindLabels[latestReleaseChanges[0].kind].en, { exact: true }).first()).toBeVisible()
     await expect(page.locator(`time[datetime="${latestRelease.date}"]`)).toBeVisible()
     await expect(page.getByRole('link', { name: `Open release page for v${latestRelease.version}` })).toHaveAttribute('href', latestRelease.url)
     await expect(page.getByText('View full release notes', { exact: true })).toHaveCount(0)
@@ -42,7 +48,7 @@ test('renders localized release announcements on the mobile About page', async (
     await expect(page.locator('details')).toHaveCount(visibleReleaseNotes.length)
     await expect(page.locator('details').first().locator('p').first()).toContainText(latestRelease.summary['zh-CN'])
     await expect(page.getByText(latestRelease.groups[0].changes[0].text['zh-CN'])).toBeVisible()
-    await expect(page.locator('details').first().getByText('新增', { exact: true }).first()).toBeVisible()
+    await expect(page.locator('details').first().getByText(releaseKindLabels[latestReleaseChanges[0].kind]['zh-CN'], { exact: true }).first()).toBeVisible()
     await expect(page.getByRole('link', { name: `打开 v${latestRelease.version} 发行页` })).toBeVisible()
     await expect(page.getByText('查看完整发行说明', { exact: true })).toHaveCount(0)
 })
