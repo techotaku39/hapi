@@ -171,6 +171,17 @@ vi.mock('./secureFileOperations', async () => {
     return {
         ...actual,
         getSecureDirectoryIdentity: vi.fn(async (path: string) => path),
+        secureOverwriteFile: vi.fn(async (sourcePath: string, targetPath: string) => {
+            const targetReplacement = recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish
+            if (targetReplacement && targetPath === targetReplacement.path) {
+                recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
+                await fs.writeFile(targetReplacement.replacementPath, 'concurrent target replacement')
+                await fs.rm(targetReplacement.path, { force: true })
+                await fs.rename(targetReplacement.replacementPath, targetReplacement.path)
+                throw new Error('Secure file operation source changed during the operation')
+            }
+            return await fs.copyFile(sourcePath, targetPath)
+        }),
         secureRename: vi.fn(async (sourcePath: string, destinationPath: string) => {
             const sourceReplacement = recycleBinIoHarness.replaceSourceBeforeDetach
             if (sourceReplacement && sourcePath === sourceReplacement.path && destinationPath.includes('.hapi-source-')) {
@@ -1022,7 +1033,7 @@ describe('RecycleBinManager', () => {
             expect(restored).toEqual({ success: true, restoredPath: filePath })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('old')
             await expect(readFile(legacyBackupPath, 'utf8')).resolves.toBe('unrelated backup')
-            await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-restore-/))
+            expect((await readdir(workspaceDir)).some((name) => name.startsWith('.hapi-restore-'))).toBe(false)
             expect((await manager.list(workspaceDir)).entries).toHaveLength(0)
         } finally {
             await cleanup()

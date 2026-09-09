@@ -15,8 +15,14 @@ export type SecureRenameOptions = {
     sourceDirectoryIdentity: string
     targetDirectoryIdentity: string
     sourceFileIdentity?: FileIdentity
-    targetFileIdentity?: FileIdentity
-    replace: boolean
+}
+
+export type SecureOverwriteOptions = {
+    targetDirectoryIdentity: string
+    sourceFileIdentity: FileIdentity
+    targetFileIdentity: FileIdentity
+    size: number
+    mode: number
 }
 
 const IS_WINDOWS = process.platform === 'win32'
@@ -228,12 +234,12 @@ async function openWindowsFile(path: string, expectedIdentity?: FileIdentity): P
     }
 }
 
-async function createWindowsRenameInformation(targetName: string, targetDirectoryHandle: number, replace: boolean): Promise<{ buffer: Buffer; pointer: number }> {
+async function createWindowsRenameInformation(targetName: string, targetDirectoryHandle: number): Promise<{ buffer: Buffer; pointer: number }> {
     const fileName = Buffer.from(targetName, 'utf16le')
     const pointerSize = process.arch === 'ia32' ? 4 : 8
     const fileNameOffset = pointerSize === 4 ? 12 : 20
     const buffer = Buffer.alloc(fileNameOffset + fileName.length)
-    buffer.writeUInt8(replace ? 1 : 0, 0)
+    buffer.writeUInt8(0, 0)
     if (pointerSize === 4) buffer.writeUInt32LE(targetDirectoryHandle, 4)
     else buffer.writeBigUInt64LE(BigInt(targetDirectoryHandle), 8)
     buffer.writeUInt32LE(fileName.length, pointerSize === 4 ? 8 : 16)
@@ -247,7 +253,6 @@ async function secureRenameWindows(
     targetName: string,
     targetDirectory: WindowsDirectory,
     sourceIdentity: FileIdentity | undefined,
-    replace: boolean,
 ): Promise<void> {
     // SetFileInformationByHandle does not reliably honor RootDirectory for a
     // relative rename on supported Windows filesystems. NtSetInformationFile
@@ -255,7 +260,7 @@ async function secureRenameWindows(
     // directory-handle-relative operation.
     const source = await openWindowsFile(sourcePath, sourceIdentity)
     try {
-        const { buffer, pointer } = await createWindowsRenameInformation(targetName, targetDirectory.handle, replace)
+        const { buffer, pointer } = await createWindowsRenameInformation(targetName, targetDirectory.handle)
         void buffer
         const ioStatusBlock = Buffer.alloc(process.arch === 'ia32' ? 8 : 16)
         const status = source.symbols.NtSetInformationFile(source.handle, await bufferPointer(ioStatusBlock), pointer, buffer.length, 10)
@@ -330,19 +335,13 @@ export async function secureRename(
     try {
         targetHandle = await openSecureDirectory(targetDirectory, options.targetDirectoryIdentity)
         await assertFileIdentity(sourcePath, options.sourceFileIdentity)
-        if (options.replace) await assertFileIdentity(targetPath, options.targetFileIdentity)
         if (IS_WINDOWS) {
-            await secureRenameWindows(sourcePath, targetName, targetHandle as WindowsDirectory, options.sourceFileIdentity, options.replace)
+            await secureRenameWindows(sourcePath, targetName, targetHandle as WindowsDirectory, options.sourceFileIdentity)
             return
         }
         const symbols = await getCachedPosixSymbols()
         const sourcePosix = sourceHandle as PosixDirectory
         const targetPosix = targetHandle as PosixDirectory
-        if (options.replace) {
-            const result = symbols.renameat(sourcePosix.handle.fd, sourceName, targetPosix.handle.fd, targetName)
-            if (result !== 0) throw new Error(`renameat failed with errno ${-result}`)
-            return
-        }
         const linkResult = symbols.linkat(sourcePosix.handle.fd, sourceName, targetPosix.handle.fd, targetName, 0)
         if (linkResult !== 0) throw new Error(`linkat failed with errno ${-linkResult}`)
         const unlinkResult = symbols.unlinkat(sourcePosix.handle.fd, sourceName, 0)
@@ -368,6 +367,57 @@ export async function secureUnlink(path: string, directoryIdentity: string, file
         if (result !== 0) throw new Error(`unlinkat failed with errno ${-result}`)
     } finally {
         await closeSecureDirectory(directory)
+    }
+}
+
+export async function secureOverwriteFile(
+    sourcePath: string,
+    targetPath: string,
+    options: SecureOverwriteOptions,
+): Promise<void> {
+    const targetDirectory = await openSecureDirectory(dirname(targetPath), options.targetDirectoryIdentity)
+    const sourceFlags = IS_WINDOWS ? 'r' : constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+    const targetFlags = IS_WINDOWS ? 'r+' : constants.O_RDWR | (constants.O_NOFOLLOW ?? 0)
+    const sourceHandle = await open(sourcePath, sourceFlags)
+    let targetHandle: FileHandle | null = null
+    try {
+        const sourceStats = await sourceHandle.stat()
+        await assertFileIdentity(sourcePath, options.sourceFileIdentity)
+        if (!sourceStats.isFile() || sourceStats.size !== options.size) {
+            throw new Error('Secure overwrite source changed during the operation')
+        }
+        targetHandle = await open(targetPath, targetFlags)
+        const targetStats = await targetHandle.stat()
+        await assertFileIdentity(targetPath, options.targetFileIdentity)
+        if (!targetStats.isFile() || identityKey(identityFromStats(targetStats)) !== identityKey(options.targetFileIdentity)) {
+            throw new Error('Secure overwrite target changed during the operation')
+        }
+
+        const buffer = Buffer.allocUnsafe(1024 * 1024)
+        let offset = 0
+        while (offset < sourceStats.size) {
+            const readResult = await sourceHandle.read(buffer, 0, Math.min(buffer.length, sourceStats.size - offset), offset)
+            if (readResult.bytesRead === 0) throw new Error('Secure overwrite source changed during the operation')
+            let written = 0
+            while (written < readResult.bytesRead) {
+                const writeResult = await targetHandle.write(
+                    buffer,
+                    written,
+                    readResult.bytesRead - written,
+                    offset + written,
+                )
+                if (writeResult.bytesWritten === 0) throw new Error('Secure overwrite target write failed')
+                written += writeResult.bytesWritten
+            }
+            offset += written
+        }
+        await targetHandle.truncate(sourceStats.size)
+        await targetHandle.chmod(options.mode & 0o7777)
+        await targetHandle.sync()
+    } finally {
+        if (targetHandle) await targetHandle.close()
+        await sourceHandle.close()
+        await closeSecureDirectory(targetDirectory)
     }
 }
 
