@@ -473,6 +473,10 @@ class SessionStore(
         val replyAt = (patch.lastAssistantMessageAt as? OptionalField.Present)?.value ?: return
         val currentSummary = _sessions.value.firstOrNull { it.id == sessionId }
         val currentDetail = _details.value[sessionId]
+        if (currentSummary == null && currentDetail == null) {
+            onLiveReplyDuringBackfill?.invoke(sessionId, replyAt)
+            return
+        }
         if (
             currentSummary?.assistantReplyClockBackfilled != false
             && currentDetail?.assistantReplyClockBackfilled != false

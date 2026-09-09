@@ -411,6 +411,53 @@ describe('reply-clock full-record cache ordering', () => {
         expect(getUnreadSessionCount([summary!])).toBe(1)
         unmount()
     })
+
+    it('preserves a live reply that arrives before initial list hydration', () => {
+        const sessionId = 'legacy-startup-live-reply'
+        window.localStorage.removeItem('hapi.sessionLastSeen.v2')
+        window.localStorage.removeItem('hapi.sessionManualUnread.v2')
+        const { queryClient, unmount } = renderUseSSE()
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId,
+                namespace: 'default',
+                data: {
+                    lastAssistantMessageAt: 6_000,
+                    lastAssistantMessageVersion: 11
+                }
+            })
+        })
+        expect(getSessionLastSeenAt(sessionId)).toBe(5_999)
+
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSummary({
+                id: sessionId,
+                lastAssistantMessageAt: 6_000,
+                lastAssistantMessageVersion: 11,
+                assistantReplyClockBackfilled: false
+            })]
+        })
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId,
+                namespace: 'default',
+                data: {
+                    lastAssistantMessageAt: 6_000,
+                    lastAssistantMessageVersion: 12,
+                    assistantReplyClockBackfilled: true
+                }
+            })
+        })
+
+        const summary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]
+        expect(summary?.assistantReplyClockBackfilled).toBe(true)
+        expect(getUnreadSessionCount([summary!])).toBe(1)
+        unmount()
+    })
 })
 
 describe('canApplyVersionedSummaryPatch (PR #897 review, HAPI Bot 2026-07-23 Major)', () => {

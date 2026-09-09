@@ -687,6 +687,13 @@ export function useSSE(options: {
             const currentSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
                 ?.sessions.find((session) => session.id === sessionId)
             const currentDetail = queryClient.getQueryData<SessionResponse>(queryKeys.session(sessionId))?.session
+            if (currentSummary === undefined && currentDetail === undefined) {
+                // The first live reply can arrive before the initial list or
+                // detail hydration. Preserve it so a later incomplete
+                // baseline cannot seed that reply as already seen.
+                markSessionUnread(sessionId, patch.lastAssistantMessageAt)
+                return
+            }
             if (
                 currentSummary?.assistantReplyClockBackfilled !== false
                 && currentDetail?.assistantReplyClockBackfilled !== false

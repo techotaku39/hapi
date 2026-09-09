@@ -327,6 +327,10 @@ public final class SessionListStore: SessionListStoring {
               let replyAt = field.wireValue else { return }
         let currentSummary = sessions.first { $0.id == sessionId }
         let currentDetail = details[sessionId]
+        if currentSummary == nil, currentDetail == nil {
+            onLiveReplyDuringBackfill?(sessionId, replyAt)
+            return
+        }
         guard currentSummary?.assistantReplyClockBackfilled == false
                 || currentDetail?.assistantReplyClockBackfilled == false else { return }
 
