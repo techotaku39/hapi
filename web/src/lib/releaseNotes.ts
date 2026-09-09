@@ -68,6 +68,38 @@ function releaseNote(
  * guide and reusable authoring prompt.
  */
 export const RELEASE_NOTES = [
+    releaseNote('0.29.1', '2026-09-09',
+        'Add Cursor Steer, DeepSeek Harness, remote Codex MCP and Luna fallback, richer session controls, and attachment/export tools; improve usage visibility, streaming, rewind, and cross-platform reliability.',
+        '增加 Cursor Steer、DeepSeek Harness、远程 Codex MCP 与 Luna 回退、更丰富的会话控制及附件/导出工具；改进用量展示、流式处理、rewind 和跨平台可靠性。',
+        [
+            group('Agent controls and model options', 'Agent 控制与模型选项', [
+                change('feature', 'Steer an active Cursor turn through a concurrent ACP prompt without canceling the turn in progress.', '通过并发 ACP prompt 将消息插入活动 Cursor 回合，无需取消正在进行的回合。'),
+                change('feature', 'Add the remote-only DeepSeek Harness Agent through ACP, with its server-owned model and permission policy kept explicit.', '通过 ACP 增加仅支持远程的 DeepSeek Harness Agent，并明确由其服务端管理模型和权限策略。'),
+                change('feature', 'Support user-configured MCP servers in remote Codex sessions and add a backend-authorized Luna Reserve fallback.', '远程 Codex 会话支持用户配置的 MCP 服务器，并增加由后端授权的 Luna Reserve 回退。'),
+                change('feature', 'Let Claude choose a permission mode when creating a session and let Pi auto-title sessions through the bundled HAPI extension.', '创建 Claude 会话时可选择权限模式，并通过内置 HAPI 扩展为 Pi 会话自动生成标题。'),
+            ]),
+            group('Session actions and composer', '会话操作与输入框', [
+                change('feature', 'Add explicit Mark as unread and bulk mark-all-read actions, plus an opt-in PWA taskbar unread badge.', '增加明确的“标记为未读”和“全部标记为已读”操作，并支持可选的 PWA 任务栏未读徽章。'),
+                change('feature', 'Add a scroll-to-bottom button, anchor the composer settings sheet to the clicked control, and reorder attachments with pointer, touch, or keyboard input.', '增加滚动到底部按钮；让输入框设置面板定位到被点击的控件；支持使用指针、触摸或键盘调整附件顺序。'),
+                change('feature', 'Make large conversation exports warning-only with explicit confirmation while retaining resource limits, and add word wrapping to file source previews.', '大对话导出改为先警告并要求明确确认，同时保留资源限制；文件源码预览支持换行。'),
+            ]),
+            group('Usage and conversation visibility', '用量与对话可见性', [
+                change('feature', 'Show authoritative Claude round usage metadata, including processed tokens, cache-read share, API-rate estimate, elapsed time, and internal turns.', '显示可信的 Claude 回合用量信息，包括处理 Token、缓存读取占比、API 费率估算、耗时和内部回合数。'),
+            ]),
+            group('Stream and transport reliability', '流式处理与传输稳定性', [
+                change('fix', 'Keep one stored message per OpenCode reasoning stream, stabilize streamed reasoning and text block IDs, and ignore late Codex app-server writes during disconnect.', '每个 OpenCode 思考流只保留一条存储消息；稳定流式思考和文本块 ID；断开连接时忽略迟到的 Codex app-server 写入。'),
+                change('fix', 'Preserve permission state when ACP tool input is missing, expose model-specific OpenCode reasoning options, and stop heartbeat replay from scanning session history.', 'ACP 工具缺少输入时仍保留权限状态；显示按模型区分的 OpenCode 思考选项；心跳重放不再扫描会话历史。'),
+            ]),
+            group('Session lifecycle and navigation', '会话生命周期与导航', [
+                change('fix', 'Fail closed on ambiguous Codex Rewind boundaries, preserve the visible chat window during rewind, and accept the first Claude fork-child prompt reliably.', 'Codex Rewind 边界不明确时安全拒绝；rewind 时保留可见聊天窗口；可靠接收 Claude Fork 子会话的首条提示。'),
+                change('fix', 'Keep forked session summaries, sidebar viewport, inactive-session notices, recent-path labels, and file-browser tab preferences consistent.', '保持 Fork 会话摘要、侧栏视口、非活动会话提示、最近路径标签和文件浏览器标签偏好一致。'),
+                change('fix', 'Clarify session-summary settings and preserve session state across pin updates and other navigation changes.', '明确会话摘要设置说明，并在置顶更新等导航变化中保留会话状态。'),
+            ]),
+            group('Platform and media fixes', '平台与媒体修复', [
+                change('fix', 'Unify message-action styling, preserve source extensions for generated-media downloads, and show Gemini 3.7 Flash in the Antigravity model list.', '统一消息操作按钮样式；生成媒体下载时保留源文件扩展名；在 Antigravity 模型列表中显示 Gemini 3.7 Flash。'),
+                change('fix', 'Improve Windows runner identity checks, macOS runner limits, Android status-bar behavior, iOS pairing and transcript scrolling, and APNs error handling.', '改进 Windows Runner 身份检查、macOS Runner 限制、Android 状态栏行为、iOS 配对与 transcript 滚动，以及 APNs 错误处理。'),
+            ]),
+        ]),
     releaseNote('0.29.0', '2026-08-19',
         'Codex now supports mid-turn steering, while Pi session controls follow model capabilities and compaction no longer leaves stale context usage on screen.',
         'Codex 现在支持回合中介入；Pi 会话控制会根据模型能力调整，压缩后也不再显示过期的上下文用量。',

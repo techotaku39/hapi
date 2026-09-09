@@ -4,7 +4,7 @@ import { RELEASE_NOTES } from './releaseNotes'
 describe('release notes catalog', () => {
     it('keeps every entry localized, linked, and newest-first', () => {
         expect(RELEASE_NOTES.length).toBeGreaterThan(0)
-        expect(RELEASE_NOTES.length).toBeGreaterThanOrEqual(74)
+        expect(RELEASE_NOTES.length).toBeGreaterThanOrEqual(75)
         expect(RELEASE_NOTES.some((release) => release.version === __APP_VERSION__)).toBe(true)
         expect(new Set(RELEASE_NOTES.map((release) => release.version)).size).toBe(RELEASE_NOTES.length)
 

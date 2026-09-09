@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import SettingsHubPage from './index'
@@ -11,7 +11,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setAppBadgeEnabled } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -21,6 +21,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setComposerEnterBehavior: vi.fn(),
     setCodexExplorationCollapsed: vi.fn(),
     setVoice: vi.fn(),
+    setAppBadgeEnabled: vi.fn(),
 }))
 
 const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false, sessionSummaryInChat: false })
@@ -83,6 +84,10 @@ vi.mock('@/hooks/useShowActiveSessionsOnly', () => ({
 
 vi.mock('@/hooks/usePinInProgressSessions', () => ({
     usePinInProgressSessions: () => ({ pinInProgressSessions: false, setPinInProgressSessions: vi.fn() }),
+}))
+
+vi.mock('@/hooks/useAppBadgePreference', () => ({
+    useAppBadgePreference: () => ({ appBadgeEnabled: false, setAppBadgeEnabled }),
 }))
 
 vi.mock('@/hooks/useSessionHeaderMetadata', () => ({
@@ -245,10 +250,36 @@ describe('responsive settings pages', () => {
         renderPage(<SettingsGeneralPage />)
         expect(screen.getByText('Companion')).toBeInTheDocument()
         expect(screen.getByText('Companion pairing')).toBeInTheDocument()
-        expect(await screen.findByRole('checkbox', { name: 'Ask agents to emit session status summary' })).toBeInTheDocument()
-        expect(screen.getByRole('checkbox', { name: 'Show session status summary in chat' })).toBeInTheDocument()
+        expect(await screen.findByRole('checkbox', { name: 'Emit status summaries' })).toBeInTheDocument()
+        expect(screen.getByRole('checkbox', { name: 'Show status summaries in chat' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
+    })
+
+    it('explains and keeps summary generation separate from chat display', async () => {
+        updateHubSettings.mockImplementation(async (patch: { sessionSummaryContract?: boolean; sessionSummaryInChat?: boolean }) => ({
+            sessionSummaryContract: patch.sessionSummaryContract ?? false,
+            sessionSummaryInChat: patch.sessionSummaryInChat ?? false,
+        }))
+
+        renderPage(<SettingsGeneralPage />)
+
+        expect(await screen.findByRole('heading', { name: 'Session status summaries' })).toBeInTheDocument()
+        expect(screen.getByText('Choose whether supported agents emit a machine-readable status summary and whether it appears in chat.')).toBeInTheDocument()
+        expect(await screen.findByRole('checkbox', { name: 'Emit status summaries' })).toBeInTheDocument()
+        expect(screen.getByText('Off by default. When enabled, supported agents are asked to add a trailing AGENT_NOTIFY_SUMMARY line after each turn for notifications and background work records. Applies to new/resumed sessions. (Supported: Claude, Codex, OpenCode, remote Grok; not yet supported: local Grok, Cursor)')).toBeInTheDocument()
+        expect(screen.queryByRole('heading', { name: 'Chat display', level: 3 })).not.toBeInTheDocument()
+        expect(screen.getByText('Only affects display in chat and copied content; it does not affect summary generation, notifications, or background work records. When on, a status row is shown; when off, it is hidden. Stored messages remain unchanged.')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Emit status summaries' }))
+        await waitFor(() => {
+            expect(updateHubSettings).toHaveBeenCalledWith({ sessionSummaryContract: true })
+        })
+
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Show status summaries in chat' }))
+        await waitFor(() => {
+            expect(updateHubSettings).toHaveBeenCalledWith({ sessionSummaryInChat: true })
+        })
     })
 
     it('renders compact display controls without dropdown popovers', () => {
@@ -258,6 +289,10 @@ describe('responsive settings pages', () => {
         expect(setColorTheme).toHaveBeenCalledWith('nord')
         expect(screen.getByRole('radio', { name: '120%' })).toBeInTheDocument()
         expect(screen.getByRole('spinbutton', { name: 'Sessions Before Folding' })).toHaveValue(8)
+        const appBadgeToggle = screen.getByRole('checkbox', { name: 'Taskbar unread badge' })
+        expect(appBadgeToggle).not.toBeChecked()
+        fireEvent.click(appBadgeToggle)
+        expect(setAppBadgeEnabled).toHaveBeenCalledWith(true)
         expect(screen.getByRole('checkbox', { name: 'Show field labels' })).toBeChecked()
         expect(screen.getByRole('checkbox', { name: 'Reasoning effort' })).toBeChecked()
         expect(screen.getByRole('checkbox', { name: 'Machine' })).toBeChecked()
@@ -301,36 +336,36 @@ describe('responsive settings pages', () => {
         expect(screen.getByText('Protocol Version')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
         expect(screen.getByText("What's New")).toBeInTheDocument()
-        expect(screen.getByText('v0.29.0')).toBeInTheDocument()
-        expect(screen.getByText('Deliver one queued message into an active Codex turn through app-server turn/steer without interrupting or waiting for the turn to finish.')).toBeInTheDocument()
-        const latestRelease = screen.getByRole('link', { name: 'Open release page for v0.29.0' }).closest('details')
+        expect(screen.getByText('v0.29.1')).toBeInTheDocument()
+        expect(screen.getByText('Steer an active Cursor turn through a concurrent ACP prompt without canceling the turn in progress.')).toBeInTheDocument()
+        const latestRelease = screen.getByRole('link', { name: 'Open release page for v0.29.1' }).closest('details')
         expect(latestRelease).not.toBeNull()
-        expect(latestRelease?.textContent).toContain('Codex now supports mid-turn steering, while Pi session controls follow model capabilities and compaction no longer leaves stale context usage on screen.')
+        expect(latestRelease?.textContent).toContain('Add Cursor Steer, DeepSeek Harness, remote Codex MCP and Luna fallback, richer session controls, and attachment/export tools; improve usage visibility, streaming, rewind, and cross-platform reliability.')
         expect(within(latestRelease as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
         expect(within(latestRelease as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
-        expect(within(latestRelease as HTMLElement).getAllByText('Added', { exact: true })).toHaveLength(3)
-        expect(within(latestRelease as HTMLElement).getAllByText('Fixed', { exact: true })).toHaveLength(2)
+        expect(within(latestRelease as HTMLElement).getAllByText('Added', { exact: true })).toHaveLength(8)
+        expect(within(latestRelease as HTMLElement).getAllByText('Fixed', { exact: true })).toHaveLength(7)
         expect(within(latestRelease as HTMLElement).getAllByText('Added', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
-        expect(screen.getByRole('link', { name: 'Open release page for v0.29.0' })).toHaveAttribute('href', 'https://github.com/tiann/hapi/releases/tag/v0.29.0')
-        expect(screen.getByRole('link', { name: 'Open release page for v0.29.0' })).toHaveAttribute('rel', 'noopener noreferrer')
+        expect(screen.getByRole('link', { name: 'Open release page for v0.29.1' })).toHaveAttribute('href', 'https://github.com/tiann/hapi/releases/tag/v0.29.1')
+        expect(screen.getByRole('link', { name: 'Open release page for v0.29.1' })).toHaveAttribute('rel', 'noopener noreferrer')
         expect(screen.queryByText('View full release notes')).not.toBeInTheDocument()
-        expect(document.querySelector('time[datetime="2026-08-19"]')).toBeInTheDocument()
+        expect(document.querySelector('time[datetime="2026-09-09"]')).toBeInTheDocument()
     })
 
     it('localizes release announcements with the selected language', () => {
         localStorage.setItem('hapi-lang', 'zh-CN')
         renderPage(<SettingsAboutPage />)
         expect(screen.getByText('更新公告')).toBeInTheDocument()
-        expect(screen.getByText('通过 app-server turn/steer 将一条队列消息插入当前 Codex 回合，无需中断或等待当前回合结束。')).toBeInTheDocument()
-        const latestRelease = screen.getByRole('link', { name: '打开 v0.29.0 发行页' }).closest('details')
+        expect(screen.getByText('通过并发 ACP prompt 将消息插入活动 Cursor 回合，无需取消正在进行的回合。')).toBeInTheDocument()
+        const latestRelease = screen.getByRole('link', { name: '打开 v0.29.1 发行页' }).closest('details')
         expect(latestRelease).not.toBeNull()
-        expect(latestRelease?.textContent).toContain('Codex 现在支持回合中介入；Pi 会话控制会根据模型能力调整，压缩后也不再显示过期的上下文用量。')
+        expect(latestRelease?.textContent).toContain('增加 Cursor Steer、DeepSeek Harness、远程 Codex MCP 与 Luna 回退、更丰富的会话控制及附件/导出工具；改进用量展示、流式处理、rewind 和跨平台可靠性。')
         expect(within(latestRelease as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
         expect(within(latestRelease as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
-        expect(within(latestRelease as HTMLElement).getAllByText('新增', { exact: true })).toHaveLength(3)
-        expect(within(latestRelease as HTMLElement).getAllByText('修复', { exact: true })).toHaveLength(2)
+        expect(within(latestRelease as HTMLElement).getAllByText('新增', { exact: true })).toHaveLength(8)
+        expect(within(latestRelease as HTMLElement).getAllByText('修复', { exact: true })).toHaveLength(7)
         expect(within(latestRelease as HTMLElement).getAllByText('新增', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
-        expect(screen.getByRole('link', { name: '打开 v0.29.0 发行页' })).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: '打开 v0.29.1 发行页' })).toBeInTheDocument()
         expect(screen.queryByText('查看完整发行说明')).not.toBeInTheDocument()
     })
 
