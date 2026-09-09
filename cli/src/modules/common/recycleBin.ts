@@ -1,15 +1,19 @@
 import { constants, type Stats } from 'node:fs'
 import {
+    fileIdentityFromStats,
+    getSecureDirectoryIdentity,
+    secureRename,
+    secureUnlink,
+} from './secureFileOperations'
+import {
     chmod,
     lstat,
-    link,
     mkdir,
     open,
     readdir,
     realpath,
     rename,
     rm,
-    unlink,
 } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
@@ -95,7 +99,10 @@ type ResolvedFile = {
 
 type ResolvedRestoreTarget = {
     path: string
-    parent: string
+    parent: {
+        path: string
+        identity: string
+    }
 }
 
 function hasGitMetadataSegment(path: string): boolean {
@@ -244,8 +251,9 @@ async function syncStagingParentIfPresent(path: string): Promise<void> {
     }
 }
 
-async function removeStagingFileDurably(path: string): Promise<void> {
-    await rm(path, { force: true })
+async function removeStagingFileDurably(path: string, stats: FileStats): Promise<void> {
+    const directoryIdentity = await getSecureDirectoryIdentity(dirname(path))
+    await secureUnlink(path, directoryIdentity, fileIdentityFromStats(stats))
     await syncStagingParentIfPresent(path)
 }
 
@@ -349,6 +357,8 @@ type RecycleBinCopyOptions = {
     stageId?: string
     /** Verify that the source path remains authorized immediately before detaching it. */
     beforeDetach?: () => Promise<void>
+    /** Identity of the source parent directory pinned before copying began. */
+    sourceDirectoryIdentity?: string
     /** Verify that a copy destination remains inside the authorized scope before creation. */
     beforeDestinationCreate?: () => Promise<void>
     /** Classify the persisted staging file for crash recovery. */
@@ -364,7 +374,7 @@ async function copyFileWithoutReplacing(
     destinationPath: string,
     expected: FileStats,
     options: RecycleBinCopyOptions = {},
-): Promise<void> {
+): Promise<FileStats> {
     const sourceHandle = await open(sourcePath, READ_FILE_FLAGS)
     let destinationCreated = false
     let sourceRemoved = false
@@ -419,19 +429,21 @@ async function copyFileWithoutReplacing(
             await options.onStagingFileCreated?.(detachedPath, openedStats, options.stagingFileKind ?? 'source')
             await options.beforeDetach?.()
             await assertFileUnchanged(sourcePath, openedStats)
-            await rename(sourcePath, detachedPath)
-            const detachedStats = await lstat(detachedPath)
-            if (!isSameFileStats(detachedStats, openedStats)) {
-                if (!(await pathExists(sourcePath))) {
-                    await rename(detachedPath, sourcePath)
-                    await syncParentDirectory(sourcePath)
-                }
-                throw new Error('File changed before the recycle-bin operation completed')
+            if (!options.sourceDirectoryIdentity) {
+                throw new Error('Secure source directory identity is required')
             }
+            await secureRename(sourcePath, detachedPath, {
+                sourceDirectoryIdentity: options.sourceDirectoryIdentity,
+                targetDirectoryIdentity: options.sourceDirectoryIdentity,
+                sourceFileIdentity: fileIdentityFromStats(openedStats),
+                replace: false,
+            })
             sourceRemoved = true
+            const detachedStats = await lstat(detachedPath)
+            if (!isSameFileStats(detachedStats, openedStats)) throw new Error('File changed before the recycle-bin operation completed')
             await options.onStagingFileCreated?.(detachedPath, detachedStats, options.stagingFileKind ?? 'source')
             try {
-                await unlink(detachedPath)
+                await secureUnlink(detachedPath, options.sourceDirectoryIdentity, fileIdentityFromStats(detachedStats))
             } catch (error) {
                 logger.debug('[RECYCLE BIN] Deferring detached-source cleanup', { detachedPath, error })
             }
@@ -450,6 +462,7 @@ async function copyFileWithoutReplacing(
     } finally {
         await sourceHandle.close()
     }
+    return await lstat(destinationPath)
 }
 
 type MoveFileOptions = RecycleBinCopyOptions
@@ -459,18 +472,25 @@ async function moveRegularFile(
     destinationPath: string,
     expected?: FileStats,
     options: MoveFileOptions = {},
-): Promise<void> {
+): Promise<FileStats> {
     const sourceStats = expected ?? await readRegularFileStats(sourcePath)
     await assertFileUnchanged(sourcePath, sourceStats)
     if (await pathExists(destinationPath)) {
         throw new Error('Recycle-bin operation destination already exists')
     }
 
+    const sourceDirectoryIdentity = options.unlinkSource === false
+        ? undefined
+        : await getSecureDirectoryIdentity(dirname(sourcePath))
+
     // Always copy the source into a new inode. A same-filesystem rename would
     // leave the recycle payload writable through descriptors opened before the
     // deletion, so subsequent writes could mutate the supposedly immutable
     // recovery snapshot.
-    await copyFileWithoutReplacing(sourcePath, destinationPath, sourceStats, options)
+    return await copyFileWithoutReplacing(sourcePath, destinationPath, sourceStats, {
+        ...options,
+        sourceDirectoryIdentity,
+    })
 }
 
 export function resolveRecycleBinRetentionDays(value: unknown): number {
@@ -654,6 +674,8 @@ async function resolveRestoreTarget(originalPath: string, root: string, protecte
         throw invalidPathError('Restore target is outside the authorized working directory')
     }
 
+    const parentIdentity = await getSecureDirectoryIdentity(canonicalParent)
+
     try {
         const existing = await lstat(target)
         if (existing.isSymbolicLink()) {
@@ -663,7 +685,7 @@ async function resolveRestoreTarget(originalPath: string, root: string, protecte
         if (!isNotFound(error)) throw error
     }
 
-    return { path: target, parent: canonicalParent }
+    return { path: target, parent: { path: canonicalParent, identity: parentIdentity } }
 }
 
 async function revalidateRestoreParent(
@@ -671,7 +693,7 @@ async function revalidateRestoreParent(
     expectedParent: string,
     scopeRoot: string,
     protectedRoot?: string,
-): Promise<string> {
+): Promise<{ path: string; identity: string }> {
     let currentParent: string
     try {
         currentParent = await realpath(dirname(target))
@@ -689,7 +711,7 @@ async function revalidateRestoreParent(
     ) {
         throw invalidPathError('Restore target changed during restore')
     }
-    return currentParent
+    return { path: currentParent, identity: await getSecureDirectoryIdentity(currentParent) }
 }
 
 function getEntryDirectory(root: string, entryId: string): string {
@@ -812,7 +834,7 @@ async function reconcileEntryStagingFiles(
             }
             if (stagingFile.kind === 'restore') {
                 try {
-                    await removeStagingFileDurably(stagingFile.path)
+                    await removeStagingFileDurably(stagingFile.path, stats)
                     stagingFilesChanged = true
                 } catch (error) {
                     clean = false
@@ -834,7 +856,7 @@ async function reconcileEntryStagingFiles(
                 continue
             }
             try {
-                await removeStagingFileDurably(stagingFile.path)
+                await removeStagingFileDurably(stagingFile.path, stats)
                 stagingFilesChanged = true
             } catch (error) {
                 clean = false
@@ -1139,7 +1161,7 @@ export class RecycleBinManager {
             }
             const resolvedTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
             let target = resolvedTarget.path
-            let validatedParent = resolvedTarget.parent
+            let validatedParent = resolvedTarget.parent.path
             let targetExists = false
             let expectedTargetStats: FileStats | null = null
             try {
@@ -1178,15 +1200,19 @@ export class RecycleBinManager {
             }
             await assertPayloadIntegrity(entry, payloadPath)
 
-            validatedParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
+            const firstValidatedParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
+            validatedParent = firstValidatedParent.path
             target = join(validatedParent, basename(target))
 
             let stagedPath: string | null = null
             let stagedCreated = false
+            let stagedStats: FileStats | null = null
+            let stagingParentIdentity: string | null = null
             try {
                 const stagingParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
-                stagedPath = join(stagingParent, `.hapi-restore-${entry.id}-${randomUUID()}.tmp`)
-                await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
+                stagingParentIdentity = stagingParent.identity
+                stagedPath = join(stagingParent.path, `.hapi-restore-${entry.id}-${randomUUID()}.tmp`)
+                stagedStats = await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
                     stagingFileKind: 'restore',
@@ -1194,7 +1220,10 @@ export class RecycleBinManager {
                 })
                 stagedCreated = true
                 const publicationParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
-                if (normalizeForComparison(publicationParent) !== normalizeForComparison(stagingParent)) {
+                if (
+                    normalizeForComparison(publicationParent.path) !== normalizeForComparison(stagingParent.path)
+                    || publicationParent.identity !== stagingParentIdentity
+                ) {
                     throw invalidPathError('Restore target changed during restore')
                 }
                 if (targetExists && conflict === 'overwrite') {
@@ -1202,22 +1231,31 @@ export class RecycleBinManager {
                     if (!expectedTargetStats || !isSameFileStats(currentTargetStats, expectedTargetStats)) {
                         throw invalidPathError('Restore target changed during restore')
                     }
-                    await rename(stagedPath, target)
+                }
+                if (!stagedPath || !stagedStats || !stagingParentIdentity) {
+                    throw new Error('Restore staging state is unavailable')
+                }
+                await secureRename(stagedPath, target, {
+                    sourceDirectoryIdentity: stagingParentIdentity,
+                    targetDirectoryIdentity: publicationParent.identity,
+                    sourceFileIdentity: fileIdentityFromStats(stagedStats),
+                    targetFileIdentity: expectedTargetStats && targetExists && conflict === 'overwrite'
+                        ? fileIdentityFromStats(expectedTargetStats)
+                        : undefined,
+                    replace: targetExists && conflict === 'overwrite',
+                })
+                await clearEntryStagingFile(root, entry, stagedPath)
+                if (targetExists && conflict === 'overwrite') {
                     await syncParentDirectory(target)
                 } else {
-                    // Publish a complete staged file without replacing a
-                    // target that appeared after the conflict check.
-                    await link(stagedPath, target)
-                    await syncParentDirectory(target)
-                    await unlink(stagedPath)
                     await syncParentDirectory(target)
                 }
                 await removeEntryUnlocked(root, entry, protectedRoot)
                 await syncDirectory(root)
                 return { success: true, restoredPath: target }
             } catch (error) {
-                if (stagedCreated && stagedPath) {
-                    await rm(stagedPath, { force: true }).catch(() => {})
+                if (stagedCreated && stagedPath && stagedStats && stagingParentIdentity) {
+                    await secureUnlink(stagedPath, stagingParentIdentity, fileIdentityFromStats(stagedStats)).catch(() => {})
                 }
                 throw error
             }

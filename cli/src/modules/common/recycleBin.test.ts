@@ -30,6 +30,10 @@ const recycleBinIoHarness = vi.hoisted(() => ({
         path: string
         replacementPath: string
     } | undefined,
+    replaceRestoreTargetDuringSecurePublish: undefined as {
+        path: string
+        replacementPath: string
+    } | undefined,
 }))
 
 vi.mock('node:fs/promises', async () => {
@@ -161,6 +165,52 @@ vi.mock('node:fs/promises', async () => {
     }
 })
 
+vi.mock('./secureFileOperations', async () => {
+    const actual = await vi.importActual<typeof import('./secureFileOperations')>('./secureFileOperations')
+    const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+        ...actual,
+        getSecureDirectoryIdentity: vi.fn(async (path: string) => path),
+        secureRename: vi.fn(async (sourcePath: string, destinationPath: string) => {
+            const sourceReplacement = recycleBinIoHarness.replaceSourceBeforeDetach
+            if (sourceReplacement && sourcePath === sourceReplacement.path && destinationPath.includes('.hapi-source-')) {
+                recycleBinIoHarness.replaceSourceBeforeDetach = undefined
+                await fs.writeFile(sourceReplacement.replacementPath, 'concurrent replacement')
+                await fs.rm(sourceReplacement.path, { force: true })
+                await fs.rename(sourceReplacement.replacementPath, sourceReplacement.path)
+                throw new Error('File changed before the recycle-bin operation completed')
+            }
+            const targetReplacement = recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish
+            if (targetReplacement && destinationPath === targetReplacement.path) {
+                recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
+                await fs.writeFile(targetReplacement.replacementPath, 'concurrent target replacement')
+                await fs.rm(targetReplacement.path, { force: true })
+                await fs.rename(targetReplacement.replacementPath, targetReplacement.path)
+                throw new Error('Secure file operation source changed during the operation')
+            }
+            return await fs.rename(sourcePath, destinationPath)
+        }),
+        secureUnlink: vi.fn(async (path: string) => {
+            if (recycleBinIoHarness.rejectDetachedUnlink && path.includes('.hapi-source-')) {
+                const error = new Error('Simulated detached-source unlink failure') as NodeJS.ErrnoException
+                error.code = 'EIO'
+                throw error
+            }
+            if (recycleBinIoHarness.rejectOwnedStageRemoval && path.includes('.hapi-source-')) {
+                const error = new Error('Simulated owned-stage removal failure') as NodeJS.ErrnoException
+                error.code = 'EIO'
+                throw error
+            }
+            if (recycleBinIoHarness.rejectRestoreStageRemoval && path.includes('.hapi-restore-')) {
+                const error = new Error('Simulated restore-stage removal failure') as NodeJS.ErrnoException
+                error.code = 'EIO'
+                throw error
+            }
+            return await fs.unlink(path)
+        }),
+    }
+})
+
 import { chmod, link, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, join, sep } from 'node:path'
@@ -208,6 +258,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.stagingParentPath = undefined
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
+        recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -998,6 +1049,30 @@ describe('RecycleBinManager', () => {
             })
         } finally {
             recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
+            await cleanup()
+        }
+    })
+
+    it('does not overwrite a target replaced after final parent validation', async () => {
+        try {
+            const filePath = join(workspaceDir, 'overwrite-final-publish-race.txt')
+            await writeFile(filePath, 'original contents')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await writeFile(filePath, 'current contents')
+            const replacementPath = join(workspaceDir, 'overwrite-final-publish-replacement.tmp')
+            recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = { path: filePath, replacementPath }
+
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
+            expect(restored).toMatchObject({ success: false, error: 'Secure file operation source changed during the operation' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('concurrent target replacement')
+            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                success: true,
+                content: Buffer.from('original contents').toString('base64'),
+            })
+        } finally {
+            recycleBinIoHarness.replaceRestoreTargetDuringSecurePublish = undefined
             await cleanup()
         }
     })
