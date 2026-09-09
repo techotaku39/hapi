@@ -3994,7 +3994,7 @@ export class SyncEngine {
             original
         })
         if (!this.store.sessions.getSessionByNamespace(access.sessionId, namespace)) {
-            await this.store.attachments.deleteForSession(stored.id, namespace, access.sessionId)
+            await this.store.attachments.deleteById(stored.id, namespace)
             throw new Error('Session was deleted while uploading')
         }
         return {

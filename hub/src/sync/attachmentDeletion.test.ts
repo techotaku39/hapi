@@ -362,4 +362,61 @@ describe('SyncEngine.createAttachment', () => {
             store.close()
         }
     })
+
+    it('reclaims an upload transferred during session merge before the upload resumes', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-attachment-upload-merge-race-'))
+        tempDirs.push(root)
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const engine = createEngine(store)
+        let releaseCreate!: () => void
+        let notifyCreateStarted!: () => void
+        const createGate = new Promise<void>((resolve) => { releaseCreate = resolve })
+        const createStarted = new Promise<void>((resolve) => { notifyCreateStarted = resolve })
+        let createdAttachment!: Awaited<ReturnType<Store['attachments']['create']>>
+        const originalCreate = store.attachments.create.bind(store.attachments)
+        spyOn(store.attachments, 'create').mockImplementation(async (...args) => {
+            createdAttachment = await originalCreate(...args)
+            notifyCreateStarted()
+            await createGate
+            return createdAttachment
+        })
+        try {
+            const source = engine.getOrCreateSession(
+                'attachment-upload-merge-race-source',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const target = engine.getOrCreateSession(
+                'attachment-upload-merge-race-target',
+                { path: '/tmp/project', host: 'localhost', flavor: 'opencode' },
+                null,
+                'default'
+            )
+            const sessionCache = (engine as unknown as {
+                sessionCache: { mergeSessions(oldSessionId: string, newSessionId: string, namespace: string): Promise<void> }
+            }).sessionCache
+            const uploading = engine.createAttachment(
+                source.id,
+                'default',
+                'photo.png',
+                Buffer.from('original').toString('base64'),
+                'image/png'
+            )
+            await createStarted
+            expect(store.attachments.getForSession(createdAttachment.id, 'default', source.id)).not.toBeNull()
+
+            await sessionCache.mergeSessions(source.id, target.id, 'default')
+            expect(store.attachments.getForSession(createdAttachment.id, 'default', target.id)).not.toBeNull()
+            releaseCreate()
+
+            await expect(uploading).rejects.toThrow('Session was deleted while uploading')
+            expect(store.attachments.getForSession(createdAttachment.id, 'default', target.id)).toBeNull()
+            expect(existsSync(createdAttachment.originalPath)).toBe(false)
+        } finally {
+            releaseCreate?.()
+            engine.stop()
+            store.close()
+        }
+    })
 })

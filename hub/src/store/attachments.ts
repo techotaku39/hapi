@@ -213,6 +213,25 @@ export class AttachmentStore {
         return true
     }
 
+    /** Delete an attachment by opaque id without depending on its current owner. */
+    async deleteById(id: string, namespace: string): Promise<boolean> {
+        const attachment = this.db.prepare(`
+            SELECT id, namespace, session_id, filename, mime_type, size,
+                   sha256, original_path, created_at
+            FROM attachments
+            WHERE id = ? AND namespace = ?
+        `).get(id, namespace) as AttachmentRow | null | undefined
+        if (!attachment) return false
+
+        const result = this.db.prepare(
+            'DELETE FROM attachments WHERE id = ? AND namespace = ?'
+        ).run(id, namespace)
+        if (Number(result.changes) === 0) return false
+
+        await rm(attachment.original_path, { force: true })
+        return true
+    }
+
     /** Remove files in the attachment root that are not referenced by SQLite. */
     async cleanupUntrackedFiles(): Promise<number> {
         let entries: Array<{ name: string; isFile(): boolean }>
