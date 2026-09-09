@@ -164,10 +164,17 @@ function chooseKimiProvider(snapshot: KimiConfigSnapshot): KimiProviderConfig | 
     return providerName ? snapshot.providers.get(providerName) ?? null : null
 }
 
+function hasKimiCredentialPair(snapshot: KimiConfigSnapshot, env: NodeJS.ProcessEnv): boolean {
+    const provider = chooseKimiProvider(snapshot)
+    const baseUrl = nonEmptyString(env.KIMI_BASE_URL) ?? provider?.baseUrl
+    const apiKey = nonEmptyString(env.KIMI_API_KEY) ?? provider?.apiKey
+    return Boolean(baseUrl && apiKey)
+}
+
 async function readKimiConfig(env: NodeJS.ProcessEnv, userHome = homedir()): Promise<KimiConfigSnapshot> {
     const explicitHome = nonEmptyString(env.KIMI_CODE_HOME) ?? nonEmptyString(env.KIMI_SHARE_DIR)
     const homes = (explicitHome
-        ? [explicitHome, join(userHome, '.kimi')]
+        ? [explicitHome]
         : [join(userHome, '.kimi-code'), join(userHome, '.kimi')]
     ).filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
 
@@ -175,29 +182,34 @@ async function readKimiConfig(env: NodeJS.ProcessEnv, userHome = homedir()): Pro
         const tomlPath = join(home, 'config.toml')
         try {
             const snapshot = parseKimiToml(await readFile(tomlPath, 'utf8'))
-            const provider = chooseKimiProvider(snapshot)
-            if (provider?.baseUrl || provider?.apiKey) return snapshot
+            if (hasKimiCredentialPair(snapshot, env)) return snapshot
         } catch {
             // Try the JSON migration format below.
         }
         const json = await readJsonObject(join(home, 'config.json'))
         if (json) {
             const snapshot = parseKimiJson(json)
-            const provider = chooseKimiProvider(snapshot)
-            if (provider?.baseUrl || provider?.apiKey) return snapshot
+            if (hasKimiCredentialPair(snapshot, env)) return snapshot
         }
     }
     return { defaultModel: null, providers: new Map(), modelProviders: new Map() }
 }
 
-/**
- * Read the active Codex model provider's base URL without a TOML dependency.
- * This intentionally supports the small stable subset needed for credentials:
- * `model_provider` and `[model_providers.<name>] base_url`.
- */
-export function parseCodexBaseUrl(configText: string): string | null {
+type CodexProviderConfig = {
+    baseUrl?: string
+    envKey?: string
+}
+
+type CodexConfigSnapshot = {
+    activeProvider: string | null
+    providers: Map<string, CodexProviderConfig>
+}
+
+/** Read the active Codex provider and its credential selector. */
+function parseCodexConfig(configText: string): CodexConfigSnapshot {
     let activeProvider: string | null = null
     let currentProvider: string | null = null
+    const providers = new Map<string, CodexProviderConfig>()
 
     for (const rawLine of configText.split(/\r?\n/)) {
         const line = stripTomlComment(rawLine).trim()
@@ -219,14 +231,28 @@ export function parseCodexBaseUrl(configText: string): string | null {
             continue
         }
 
-        const baseUrlMatch = /^base_url\s*=\s*(.+)$/.exec(line)
-        if (!baseUrlMatch || currentProvider === null) continue
-        const baseUrl = nonEmptyString(unquoteTomlString(baseUrlMatch[1]))
-        if (!baseUrl) continue
-        if (activeProvider !== null && currentProvider === activeProvider) return baseUrl
+        if (currentProvider === null) continue
+        const fieldMatch = /^([A-Za-z0-9_-]+)\s*=\s*(.+)$/.exec(line)
+        if (!fieldMatch) continue
+        const value = unquoteTomlString(fieldMatch[2])
+        if (value === null) continue
+        const provider = providers.get(currentProvider) ?? {}
+        if (fieldMatch[1] === 'base_url') provider.baseUrl = nonEmptyString(value) ?? undefined
+        if (fieldMatch[1] === 'env_key') provider.envKey = nonEmptyString(value) ?? undefined
+        providers.set(currentProvider, provider)
     }
 
-    return null
+    return { activeProvider, providers }
+}
+
+/**
+ * Read the active Codex model provider's base URL without a TOML dependency.
+ * This intentionally supports the small stable subset needed for credentials:
+ * `model_provider` and `[model_providers.<name>] base_url`.
+ */
+export function parseCodexBaseUrl(configText: string): string | null {
+    const config = parseCodexConfig(configText)
+    return config.activeProvider ? config.providers.get(config.activeProvider)?.baseUrl ?? null : null
 }
 
 async function resolveClaudeCredentials(env: NodeJS.ProcessEnv): Promise<ResolvedUsageCredentials> {
@@ -260,29 +286,44 @@ async function resolveClaudeCredentials(env: NodeJS.ProcessEnv): Promise<Resolve
 }
 
 async function resolveCodexCredentials(env: NodeJS.ProcessEnv): Promise<ResolvedUsageCredentials> {
-    let baseUrl = nonEmptyString(env.OPENAI_BASE_URL)
-    let apiKey = nonEmptyString(env.OPENAI_API_KEY)
-    let baseUrlSource: UsageQueryCredentialStatus['source'] = baseUrl ? 'environment' : 'none'
-    let apiKeySource: UsageQueryCredentialStatus['source'] = apiKey ? 'environment' : 'none'
-
     const codexHome = nonEmptyString(env.CODEX_HOME) ?? join(homedir(), '.codex')
-    if (!baseUrl) {
-        try {
-            baseUrl = parseCodexBaseUrl(await readFile(join(codexHome, 'config.toml'), 'utf8')) ?? ''
-        } catch {
-            baseUrl = ''
-        }
-        if (baseUrl) baseUrlSource = 'config'
+    let config: CodexConfigSnapshot = { activeProvider: null, providers: new Map() }
+    try {
+        config = parseCodexConfig(await readFile(join(codexHome, 'config.toml'), 'utf8'))
+    } catch {
+        // Missing Codex config uses the default OpenAI credential path.
     }
-    if (!apiKey) {
-        const auth = await readJsonObject(join(codexHome, 'auth.json'))
-        apiKey = firstObjectString(auth, ['OPENAI_API_KEY', 'openai_api_key', 'api_key', 'apiKey']) ?? ''
-        if (apiKey) apiKeySource = 'config'
+
+    const activeProvider = config.activeProvider
+    const selected = activeProvider ? config.providers.get(activeProvider) : undefined
+    const isOpenAiProvider = !activeProvider || activeProvider.toLowerCase() === 'openai'
+    let baseUrl = ''
+    let apiKey = ''
+    let baseUrlSource: UsageQueryCredentialStatus['source'] = 'none'
+    let apiKeySource: UsageQueryCredentialStatus['source'] = 'none'
+
+    if (!isOpenAiProvider) {
+        baseUrl = selected?.baseUrl ?? ''
+        if (baseUrl) baseUrlSource = 'config'
+        if (selected?.envKey) {
+            apiKey = nonEmptyString(env[selected.envKey]) ?? ''
+            if (apiKey) apiKeySource = 'environment'
+        }
+    } else {
+        baseUrl = nonEmptyString(env.OPENAI_BASE_URL) ?? selected?.baseUrl ?? ''
+        if (baseUrl) baseUrlSource = env.OPENAI_BASE_URL ? 'environment' : 'config'
+        apiKey = nonEmptyString(env.OPENAI_API_KEY) ?? ''
+        if (apiKey) apiKeySource = 'environment'
+        if (!apiKey) {
+            const auth = await readJsonObject(join(codexHome, 'auth.json'))
+            apiKey = firstObjectString(auth, ['OPENAI_API_KEY', 'openai_api_key', 'api_key', 'apiKey']) ?? ''
+            if (apiKey) apiKeySource = 'config'
+        }
     }
 
     return {
-        baseUrl: baseUrl ?? '',
-        apiKey: apiKey ?? '',
+        baseUrl,
+        apiKey,
         baseUrlSource,
         apiKeySource
     }

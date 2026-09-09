@@ -66,15 +66,41 @@ describe('usage query credential resolution', () => {
             await writeFile(join(codexDir, 'config.toml'), [
                 'model_provider = "Gateway"',
                 '[model_providers.Gateway]',
-                'base_url = "https://codex.example/v1"'
+                'base_url = "https://codex.example/v1"',
+                'env_key = "CODEX_GATEWAY_API_KEY"'
             ].join('\n'))
-            await writeFile(join(codexDir, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'codex-secret' }))
+            await writeFile(join(codexDir, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'unrelated-openai-secret' }))
 
             const claude = await resolveUsageCredentials('claude', { CLAUDE_CONFIG_DIR: claudeDir })
             expect(claude).toMatchObject({ baseUrl: 'https://claude.example/', apiKey: 'claude-secret', baseUrlSource: 'config', apiKeySource: 'config' })
 
-            const codex = await resolveUsageCredentials('codex', { CODEX_HOME: codexDir })
-            expect(codex).toMatchObject({ baseUrl: 'https://codex.example/v1', apiKey: 'codex-secret', baseUrlSource: 'config', apiKeySource: 'config' })
+            const codex = await resolveUsageCredentials('codex', {
+                CODEX_HOME: codexDir,
+                CODEX_GATEWAY_API_KEY: 'codex-secret',
+                OPENAI_API_KEY: 'unrelated-openai-secret',
+                OPENAI_BASE_URL: 'https://api.openai.example/v1'
+            })
+            expect(codex).toMatchObject({ baseUrl: 'https://codex.example/v1', apiKey: 'codex-secret', baseUrlSource: 'config', apiKeySource: 'environment' })
+        } finally {
+            await rm(root, { recursive: true, force: true })
+        }
+    })
+
+    it('uses OpenAI credentials only for the OpenAI Codex provider', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'hapi-codex-openai-credentials-'))
+        try {
+            await writeFile(join(root, 'config.toml'), 'model_provider = "openai"\n')
+            await writeFile(join(root, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'config-openai-secret' }))
+            const resolved = await resolveUsageCredentials('codex', {
+                CODEX_HOME: root,
+                OPENAI_BASE_URL: 'https://api.openai.example/v1'
+            })
+            expect(resolved).toMatchObject({
+                baseUrl: 'https://api.openai.example/v1',
+                apiKey: 'config-openai-secret',
+                baseUrlSource: 'environment',
+                apiKeySource: 'config'
+            })
         } finally {
             await rm(root, { recursive: true, force: true })
         }
@@ -178,8 +204,7 @@ describe('usage query credential resolution', () => {
             const legacyHome = join(root, '.kimi')
             await mkdir(currentHome, { recursive: true })
             await mkdir(legacyHome, { recursive: true })
-            await writeFile(join(currentHome, 'config.toml'), 'default_model = "kimi-code/k3"\n')
-            await writeFile(join(legacyHome, 'config.toml'), [
+            const legacyConfig = [
                 'default_model = "legacy"',
                 '[providers.legacy]',
                 'type = "kimi"',
@@ -187,10 +212,36 @@ describe('usage query credential resolution', () => {
                 'api_key = "legacy-secret"',
                 '[models.legacy]',
                 'provider = "legacy"'
+            ].join('\n')
+            await writeFile(join(legacyHome, 'config.toml'), legacyConfig)
+
+            await writeFile(join(currentHome, 'config.toml'), [
+                'default_model = "current"',
+                '[providers.current]',
+                'type = "kimi"',
+                'api_key = "partial-current-secret"',
+                '[models.current]',
+                'provider = "current"'
             ].join('\n'))
 
             const resolved = await resolveUsageCredentials('kimi', {}, root)
             expect(resolved).toMatchObject({
+                baseUrl: 'https://legacy.kimi.example/coding/v1',
+                apiKey: 'legacy-secret',
+                baseUrlSource: 'config',
+                apiKeySource: 'config'
+            })
+
+            await writeFile(join(currentHome, 'config.toml'), [
+                'default_model = "current"',
+                '[providers.current]',
+                'type = "kimi"',
+                'base_url = "https://partial-current.kimi.example/coding/v1"',
+                '[models.current]',
+                'provider = "current"'
+            ].join('\n'))
+            const baseOnly = await resolveUsageCredentials('kimi', {}, root)
+            expect(baseOnly).toMatchObject({
                 baseUrl: 'https://legacy.kimi.example/coding/v1',
                 apiKey: 'legacy-secret',
                 baseUrlSource: 'config',
