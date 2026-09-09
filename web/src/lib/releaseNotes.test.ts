@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RELEASE_NOTES } from './releaseNotes'
+import { getVisibleReleaseNotes, RELEASE_NOTES } from './releaseNotes'
 
 describe('release notes catalog', () => {
     it('keeps every entry localized, linked, and newest-first', () => {
@@ -44,5 +44,20 @@ describe('release notes catalog', () => {
                 if (change.kind === 'feature') expect(seenFix).toBe(false)
             }
         }
+    })
+
+    it('hides a prepared future entry from the current app', () => {
+        const futureRelease = {
+            ...RELEASE_NOTES[0],
+            version: '0.30.0',
+            date: '2026-09-10',
+            url: 'https://github.com/tiann/hapi/releases/tag/v0.30.0',
+        }
+        const preparedCatalog = [futureRelease, ...RELEASE_NOTES]
+        const visible = getVisibleReleaseNotes('0.29.1', preparedCatalog)
+
+        expect(visible[0].version).toBe('0.29.1')
+        expect(visible).toHaveLength(RELEASE_NOTES.length)
+        expect(visible.some((release) => release.version === '0.30.0')).toBe(false)
     })
 })

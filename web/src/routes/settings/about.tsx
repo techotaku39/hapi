@@ -1,10 +1,11 @@
 import { PROTOCOL_VERSION } from '@hapi/protocol'
-import { RELEASE_NOTES } from '@/lib/releaseNotes'
+import { getVisibleReleaseNotes, RELEASE_NOTES } from '@/lib/releaseNotes'
 import { useTranslation } from '@/lib/use-translation'
 import { ChevronRightIcon, SettingsPageContent, SettingsRow, SettingsSection } from '@/components/settings/SettingsPrimitives'
 
 export default function SettingsAboutPage() {
     const { t, locale } = useTranslation()
+    const visibleReleaseNotes = getVisibleReleaseNotes(__APP_VERSION__, RELEASE_NOTES)
     const dateFormatter = new Intl.DateTimeFormat(locale, {
         year: 'numeric',
         month: 'short',
@@ -25,7 +26,7 @@ export default function SettingsAboutPage() {
                 title={t('settings.about.releaseNotes.title')}
                 description={t('settings.about.releaseNotes.description')}
             >
-                {RELEASE_NOTES.map((release, index) => (
+                {visibleReleaseNotes.map((release, index) => (
                     <details key={release.version} open={index === 0} className="group">
                         <summary className="flex cursor-pointer list-none items-start gap-3 px-3 py-3 text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] [&::-webkit-details-marker]:hidden">
                             <span className="min-w-0 flex-1">

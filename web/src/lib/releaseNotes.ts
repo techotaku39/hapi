@@ -20,6 +20,14 @@ export type ReleaseNote = {
     groups: readonly ReleaseChangeGroup[]
 }
 
+export function getVisibleReleaseNotes(
+    appVersion: string,
+    releaseNotes: readonly ReleaseNote[],
+): readonly ReleaseNote[] {
+    const currentReleaseIndex = releaseNotes.findIndex((release) => release.version === appVersion)
+    return currentReleaseIndex >= 0 ? releaseNotes.slice(currentReleaseIndex) : releaseNotes
+}
+
 function change(kind: ReleaseChangeKind, en: string, zhCN: string): ReleaseChange {
     return {
         kind,
