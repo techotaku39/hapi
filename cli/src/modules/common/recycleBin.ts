@@ -47,12 +47,19 @@ const READ_FILE_FLAGS = process.platform === 'win32'
 
 type FileStats = Stats
 
+type RecycleBinStagingFile = {
+    path: string
+    dev: string
+    ino: string
+}
+
 type StoredRecycleBinEntry = RecycleBinEntry & {
     version: typeof RECYCLE_BIN_METADATA_VERSION
     ownerNamespace: string
     scopeRoot: string
     mode: number
     contentHash: string
+    stagingFiles: RecycleBinStagingFile[]
 }
 
 const StoredRecycleBinEntrySchema = z.object({
@@ -66,6 +73,11 @@ const StoredRecycleBinEntrySchema = z.object({
     size: z.number().int().nonnegative(),
     mode: z.number().int().nonnegative(),
     contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+    stagingFiles: z.array(z.object({
+        path: z.string().min(1),
+        dev: z.string().regex(/^\d+$/),
+        ino: z.string().regex(/^\d+$/),
+    })).default([]),
     deletedAt: z.number().int().nonnegative(),
     expiresAt: z.number().int().nonnegative(),
 })
@@ -190,6 +202,37 @@ async function writeJsonAtomically(path: string, value: unknown): Promise<void> 
     }
 }
 
+async function updateEntryStagingFiles(
+    root: string,
+    entry: StoredRecycleBinEntry,
+    stagingFiles: RecycleBinStagingFile[],
+): Promise<void> {
+    const nextEntry = { ...entry, stagingFiles }
+    await writeJsonAtomically(join(root, entry.id, ENTRY_METADATA_FILE), nextEntry)
+    entry.stagingFiles = stagingFiles
+}
+
+async function recordEntryStagingFile(
+    root: string,
+    entry: StoredRecycleBinEntry,
+    path: string,
+    stats: FileStats,
+): Promise<void> {
+    const stagingFiles = entry.stagingFiles.filter((file) => file.path !== path)
+    stagingFiles.push({ path, dev: String(stats.dev), ino: String(stats.ino) })
+    await updateEntryStagingFiles(root, entry, stagingFiles)
+}
+
+async function clearEntryStagingFile(
+    root: string,
+    entry: StoredRecycleBinEntry,
+    path: string,
+): Promise<void> {
+    const stagingFiles = entry.stagingFiles.filter((file) => file.path !== path)
+    if (stagingFiles.length === entry.stagingFiles.length) return
+    await updateEntryStagingFiles(root, entry, stagingFiles)
+}
+
 async function readRegularFileStats(path: string): Promise<FileStats> {
     const handle = await open(path, READ_FILE_FLAGS)
     try {
@@ -288,6 +331,10 @@ type RecycleBinCopyOptions = {
     unlinkSource?: boolean
     /** Stable entry id used to name a recoverable source-detach staging file. */
     stageId?: string
+    /** Persist a staging file identity as soon as it is created. */
+    onStagingFileCreated?: (path: string, stats: FileStats) => Promise<void>
+    /** Remove a staging file identity after its directory entry is gone. */
+    onStagingFileRemoved?: (path: string) => Promise<void>
 }
 
 async function copyFileWithoutReplacing(
@@ -310,6 +357,10 @@ async function copyFileWithoutReplacing(
         const destinationHandle = await open(destinationPath, 'wx', desiredMode)
         destinationCreated = true
         try {
+            if (options.unlinkSource === false) {
+                const destinationStats = await destinationHandle.stat()
+                await options.onStagingFileCreated?.(destinationPath, destinationStats)
+            }
             while (offset < openedStats.size) {
                 const result = await sourceHandle.read(buffer, 0, Math.min(buffer.length, openedStats.size - offset), offset)
                 if (result.bytesRead === 0) {
@@ -342,6 +393,7 @@ async function copyFileWithoutReplacing(
                 throw new Error('Recycle-bin staging id is required when removing the source')
             }
             const detachedPath = join(dirname(sourcePath), `.hapi-source-${options.stageId}.tmp`)
+            await options.onStagingFileCreated?.(detachedPath, openedStats)
             await rename(sourcePath, detachedPath)
             const detachedStats = await lstat(detachedPath)
             if (!isSameFileStats(detachedStats, openedStats)) {
@@ -352,10 +404,16 @@ async function copyFileWithoutReplacing(
                 throw new Error('File changed before the recycle-bin operation completed')
             }
             sourceRemoved = true
+            await options.onStagingFileCreated?.(detachedPath, detachedStats)
             try {
                 await unlink(detachedPath)
             } catch (error) {
                 logger.debug('[RECYCLE BIN] Deferring detached-source cleanup', { detachedPath, error })
+            }
+            if (!(await pathExists(detachedPath))) {
+                await options.onStagingFileRemoved?.(detachedPath).catch((error) => {
+                    logger.debug('[RECYCLE BIN] Failed to clear detached staging metadata', { detachedPath, error })
+                })
             }
             await syncParentDirectory(sourcePath)
         }
@@ -623,53 +681,80 @@ async function reconcileEntryStagingFiles(
     protectedRoot?: string,
 ): Promise<boolean> {
     let clean = true
-    const stagingDirectories = new Set([join(root, entry.id)])
+    const entryDirectory = join(root, entry.id)
+    const safeDirectories = new Set([entryDirectory])
+    let originalParentMissing = false
+    const originalParent = dirname(entry.originalPath)
     try {
-        const workspaceDirectory = await realpath(dirname(entry.originalPath))
+        const workspaceDirectory = await realpath(originalParent)
         if (
             isPathWithin(workspaceDirectory, entry.scopeRoot)
             && !hasGitMetadataSegment(workspaceDirectory)
             && !(protectedRoot && isPathWithin(workspaceDirectory, protectedRoot))
         ) {
-            stagingDirectories.add(workspaceDirectory)
+            safeDirectories.add(workspaceDirectory)
         }
     } catch (error) {
-        if (!isNotFound(error)) {
+        if (isNotFound(error)) {
+            originalParentMissing = true
+        } else {
             logger.debug('[RECYCLE BIN] Failed to resolve staging directory', { entryId: entry.id, error })
             clean = false
         }
     }
-    const stagingNames = [
-        `.hapi-source-${entry.id}.tmp`,
-        `.hapi-restore-${entry.id}.tmp`,
-    ]
-    for (const directory of stagingDirectories) {
-        for (const name of stagingNames) {
-            const stagingPath = join(directory, name)
-            try {
-                const stats = await lstat(stagingPath)
-                if (!stats.isFile() || stats.isSymbolicLink() || stats.size !== entry.size) {
-                    clean = false
-                    continue
-                }
-                const contentHash = await hashFile(stagingPath)
-                const finalStats = await lstat(stagingPath)
-                if (contentHash !== entry.contentHash || !isSameFileStats(stats, finalStats)) {
-                    clean = false
-                    continue
-                }
-                try {
-                    await rm(stagingPath, { force: true })
-                } catch (error) {
-                    clean = false
-                    logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath, error })
-                }
-            } catch (error) {
-                if (!isNotFound(error)) {
-                    clean = false
-                    logger.debug('[RECYCLE BIN] Failed to reconcile staging file', { stagingPath, error })
-                }
+
+    let stagingFilesChanged = false
+    const remainingStagingFiles: RecycleBinStagingFile[] = []
+    for (const stagingFile of entry.stagingFiles) {
+        const isSafePath = [...safeDirectories].some((directory) => isPathWithin(stagingFile.path, directory))
+        if (!isSafePath) {
+            if (originalParentMissing && isPathWithin(stagingFile.path, originalParent)) {
+                stagingFilesChanged = true
+                continue
             }
+            clean = false
+            remainingStagingFiles.push(stagingFile)
+            continue
+        }
+        try {
+            const stats = await lstat(stagingFile.path)
+            if (!stats.isFile() || stats.isSymbolicLink() || stats.size !== entry.size
+                || String(stats.dev) !== stagingFile.dev || String(stats.ino) !== stagingFile.ino) {
+                clean = false
+                remainingStagingFiles.push(stagingFile)
+                continue
+            }
+            const contentHash = await hashFile(stagingFile.path)
+            const finalStats = await lstat(stagingFile.path)
+            if (contentHash !== entry.contentHash || !isSameFileStats(stats, finalStats)) {
+                clean = false
+                remainingStagingFiles.push(stagingFile)
+                continue
+            }
+            try {
+                await rm(stagingFile.path, { force: true })
+                stagingFilesChanged = true
+            } catch (error) {
+                clean = false
+                remainingStagingFiles.push(stagingFile)
+                logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath: stagingFile.path, error })
+            }
+        } catch (error) {
+            if (isNotFound(error)) {
+                stagingFilesChanged = true
+                continue
+            }
+            clean = false
+            remainingStagingFiles.push(stagingFile)
+            logger.debug('[RECYCLE BIN] Failed to reconcile staging file', { stagingPath: stagingFile.path, error })
+        }
+    }
+    if (stagingFilesChanged) {
+        try {
+            await updateEntryStagingFiles(root, entry, remainingStagingFiles)
+        } catch (error) {
+            clean = false
+            logger.debug('[RECYCLE BIN] Failed to persist staging cleanup metadata', { entryId: entry.id, error })
         }
     }
     return clean
@@ -808,6 +893,7 @@ export class RecycleBinManager {
                 size: source.stats.size,
                 mode: source.stats.mode,
                 contentHash: await hashFile(source.path),
+                stagingFiles: [],
                 deletedAt,
                 expiresAt: deletedAt + retentionDays * DAY_MS,
             }
@@ -816,13 +902,21 @@ export class RecycleBinManager {
             try {
                 await writeJsonAtomically(metadataPath, entry)
                 await syncParentDirectory(entryDirectory)
-                await moveRegularFile(source.path, payloadPath, source.stats, { stageId: entryId })
+                await moveRegularFile(source.path, payloadPath, source.stats, {
+                    stageId: entryId,
+                    onStagingFileCreated: (path, stats) => recordEntryStagingFile(root, entry, path, stats),
+                    onStagingFileRemoved: (path) => clearEntryStagingFile(root, entry, path),
+                })
                 await assertPayloadIntegrity(entry, payloadPath)
             } catch (error) {
                 let rollbackError: unknown = null
                 if (await pathExists(payloadPath)) {
                     try {
-                        await moveRegularFile(payloadPath, source.path, undefined, { stageId: entryId })
+                        await moveRegularFile(payloadPath, source.path, undefined, {
+                            stageId: entryId,
+                            onStagingFileCreated: (path, stats) => recordEntryStagingFile(root, entry, path, stats),
+                            onStagingFileRemoved: (path) => clearEntryStagingFile(root, entry, path),
+                        })
                     } catch (error) {
                         rollbackError = error
                         logger.debug('[RECYCLE BIN] Failed to roll back a failed move', { rollbackError })
@@ -930,9 +1024,11 @@ export class RecycleBinManager {
             let target = resolvedTarget.path
             let validatedParent = resolvedTarget.parent
             let targetExists = false
+            let expectedTargetStats: FileStats | null = null
             try {
                 const targetStats = await lstat(target)
                 targetExists = true
+                expectedTargetStats = targetStats
                 if (targetStats.isSymbolicLink() || !targetStats.isFile()) {
                     throw invalidPathError('The restore target is not a regular file')
                 }
@@ -976,6 +1072,7 @@ export class RecycleBinManager {
                 await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
+                    onStagingFileCreated: (path, stats) => recordEntryStagingFile(root, entry, path, stats),
                 })
                 stagedCreated = true
                 const publicationParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
@@ -983,6 +1080,10 @@ export class RecycleBinManager {
                     throw invalidPathError('Restore target changed during restore')
                 }
                 if (targetExists && conflict === 'overwrite') {
+                    const currentTargetStats = await lstat(target)
+                    if (!expectedTargetStats || !isSameFileStats(currentTargetStats, expectedTargetStats)) {
+                        throw invalidPathError('Restore target changed during restore')
+                    }
                     await rename(stagedPath, target)
                     await syncParentDirectory(target)
                 } else {

@@ -15,6 +15,10 @@ const recycleBinIoHarness = vi.hoisted(() => ({
         triggerAt: number
         seen: number
     } | undefined,
+    replaceRestoreTargetBeforePublish: undefined as {
+        path: string
+        replacementPath: string
+    } | undefined,
 }))
 
 vi.mock('node:fs/promises', async () => {
@@ -61,6 +65,13 @@ vi.mock('node:fs/promises', async () => {
         }),
         open: vi.fn(async (...args: [string, string | number, number?]) => {
             const handle = await actual.open(...args)
+            const targetReplacement = recycleBinIoHarness.replaceRestoreTargetBeforePublish
+            if (targetReplacement && args[1] === 'wx' && args[0].includes('.hapi-restore-')) {
+                recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
+                await actual.writeFile(targetReplacement.replacementPath, 'concurrent target replacement')
+                await actual.rm(targetReplacement.path, { force: true })
+                await actual.rename(targetReplacement.replacementPath, targetReplacement.path)
+            }
             const isDestinationHandle = args[1] === 'wx'
             const isDirectoryHandle = typeof args[1] === 'number'
             if ((!isDestinationHandle || (!recycleBinIoHarness.shortWrite && !recycleBinIoHarness.rejectSync))
@@ -140,6 +151,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.rejectDetachedUnlink = false
         recycleBinIoHarness.rejectOwnedStageRemoval = false
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
+        recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -463,11 +475,21 @@ describe('RecycleBinManager', () => {
                 `.hapi-source-${moved.entry.id}.tmp`,
                 `.hapi-restore-${moved.entry.id}.tmp`,
             ]
+            const ownedStagingFiles: Array<{ path: string; dev: string; ino: string }> = []
             for (const name of stagingNames) {
-                await writeFile(join(workspaceDir, name), 'reconcile staging files')
+                const stagingPath = join(workspaceDir, name)
+                await writeFile(stagingPath, 'reconcile staging files')
+                const stats = await stat(stagingPath)
+                ownedStagingFiles.push({ path: stagingPath, dev: String(stats.dev), ino: String(stats.ino) })
             }
             const rollbackStage = join(getRecycleBinRoot(homeDir), moved.entry.id, `.hapi-source-${moved.entry.id}.tmp`)
             await writeFile(rollbackStage, 'reconcile staging files')
+            const rollbackStats = await stat(rollbackStage)
+            ownedStagingFiles.push({ path: rollbackStage, dev: String(rollbackStats.dev), ino: String(rollbackStats.ino) })
+            const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as { stagingFiles?: typeof ownedStagingFiles }
+            metadata.stagingFiles = ownedStagingFiles
+            await writeFile(metadataPath, JSON.stringify(metadata))
 
             await expect(manager.list(workspaceDir)).resolves.toMatchObject({
                 success: true,
@@ -492,15 +514,59 @@ describe('RecycleBinManager', () => {
 
             const sourceStage = join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`)
             const restoreStage = join(workspaceDir, `.hapi-restore-${moved.entry.id}.tmp`)
-            await writeFile(sourceStage, 'unrelated source-stage file')
-            await writeFile(restoreStage, 'unrelated restore-stage file')
+            const collisionContent = 'original contents'
+            await writeFile(sourceStage, collisionContent)
+            const sourceStats = await stat(sourceStage)
+            await writeFile(restoreStage, collisionContent)
+            const restoreStats = await stat(restoreStage)
+            const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+                stagingFiles?: Array<{ path: string; dev: string; ino: string }>
+            }
+            metadata.stagingFiles = [
+                { path: sourceStage, dev: String(sourceStats.dev), ino: `${sourceStats.ino}0` },
+                { path: restoreStage, dev: String(restoreStats.dev), ino: `${restoreStats.ino}0` },
+            ]
+            await writeFile(metadataPath, JSON.stringify(metadata))
 
             await expect(manager.list(workspaceDir)).resolves.toMatchObject({
                 success: true,
                 entries: [moved.entry],
             })
-            await expect(readFile(sourceStage, 'utf8')).resolves.toBe('unrelated source-stage file')
-            await expect(readFile(restoreStage, 'utf8')).resolves.toBe('unrelated restore-stage file')
+            await expect(readFile(sourceStage, 'utf8')).resolves.toBe(collisionContent)
+            await expect(readFile(restoreStage, 'utf8')).resolves.toBe(collisionContent)
+        } finally {
+            await cleanup()
+        }
+    })
+
+    it('does not remove zero-byte files with a recorded staging name but different inodes', async () => {
+        try {
+            const filePath = join(workspaceDir, 'zero-byte-staging-collision.txt')
+            await writeFile(filePath, '')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const sourceStage = join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`)
+            const restoreStage = join(workspaceDir, `.hapi-restore-${moved.entry.id}.tmp`)
+            await writeFile(sourceStage, '')
+            const sourceStats = await stat(sourceStage)
+            await writeFile(restoreStage, '')
+            const restoreStats = await stat(restoreStage)
+            const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+                stagingFiles?: Array<{ path: string; dev: string; ino: string }>
+            }
+            metadata.stagingFiles = [
+                { path: sourceStage, dev: String(sourceStats.dev), ino: `${sourceStats.ino}0` },
+                { path: restoreStage, dev: String(restoreStats.dev), ino: `${restoreStats.ino}0` },
+            ]
+            await writeFile(metadataPath, JSON.stringify(metadata))
+
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [moved.entry] })
+            await expect(stat(sourceStage)).resolves.toBeDefined()
+            await expect(stat(restoreStage)).resolves.toBeDefined()
         } finally {
             await cleanup()
         }
@@ -803,6 +869,30 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('does not overwrite a target replaced during payload staging', async () => {
+        try {
+            const filePath = join(workspaceDir, 'overwrite-target-race.txt')
+            await writeFile(filePath, 'original contents')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await writeFile(filePath, 'current contents')
+            const replacementPath = join(workspaceDir, 'overwrite-target-race-replacement.tmp')
+            recycleBinIoHarness.replaceRestoreTargetBeforePublish = { path: filePath, replacementPath }
+
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
+            expect(restored).toMatchObject({ success: false, error: 'Restore target changed during restore' })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('concurrent target replacement')
+            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                success: true,
+                content: Buffer.from('original contents').toString('base64'),
+            })
+        } finally {
+            recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
+            await cleanup()
+        }
+    })
+
     it('restores the recorded permission bits after a copy-based restore', async () => {
         try {
             const filePath = join(workspaceDir, 'permissions.txt')
@@ -914,7 +1004,7 @@ describe('RecycleBinManager', () => {
 
             recycleBinIoHarness.directorySyncCalls = 0
             recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 3
+            recycleBinIoHarness.directorySyncFailureAt = 4
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
             expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('restore destination')
@@ -934,7 +1024,7 @@ describe('RecycleBinManager', () => {
 
             recycleBinIoHarness.directorySyncCalls = 0
             recycleBinIoHarness.rejectDirectorySync = true
-            recycleBinIoHarness.directorySyncFailureAt = 3
+            recycleBinIoHarness.directorySyncFailureAt = 4
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'overwrite')
             expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('original')
