@@ -75,25 +75,23 @@ lands on the session UI. Three entry points:
 3. **Manual entry** — hub URL + access token, for hubs started without
    `--relay`.
 
-### Pairing against a local dev hub
+### Pairing against a development hub
 
 ```sh
-# repo root: start the hub (prints the access token + QR codes)
-bun run dev
+# Start a hub with the built-in HTTPS relay (prints the access token + QR codes).
+hapi hub --relay
 
-# emulator: the host machine is 10.0.2.2
-#   Hub URL:       http://10.0.2.2:3006
-#   Access token:  from the hub terminal / hub settings.json (CLI_API_TOKEN)
-# physical device: use the machine's LAN IP, e.g. http://192.168.1.10:3006
+# Use the printed https:// URL. For a source-tree `bun run dev` hub, put an
+# HTTPS reverse proxy or tunnel in front of localhost:3006 first.
 adb shell am start -a android.intent.action.VIEW \
-  -d "hapicompanion://bind?hub=http%3A%2F%2F10.0.2.2%3A3006&code=<accessToken>"  # optional: exercises the deep link
+  -d "hapicompanion://bind?hub=https%3A%2F%2Fhub.example.com&code=<accessToken>"  # optional: exercises the deep link
 ```
 
-Plain-`http` LAN/emulator hubs work in all build types: the manifest opts in
-to cleartext traffic (`android:usesCleartextTraffic="true"`), because
-self-hosted LAN hubs are the primary pairing target and Android cannot scope
-the exemption to local addresses only. Sign-out (home → Sign out) deletes the
-stored credentials for that hub and drops it from the roster.
+The app rejects plain-`http` hub URLs in manual entry, deep links, QR codes,
+and restored hub state. The manifest also sets
+`android:usesCleartextTraffic="false"`; there is no debug or LAN exemption.
+Sign-out (home → Sign out) deletes the stored credentials for that hub and
+drops it from the roster.
 
 ## Milestones (track B of the native-clients plan)
 
@@ -101,7 +99,7 @@ stored credentials for that hub and drops it from the roster.
 - **M1** — foundations: wire types + modes catalog; auth + `HapiApi` (MockWebServer-tested); `SseEngine` reconnect state machine + versioned patches (gzip streaming verified); pairing UI + `hapicompanion://bind` deep link.
 - **M2** — read-only chat: chat pipeline port gated on fixtures all-green; session list; `MessageWindowStore` port; Markdown renderer; read-only chat screen (`LazyColumn(reverseLayout = true)`).
 - **M3** — interaction: composer (optimistic send/queue/steer/drafts), permission approvals UX, session controls (mode/model/abort/resume/rename/archive), new session, dictation.
-  - **B-M3ce landed** — voice dictation: mic button in the composer (`RECORD_AUDIO` requested at first use), `MediaRecorder` → m4a/AAC, provider discovery via `GET /api/voice/transcription/providers` (first `standard`-capable provider; a hub without one shows a notice), upload through the multipart `POST /api/voice/transcription`, transcript appended at the composer text with a space separator; `DictationController` is a plain seam over recorder + API, JVM-tested with fakes. Slash commands: typing a lone `/token` opens a dropdown merging the session's `metadata.slashCommands` names with the `GET /slash-commands` RPC list (RPC entries win dedupe; exact → prefix → contains filtering), tap inserts `/name ` (the skills `$` trigger is deferred). Session ops: list long-press sheet and chat top-bar overflow gain Rename (`PATCH /sessions/:id`, optimistic name with roll-forward on failure), Delete (confirm; 409-while-active surfaced), and Reopen for inactive sessions (`POST /reopen`; a superseding id reuses the supersede path — window seed + draft move + navigate-replace; 422 missing-metadata formatted); chat shows an inactive-session bar ("send to resume, or Reopen").
+  - **B-M3ce landed** — voice dictation: mic button in the composer (`RECORD_AUDIO` requested at first use), `MediaRecorder` → m4a/AAC, provider discovery via `GET /api/voice/transcription/providers` on chat entry (first `standard`-capable provider; mic hidden until available, including unconfigured/unreachable hubs), upload through the multipart `POST /api/voice/transcription`, transcript appended at the composer text with a space separator; `DictationController` is a plain seam over recorder + API, JVM-tested with fakes. Slash commands: typing a lone `/token` opens a dropdown merging the session's `metadata.slashCommands` names with the `GET /slash-commands` RPC list (RPC entries win dedupe; exact → prefix → contains filtering), tap inserts `/name ` (the skills `$` trigger is deferred). Session ops: list long-press sheet and chat top-bar overflow gain Rename (`PATCH /sessions/:id`, optimistic name with roll-forward on failure), Delete (confirm; 409-while-active surfaced), and Reopen for inactive sessions (`POST /reopen`; a superseding id reuses the supersede path — window seed + draft move + navigate-replace; 422 missing-metadata formatted); chat shows an inactive-session bar ("send to resume, or Reopen").
 - **M4** — FCM push (register → notification actions via expedited WorkManager) + files/git viewer, Scratchlist, usage/storage stats.
   - **B-M4a landed** — FCM push + notification actions. `:core:data` `push/`: `PushPayload` (data-only contract v1 decoding: type/severity/`notifySummary` parsing, channel routing, `type-<sessionId>` coalescing tags, unknown type/contractVersion degrade to plain title/body), `DeviceRegistrar` (registers the FCM token with **every** paired hub on start/pairing/`onNewToken`, DataStore-persisted `deviceId` UUID, WorkManager retry seam, best-effort unregister on sign-out before credentials are wiped), `PushHubAccess` + `PushActionRunner` (workers build a `HubSession` on demand from stored credentials — no `HubGraph` needed in background — and resolve the owning hub: active hub first, other paired hubs on 404 session-miss). `:app`: `push/PushBinding` (Firebase availability gate — no `google-services.json` → all push paths no-op), `fcm/` (`HapiFirebaseMessagingService`, `NotificationChannels` — `permission_requests` HIGH / `ready` / `task_notifications`, `PushNotifications` builder with severity accents + suppress-when-open rule, `NotificationActionReceiver` → expedited `PermissionActionWorker` (Allow/Deny → approve/deny `{}`) and `SendMessageWorker` (RemoteInput reply → `{text, localId}`) with pending → done/"Already handled"/failed notification states), WorkManager on-demand init + `HapiWorkerFactory`, notification tap → internal `MainActivity` intent route → chat.
 - **M5** — polish: zh-CN i18n, OLED/Material You theming, predictive back, LeakCanary pass, Play listing + self-build docs.
@@ -181,8 +179,9 @@ To enable push:
    with your `applicationId` (default `run.hapi.companion`), download
    `google-services.json` into `android/app/`, and rebuild.
 3. **Hub side**: point the hub at the *same* Firebase project —
-   `FCM_SERVICE_ACCOUNT_PATH` + `FCM_PROJECT_ID`
-   (`docs/api/native-companion-contract.md`). The device registers itself
+   `FCM_SERVICE_ACCOUNT_PATH` (or `fcmServiceAccountPath` in
+   `~/.hapi/settings.json`; the project id comes from the JSON itself, see
+   `docs/api/native-companion-contract.md`). The device registers itself
    with every paired hub (`POST /api/devices/register`) on pairing, app
    start, and token rotation, and unregisters on sign-out.
 
@@ -195,3 +194,31 @@ the session against the active hub.
 Planned for v1.x: runtime `FirebaseOptions` handed out by the hub, so
 self-builds get push without baking a config into the APK. That lands
 entirely behind the existing `app/.../push/PushBinding.kt` seam.
+
+## Release signing
+
+Same philosophy as Firebase: the repo carries no secrets and builds green
+without them. `:app:bundleRelease` produces an **unsigned** AAB unless an
+upload key is configured via gradle properties (user-global
+`~/.gradle/gradle.properties`), environment variables (CI secrets), or
+`android/local.properties` (gitignored; same property names — the
+conventional machine-local home, loaded explicitly since it is not part
+of gradle's own property chain):
+
+| gradle property | env | meaning |
+|---|---|---|
+| `hapiUploadKeystore` | `HAPI_UPLOAD_KEYSTORE` | keystore path (`~` ok) |
+| `hapiUploadKeystorePassword` | `HAPI_UPLOAD_KEYSTORE_PASSWORD` | store password |
+| `hapiUploadKeyAlias` | `HAPI_UPLOAD_KEY_ALIAS` | default `upload` |
+| `hapiUploadKeyPassword` | `HAPI_UPLOAD_KEY_PASSWORD` | default: store password |
+
+This is an **upload key** for Play App Signing (Google holds the actual
+distribution key, so a lost upload key is resettable in Play Console).
+Generate one with:
+
+```bash
+keytool -genkeypair -v -keystore ~/.hapi/upload.keystore -alias upload \
+  -keyalg RSA -keysize 2048 -validity 10950
+```
+
+Keystores never live in the repo (`*.keystore` / `*.jks` are gitignored).
