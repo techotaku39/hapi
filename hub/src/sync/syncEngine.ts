@@ -34,6 +34,7 @@ import { MachineCache, type Machine } from './machineCache'
 import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
 import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
 import { selectForkTranscriptPrefix } from './forkTranscript'
+import { buildForkSessionSummary } from './forkSessionSummary'
 import {
     RpcGateway,
     RpcTargetMissingError,
@@ -51,6 +52,7 @@ import {
     type RpcArchiveCodexSessionResponse,
     type RpcListCursorModelsResponse,
     type RpcListOpencodeModelsResponse,
+    type RpcListOpencodeModelVariantsResponse,
     type RpcListGrokModelsResponse,
     type RpcListCopilotModelsResponse,
     type RpcListGrokReasoningEffortOptionsResponse,
@@ -84,6 +86,7 @@ export type {
     RpcListPiSessionsResponse,
     RpcListCursorModelsResponse,
     RpcListOpencodeModelsResponse,
+    RpcListOpencodeModelVariantsResponse,
     RpcListGrokModelsResponse,
     RpcListCopilotModelsResponse,
     RpcListGrokReasoningEffortOptionsResponse,
@@ -1443,11 +1446,13 @@ export class SyncEngine {
         const copiedLocalIds = new Set(
             prefix.flatMap((message) => (message.localId ? [message.localId] : []))
         )
+        const forkSummary = buildForkSessionSummary(source.metadata)
         const childMetadata: Record<string, unknown> = {
             path: directory,
             host: source.metadata?.host ?? 'unknown',
             machineId,
             flavor,
+            ...(forkSummary ? { summary: forkSummary } : {}),
             forkedFrom: sessionId,
             startedBy: 'runner',
             capabilities: source.metadata?.capabilities,
@@ -1675,7 +1680,13 @@ export class SyncEngine {
             )
             this.scrubHistoryLocators(sessionId, namespace)
             this.sessionCache.rebuildTodosFromTranscript(sessionId)
-            this.eventPublisher.emit({ type: 'messages-invalidated', sessionId, namespace })
+            this.eventPublisher.emit({
+                type: 'messages-invalidated',
+                sessionId,
+                namespace,
+                reason: 'rewind',
+                truncateFromLocalId: rpcResult.truncateFromLocalId ?? messageLocalId
+            })
             this.sessionCache.refreshSession(sessionId)
             return { type: 'success' }
         } catch (error) {
@@ -3943,6 +3954,10 @@ export class SyncEngine {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
+    }
+
+    async listOpencodeModelVariantsForMachine(machineId: string, cwd?: string | null): Promise<RpcListOpencodeModelVariantsResponse> {
+        return await this.rpcGateway.listOpencodeModelVariantsForMachine(machineId, cwd)
     }
 
     async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {

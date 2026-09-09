@@ -11,10 +11,12 @@ import {
     getMessageWindowState,
     getQueuedReconcileCandidateLocalIds,
     ingestIncomingMessages,
+    invalidateMessageWindow,
     loadMessageContext,
     markMessagesConsumed,
     reconcileQueuedLocalIds,
     removeOptimisticMessage,
+    rewindMessageWindow,
     setMessageWindowTargetLock,
     setMessageViewMode,
     syncTailMessages,
@@ -308,6 +310,96 @@ describe('message tail synchronization', () => {
 
         expect(getMessageWindowState(id).viewMode).toBe('history')
         setMessageWindowTargetLock(id, false)
+    })
+
+    it('removes the rewound suffix immediately and applies duplicate invalidations once', async () => {
+        const id = sessionId('rewind-suffix')
+        const prefix = makeAgentMessage({ id: 'prefix', seq: 1, at: 1_000 })
+        const target = makeUserMessage({
+            id: 'target',
+            seq: 2,
+            localId: 'target-local-id',
+            createdAt: 2_000,
+            invokedAt: 2_000
+        })
+        const suffix = makeAgentMessage({ id: 'suffix', seq: 3, at: 3_000 })
+        const getMessages = vi.fn(async () => latestResponse([prefix, target, suffix], { epoch: 1 }))
+
+        await syncTailMessages(createApi(getMessages), id)
+        rewindMessageWindow(id, 'target-local-id')
+        rewindMessageWindow(id, 'target-local-id')
+
+        expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['prefix'])
+        expect(getMessageWindowState(id).isSyncingTail).toBe(true)
+    })
+
+    it('clears the window when the rewind boundary is outside the loaded page', async () => {
+        const id = sessionId('rewind-boundary-not-loaded')
+        const current = makeAgentMessage({ id: 'current', seq: 40, at: 40_000 })
+        const getMessages = vi.fn(async () => latestResponse([current], { epoch: 1 }))
+
+        await syncTailMessages(createApi(getMessages), id)
+        rewindMessageWindow(id, 'boundary-not-loaded')
+
+        expect(getMessageWindowState(id).messages).toEqual([])
+    })
+
+    it('deduplicates delayed rewind events across consecutive boundaries', async () => {
+        const id = sessionId('rewind-delayed-event')
+        const prefix = makeAgentMessage({ id: 'prefix', seq: 1, at: 1_000 })
+        const firstBoundary = makeUserMessage({
+            id: 'first-boundary',
+            seq: 2,
+            localId: 'first-boundary-local-id',
+            createdAt: 2_000,
+            invokedAt: 2_000
+        })
+        const secondBoundary = makeUserMessage({
+            id: 'second-boundary',
+            seq: 3,
+            localId: 'second-boundary-local-id',
+            createdAt: 3_000,
+            invokedAt: 3_000
+        })
+        const suffix = makeAgentMessage({ id: 'suffix', seq: 4, at: 4_000 })
+        const getMessages = vi.fn(async () => latestResponse(
+            [prefix, firstBoundary, secondBoundary, suffix],
+            { epoch: 1 }
+        ))
+
+        await syncTailMessages(createApi(getMessages), id)
+        rewindMessageWindow(id, 'second-boundary-local-id')
+        rewindMessageWindow(id, 'first-boundary-local-id')
+        rewindMessageWindow(id, 'second-boundary-local-id')
+
+        expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['prefix'])
+    })
+
+    it('retains the current window while a latest reset is in flight', async () => {
+        const id = sessionId('invalidation-preserves-window')
+        const current = makeAgentMessage({ id: 'current', seq: 10, at: 10_000 })
+        const latest = makeAgentMessage({ id: 'latest', seq: 20, at: 20_000 })
+        const response = deferred<MessagesResponse>()
+        const getMessages = vi.fn()
+            .mockResolvedValueOnce(latestResponse([current], { epoch: 1 }))
+            .mockImplementationOnce(async () => await response.promise)
+        const api = createApi(getMessages)
+
+        await syncTailMessages(api, id)
+        invalidateMessageWindow(id)
+
+        expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['current'])
+        expect(getMessageWindowState(id).isSyncingTail).toBe(true)
+
+        const syncing = syncTailMessages(api, id)
+        await vi.waitFor(() => expect(getMessages).toHaveBeenCalledTimes(2))
+        expect(getMessages.mock.calls[1]?.[1]).toEqual({ limit: 200 })
+
+        response.resolve(latestResponse([latest], { epoch: 2 }))
+        await syncing
+
+        expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['latest'])
+        expect(getMessageWindowState(id).isSyncingTail).toBe(false)
     })
 
     it('renders a persisted window immediately, then requests the latest tail on re-entry', async () => {
@@ -1409,7 +1501,7 @@ describe('search-target message context', () => {
         })
     })
 
-    it('persists and hydrates the latest reset boundary for historical contexts', async () => {
+    it('does not persist a stale latest-reset boundary for historical contexts', async () => {
         const id = sessionId('search-context-persistence')
         const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
         const getMessageContext = vi.fn(async () => contextResponse([target], {
@@ -1428,12 +1520,11 @@ describe('search-target message context', () => {
         await new Promise((resolve) => setTimeout(resolve, 250))
 
         const raw = sessionStorage.getItem(`hapi:message-window:v2:${id}`)
-        expect(raw).not.toBeNull()
-        expect(JSON.parse(raw!).requiresLatestReset).toBe(true)
+        expect(raw).toBeNull()
 
         const reloadedId = sessionId('search-context-persistence-reloaded')
-        sessionStorage.setItem(`hapi:message-window:v2:${reloadedId}`, raw!)
-        expect(getMessageWindowState(reloadedId).requiresLatestReset).toBe(true)
+        expect(getMessageWindowState(reloadedId).messages).toEqual([])
+        expect(getMessageWindowState(reloadedId).requiresLatestReset).toBe(false)
     })
 
     it('forces a latest reset for legacy cached windows without the persisted flag', () => {

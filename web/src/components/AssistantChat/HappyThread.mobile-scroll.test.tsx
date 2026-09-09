@@ -38,8 +38,25 @@ import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
 
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+const originalResizeObserver = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver')
+let resizeCallbacks: Array<() => void> = []
 
-function renderThread(onViewModeChange = vi.fn(), onJumpToTail?: () => void) {
+class TestResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(() => callback([], this as unknown as ResizeObserver))
+    }
+
+    observe() {}
+
+    disconnect() {}
+}
+
+function renderThread(
+    onViewModeChange = vi.fn(),
+    unseenCount = 0,
+    onJumpToTail?: () => void
+) {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } }
     })
@@ -61,7 +78,7 @@ function renderThread(onViewModeChange = vi.fn(), onJumpToTail?: () => void) {
                     isLoadingMoreMessages={false}
                     onLoadMore={vi.fn().mockResolvedValue({ status: 'exhausted' })}
                     onCancelLoadMore={vi.fn()}
-                    unseenCount={0}
+                    unseenCount={unseenCount}
                     rawMessagesCount={1}
                     normalizedMessagesCount={1}
                     messagesVersion={1}
@@ -96,6 +113,11 @@ function renderThread(onViewModeChange = vi.fn(), onJumpToTail?: () => void) {
 
 beforeEach(() => {
     vi.useFakeTimers()
+    resizeCallbacks = []
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+        configurable: true,
+        value: TestResizeObserver
+    })
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
         configurable: true,
         writable: true,
@@ -117,6 +139,16 @@ afterEach(() => {
         Object.defineProperty(HTMLElement.prototype, 'scrollTo', originalScrollTo)
     } else {
         Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+    }
+    if (originalScrollIntoView) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView)
+    } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+    }
+    if (originalResizeObserver) {
+        Object.defineProperty(globalThis, 'ResizeObserver', originalResizeObserver)
+    } else {
+        Reflect.deleteProperty(globalThis, 'ResizeObserver')
     }
 })
 
@@ -192,7 +224,7 @@ describe('mobile initial scroll settling', () => {
     it('uses the explicit tail transition when a send requests a forced scroll', () => {
         const onViewModeChange = vi.fn()
         const onJumpToTail = vi.fn()
-        const { rerenderThread } = renderThread(onViewModeChange, onJumpToTail)
+        const { rerenderThread } = renderThread(onViewModeChange, 0, onJumpToTail)
         onViewModeChange.mockClear()
 
         rerenderThread(1)
@@ -295,6 +327,51 @@ describe('mobile initial scroll settling', () => {
 })
 
 describe('explicit tail scrolling', () => {
+    it('renders the unread count inside the compact bottom control', () => {
+        const { container } = renderThread(vi.fn(), 7)
+        const button = container.querySelector<HTMLButtonElement>('button[aria-label*="7"]')
+
+        expect(button).not.toBeNull()
+        expect(button).toHaveClass('rounded-full', 'h-6', 'w-6')
+        expect(button).toHaveClass('bg-[var(--app-button)]', 'text-[var(--app-button-text)]')
+        expect(button?.querySelector('span')).toHaveClass('translate-y-px')
+        expect(button?.textContent).toContain('7')
+    })
+
+    it('uses the same smooth end-alignment scroll as outline navigation', () => {
+        const scrollIntoView = vi.fn()
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            writable: true,
+            value: scrollIntoView
+        })
+        const { rerenderThread } = renderThread()
+
+        rerenderThread(1)
+
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end', behavior: 'smooth' })
+    })
+
+    it('retargets the smooth tail jump when content grows during the animation', () => {
+        const scrollIntoView = vi.fn()
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            writable: true,
+            value: scrollIntoView
+        })
+        const { rerenderThread } = renderThread()
+
+        rerenderThread(1)
+        expect(scrollIntoView).toHaveBeenCalledTimes(1)
+
+        act(() => {
+            resizeCallbacks.at(-1)?.()
+        })
+
+        expect(scrollIntoView).toHaveBeenCalledTimes(2)
+        expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'end', behavior: 'smooth' })
+    })
+
     it('stays in tail mode through smooth-scroll progress and content growth', () => {
         const { viewport, onViewModeChange, rerenderThread } = renderThread()
         act(() => {
