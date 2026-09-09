@@ -201,6 +201,39 @@ describe('usage query credential resolution', () => {
         }
     })
 
+    it('does not fall through an explicit Kimi home to the default current home', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-explicit-home-'))
+        try {
+            const explicitHome = join(root, 'explicit')
+            const defaultHome = join(root, '.kimi-code')
+            await mkdir(explicitHome, { recursive: true })
+            await mkdir(defaultHome, { recursive: true })
+            await writeFile(join(explicitHome, 'config.toml'), 'default_model = "explicit/k3"\n')
+            await writeFile(join(defaultHome, 'config.toml'), [
+                'default_model = "default"',
+                '[providers.default]',
+                'type = "kimi"',
+                'base_url = "https://default.kimi.example/coding/v1"',
+                'api_key = "default-secret"',
+                '[models.default]',
+                'provider = "default"'
+            ].join('\n'))
+
+            const resolved = await resolveUsageCredentials('kimi', {
+                KIMI_CODE_HOME: explicitHome,
+                KIMI_API_KEY: 'explicit-secret'
+            }, root)
+            expect(resolved).toMatchObject({
+                baseUrl: '',
+                apiKey: 'explicit-secret',
+                baseUrlSource: 'none',
+                apiKeySource: 'environment'
+            })
+        } finally {
+            await rm(root, { recursive: true, force: true })
+        }
+    })
+
     it('does not infer an inactive Kimi provider without an active model selection', async () => {
         const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-inactive-provider-'))
         try {

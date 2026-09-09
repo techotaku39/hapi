@@ -166,11 +166,10 @@ function chooseKimiProvider(snapshot: KimiConfigSnapshot): KimiProviderConfig | 
 
 async function readKimiConfig(env: NodeJS.ProcessEnv, userHome = homedir()): Promise<KimiConfigSnapshot> {
     const explicitHome = nonEmptyString(env.KIMI_CODE_HOME) ?? nonEmptyString(env.KIMI_SHARE_DIR)
-    const homes = [
-        explicitHome,
-        join(userHome, '.kimi-code'),
-        join(userHome, '.kimi')
-    ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
+    const homes = (explicitHome
+        ? [explicitHome, join(userHome, '.kimi')]
+        : [join(userHome, '.kimi-code'), join(userHome, '.kimi')]
+    ).filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
 
     for (const home of homes) {
         const tomlPath = join(home, 'config.toml')
