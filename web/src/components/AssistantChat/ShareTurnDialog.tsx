@@ -759,6 +759,8 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
                                         {props.metadataItems.map((item) => item.key === 'agent' ? (
                                             <span
                                                 key={item.key}
+                                                role={item.showIcon !== false && item.showText === false ? 'img' : undefined}
+                                                aria-label={item.showIcon !== false && item.showText === false ? item.text : undefined}
                                                 className={`inline-flex items-center gap-1 ${item.showIcon !== false && item.showText === false ? '-mr-2' : ''}`}
                                             >
                                                 {item.showIcon !== false ? (

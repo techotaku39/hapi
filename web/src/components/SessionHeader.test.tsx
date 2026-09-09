@@ -121,6 +121,7 @@ describe('SessionHeader', () => {
         expect(agentIcons).toHaveLength(2)
         expect(agentIcons[0]?.parentElement).toHaveClass('-mr-1')
         expect(agentIcons[1]?.parentElement).toHaveClass('-mr-2')
+        expect(screen.getAllByRole('img', { name: 'codex' })).toHaveLength(2)
         expect(screen.queryAllByText('codex', { exact: true })).toHaveLength(0)
     })
 

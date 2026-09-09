@@ -403,7 +403,11 @@ export function SessionHeader(props: {
                         {showMobileMetadata ? (
                             <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden text-xs text-[var(--app-hint)] sm:hidden">
                                 {showAgentLabel || showAgentIcon ? (
-                                    <span className={`inline-flex shrink-0 items-center gap-1 ${agentIconOnly ? '-mr-1' : ''}`}>
+                                    <span
+                                        role={agentIconOnly ? 'img' : undefined}
+                                        aria-label={agentIconOnly ? agentLabel ?? undefined : undefined}
+                                        className={`inline-flex shrink-0 items-center gap-1 ${agentIconOnly ? '-mr-1' : ''}`}
+                                    >
                                         {showAgentIcon ? (
                                             <AgentFlavorIcon
                                                 flavor={session.metadata?.flavor}
@@ -426,7 +430,11 @@ export function SessionHeader(props: {
                         ) : null}
                         <div className="hidden flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--app-hint)] sm:flex">
                             {showAgentLabel || showAgentIcon ? (
-                                <span className={`inline-flex items-center gap-1 ${agentIconOnly ? '-mr-2' : ''}`}>
+                                <span
+                                    role={agentIconOnly ? 'img' : undefined}
+                                    aria-label={agentIconOnly ? agentLabel ?? undefined : undefined}
+                                    className={`inline-flex items-center gap-1 ${agentIconOnly ? '-mr-2' : ''}`}
+                                >
                                     {showAgentIcon ? (
                                         <AgentFlavorIcon
                                             flavor={session.metadata?.flavor}
