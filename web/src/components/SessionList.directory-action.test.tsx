@@ -779,6 +779,49 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByTitle('In progress').getAttribute('aria-expanded')).toBe('true')
     })
 
+    it('allows a directory group to collapse while searching', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-match',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Matching task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-other',
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Other task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        const projectHeader = screen.getByTitle('/work/hapi')
+        const projectPanel = projectHeader.nextElementSibling
+        expect(projectPanel?.getAttribute('data-open')).toBeNull()
+
+        // Establish a manual collapsed state before filtering. The filter
+        // still opens the group by default so matching sessions remain visible.
+        fireEvent.click(projectHeader)
+        fireEvent.click(projectHeader)
+        expect(projectPanel?.getAttribute('data-open')).toBeNull()
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const searchInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(searchInput, {
+            target: { value: 'Matching' },
+        })
+
+        expect(projectPanel?.getAttribute('data-open')).toBe('true')
+
+        fireEvent.click(projectHeader)
+        expect(projectPanel?.getAttribute('data-open')).toBeNull()
+
+        fireEvent.click(projectHeader)
+        expect(projectPanel?.getAttribute('data-open')).toBe('true')
+
+        fireEvent.change(searchInput, { target: { value: '' } })
+        expect(projectPanel?.getAttribute('data-open')).toBeNull()
+    })
+
     it('toggles the running section with the keyboard', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
