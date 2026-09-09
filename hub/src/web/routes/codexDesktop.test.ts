@@ -1428,6 +1428,91 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('matches repeated prompt texts by occurrence when merging attachments', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-codex-repeated-attachment-merge-'))
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const source = store.sessions.getOrCreateSession(
+            'source-repeated-attachment-session',
+            { codexSessionId: 'codex-thread-repeated-attachments' },
+            {},
+            'default'
+        )
+        const canonical = store.sessions.getOrCreateSession(
+            'canonical-repeated-attachment-session',
+            { codexSessionId: 'codex-thread-repeated-attachments' },
+            {},
+            'default'
+        )
+        store.sessions.touchSessionUpdatedAt(canonical.id, Date.now() + 1_000, 'default')
+        const firstAttachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: source.id,
+            filename: 'first.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('first original')
+        })
+        const secondAttachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: source.id,
+            filename: 'second.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('second original')
+        })
+        const prompt = (attachmentId?: string) => ({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'repeat this',
+                ...(attachmentId ? {
+                    attachments: [{
+                        id: `message-${attachmentId}`,
+                        filename: attachmentId === firstAttachment.id ? firstAttachment.filename : secondAttachment.filename,
+                        mimeType: 'text/plain',
+                        size: attachmentId === firstAttachment.id ? firstAttachment.size : secondAttachment.size,
+                        attachmentId
+                    }]
+                } : {})
+            }
+        })
+        store.messages.addMessage(canonical.id, prompt(), 'canonical-1')
+        store.messages.addMessage(canonical.id, prompt(), 'canonical-2')
+        store.messages.addMessage(source.id, prompt(firstAttachment.id), 'source-1')
+        store.messages.addMessage(source.id, prompt(secondAttachment.id), 'source-2')
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => null }))
+
+        try {
+            const response = await app.request('/api/codex/merge-duplicate-sessions', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ sessionIds: ['codex-thread-repeated-attachments'] })
+            })
+            expect(response.status).toBe(200)
+            const mergedMessages = store.messages.getAllMessages(canonical.id)
+            expect(mergedMessages).toHaveLength(2)
+            const attachmentIds = mergedMessages.map((message) => {
+                const content = message.content as {
+                    content?: { attachments?: Array<{ attachmentId?: string }> }
+                }
+                return content.content?.attachments?.[0]?.attachmentId
+            })
+            expect(attachmentIds[0]).toBeDefined()
+            expect(attachmentIds[1]).toBeDefined()
+            expect(attachmentIds[0]).not.toBe(attachmentIds[1])
+            expect((await store.attachments.readForSessionAsync(attachmentIds[0]!, 'default', canonical.id))?.data)
+                .toEqual(Buffer.from('first original'))
+            expect((await store.attachments.readForSessionAsync(attachmentIds[1]!, 'default', canonical.id))?.data)
+                .toEqual(Buffer.from('second original'))
+        } finally {
+            store.close()
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
     it('treats source and fork ids as the same duplicate-sessions group', async () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {

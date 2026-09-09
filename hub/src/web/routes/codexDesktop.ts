@@ -1340,9 +1340,13 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
         throw new Error(`No duplicate Hapi session found for Codex thread: ${options.group.codexSessionId}`)
     }
 
-    const knownMessages = new Map(
-        canonical.storedMessages.map((message) => [getComparableStoredMessageKey(message), message])
-    )
+    const knownMessages = new Map<string, StoredMessage[]>()
+    for (const message of canonical.storedMessages) {
+        const comparableKey = getComparableStoredMessageKey(message)
+        const bucket = knownMessages.get(comparableKey) ?? []
+        bucket.push(message)
+        knownMessages.set(comparableKey, bucket)
+    }
     const removedSessionIds: string[] = []
     const appendedMessages: StoredMessage[] = []
     let updatedCanonicalMessage = false
@@ -1351,9 +1355,12 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
     for (const source of sessionStates.slice(1)) {
         latestActivity = Math.max(latestActivity, source.updatedAt)
         const clonedAttachments = new Map<string, StoredAttachment>()
+        const sourceOccurrences = new Map<string, number>()
         for (const message of source.storedMessages) {
             const comparableKey = getComparableStoredMessageKey(message)
-            const existing = knownMessages.get(comparableKey)
+            const occurrence = sourceOccurrences.get(comparableKey) ?? 0
+            sourceOccurrences.set(comparableKey, occurrence + 1)
+            const existing = knownMessages.get(comparableKey)?.[occurrence]
             if (existing && !hasUserAttachments(message.content)) {
                 continue
             }
@@ -1370,7 +1377,9 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
                 if (!options.store.messages.updateMessageContent(existing.id, mergedContent)) {
                     throw new Error(`Failed to merge duplicate Codex message: ${existing.id}`)
                 }
-                knownMessages.set(comparableKey, { ...existing, content: mergedContent })
+                const bucket = knownMessages.get(comparableKey) ?? []
+                bucket[occurrence] = { ...existing, content: mergedContent }
+                knownMessages.set(comparableKey, bucket)
                 updatedCanonicalMessage = true
                 latestActivity = Math.max(latestActivity, message.invokedAt ?? message.createdAt)
                 continue
@@ -1383,7 +1392,9 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
                 invokedAt: message.invokedAt,
                 scheduledAt: message.scheduledAt
             })
-            knownMessages.set(comparableKey, copied)
+            const bucket = knownMessages.get(comparableKey) ?? []
+            bucket[occurrence] = copied
+            knownMessages.set(comparableKey, bucket)
             appendedMessages.push(copied)
             latestActivity = Math.max(latestActivity, copied.invokedAt ?? copied.createdAt)
         }
