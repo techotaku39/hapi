@@ -11,6 +11,7 @@ import { getPinInProgressSessionsModeOptions, usePinInProgressSessionsMode } fro
 import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionPreviewLimit, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { useSessionHeaderMetadata, type SessionHeaderMetadataKey } from '@/hooks/useSessionHeaderMetadata'
+import { useAppBadgePreference } from '@/hooks/useAppBadgePreference'
 import { SettingsChoiceGroup, SettingsFieldLabel, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 
 function MinusIcon() {
@@ -140,6 +141,7 @@ export default function SettingsDisplayPage() {
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
     const { pinInProgressSessionsMode, setPinInProgressSessionsMode } = usePinInProgressSessionsMode()
+    const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
     const sessionHeaderOptions: ReadonlyArray<{ key: SessionHeaderMetadataKey; labelKey: string }> = [
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
@@ -187,6 +189,7 @@ export default function SettingsDisplayPage() {
                         onChange={setPinInProgressSessionsMode}
                     />
                 </div>
+                <SettingsSwitch label={t('settings.display.appBadge')} description={t('settings.display.appBadge.desc')} checked={appBadgeEnabled} onChange={setAppBadgeEnabled} />
                 <SettingsChoiceGroup
                     label={t('settings.display.sessionListStatus')}
                     description={t('settings.display.sessionListStatus.detailedDescription')}
