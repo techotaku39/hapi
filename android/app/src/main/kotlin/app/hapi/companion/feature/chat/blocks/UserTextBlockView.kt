@@ -47,7 +47,6 @@ import app.hapi.companion.ui.theme.HapiTheme
 import app.hapi.protocol.chat.ChatAttachment
 import app.hapi.protocol.chat.UserTextBlock
 import coil.compose.AsyncImage
-import coil.request.CachePolicy
 import coil.request.ImageRequest
 
 /**
@@ -135,8 +134,6 @@ private fun AttachmentView(attachment: ChatAttachment) {
             remoteOriginalUrl?.let { url ->
                 ImageRequest.Builder(context)
                     .data(url)
-                    .memoryCachePolicy(CachePolicy.DISABLED)
-                    .diskCachePolicy(CachePolicy.DISABLED)
                     .build()
             }
         }

@@ -64,6 +64,46 @@ describe('durable attachment session lifecycle', () => {
         expect(existsSync(attachment.originalPath)).toBe(true)
     })
 
+    it('keeps unreferenced uploads on a live source during history-only merge', async () => {
+        const { store, cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+        const referenced = await store.attachments.create({
+            namespace: 'default',
+            sessionId: oldSession.id,
+            filename: 'referenced.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('referenced')
+        })
+        const pending = await store.attachments.create({
+            namespace: 'default',
+            sessionId: oldSession.id,
+            filename: 'pending.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('pending')
+        })
+        store.messages.addMessage(oldSession.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'history attachment',
+                attachments: [{
+                    id: 'history-attachment',
+                    filename: referenced.filename,
+                    mimeType: referenced.mimeType,
+                    size: referenced.size,
+                    attachmentId: referenced.id
+                }]
+            }
+        }, 'history-attachment-message')
+
+        await cache.mergeSessionHistory(oldSession.id, newSession.id, 'default')
+
+        expect(store.attachments.getForSession(referenced.id, 'default', newSession.id)).not.toBeNull()
+        expect(store.attachments.getForSession(referenced.id, 'default', oldSession.id)).toBeNull()
+        expect(store.attachments.getForSession(pending.id, 'default', oldSession.id)).not.toBeNull()
+        expect(store.attachments.getForSession(pending.id, 'default', newSession.id)).toBeNull()
+    })
+
     it('transfers uploads completed during awaited merge work before deleting the source', async () => {
         const { store, cache, root } = setup()
         const { oldSession, newSession } = makeSessions(cache)

@@ -333,6 +333,24 @@ export class AttachmentStore {
         return Number(result.changes)
     }
 
+    transferIds(
+        namespace: string,
+        fromSessionId: string,
+        toSessionId: string,
+        attachmentIds: readonly string[]
+    ): number {
+        if (fromSessionId === toSessionId || attachmentIds.length === 0) return 0
+        const placeholders = attachmentIds.map(() => '?').join(', ')
+        const result = this.db.prepare(`
+            UPDATE attachments
+            SET session_id = ?
+            WHERE namespace = ?
+              AND session_id = ?
+              AND id IN (${placeholders})
+        `).run(toSessionId, namespace, fromSessionId, ...attachmentIds)
+        return Number(result.changes)
+    }
+
     async deleteAllForSession(namespace: string, sessionId: string): Promise<number> {
         const attachments = this.db.prepare(`
             SELECT id, namespace, session_id, filename, mime_type, size,

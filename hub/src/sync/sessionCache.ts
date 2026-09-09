@@ -1,6 +1,6 @@
-import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
+import { AgentStateSchema, AttachmentMetadataSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
-import type { Store } from '../store'
+import type { Store, StoredMessage } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
@@ -13,6 +13,26 @@ const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // HTTP caller as 409 instead of spinning forever.
 const METADATA_RETRY_ATTEMPTS = 5
 type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'effort' | 'serviceTier' | 'collaborationMode' | 'copilotAgentMode'
+
+function collectDurableAttachmentIds(messages: StoredMessage[]): string[] {
+    const ids = new Set<string>()
+    for (const message of messages) {
+        if (!isRecord(message.content) || message.content.role !== 'user') continue
+        const content = message.content.content
+        if (!isRecord(content) || !Array.isArray(content.attachments)) continue
+        for (const attachment of content.attachments) {
+            const parsed = AttachmentMetadataSchema.safeParse(attachment)
+            if (parsed.success && parsed.data.attachmentId) {
+                ids.add(parsed.data.attachmentId)
+            }
+        }
+    }
+    return Array.from(ids)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
 
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
@@ -1147,8 +1167,20 @@ export class SessionCache {
             throw new Error('Session not found for merge')
         }
 
+        const referencedAttachmentIds = options.deleteOldSession
+            ? null
+            : collectDurableAttachmentIds(this.store.messages.getAllMessages(oldSessionId))
         const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
-        this.store.attachments.transferSession(namespace, oldSessionId, newSessionId)
+        if (referencedAttachmentIds === null) {
+            this.store.attachments.transferSession(namespace, oldSessionId, newSessionId)
+        } else {
+            this.store.attachments.transferIds(
+                namespace,
+                oldSessionId,
+                newSessionId,
+                referencedAttachmentIds
+            )
+        }
         // mergeSessions deletes the source. mergeSessionHistory keeps it alive
         // with the original socket, so its notify chain must stay on that id.
         if (options.deleteOldSession) {
