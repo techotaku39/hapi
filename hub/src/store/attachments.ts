@@ -197,14 +197,20 @@ export class AttachmentStore {
         const attachment = this.getForSession(id, namespace, sessionId)
         if (!attachment) return false
 
-        const result = this.db.prepare(
-            'DELETE FROM attachments WHERE id = ? AND namespace = ? AND session_id = ?'
-        ).run(id, namespace, sessionId)
-        if (Number(result.changes) === 0) return false
+        const deleted = this.db.transaction(() => {
+            this.db.prepare(
+                'INSERT OR IGNORE INTO attachment_deletions (original_path) VALUES (?)'
+            ).run(attachment.originalPath)
+            return Number(this.db.prepare(
+                'DELETE FROM attachments WHERE id = ? AND namespace = ? AND session_id = ?'
+            ).run(id, namespace, sessionId).changes) > 0
+        })()
+        if (!deleted) return false
 
-        // Delete the row first. If the process exits before the file is removed,
-        // startup reconciliation can safely reclaim the now-untracked blob.
+        // Ownership and the cleanup journal commit together. If the process exits
+        // before the file is removed, startup reconciliation drains the journal.
         await rm(attachment.originalPath, { force: true })
+        this.clearDeletionJournal(attachment.originalPath)
         return true
     }
 
@@ -218,13 +224,38 @@ export class AttachmentStore {
         `).get(id, namespace) as AttachmentRow | null | undefined
         if (!attachment) return false
 
-        const result = this.db.prepare(
-            'DELETE FROM attachments WHERE id = ? AND namespace = ?'
-        ).run(id, namespace)
-        if (Number(result.changes) === 0) return false
+        const deleted = this.db.transaction(() => {
+            this.db.prepare(
+                'INSERT OR IGNORE INTO attachment_deletions (original_path) VALUES (?)'
+            ).run(attachment.original_path)
+            return Number(this.db.prepare(
+                'DELETE FROM attachments WHERE id = ? AND namespace = ?'
+            ).run(id, namespace).changes) > 0
+        })()
+        if (!deleted) return false
 
         await rm(attachment.original_path, { force: true })
+        this.clearDeletionJournal(attachment.original_path)
         return true
+    }
+
+    async cleanupPendingDeletions(): Promise<number> {
+        const rows = this.db.prepare(
+            'SELECT original_path FROM attachment_deletions'
+        ).all() as Array<{ original_path: string }>
+        let cleaned = 0
+        let firstError: unknown
+        for (const row of rows) {
+            try {
+                await rm(row.original_path, { force: true })
+                this.clearDeletionJournal(row.original_path)
+                cleaned += 1
+            } catch (error) {
+                firstError ??= error
+            }
+        }
+        if (firstError) throw firstError
+        return cleaned
     }
 
     async cloneForSession(
@@ -351,6 +382,12 @@ export class AttachmentStore {
             await rm(path, { force: true })
         } catch {
         }
+    }
+
+    private clearDeletionJournal(originalPath: string): void {
+        this.db.prepare(
+            'DELETE FROM attachment_deletions WHERE original_path = ?'
+        ).run(originalPath)
     }
 
     private toStoredAttachment(row: AttachmentRow): StoredAttachment {

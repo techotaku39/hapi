@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import * as fsPromises from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './index'
@@ -50,6 +51,43 @@ describe('AttachmentStore', () => {
         expect(existsSync(created.originalPath)).toBe(false)
         expect(await store.attachments.readForSessionAsync(created.id, 'namespace-a', 'session-a')).toBeNull()
         store.close()
+    })
+
+    it('journals failed file cleanup for the next startup reconciliation', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.sqlite')
+        const attachmentsRoot = join(dir, 'attachments')
+        const store = new Store(dbPath, { attachmentsRoot })
+        const session = store.sessions.getOrCreateSession('cleanup-journal-session', {}, {}, 'default')
+        const attachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: session.id,
+            filename: 'journaled.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('journaled')
+        })
+        const originalRm = fsPromises.rm.bind(fsPromises)
+        const rmSpy = spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+            if (String(path) === attachment.originalPath) {
+                throw new Error('simulated unlink failure')
+            }
+            return await originalRm(path, options)
+        })
+
+        try {
+            await expect(store.attachments.deleteForSession(attachment.id, 'default', session.id))
+                .rejects.toThrow('simulated unlink failure')
+            expect(store.attachments.getForSession(attachment.id, 'default', session.id)).toBeNull()
+        } finally {
+            rmSpy.mockRestore()
+            store.close()
+        }
+
+        const reopened = new Store(dbPath, { attachmentsRoot })
+        expect(await reopened.cleanupOrphanedAttachments()).toBe(1)
+        expect(existsSync(attachment.originalPath)).toBe(false)
+        reopened.close()
     })
 
     it('rejects empty and oversized originals before creating files', async () => {

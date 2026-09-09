@@ -70,7 +70,7 @@ function sameMessageIds(left: Set<string>, right: Set<string>): boolean {
     }
     return true
 }
-const SCHEMA_VERSION: number = 27
+const SCHEMA_VERSION: number = 28
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -84,7 +84,8 @@ const REQUIRED_TABLES = [
     'usage_scan_state',
     'events',
     'event_links',
-    'attachments'
+    'attachments',
+    'attachment_deletions'
 ] as const
 
 export class Store {
@@ -167,6 +168,14 @@ export class Store {
      * database may legitimately own files in the shared attachment root.
      */
     async cleanupOrphanedAttachments(): Promise<number> {
+        let deleted = 0
+        let firstError: unknown
+        try {
+            deleted += await this.attachments.cleanupPendingDeletions()
+        } catch (error) {
+            firstError ??= error
+        }
+
         const rows = this.db.prepare(`
             SELECT DISTINCT a.namespace, a.session_id
             FROM attachments AS a
@@ -175,8 +184,6 @@ export class Store {
             WHERE s.id IS NULL
         `).all() as Array<{ namespace: string; session_id: string }>
 
-        let deleted = 0
-        let firstError: unknown
         for (const row of rows) {
             try {
                 deleted += await this.attachments.deleteAllForSession(row.namespace, row.session_id)
@@ -602,6 +609,7 @@ export class Store {
             24: () => this.migrateFromV24ToV25(),
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
+            27: () => this.migrateFromV27ToV28(),
         })
 
         if (currentVersion === 0) {
@@ -866,6 +874,10 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_attachments_namespace_session
                 ON attachments(namespace, session_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS attachment_deletions (
+                original_path TEXT PRIMARY KEY
+            );
         `)
     }
 
@@ -1338,6 +1350,15 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_attachments_namespace_session
                 ON attachments(namespace, session_id, created_at);
+        `)
+    }
+
+    /** v27→v28: journal attachment files awaiting filesystem cleanup. */
+    private migrateFromV27ToV28(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS attachment_deletions (
+                original_path TEXT PRIMARY KEY
+            );
         `)
     }
 
