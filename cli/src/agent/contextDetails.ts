@@ -6,7 +6,6 @@ import type {
     Metadata
 } from '@hapi/protocol'
 import type { SkillMetadata, ThreadStartParams } from '@/codex/appServerTypes'
-import type { McpServersConfig } from '@/codex/utils/buildHapiMcpBridge'
 
 type JsonRecord = Record<string, unknown>
 
@@ -198,7 +197,7 @@ export function buildCodexContextDetails(args: {
     threadParams?: ThreadStartParams
     slashCommands?: readonly string[]
     skills?: readonly (Pick<SkillMetadata, 'name' | 'enabled'> | SkillMetadata)[]
-    mcpServers?: McpServersConfig
+    mcpServers?: Record<string, unknown>
     mcpServerInventory?: readonly CodexMcpServerInventory[]
     updatedAt?: number
 }): ContextDetails {
@@ -244,10 +243,11 @@ export function buildCodexContextDetails(args: {
     }
     for (const [name, server] of Object.entries(args.mcpServers ?? {})) {
         const previous = mcpServerByName.get(name)
+        const tools = asRecord(asRecord(server)?.tools)
         mcpServerByName.set(name, {
             name,
-            ...(server.tools
-                ? { toolNames: Object.keys(server.tools) }
+            ...(tools
+                ? { toolNames: Object.keys(tools) }
                 : previous?.toolNames
                     ? { toolNames: previous.toolNames }
                     : {}),
