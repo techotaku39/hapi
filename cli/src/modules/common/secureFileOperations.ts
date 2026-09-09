@@ -288,15 +288,15 @@ async function secureRenameWindows(
 async function secureUnlinkWindows(path: string, expectedIdentity?: FileIdentity): Promise<void> {
     const file = await openWindowsFile(path, expectedIdentity)
     try {
-        const information = Buffer.alloc(1)
-        information.writeUInt8(1, 0)
+        const information = Buffer.alloc(4)
+        information.writeUInt32LE(0x00000001 | 0x00000002 | 0x00000010, 0)
         const ioStatusBlock = Buffer.alloc(process.arch === 'ia32' ? 8 : 16)
         const status = file.symbols.NtSetInformationFile(
             file.handle,
             await bufferPointer(ioStatusBlock),
             await bufferPointer(information),
             information.length,
-            13,
+            64,
         )
         if (status < 0) {
             throw new Error(`NtSetInformationFile delete failed with status 0x${(status >>> 0).toString(16)}`)
@@ -307,15 +307,15 @@ async function secureUnlinkWindows(path: string, expectedIdentity?: FileIdentity
 }
 
 async function markWindowsHandleForDeletion(symbols: WindowsNativeSymbols, handle: number): Promise<void> {
-    const information = Buffer.alloc(1)
-    information.writeUInt8(1, 0)
+    const information = Buffer.alloc(4)
+    information.writeUInt32LE(0x00000001 | 0x00000002 | 0x00000010, 0)
     const ioStatusBlock = Buffer.alloc(process.arch === 'ia32' ? 8 : 16)
     const status = symbols.NtSetInformationFile(
         handle,
         await bufferPointer(ioStatusBlock),
         await bufferPointer(information),
         information.length,
-        13,
+        64,
     )
     if (status < 0) throw new Error(`NtSetInformationFile delete failed with status 0x${(status >>> 0).toString(16)}`)
 }
@@ -377,7 +377,7 @@ async function openPosixStagingFile(path: string, directoryIdentity: string, mod
             | constants.O_CREAT
             | constants.O_EXCL
             | (constants.O_NOFOLLOW ?? 0),
-        mode & 0o7777,
+        0o600,
     )
     if (rawFd < 0) {
         await closeSecureDirectory(directory)
@@ -464,12 +464,11 @@ async function openWindowsStagingFile(path: string, directoryIdentity: string, m
         const created = await createWindowsStagingHandle(path, directory)
         nativeHandle = created.handle
         nodeHandle = await open(path, 'r+')
-        const openedByPath = await openWindowsFile(path)
-        if (openedByPath.identity !== created.identity) {
-            openedByPath.symbols.CloseHandle(openedByPath.handle)
+        const nodeStats = await nodeHandle.stat({ bigint: true })
+        const nodeIdentity = `${nodeStats.dev}:${nodeStats.ino >> 32n}:${nodeStats.ino & 0xffffffffn}`
+        if (!nodeStats.isFile() || nodeIdentity !== created.identity) {
             throw new Error('Secure staging path changed during creation')
         }
-        openedByPath.symbols.CloseHandle(openedByPath.handle)
         const targetHandle = nodeHandle
         nodeHandle = null
         directory.symbols.CloseHandle(nativeHandle)
