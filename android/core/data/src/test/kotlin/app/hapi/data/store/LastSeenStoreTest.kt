@@ -22,6 +22,30 @@ class LastSeenStoreTest {
     }
 
     @Test
+    fun `markUnread lowers the watermark and baseline completion preserves it`() = runTest {
+        val store = LastSeenStore(backgroundScope)
+        val pending = summary(
+            "legacy",
+            updatedAt = 9_000,
+            lastAssistantMessageAt = 5_000,
+        ).copy(assistantReplyClockBackfilled = false)
+
+        store.initializeBaseline("hub-a", listOf(pending))
+        store.markUnread("legacy", 6_000)
+        assertEquals(5_999, store.lastSeenAt("legacy"))
+        store.markUnread("legacy", 5_500)
+        assertEquals(5_999, store.lastSeenAt("legacy"))
+
+        val complete = pending.copy(
+            lastAssistantMessageAt = 6_000,
+            assistantReplyClockBackfilled = true,
+        )
+        store.initializeBaseline("hub-a", listOf(complete))
+        assertEquals(5_999, store.lastSeenAt("legacy"))
+        assertTrue(LastSeenStore.isUnread(complete, store.lastSeenAt("legacy")))
+    }
+
+    @Test
     fun `unread compares the latest reply against the watermark`() = runTest {
         val row = summary("s1", updatedAt = 9_000, lastAssistantMessageAt = 1_000)
         assertTrue(LastSeenStore.isUnread(row, lastSeenAt = 0))

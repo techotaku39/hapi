@@ -21,6 +21,24 @@ struct LastSeenStoreTests {
         #expect(store.lastSeenAt("unknown") == 0)
     }
 
+    @Test func markUnreadLowersTheWatermarkAndBaselineCompletionPreservesIt() {
+        var pending = storeSummary("legacy", updatedAt: 9_000, lastAssistantMessageAt: 5_000)
+        pending.assistantReplyClockBackfilled = false
+        let store = LastSeenStore()
+
+        store.initializeBaseline(scopeKey: "hub-a", sessions: [pending])
+        store.markUnread(sessionId: "legacy", activityAt: 6_000)
+        #expect(store.lastSeenAt("legacy") == 5_999)
+        store.markUnread(sessionId: "legacy", activityAt: 5_500)
+        #expect(store.lastSeenAt("legacy") == 5_999)
+
+        pending.lastAssistantMessageAt = 6_000
+        pending.assistantReplyClockBackfilled = true
+        store.initializeBaseline(scopeKey: "hub-a", sessions: [pending])
+        #expect(store.lastSeenAt("legacy") == 5_999)
+        #expect(LastSeenStore.isUnread(pending, lastSeenAt: store.lastSeenAt("legacy")))
+    }
+
     @Test func unreadComparesLatestReplyAgainstTheWatermark() {
         let row = storeSummary("s1", updatedAt: 9_000, lastAssistantMessageAt: 1_000)
         #expect(LastSeenStore.isUnread(row, lastSeenAt: 0))

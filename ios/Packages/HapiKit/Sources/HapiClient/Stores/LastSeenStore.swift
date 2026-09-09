@@ -71,6 +71,16 @@ public final class LastSeenStore {
         snapshot?.scheduleWrite(state)
     }
 
+    /// Preserve a live reply below the watermark while legacy backfill is pending.
+    public func markUnread(sessionId: String, activityAt: Int) {
+        guard !sessionId.isEmpty else { return }
+        let unreadBefore = activityAt - 1
+        let current = state.lastSeen[sessionId]
+        guard current == nil || current! > unreadBefore else { return }
+        state.lastSeen[sessionId] = unreadBefore
+        snapshot?.scheduleWrite(state)
+    }
+
     /// `initializeSessionLastSeen`: on the first list load for `scopeKey`
     /// (e.g. the hub origin), seed every session without a watermark at its
     /// current reply/activity clock, then never again for that scope.

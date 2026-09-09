@@ -269,6 +269,29 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `live reply during pending backfill notifies the unread watermark`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("legacy", updatedAt = 9_000, lastAssistantMessageAt = 5_000, lastAssistantMessageVersion = 10)
+                    .copy(assistantReplyClockBackfilled = false),
+            )
+        )
+        store.refresh()
+        var unreadAt: Long? = null
+        store.onLiveReplyDuringBackfill = { _, activityAt -> unreadAt = activityAt }
+
+        store.applySessionEvent(
+            globalScope,
+            sessionUpdatedEvent(
+                "legacy",
+                """{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":11}""",
+            ),
+        )
+
+        assertEquals(6_000L, unreadAt)
+    }
+
+    @Test
     fun `full-session event with mismatched id falls back to list refetch`() = runStoreTest { store, server ->
         server.enqueueJson(sessionsResponseJson(summary("s1", updatedAt = 100)))
         store.refresh()

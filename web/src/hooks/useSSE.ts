@@ -23,6 +23,7 @@ import type {
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, markMessagesIndeterminate, markMessagesRequeued, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
 import { applySessionDetailPatch } from '@/lib/sessionPatch'
+import { markSessionUnread } from '@/lib/sessionLastSeen'
 import {
     shouldAcceptSessionRecord,
     shouldAcceptSessionSummaryRecord,
@@ -674,6 +675,47 @@ export function useSSE(options: {
             })
         }
 
+        const preserveLiveReplyUnreadDuringBackfill = (sessionId: string, patch: SessionPatch): void => {
+            if (
+                patch.assistantReplyClockBackfilled !== undefined
+                || patch.lastAssistantMessageAt === undefined
+                || patch.lastAssistantMessageAt === null
+            ) {
+                return
+            }
+
+            const currentSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+                ?.sessions.find((session) => session.id === sessionId)
+            const currentDetail = queryClient.getQueryData<SessionResponse>(queryKeys.session(sessionId))?.session
+            if (
+                currentSummary?.assistantReplyClockBackfilled !== false
+                && currentDetail?.assistantReplyClockBackfilled !== false
+            ) {
+                return
+            }
+
+            const currentReplyAt = Math.max(
+                currentSummary?.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY,
+                currentDetail?.lastAssistantMessageAt ?? Number.NEGATIVE_INFINITY
+            )
+            const currentReplyVersion = Math.max(
+                currentSummary?.lastAssistantMessageVersion ?? 0,
+                currentDetail?.seq ?? 0
+            )
+            if (
+                patch.lastAssistantMessageVersion !== undefined
+                && patch.lastAssistantMessageVersion < currentReplyVersion
+            ) {
+                return
+            }
+            if (patch.lastAssistantMessageAt > currentReplyAt) {
+                // The later completion patch must preserve this lower
+                // watermark; otherwise it would seed the live reply itself
+                // and silently swallow the unread transition.
+                markSessionUnread(sessionId, patch.lastAssistantMessageAt)
+            }
+        }
+
         const handleSyncEvent = (event: SyncEvent) => {
             lastActivityAtRef.current = Date.now()
 
@@ -779,6 +821,7 @@ export function useSSE(options: {
                 } else {
                     const patch = getSessionPatch(event.data)
                     if (patch) {
+                        preserveLiveReplyUnreadDuringBackfill(event.sessionId, patch)
                         const detailPatched = patchSessionDetail(event.sessionId, patch)
                         const summaryPatched = patchSessionSummary(event.sessionId, patch)
 

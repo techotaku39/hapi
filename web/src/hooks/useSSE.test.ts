@@ -4,6 +4,7 @@ import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session, SessionResponse, SessionSummary, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
+import { getSessionLastSeenAt, getUnreadSessionCount } from '@/lib/sessionLastSeen'
 import {
     applySessionDetailPatch,
     canApplyVersionedSummaryPatch,
@@ -361,6 +362,53 @@ describe('reply-clock full-record cache ordering', () => {
         expect(summary?.metadata?.path).toBe('/new')
         expect(summary?.lastAssistantMessageAt).toBe(3_000)
         expect(summary?.assistantReplyClockBackfilled).toBe(true)
+        unmount()
+    })
+
+    it('preserves a live reply as unread until legacy backfill completes', () => {
+        const sessionId = 'legacy-live-reply'
+        window.localStorage.removeItem('hapi.sessionLastSeen.v2')
+        window.localStorage.removeItem('hapi.sessionManualUnread.v2')
+        const { queryClient, unmount } = renderUseSSE()
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSummary({
+                id: sessionId,
+                lastAssistantMessageAt: 5_000,
+                lastAssistantMessageVersion: 10,
+                assistantReplyClockBackfilled: false
+            })]
+        })
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId,
+                namespace: 'default',
+                data: {
+                    lastAssistantMessageAt: 6_000,
+                    lastAssistantMessageVersion: 11
+                }
+            })
+        })
+
+        expect(getSessionLastSeenAt(sessionId)).toBe(5_999)
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId,
+                namespace: 'default',
+                data: {
+                    lastAssistantMessageAt: 6_000,
+                    lastAssistantMessageVersion: 12,
+                    assistantReplyClockBackfilled: true
+                }
+            })
+        })
+
+        const summary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]
+        expect(summary?.assistantReplyClockBackfilled).toBe(true)
+        expect(getUnreadSessionCount([summary!])).toBe(1)
         unmount()
     })
 })

@@ -213,6 +213,28 @@ struct SessionListStoreTests {
         #expect(store.sessions.first?.updatedAt == 9_000)
     }
 
+    @Test func liveReplyDuringPendingBackfillNotifiesTheUnreadWatermark() async throws {
+        let (performer, store) = try makeStore()
+        var pending = storeSummary(
+            "legacy",
+            updatedAt: 9_000,
+            lastAssistantMessageAt: 5_000,
+            lastAssistantMessageVersion: 10
+        )
+        pending.assistantReplyClockBackfilled = false
+        await performer.enqueue(json: try sessionsResponseJSON(pending))
+        try await store.refresh()
+        var unreadAt: Int?
+        store.onLiveReplyDuringBackfill = { _, activityAt in unreadAt = activityAt }
+
+        store.applySessionEvent(try sessionUpdatedEvent(
+            "legacy",
+            dataJSON: "{\"lastAssistantMessageAt\":6000,\"lastAssistantMessageVersion\":11}"
+        ))
+
+        #expect(unreadAt == 6_000)
+    }
+
     @Test func fullSessionEventWithMismatchedIdFallsBackToListRefetch() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1", updatedAt: 100)))

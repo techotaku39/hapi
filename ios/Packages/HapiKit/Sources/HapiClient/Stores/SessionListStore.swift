@@ -85,6 +85,8 @@ public final class SessionListStore: SessionListStoring {
     /// `HubSession` to `ScratchlistStore.handleInvalidation` (the iOS seam
     /// for the Android `SessionStore.scratchlistInvalidations` flow).
     @ObservationIgnored public var onScratchlistInvalidation: (@MainActor (String) -> Void)?
+    /// Wired by the app so live replies cannot be absorbed by a pending baseline.
+    @ObservationIgnored public var onLiveReplyDuringBackfill: (@MainActor (String, Int) -> Void)?
 
     @ObservationIgnored private let api: APIClient
     @ObservationIgnored private let snapshot: DiskCache<[SessionSummary]>?
@@ -295,6 +297,7 @@ public final class SessionListStore: SessionListStoring {
             }
             upsertSummary(full)
         case .patch(let patch) where patch != SessionPatch():
+            preserveLiveReplyUnreadDuringBackfill(sessionId: sessionId, patch: patch)
             patchDetail(sessionId: sessionId, patch: patch)
             if !patchSummary(sessionId: sessionId, patch: patch) {
                 // Row not in the list yet (fresh spawn raced the refetch).
@@ -315,6 +318,31 @@ public final class SessionListStore: SessionListStoring {
                 }
             }
             scheduleRefresh()
+        }
+    }
+
+    private func preserveLiveReplyUnreadDuringBackfill(sessionId: String, patch: SessionPatch) {
+        guard patch.assistantReplyClockBackfilled == nil,
+              let field = patch.lastAssistantMessageAt,
+              let replyAt = field.wireValue else { return }
+        let currentSummary = sessions.first { $0.id == sessionId }
+        let currentDetail = details[sessionId]
+        guard currentSummary?.assistantReplyClockBackfilled == false
+                || currentDetail?.assistantReplyClockBackfilled == false else { return }
+
+        let currentReplyAt = max(
+            currentSummary?.lastAssistantMessageAt ?? Int.min,
+            currentDetail?.lastAssistantMessageAt ?? Int.min
+        )
+        let currentReplyVersion = max(
+            currentSummary?.lastAssistantMessageVersion ?? 0,
+            currentDetail?.seq ?? 0
+        )
+        if let replyVersion = patch.lastAssistantMessageVersion, replyVersion < currentReplyVersion {
+            return
+        }
+        if replyAt > currentReplyAt {
+            onLiveReplyDuringBackfill?(sessionId, replyAt)
         }
     }
 

@@ -4,6 +4,7 @@ import app.hapi.data.api.HapiApi
 import app.hapi.data.sse.SseSubscriptionKey
 import app.hapi.protocol.patch.applySessionDetailPatch
 import app.hapi.protocol.wire.HapiJson
+import app.hapi.protocol.wire.OptionalField
 import app.hapi.protocol.wire.ReopenSessionResponse
 import app.hapi.protocol.wire.Session
 import app.hapi.protocol.wire.SessionPatch
@@ -156,6 +157,9 @@ class SessionStore(
      * key in `useSSE.ts`).
      */
     val scratchlistInvalidations: SharedFlow<String> = _scratchlistInvalidations.asSharedFlow()
+
+    /** Wired by the app so live replies cannot be absorbed by a pending baseline. */
+    var onLiveReplyDuringBackfill: ((String, Long) -> Unit)? = null
 
     private val refreshMutex = Mutex()
     private val refreshQueued = AtomicBoolean(false)
@@ -435,6 +439,7 @@ class SessionStore(
         }
         val patch = SessionPatches.parse(data)
         if (patch != null) {
+            preserveLiveReplyUnreadDuringBackfill(sessionId, patch)
             patchDetail(sessionId, patch)
             val summaryPatched = patchSummary(sessionId, patch)
             if (!summaryPatched) {
@@ -461,6 +466,33 @@ class SessionStore(
             }
         }
         scheduleRefresh()
+    }
+
+    private fun preserveLiveReplyUnreadDuringBackfill(sessionId: String, patch: SessionPatch) {
+        if (patch.assistantReplyClockBackfilled != null) return
+        val replyAt = (patch.lastAssistantMessageAt as? OptionalField.Present)?.value ?: return
+        val currentSummary = _sessions.value.firstOrNull { it.id == sessionId }
+        val currentDetail = _details.value[sessionId]
+        if (
+            currentSummary?.assistantReplyClockBackfilled != false
+            && currentDetail?.assistantReplyClockBackfilled != false
+        ) return
+
+        val currentReplyAt = maxOf(
+            currentSummary?.lastAssistantMessageAt ?: Long.MIN_VALUE,
+            currentDetail?.lastAssistantMessageAt ?: Long.MIN_VALUE,
+        )
+        val currentReplyVersion = maxOf(
+            currentSummary?.lastAssistantMessageVersion ?: 0L,
+            currentDetail?.seq ?: 0L,
+        )
+        if (
+            patch.lastAssistantMessageVersion != null
+            && patch.lastAssistantMessageVersion < currentReplyVersion
+        ) return
+        if (replyAt > currentReplyAt) {
+            onLiveReplyDuringBackfill?.invoke(sessionId, replyAt)
+        }
     }
 
     private fun parseFullSession(data: JsonElement?): Session? {

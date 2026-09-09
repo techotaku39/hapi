@@ -66,6 +66,17 @@ class LastSeenStore(
         }
     }
 
+    /** Preserve a live reply below the watermark while legacy backfill is pending. */
+    fun markUnread(sessionId: String, activityAt: Long) {
+        if (sessionId.isEmpty()) return
+        val unreadBefore = activityAt - 1
+        updateState { state ->
+            val current = state.lastSeen[sessionId]
+            if (current != null && current <= unreadBefore) state
+            else state.copy(lastSeen = state.lastSeen + (sessionId to unreadBefore))
+        }
+    }
+
     /**
      * `initializeSessionLastSeen`: on the first list load for [scopeKey]
      * (e.g. the hub id), seed every session without a watermark at its
