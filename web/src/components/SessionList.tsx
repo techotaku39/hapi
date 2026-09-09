@@ -776,7 +776,10 @@ export function SessionListSearch(props: {
                 <button
                     ref={dateButtonRef}
                     type="button"
-                    onClick={() => setDatePickerOpen(open => !open)}
+                    onClick={() => {
+                        setSearchModeOpen(false)
+                        setDatePickerOpen(open => !open)
+                    }}
                     className={cn(
                         'relative shrink-0 transition-colors hover:bg-[var(--app-subtle-bg)]',
                         variant === 'standalone'
@@ -842,7 +845,10 @@ export function SessionListSearch(props: {
                 type="button"
                 aria-label={t('sessions.search.scope.toggle')}
                 aria-expanded={searchModeOpen}
-                onClick={() => setSearchModeOpen(open => !open)}
+                onClick={() => {
+                    setDatePickerOpen(false)
+                    setSearchModeOpen(open => !open)
+                }}
                 className="flex h-full w-auto items-center gap-0.5 border-r border-[var(--app-border)] px-1.5 text-xs leading-none text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
             >
                 <span className="shrink-0 whitespace-nowrap leading-none">
