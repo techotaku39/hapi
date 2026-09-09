@@ -38,6 +38,11 @@ function identityKey(identity: FileIdentity): string {
     return `${identity.dev}:${identity.ino}`
 }
 
+function windowsIdentityFromFileIdentity(identity: FileIdentity): string {
+    const ino = BigInt(identity.ino)
+    return `${identity.dev}:${ino >> 32n}:${ino & 0xffffffffn}`
+}
+
 function isSameFileIdentity(left: Stats, right: Stats): boolean {
     return left.isFile()
         && right.isFile()
@@ -239,6 +244,9 @@ async function openWindowsFile(path: string, expectedIdentity?: FileIdentity): P
         if ((information.attributes & 0x00000010) !== 0 || (information.attributes & 0x00000400) !== 0) {
             throw new Error('Secure file operation source is not a regular file')
         }
+        if (expectedIdentity && information.identity !== windowsIdentityFromFileIdentity(expectedIdentity)) {
+            throw new Error('Secure file operation source changed during the operation')
+        }
         await assertFileIdentity(path, expectedIdentity)
         return { handle, symbols, identity: information.identity }
     } catch (error) {
@@ -397,11 +405,6 @@ async function openPosixStagingFile(path: string, directoryIdentity: string, mod
         return handle
     } catch (error) {
         if (handle) await handle.close().catch(() => {})
-        try {
-            symbols.unlinkat((directory as PosixDirectory).handle.fd, name, 0)
-        } catch {
-            // Preserve the original creation error; the parent cleanup is best effort.
-        }
         throw error
     } finally {
         await symbols.close(rawFd)
