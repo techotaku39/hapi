@@ -820,7 +820,10 @@ export function SessionListSearch(props: {
                 data-testid={variant === 'embedded'
                     ? 'session-list-search-date-embedded'
                     : 'session-list-search-date-standalone'}
-                onClick={() => setDatePickerOpen(open => !open)}
+                onClick={() => {
+                    setSearchModeOpen(false)
+                    setDatePickerOpen(open => !open)
+                }}
                 className={cn(
                     'relative flex shrink-0 items-center justify-center transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset',
@@ -899,7 +902,10 @@ export function SessionListSearch(props: {
                 type="button"
                 aria-label={t('sessions.search.scope.toggle')}
                 aria-expanded={searchModeOpen}
-                onClick={() => setSearchModeOpen(open => !open)}
+                onClick={() => {
+                    setDatePickerOpen(false)
+                    setSearchModeOpen(open => !open)
+                }}
                 className="flex h-full w-auto items-center gap-0.5 border-r border-[var(--app-border)] px-1.5 text-xs leading-none text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
             >
                 <span className="shrink-0 whitespace-nowrap leading-none">
