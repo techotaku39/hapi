@@ -128,6 +128,7 @@ describe('FilePage markdown preview', () => {
         renderWithProviders()
 
         const errorToggle = await screen.findByRole('button', { name: /Show full error/ })
+        expect(screen.getAllByRole('alert')).toHaveLength(1)
         expect(errorToggle).toHaveAttribute('aria-expanded', 'false')
         expect(errorToggle).toHaveTextContent('…')
         expect(errorToggle).not.toHaveTextContent(tail)

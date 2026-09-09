@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 const DEFAULT_MAX_LENGTH = 160
+
+type ExpandableErrorMessageProps = {
+    message: string
+    expandLabel: string
+    collapseLabel: string
+    className?: string
+    maxLength?: number
+}
 
 function splitGraphemes(value: string) {
     if (typeof Intl.Segmenter === 'function') {
@@ -10,13 +18,11 @@ function splitGraphemes(value: string) {
     return Array.from(value)
 }
 
-export function ExpandableErrorMessage(props: {
-    message: string
-    expandLabel: string
-    collapseLabel: string
-    className?: string
-    maxLength?: number
-}) {
+export function ExpandableErrorMessage(props: ExpandableErrorMessageProps) {
+    return <ExpandableErrorMessageContent key={props.message} {...props} />
+}
+
+function ExpandableErrorMessageContent(props: ExpandableErrorMessageProps) {
     const [expanded, setExpanded] = useState(false)
     const maxLength = props.maxLength ?? DEFAULT_MAX_LENGTH
     const singleLine = props.message.replace(/\s+/g, ' ').trim()
@@ -25,10 +31,6 @@ export function ExpandableErrorMessage(props: {
     const preview = truncated
         ? `${graphemes.slice(0, maxLength).join('').trimEnd()}…`
         : props.message
-
-    useEffect(() => {
-        setExpanded(false)
-    }, [props.message])
 
     return (
         <div role="alert" className={props.className}>

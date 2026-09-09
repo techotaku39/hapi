@@ -492,14 +492,8 @@ export default function FilePage() {
                         />
                     ) : displayMode === 'diff' && diffContent ? (
                         <DiffDisplay diffContent={diffContent} />
-                    ) : displayMode === 'diff' && diffError ? (
-                        <ExpandableErrorMessage
-                            message={diffErrorMessage ?? ''}
-                            expandLabel={t('file.page.expandError')}
-                            collapseLabel={t('file.page.collapseError')}
-                            className="text-sm text-[var(--app-hint)]"
-                        />
-                    ) : displayMode === 'file' ? (
+                    ) : displayMode === 'diff' && diffError ? null
+                    : displayMode === 'file' ? (
                         imagePreviewUrl ? (
                             <ImagePreview
                                 src={imagePreviewUrl}
