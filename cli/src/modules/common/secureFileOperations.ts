@@ -291,13 +291,29 @@ async function bufferPointer(buffer: ArrayBufferView): Promise<number> {
 }
 
 async function getPosixSymbols() {
-    const library = process.platform === 'darwin' ? 'libSystem.B.dylib' : 'libc.so.6'
+    const isDarwin = process.platform === 'darwin'
+    const library = isDarwin ? 'libSystem.B.dylib' : 'libc.so.6'
     const { dlopen } = await loadFfi()
-    return dlopen(library, {
-        renameat: { args: ['i32', 'cstring', 'i32', 'cstring'], returns: 'i32' },
-        linkat: { args: ['i32', 'cstring', 'i32', 'cstring', 'i32'], returns: 'i32' },
+    if (isDarwin) {
+        const { symbols } = dlopen(library, {
+            renameatx_np: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
+            unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
+        })
+        return {
+            renameNoReplace: symbols.renameatx_np,
+            unlinkat: symbols.unlinkat,
+            noReplaceFlag: 0x00000004,
+        }
+    }
+    const { symbols } = dlopen(library, {
+        renameat2: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
         unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
-    }).symbols
+    })
+    return {
+        renameNoReplace: symbols.renameat2,
+        unlinkat: symbols.unlinkat,
+        noReplaceFlag: 0x00000001,
+    }
 }
 
 let posixSymbols: Promise<Awaited<ReturnType<typeof getPosixSymbols>>> | null = null
@@ -334,10 +350,14 @@ export async function secureRename(
         const symbols = await getCachedPosixSymbols()
         const sourcePosix = sourceHandle as PosixDirectory
         const targetPosix = targetHandle as PosixDirectory
-        const linkResult = symbols.linkat(sourcePosix.handle.fd, sourceName, targetPosix.handle.fd, targetName, 0)
-        if (linkResult !== 0) throw new Error(`linkat failed with errno ${-linkResult}`)
-        const unlinkResult = symbols.unlinkat(sourcePosix.handle.fd, sourceName, 0)
-        if (unlinkResult !== 0) throw new Error(`unlinkat failed with errno ${-unlinkResult}`)
+        const result = symbols.renameNoReplace(
+            sourcePosix.handle.fd,
+            sourceName,
+            targetPosix.handle.fd,
+            targetName,
+            symbols.noReplaceFlag,
+        )
+        if (result !== 0) throw new Error('Atomic no-replace rename failed')
     } finally {
         if (targetHandle) await closeSecureDirectory(targetHandle)
         await closeSecureDirectory(sourceHandle)
@@ -356,7 +376,7 @@ export async function secureUnlink(path: string, directoryIdentity: string, file
             return
         }
         const result = (await getCachedPosixSymbols()).unlinkat((directory as PosixDirectory).handle.fd, name, 0)
-        if (result !== 0) throw new Error(`unlinkat failed with errno ${-result}`)
+        if (result !== 0) throw new Error('Directory-relative unlink failed')
     } finally {
         await closeSecureDirectory(directory)
     }
