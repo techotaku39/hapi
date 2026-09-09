@@ -1411,7 +1411,8 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
                     createdAt: message.createdAt,
                     localId: message.localId,
                     invokedAt: message.invokedAt,
-                    scheduledAt: message.scheduledAt
+                    scheduledAt: message.scheduledAt,
+                    deliveryState: message.deliveryState
                 }
                 inserts.push(insert)
                 stagedCanonicalMessages.push({

@@ -1647,6 +1647,71 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('preserves indeterminate delivery state when merging an unmatched duplicate message', async () => {
+        const store = new Store(':memory:')
+        const source = store.sessions.getOrCreateSession(
+            'source-indeterminate-merge-session',
+            { codexSessionId: 'codex-thread-indeterminate-merge' },
+            {},
+            'default'
+        )
+        const canonical = store.sessions.getOrCreateSession(
+            'canonical-indeterminate-merge-session',
+            { codexSessionId: 'codex-thread-indeterminate-merge' },
+            {},
+            'default'
+        )
+        store.sessions.touchSessionUpdatedAt(canonical.id, Date.now() + 1_000, 'default')
+
+        const knownPrompt = {
+            role: 'user',
+            content: { type: 'text', text: 'known prompt' }
+        }
+        const canonicalOnlyPrompt = {
+            role: 'user',
+            content: { type: 'text', text: 'canonical-only prompt' }
+        }
+        const unmatchedPrompt = {
+            role: 'user',
+            content: { type: 'text', text: 'unmatched prompt' }
+        }
+        store.messages.addMessage(canonical.id, knownPrompt, 'canonical-1')
+        store.messages.addMessage(canonical.id, canonicalOnlyPrompt, 'canonical-2')
+        store.messages.addMessage(source.id, knownPrompt, 'source-1')
+        store.messages.addMessage(source.id, unmatchedPrompt, 'source-indeterminate')
+        expect(store.messages.setMessagesDeliveryState(source.id, ['source-indeterminate'], 'indeterminate')).toBe(1)
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => null }))
+
+        try {
+            const response = await app.request('/api/codex/merge-duplicate-sessions', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ sessionIds: ['codex-thread-indeterminate-merge'] })
+            })
+            expect(response.status).toBe(200)
+            const body = await response.json() as { success: true }
+            expect(body.success).toBe(true)
+
+            const copied = store.messages.getAllMessages(canonical.id)
+                .find((message) => message.localId?.startsWith('source-indeterminate'))
+            expect(copied?.deliveryState).toBe('indeterminate')
+            expect(copied?.invokedAt).toBeNull()
+            expect(store.messages.getUninvokedLocalMessages(canonical.id, { deliverableOnly: true }))
+                .not.toContainEqual(copied)
+            expect(store.messages.getDeliverableMessagesAfter(canonical.id, 0, Date.now()))
+                .not.toContainEqual(copied)
+            expect(store.sessions.getSessionByNamespace(source.id, 'default')).toBeNull()
+        } finally {
+            store.close()
+        }
+    })
+
     it('treats source and fork ids as the same duplicate-sessions group', async () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {
