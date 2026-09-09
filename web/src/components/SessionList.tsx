@@ -863,6 +863,7 @@ export function SessionListSearch(props: {
                             onClick={() => {
                                 props.onSearchModeChange?.(mode)
                                 setSearchModeOpen(false)
+                                inputRef.current?.focus()
                             }}
                             className={cn(
                                 'flex min-h-8 w-full items-center justify-center whitespace-nowrap rounded-md px-2 py-0.5 text-center text-sm leading-none transition-colors',
