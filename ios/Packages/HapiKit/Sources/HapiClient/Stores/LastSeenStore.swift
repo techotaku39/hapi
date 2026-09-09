@@ -76,7 +76,7 @@ public final class LastSeenStore {
         guard !sessionId.isEmpty else { return }
         let unreadBefore = activityAt - 1
         let current = state.lastSeen[sessionId]
-        guard current == nil || current! > unreadBefore else { return }
+        if let current, current <= unreadBefore { return }
         state.lastSeen[sessionId] = unreadBefore
         snapshot?.scheduleWrite(state)
     }
