@@ -26,6 +26,10 @@ const recycleBinIoHarness = vi.hoisted(() => ({
         triggerAt: number
         seen: number
     } | undefined,
+    replaceRestoreParentBeforeStaging: undefined as {
+        parentPath: string
+        outsidePath: string
+    } | undefined,
 }))
 
 vi.mock('node:fs/promises', async () => {
@@ -156,6 +160,49 @@ vi.mock('./secureFileOperations', async () => {
     return {
         ...actual,
         getSecureDirectoryIdentity: vi.fn(async (path: string) => path),
+        openSecureStagingFile: vi.fn(async (path: string, _directoryIdentity: string, mode: number) => {
+            const parentReplacement = recycleBinIoHarness.replaceRestoreParentBeforeStaging
+            if (parentReplacement) {
+                recycleBinIoHarness.replaceRestoreParentBeforeStaging = undefined
+                await fs.rm(parentReplacement.parentPath, { recursive: true, force: true })
+                await fs.symlink(
+                    parentReplacement.outsidePath,
+                    parentReplacement.parentPath,
+                    process.platform === 'win32' ? 'junction' : undefined,
+                )
+                throw new Error('Secure file operation parent changed during the operation')
+            }
+            const handle = await fs.open(path, 'wx', mode)
+            return new Proxy(handle, {
+                get(target, property) {
+                    if (property === 'write' && recycleBinIoHarness.shortWrite) {
+                        return async (buffer: Buffer, bufferOffset: number, length: number, position: number) => {
+                            const shortLength = Math.max(1, Math.floor(length / 2))
+                            return await target.write(buffer, bufferOffset, shortLength, position)
+                        }
+                    }
+                    if (
+                        property === 'write'
+                        && recycleBinIoHarness.rejectRestoreWrite
+                    ) {
+                        return async (buffer: Buffer, bufferOffset: number, length: number, position: number) => {
+                            const partialLength = Math.max(1, Math.min(length, Math.floor(length / 2)))
+                            await target.write(buffer, bufferOffset, partialLength, position)
+                            const error = new Error('Simulated restore-stage write failure') as NodeJS.ErrnoException
+                            error.code = 'EIO'
+                            throw error
+                        }
+                    }
+                    if (property === 'sync' && recycleBinIoHarness.rejectSync) {
+                        return async () => {
+                            throw new Error('Simulated recycle-bin sync failure')
+                        }
+                    }
+                    const value = Reflect.get(target, property, target)
+                    return typeof value === 'function' ? value.bind(target) : value
+                },
+            })
+        }),
         secureRename: vi.fn(async (sourcePath: string, destinationPath: string) => {
             const sourceReplacement = recycleBinIoHarness.replaceSourceBeforeDetach
             if (sourceReplacement && sourcePath === sourceReplacement.path && destinationPath.includes('.hapi-source-')) {
@@ -234,6 +281,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.rejectStagingParentSync = false
         recycleBinIoHarness.stagingParentPath = undefined
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
+        recycleBinIoHarness.replaceRestoreParentBeforeStaging = undefined
         homeDir = await createTempDir('hapi-recycle-home')
         workspaceDir = await createTempDir('hapi-recycle-workspace')
     })
@@ -1101,15 +1149,14 @@ describe('RecycleBinManager', () => {
             recycleBinIoHarness.rejectRestoreStageRemoval = true
             const failed = await manager.restore(moved.entry.id, workspaceDir, 'fail')
             expect(failed).toMatchObject({ success: false, error: 'Simulated restore-stage write failure' })
-            const entryDirectory = join(getRecycleBinRoot(homeDir), moved.entry.id)
-            await expect(readdir(entryDirectory)).resolves.toEqual(expect.arrayContaining([expect.stringMatching(/^\.hapi-restore-/)]))
+            await expect(readdir(workspaceDir)).resolves.toEqual(expect.arrayContaining([expect.stringMatching(/^\.hapi-restore-/)]))
 
             recycleBinIoHarness.rejectRestoreWrite = false
             recycleBinIoHarness.rejectRestoreStageRemoval = false
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
             expect(restored).toEqual({ success: true, restoredPath: filePath })
             await expect(readFile(filePath, 'utf8')).resolves.toBe(content)
-            await expect(stat(entryDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
+            expect((await readdir(workspaceDir)).some((name) => name.startsWith('.hapi-restore-'))).toBe(false)
         } finally {
             recycleBinIoHarness.rejectRestoreWrite = false
             recycleBinIoHarness.rejectRestoreStageRemoval = false
@@ -1322,6 +1369,33 @@ describe('RecycleBinManager', () => {
             await expect(readdir(outsideDir)).resolves.toEqual([])
         } finally {
             recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
+            await rm(parentPath, { recursive: true, force: true })
+            if (outsideDir) await rm(outsideDir, { recursive: true, force: true })
+            await cleanup()
+        }
+    })
+
+    it('does not create restore staging through a parent replaced before creation', async () => {
+        let outsideDir = ''
+        const parentPath = join(workspaceDir, 'restore-staging-parent-race')
+        try {
+            outsideDir = await createTempDir('hapi-recycle-staging-race')
+            await mkdir(parentPath)
+            const filePath = join(parentPath, 'race.txt')
+            await writeFile(filePath, 'race contents')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.replaceRestoreParentBeforeStaging = {
+                parentPath,
+                outsidePath: outsideDir,
+            }
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({ success: false })
+            await expect(readdir(outsideDir)).resolves.toEqual([])
+        } finally {
+            recycleBinIoHarness.replaceRestoreParentBeforeStaging = undefined
             await rm(parentPath, { recursive: true, force: true })
             if (outsideDir) await rm(outsideDir, { recursive: true, force: true })
             await cleanup()

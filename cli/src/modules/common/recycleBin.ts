@@ -2,6 +2,7 @@ import { constants, type Stats } from 'node:fs'
 import {
     fileIdentityFromStats,
     getSecureDirectoryIdentity,
+    openSecureStagingFile,
     secureRename,
     secureUnlink,
 } from './secureFileOperations'
@@ -359,6 +360,8 @@ type RecycleBinCopyOptions = {
     beforeDetach?: () => Promise<void>
     /** Identity of the source parent directory pinned before copying began. */
     sourceDirectoryIdentity?: string
+    /** Identity of the destination directory for secure staging creation. */
+    destinationDirectoryIdentity?: string
     /** Verify that a copy destination remains inside the authorized scope before creation. */
     beforeDestinationCreate?: () => Promise<void>
     /** Classify the persisted staging file for crash recovery. */
@@ -378,6 +381,8 @@ async function copyFileWithoutReplacing(
     const sourceHandle = await open(sourcePath, READ_FILE_FLAGS)
     let destinationCreated = false
     let sourceRemoved = false
+    let createdDestinationStats: FileStats | null = null
+    let finalDestinationStats: FileStats | null = null
     const buffer = Buffer.allocUnsafe(1024 * 1024)
     let offset = 0
     try {
@@ -387,12 +392,14 @@ async function copyFileWithoutReplacing(
         }
         const desiredMode = (options.mode ?? openedStats.mode) & 0o7777
         await options.beforeDestinationCreate?.()
-        const destinationHandle = await open(destinationPath, 'wx', desiredMode)
+        const destinationHandle = options.destinationDirectoryIdentity
+            ? await openSecureStagingFile(destinationPath, options.destinationDirectoryIdentity, desiredMode)
+            : await open(destinationPath, 'wx', desiredMode)
         destinationCreated = true
         try {
+            createdDestinationStats = await destinationHandle.stat()
             if (options.unlinkSource === false) {
-                const destinationStats = await destinationHandle.stat()
-                await options.onStagingFileCreated?.(destinationPath, destinationStats, options.stagingFileKind ?? 'restore')
+                await options.onStagingFileCreated?.(destinationPath, createdDestinationStats, options.stagingFileKind ?? 'restore')
             }
             while (offset < openedStats.size) {
                 const result = await sourceHandle.read(buffer, 0, Math.min(buffer.length, openedStats.size - offset), offset)
@@ -416,6 +423,7 @@ async function copyFileWithoutReplacing(
             }
             await destinationHandle.chmod(desiredMode)
             await destinationHandle.sync()
+            finalDestinationStats = await destinationHandle.stat()
         } finally {
             await destinationHandle.close()
         }
@@ -471,13 +479,17 @@ async function copyFileWithoutReplacing(
         }
     } catch (error) {
         if (destinationCreated && !sourceRemoved) {
-            await rm(destinationPath, { force: true }).catch(() => {})
+            if (options.destinationDirectoryIdentity && createdDestinationStats) {
+                await secureUnlink(destinationPath, options.destinationDirectoryIdentity, fileIdentityFromStats(createdDestinationStats)).catch(() => {})
+            } else {
+                await rm(destinationPath, { force: true }).catch(() => {})
+            }
         }
         throw error
     } finally {
         await sourceHandle.close()
     }
-    return await lstat(destinationPath)
+    return finalDestinationStats ?? await lstat(destinationPath)
 }
 
 type MoveFileOptions = RecycleBinCopyOptions
@@ -1177,7 +1189,6 @@ export class RecycleBinManager {
             const resolvedTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
             let target = resolvedTarget.path
             let validatedParent = resolvedTarget.parent.path
-            let validatedParentIdentity = resolvedTarget.parent.identity
             let targetExists = false
             try {
                 const targetStats = await lstat(target)
@@ -1224,26 +1235,28 @@ export class RecycleBinManager {
 
             const firstValidatedParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
             validatedParent = firstValidatedParent.path
-            validatedParentIdentity = firstValidatedParent.identity
             target = join(validatedParent, basename(target))
 
             let stagedPath: string | null = null
             let stagedCreated = false
             let stagedStats: FileStats | null = null
-            const stagingParentIdentity = await getSecureDirectoryIdentity(join(root, entry.id))
+            let stagingParentIdentity: string | null = null
             try {
-                stagedPath = join(root, entry.id, `.hapi-restore-${entry.id}-${randomUUID()}.tmp`)
+                const stagingParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
+                stagingParentIdentity = stagingParent.identity
+                stagedPath = join(stagingParent.path, `.hapi-restore-${entry.id}-${randomUUID()}.tmp`)
                 stagedStats = await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
+                    destinationDirectoryIdentity: stagingParentIdentity,
                     stagingFileKind: 'restore',
                     onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
                 })
                 stagedCreated = true
                 const publicationParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
                 if (
-                    normalizeForComparison(publicationParent.path) !== normalizeForComparison(validatedParent)
-                    || publicationParent.identity !== validatedParentIdentity
+                    normalizeForComparison(publicationParent.path) !== normalizeForComparison(stagingParent.path)
+                    || publicationParent.identity !== stagingParentIdentity
                 ) {
                     throw invalidPathError('Restore target changed during restore')
                 }

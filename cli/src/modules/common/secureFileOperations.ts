@@ -1,5 +1,5 @@
 import { constants, type Stats } from 'node:fs'
-import { lstat, open, type FileHandle } from 'node:fs/promises'
+import { lstat, open, stat, type FileHandle } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 
 // Recycle-bin mutations must keep using the directory object selected during
@@ -17,6 +17,14 @@ export type SecureRenameOptions = {
     sourceFileIdentity?: FileIdentity
 }
 
+export type SecureWritableFile = {
+    stat(): Promise<Stats>
+    write(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesWritten: number }>
+    chmod(mode: number): Promise<void>
+    sync(): Promise<void>
+    close(): Promise<void>
+}
+
 const IS_WINDOWS = process.platform === 'win32'
 const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY
     | (constants.O_DIRECTORY ?? 0)
@@ -28,6 +36,13 @@ function identityFromStats(stats: Stats): FileIdentity {
 
 function identityKey(identity: FileIdentity): string {
     return `${identity.dev}:${identity.ino}`
+}
+
+function isSameFileIdentity(left: Stats, right: Stats): boolean {
+    return left.isFile()
+        && right.isFile()
+        && left.dev === right.dev
+        && left.ino === right.ino
 }
 
 function isSimpleName(name: string): boolean {
@@ -69,6 +84,9 @@ type WindowsNativeSymbols = {
     GetLastError: () => number
     GetFileInformationByHandle: (handle: number, information: number) => number
     NtSetInformationFile: (handle: number, ioStatusBlock: number, information: number, size: number, informationClass: number) => number
+    NtCreateFile: (fileHandle: number, desiredAccess: number, objectAttributes: number, ioStatusBlock: number, allocationSize: number, fileAttributes: number, shareAccess: number, createDisposition: number, createOptions: number, eaBuffer: number, eaLength: number) => number
+    WriteFile: (handle: number, buffer: number, bytesToWrite: number, bytesWritten: number, overlapped: number) => number
+    FlushFileBuffers: (handle: number) => number
 }
 
 type BunFfi = {
@@ -108,9 +126,12 @@ async function getWindowsSymbols(): Promise<WindowsNativeSymbols> {
                 CloseHandle: { args: ['ptr'], returns: 'u32' },
                 GetLastError: { args: [], returns: 'u32' },
                 GetFileInformationByHandle: { args: ['ptr', 'ptr'], returns: 'u32' },
+                WriteFile: { args: ['ptr', 'ptr', 'u32', 'ptr', 'ptr'], returns: 'u32' },
+                FlushFileBuffers: { args: ['ptr'], returns: 'u32' },
             })
             const { symbols: nativeSymbols } = dlopen('ntdll.dll', {
                 NtSetInformationFile: { args: ['ptr', 'ptr', 'ptr', 'u32', 'u32'], returns: 'i32' },
+                NtCreateFile: { args: ['ptr', 'u32', 'ptr', 'ptr', 'ptr', 'u32', 'u32', 'u32', 'u32', 'ptr', 'u32'], returns: 'i32' },
             })
             return { ...symbols, ...nativeSymbols } as unknown as WindowsNativeSymbols
         })()
@@ -285,6 +306,20 @@ async function secureUnlinkWindows(path: string, expectedIdentity?: FileIdentity
     }
 }
 
+async function markWindowsHandleForDeletion(symbols: WindowsNativeSymbols, handle: number): Promise<void> {
+    const information = Buffer.alloc(1)
+    information.writeUInt8(1, 0)
+    const ioStatusBlock = Buffer.alloc(process.arch === 'ia32' ? 8 : 16)
+    const status = symbols.NtSetInformationFile(
+        handle,
+        await bufferPointer(ioStatusBlock),
+        await bufferPointer(information),
+        information.length,
+        13,
+    )
+    if (status < 0) throw new Error(`NtSetInformationFile delete failed with status 0x${(status >>> 0).toString(16)}`)
+}
+
 async function bufferPointer(buffer: ArrayBufferView): Promise<number> {
     const { ptr } = await loadFfi()
     return ptr(buffer)
@@ -298,20 +333,28 @@ async function getPosixSymbols() {
         const { symbols } = dlopen(library, {
             renameatx_np: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
             unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
+            openat: { args: ['i32', 'cstring', 'i32', 'u32'], returns: 'i32' },
+            close: { args: ['i32'], returns: 'i32' },
         })
         return {
             renameNoReplace: symbols.renameatx_np,
             unlinkat: symbols.unlinkat,
+            openat: symbols.openat,
+            close: symbols.close,
             noReplaceFlag: 0x00000004,
         }
     }
     const { symbols } = dlopen(library, {
         renameat2: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
         unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
+        openat: { args: ['i32', 'cstring', 'i32', 'u32'], returns: 'i32' },
+        close: { args: ['i32'], returns: 'i32' },
     })
     return {
         renameNoReplace: symbols.renameat2,
         unlinkat: symbols.unlinkat,
+        openat: symbols.openat,
+        close: symbols.close,
         noReplaceFlag: 0x00000001,
     }
 }
@@ -321,6 +364,137 @@ let posixSymbols: Promise<Awaited<ReturnType<typeof getPosixSymbols>>> | null = 
 async function getCachedPosixSymbols() {
     if (!posixSymbols) posixSymbols = getPosixSymbols()
     return await posixSymbols
+}
+
+async function openPosixStagingFile(path: string, directoryIdentity: string, mode: number): Promise<SecureWritableFile> {
+    const directory = await openSecureDirectory(dirname(path), directoryIdentity)
+    const name = basename(path)
+    const symbols = await getCachedPosixSymbols()
+    const rawFd = symbols.openat(
+        (directory as PosixDirectory).handle.fd,
+        name,
+        constants.O_WRONLY
+            | constants.O_CREAT
+            | constants.O_EXCL
+            | (constants.O_NOFOLLOW ?? 0),
+        mode & 0o7777,
+    )
+    if (rawFd < 0) {
+        await closeSecureDirectory(directory)
+        throw new Error('Secure staging creation failed')
+    }
+    let handle: FileHandle | null = null
+    try {
+        const descriptorPath = process.platform === 'linux'
+            ? `/proc/self/fd/${rawFd}`
+            : `/dev/fd/${rawFd}`
+        const rawStats = await stat(descriptorPath)
+        handle = await open(path, 'r+')
+        const openedStats = await handle.stat()
+        if (!isSameFileIdentity(rawStats, openedStats)) {
+            throw new Error('Secure staging path changed during creation')
+        }
+        return handle
+    } catch (error) {
+        if (handle) await handle.close().catch(() => {})
+        try {
+            symbols.unlinkat((directory as PosixDirectory).handle.fd, name, 0)
+        } catch {
+            // Preserve the original creation error; the parent cleanup is best effort.
+        }
+        throw error
+    } finally {
+        await symbols.close(rawFd)
+        await closeSecureDirectory(directory)
+    }
+}
+
+async function createWindowsStagingHandle(
+    path: string,
+    directory: WindowsDirectory,
+): Promise<{ handle: number; identity: string }> {
+    const symbols = directory.symbols
+    const name = basename(path)
+    const nameBuffer = Buffer.from(`${name}\0`, 'utf16le')
+    const pointerSize = process.arch === 'ia32' ? 4 : 8
+    const unicodeBuffer = Buffer.alloc(pointerSize === 4 ? 12 : 16)
+    unicodeBuffer.writeUInt16LE(nameBuffer.length - 2, 0)
+    unicodeBuffer.writeUInt16LE(nameBuffer.length, 2)
+    const { ptr } = await loadFfi()
+    const namePointer = ptr(nameBuffer)
+    if (pointerSize === 4) unicodeBuffer.writeUInt32LE(namePointer, 4)
+    else unicodeBuffer.writeBigUInt64LE(BigInt(namePointer), 8)
+    const objectBuffer = Buffer.alloc(pointerSize === 4 ? 24 : 48)
+    objectBuffer.writeUInt32LE(pointerSize === 4 ? 24 : 48, 0)
+    if (pointerSize === 4) {
+        objectBuffer.writeUInt32LE(directory.handle, 4)
+        objectBuffer.writeUInt32LE(ptr(unicodeBuffer), 8)
+        objectBuffer.writeUInt32LE(0x40, 12)
+    } else {
+        objectBuffer.writeBigUInt64LE(BigInt(directory.handle), 8)
+        objectBuffer.writeBigUInt64LE(BigInt(ptr(unicodeBuffer)), 16)
+        objectBuffer.writeUInt32LE(0x40, 24)
+    }
+    const ioStatusBlock = Buffer.alloc(pointerSize === 4 ? 8 : 16)
+    const handleBuffer = Buffer.alloc(pointerSize)
+    const status = symbols.NtCreateFile(
+        ptr(handleBuffer),
+        0xc0110000,
+        ptr(objectBuffer),
+        ptr(ioStatusBlock),
+        0,
+        0x00000080,
+        0x00000007,
+        2,
+        0x00204060,
+        0,
+        0,
+    )
+    if (status < 0) throw new Error(`NtCreateFile staging failed with status 0x${(status >>> 0).toString(16)}`)
+    const handle = pointerSize === 4 ? handleBuffer.readUInt32LE(0) : Number(handleBuffer.readBigUInt64LE(0))
+    const information = readWindowsFileIdentity(symbols, handle, ptr)
+    return { handle, identity: information.identity }
+}
+
+async function openWindowsStagingFile(path: string, directoryIdentity: string, mode: number): Promise<SecureWritableFile> {
+    const directory = await openSecureDirectory(dirname(path), directoryIdentity) as WindowsDirectory
+    let nativeHandle: number | null = null
+    let nodeHandle: FileHandle | null = null
+    try {
+        const created = await createWindowsStagingHandle(path, directory)
+        nativeHandle = created.handle
+        nodeHandle = await open(path, 'r+')
+        const openedByPath = await openWindowsFile(path)
+        if (openedByPath.identity !== created.identity) {
+            openedByPath.symbols.CloseHandle(openedByPath.handle)
+            throw new Error('Secure staging path changed during creation')
+        }
+        openedByPath.symbols.CloseHandle(openedByPath.handle)
+        const targetHandle = nodeHandle
+        nodeHandle = null
+        directory.symbols.CloseHandle(nativeHandle)
+        nativeHandle = null
+        return targetHandle
+    } catch (error) {
+        if (nodeHandle) await nodeHandle.close().catch(() => {})
+        if (nativeHandle !== null) {
+            await markWindowsHandleForDeletion(directory.symbols, nativeHandle).catch(() => {})
+            directory.symbols.CloseHandle(nativeHandle)
+        }
+        throw error
+    } finally {
+        await closeSecureDirectory(directory)
+    }
+}
+
+export async function openSecureStagingFile(
+    path: string,
+    directoryIdentity: string,
+    mode: number,
+): Promise<SecureWritableFile> {
+    return IS_WINDOWS
+        ? await openWindowsStagingFile(path, directoryIdentity, mode)
+        : await openPosixStagingFile(path, directoryIdentity, mode)
 }
 
 export async function getSecureDirectoryIdentity(path: string): Promise<string> {
