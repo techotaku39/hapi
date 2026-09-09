@@ -171,6 +171,36 @@ describe('usage query credential resolution', () => {
         }
     })
 
+    it('falls back to legacy Kimi credentials when the current config is incomplete', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-incomplete-current-'))
+        try {
+            const currentHome = join(root, '.kimi-code')
+            const legacyHome = join(root, '.kimi')
+            await mkdir(currentHome, { recursive: true })
+            await mkdir(legacyHome, { recursive: true })
+            await writeFile(join(currentHome, 'config.toml'), 'default_model = "kimi-code/k3"\n')
+            await writeFile(join(legacyHome, 'config.toml'), [
+                'default_model = "legacy"',
+                '[providers.legacy]',
+                'type = "kimi"',
+                'base_url = "https://legacy.kimi.example/coding/v1"',
+                'api_key = "legacy-secret"',
+                '[models.legacy]',
+                'provider = "legacy"'
+            ].join('\n'))
+
+            const resolved = await resolveUsageCredentials('kimi', {}, root)
+            expect(resolved).toMatchObject({
+                baseUrl: 'https://legacy.kimi.example/coding/v1',
+                apiKey: 'legacy-secret',
+                baseUrlSource: 'config',
+                apiKeySource: 'config'
+            })
+        } finally {
+            await rm(root, { recursive: true, force: true })
+        }
+    })
+
     it('does not infer an inactive Kimi provider without an active model selection', async () => {
         const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-inactive-provider-'))
         try {

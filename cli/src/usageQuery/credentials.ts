@@ -175,12 +175,18 @@ async function readKimiConfig(env: NodeJS.ProcessEnv, userHome = homedir()): Pro
     for (const home of homes) {
         const tomlPath = join(home, 'config.toml')
         try {
-            return parseKimiToml(await readFile(tomlPath, 'utf8'))
+            const snapshot = parseKimiToml(await readFile(tomlPath, 'utf8'))
+            const provider = chooseKimiProvider(snapshot)
+            if (provider?.baseUrl || provider?.apiKey) return snapshot
         } catch {
             // Try the JSON migration format below.
         }
         const json = await readJsonObject(join(home, 'config.json'))
-        if (json) return parseKimiJson(json)
+        if (json) {
+            const snapshot = parseKimiJson(json)
+            const provider = chooseKimiProvider(snapshot)
+            if (provider?.baseUrl || provider?.apiKey) return snapshot
+        }
     }
     return { defaultModel: null, providers: new Map(), modelProviders: new Map() }
 }
