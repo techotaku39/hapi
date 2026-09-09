@@ -4,7 +4,11 @@ import type { Session, SessionResponse, SessionSummary, SessionsResponse } from 
 import { queryKeys } from '@/lib/query-keys'
 import { mergeSessionsResponse, needsSessionsResponseRetry } from '@/lib/sessionCache'
 
-export function useSessions(api: ApiClient | null): {
+export type UseSessionsOptions = {
+    enabled?: boolean
+}
+
+export function useSessions(api: ApiClient | null, options: UseSessionsOptions = {}): {
     sessions: SessionSummary[]
     isLoading: boolean
     error: string | null
@@ -29,7 +33,7 @@ export function useSessions(api: ApiClient | null): {
             }
             return mergeSessionsResponse(current, incoming, getCachedDetail)
         },
-        enabled: Boolean(api),
+        enabled: Boolean(api) && (options.enabled ?? true),
     })
 
     return {

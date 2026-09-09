@@ -193,6 +193,108 @@ export function getSessionLastSeenSnapshot(): Readonly<Record<string, number>> {
     return readStore()
 }
 
+type SessionReadStateInput = Pick<
+    SessionSummary,
+    'id' | 'updatedAt' | 'lastAssistantMessageAt' | 'assistantReplyClockBackfilled'
+>
+
+function latestSessionUpdates(sessions: Iterable<SessionReadStateInput>): Map<string, SessionReadStateInput> {
+    const latest = new Map<string, SessionReadStateInput>()
+    for (const session of sessions) {
+        if (!session.id || !Number.isFinite(session.updatedAt)) {
+            continue
+        }
+        const current = latest.get(session.id)
+        const sessionActivityAt = getSessionActivityTimestamp(session)
+        if (current === undefined) {
+            latest.set(session.id, session)
+            continue
+        }
+        const currentActivityAt = getSessionActivityTimestamp(current)
+        if (sessionActivityAt > currentActivityAt
+            || (sessionActivityAt === currentActivityAt && session.updatedAt > current.updatedAt)) {
+            latest.set(session.id, session)
+        }
+    }
+    return latest
+}
+
+function hasUnreadActivity(
+    session: SessionReadStateInput,
+    store: LastSeenStore,
+    manualUnreadStore: ManualUnreadStore
+): boolean {
+    const activityAt = getSessionActivityTimestamp(session)
+    const lastSeenAt = store[session.id]
+    const manualUnreadAt = manualUnreadStore[session.id]
+    return manualUnreadAt === activityAt
+        || (
+            session.assistantReplyClockBackfilled !== false
+            && activityAt > (typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : 0)
+        )
+}
+
+/** Count unread sessions in the supplied list using one localStorage snapshot. */
+export function getUnreadSessionCount(sessions: Iterable<SessionReadStateInput>): number {
+    const latest = latestSessionUpdates(sessions)
+    const store = readStore()
+    const manualUnreadStore = readManualUnreadStore()
+    let count = 0
+    for (const session of latest.values()) {
+        if (hasUnreadActivity(session, store, manualUnreadStore)) {
+            count += 1
+        }
+    }
+    return count
+}
+
+/** Mark all supplied unread sessions as seen on this device. Returns changed count. */
+export function markAllSessionsSeen(sessions: Iterable<SessionReadStateInput>): number {
+    const latest = latestSessionUpdates(sessions)
+    if (latest.size === 0) {
+        return 0
+    }
+
+    const store = readStore()
+    const manualUnreadStore = readManualUnreadStore()
+    let count = 0
+    let seenChanged = false
+    let manualUnreadChanged = false
+
+    for (const session of latest.values()) {
+        if (!hasUnreadActivity(session, store, manualUnreadStore)) {
+            continue
+        }
+
+        count += 1
+        const activityAt = getSessionActivityTimestamp(session)
+        const currentSeenAt = store[session.id]
+        const nextSeenAt = Math.max(
+            typeof currentSeenAt === 'number' && Number.isFinite(currentSeenAt) ? currentSeenAt : 0,
+            activityAt
+        )
+        if (store[session.id] !== nextSeenAt) {
+            store[session.id] = nextSeenAt
+            seenChanged = true
+        }
+        if (Object.prototype.hasOwnProperty.call(manualUnreadStore, session.id)) {
+            delete manualUnreadStore[session.id]
+            manualUnreadChanged = true
+        }
+    }
+
+    if (count === 0) {
+        return 0
+    }
+
+    const seenWritten = !seenChanged || writeStore(store)
+    const manualUnreadWritten = !manualUnreadChanged || writeManualUnreadStore(manualUnreadStore)
+    if (seenWritten || manualUnreadWritten) {
+        notifyStoreChanged()
+    }
+    return count
+}
+
 export function initializeSessionLastSeen(
     scope: string,
     sessions: Iterable<Pick<SessionSummary, 'id' | 'updatedAt' | 'lastAssistantMessageAt' | 'assistantReplyClockBackfilled'>>
