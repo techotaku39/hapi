@@ -1020,6 +1020,54 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('deduplicates an explicit retry when the same queued message is replayed', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+        const message = {
+            id: 'retry-queued-message',
+            seq: 1,
+            text: 'retry once',
+            sentFrom: 'webapp' as const
+        }
+
+        socket.trigger('update', {
+            body: {
+                t: 'retry-queued-message',
+                message: {
+                    ...message,
+                    content: {
+                        role: 'user' as const,
+                        content: { type: 'text' as const, text: message.text },
+                        meta: { sentFrom: 'webapp' as const }
+                    }
+                },
+                localId: 'retry-local-id'
+            }
+        })
+        await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce())
+        socket.trigger('update', {
+            body: {
+                t: 'new-message',
+                message: {
+                    ...message,
+                    content: {
+                        role: 'user' as const,
+                        content: { type: 'text' as const, text: message.text },
+                        meta: { sentFrom: 'webapp' as const }
+                    }
+                }
+            }
+        })
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        expect(onUserMessage).toHaveBeenCalledOnce()
+        client.close()
+    })
+
     it('delivers the text turn when an attachment cannot be materialized', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()
