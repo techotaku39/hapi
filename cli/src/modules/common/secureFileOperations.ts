@@ -1,6 +1,7 @@
 import { constants, type Stats } from 'node:fs'
 import { lstat, open, stat, type FileHandle } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 // Recycle-bin mutations must keep using the directory object selected during
 // authorization. Node's path-based fs/promises mutations cannot express this;
@@ -551,8 +552,44 @@ export async function secureUnlink(path: string, directoryIdentity: string, file
             await secureUnlinkWindows(path, fileIdentity)
             return
         }
-        const result = (await getCachedPosixSymbols()).unlinkat((directory as PosixDirectory).handle.fd, name, 0)
-        if (result !== 0) throw new Error('Directory-relative unlink failed')
+        if (!fileIdentity) throw new Error('Identity-bound POSIX cleanup requires a file identity')
+        const posixDirectory = directory as PosixDirectory
+        const symbols = await getCachedPosixSymbols()
+        const quarantineName = `.hapi-recycle-quarantine-${randomUUID()}.tmp`
+        const moved = symbols.renameNoReplace(
+            posixDirectory.handle.fd,
+            name,
+            posixDirectory.handle.fd,
+            quarantineName,
+            symbols.noReplaceFlag,
+        )
+        if (moved !== 0) throw new Error('Identity-bound POSIX cleanup could not detach the file')
+        const descriptorPath = process.platform === 'linux'
+            ? `/proc/self/fd/${posixDirectory.handle.fd}/${quarantineName}`
+            : `/dev/fd/${posixDirectory.handle.fd}/${quarantineName}`
+        const detachedStats = await stat(descriptorPath)
+        if (String(detachedStats.dev) !== fileIdentity.dev || String(detachedStats.ino) !== fileIdentity.ino) {
+            const restored = symbols.renameNoReplace(
+                posixDirectory.handle.fd,
+                quarantineName,
+                posixDirectory.handle.fd,
+                name,
+                symbols.noReplaceFlag,
+            )
+            if (restored !== 0) throw new Error('POSIX cleanup identity changed and rollback failed')
+            throw new Error('POSIX cleanup identity changed during the operation')
+        }
+        const removed = symbols.unlinkat(posixDirectory.handle.fd, quarantineName, 0)
+        if (removed !== 0) {
+            symbols.renameNoReplace(
+                posixDirectory.handle.fd,
+                quarantineName,
+                posixDirectory.handle.fd,
+                name,
+                symbols.noReplaceFlag,
+            )
+            throw new Error('Directory-relative unlink failed')
+        }
     } finally {
         await closeSecureDirectory(directory)
     }

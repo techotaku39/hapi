@@ -1076,10 +1076,12 @@ export class RecycleBinManager {
                 let rollbackError: unknown = null
                 if (await pathExists(payloadPath)) {
                     try {
+                        const rollbackTarget = await resolveRestoreTarget(source.path, scopeRoot, protectedRoot)
                         await moveRegularFile(payloadPath, source.path, undefined, {
                             stageId: entryId,
                             stagingFileKind: 'source',
                             beforeDestinationCreate: () => assertRestoreDestinationAuthorized(source.path, scopeRoot, protectedRoot),
+                            destinationDirectoryIdentity: rollbackTarget.parent.identity,
                             onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
                             onStagingFileRemoved: (path) => clearEntryStagingFile(root, entry, path),
                         })
