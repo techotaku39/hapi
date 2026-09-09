@@ -156,9 +156,11 @@ function parseKimiJson(config: JsonObject): KimiConfigSnapshot {
 }
 
 function chooseKimiProvider(snapshot: KimiConfigSnapshot): KimiProviderConfig | null {
-    const providerName = snapshot.defaultModel
-        ? snapshot.modelProviders.get(snapshot.defaultModel)
-        : undefined
+    const model = snapshot.defaultModel
+    if (!model) return null
+    const slash = model.indexOf('/')
+    const providerName = snapshot.modelProviders.get(model)
+        ?? (slash > 0 ? model.slice(0, slash) : undefined)
     return providerName ? snapshot.providers.get(providerName) ?? null : null
 }
 

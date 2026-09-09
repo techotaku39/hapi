@@ -117,6 +117,29 @@ describe('usage query credential resolution', () => {
         }
     })
 
+    it('resolves a provider-qualified Kimi default without a model alias table', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-qualified-default-'))
+        try {
+            await writeFile(join(root, 'config.toml'), [
+                'default_model = "kimi-code/k3"',
+                '[providers.kimi-code]',
+                'type = "kimi"',
+                'base_url = "https://qualified.kimi.example/coding/v1"',
+                'api_key = "qualified-kimi-secret"'
+            ].join('\n'))
+
+            const resolved = await resolveUsageCredentials('kimi', { KIMI_CODE_HOME: root })
+            expect(resolved).toMatchObject({
+                baseUrl: 'https://qualified.kimi.example/coding/v1',
+                apiKey: 'qualified-kimi-secret',
+                baseUrlSource: 'config',
+                apiKeySource: 'config'
+            })
+        } finally {
+            await rm(root, { recursive: true, force: true })
+        }
+    })
+
     it('prefers the current Kimi Code home over the legacy home', async () => {
         const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-home-precedence-'))
         try {
