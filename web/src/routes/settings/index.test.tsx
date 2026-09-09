@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
+import { getVisibleReleaseNotes, RELEASE_NOTES } from '@/lib/releaseNotes'
 import SettingsHubPage from './index'
 import SettingsGeneralPage from './general'
 import SettingsDisplayPage from './display'
@@ -330,42 +331,46 @@ describe('responsive settings pages', () => {
 
     it('renders About metadata on its own route page', () => {
         renderPage(<SettingsAboutPage />)
+        const latestReleaseNote = getVisibleReleaseNotes(__APP_VERSION__, RELEASE_NOTES)[0]
+        const latestReleaseChanges = latestReleaseNote.groups.flatMap((group) => group.changes)
         expect(screen.queryByText('Companion')).not.toBeInTheDocument()
         expect(screen.getByText('App Version')).toBeInTheDocument()
         expect(screen.getByText(String(__APP_VERSION__))).toBeInTheDocument()
         expect(screen.getByText('Protocol Version')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
         expect(screen.getByText("What's New")).toBeInTheDocument()
-        expect(screen.getByText('v0.29.1')).toBeInTheDocument()
-        expect(screen.getByText('Steer an active Cursor turn through a concurrent ACP prompt without canceling the turn in progress.')).toBeInTheDocument()
-        const latestRelease = screen.getByRole('link', { name: 'Open release page for v0.29.1' }).closest('details')
-        expect(latestRelease).not.toBeNull()
-        expect(latestRelease?.textContent).toContain('Add Cursor Steer, DeepSeek Harness, remote Codex MCP and Luna fallback, richer session controls, and attachment/export tools; improve usage visibility, streaming, rewind, and cross-platform reliability.')
-        expect(within(latestRelease as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
-        expect(within(latestRelease as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
-        expect(within(latestRelease as HTMLElement).getAllByText('Added', { exact: true })).toHaveLength(8)
-        expect(within(latestRelease as HTMLElement).getAllByText('Fixed', { exact: true })).toHaveLength(7)
-        expect(within(latestRelease as HTMLElement).getAllByText('Added', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
-        expect(screen.getByRole('link', { name: 'Open release page for v0.29.1' })).toHaveAttribute('href', 'https://github.com/tiann/hapi/releases/tag/v0.29.1')
-        expect(screen.getByRole('link', { name: 'Open release page for v0.29.1' })).toHaveAttribute('rel', 'noopener noreferrer')
+        expect(screen.getByText(`v${latestReleaseNote.version}`)).toBeInTheDocument()
+        expect(screen.getByText(latestReleaseNote.groups[0].changes[0].text.en)).toBeInTheDocument()
+        const latestReleaseElement = screen.getByRole('link', { name: `Open release page for v${latestReleaseNote.version}` }).closest('details')
+        expect(latestReleaseElement).not.toBeNull()
+        expect(latestReleaseElement?.textContent).toContain(latestReleaseNote.summary.en)
+        expect(within(latestReleaseElement as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
+        expect(within(latestReleaseElement as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
+        expect(within(latestReleaseElement as HTMLElement).getAllByText('Added', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'feature').length)
+        expect(within(latestReleaseElement as HTMLElement).getAllByText('Fixed', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'fix').length)
+        expect(within(latestReleaseElement as HTMLElement).getAllByText('Added', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
+        expect(screen.getByRole('link', { name: `Open release page for v${latestReleaseNote.version}` })).toHaveAttribute('href', latestReleaseNote.url)
+        expect(screen.getByRole('link', { name: `Open release page for v${latestReleaseNote.version}` })).toHaveAttribute('rel', 'noopener noreferrer')
         expect(screen.queryByText('View full release notes')).not.toBeInTheDocument()
-        expect(document.querySelector('time[datetime="2026-09-09"]')).toBeInTheDocument()
+        expect(document.querySelector(`time[datetime="${latestReleaseNote.date}"]`)).toBeInTheDocument()
     })
 
     it('localizes release announcements with the selected language', () => {
         localStorage.setItem('hapi-lang', 'zh-CN')
         renderPage(<SettingsAboutPage />)
+        const latestReleaseNote = getVisibleReleaseNotes(__APP_VERSION__, RELEASE_NOTES)[0]
+        const latestReleaseChanges = latestReleaseNote.groups.flatMap((group) => group.changes)
         expect(screen.getByText('更新公告')).toBeInTheDocument()
-        expect(screen.getByText('通过并发 ACP prompt 将消息插入活动 Cursor 回合，无需取消正在进行的回合。')).toBeInTheDocument()
-        const latestRelease = screen.getByRole('link', { name: '打开 v0.29.1 发行页' }).closest('details')
-        expect(latestRelease).not.toBeNull()
-        expect(latestRelease?.textContent).toContain('增加 Cursor Steer、DeepSeek Harness、远程 Codex MCP 与 Luna 回退、更丰富的会话控制及附件/导出工具；改进用量展示、流式处理、rewind 和跨平台可靠性。')
-        expect(within(latestRelease as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
-        expect(within(latestRelease as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
-        expect(within(latestRelease as HTMLElement).getAllByText('新增', { exact: true })).toHaveLength(8)
-        expect(within(latestRelease as HTMLElement).getAllByText('修复', { exact: true })).toHaveLength(7)
-        expect(within(latestRelease as HTMLElement).getAllByText('新增', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
-        expect(screen.getByRole('link', { name: '打开 v0.29.1 发行页' })).toBeInTheDocument()
+        expect(screen.getByText(latestReleaseNote.groups[0].changes[0].text['zh-CN'])).toBeInTheDocument()
+        const latestReleaseElement = screen.getByRole('link', { name: `打开 v${latestReleaseNote.version} 发行页` }).closest('details')
+        expect(latestReleaseElement).not.toBeNull()
+        expect(latestReleaseElement?.textContent).toContain(latestReleaseNote.summary['zh-CN'])
+        expect(within(latestReleaseElement as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
+        expect(within(latestReleaseElement as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
+        expect(within(latestReleaseElement as HTMLElement).getAllByText('新增', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'feature').length)
+        expect(within(latestReleaseElement as HTMLElement).getAllByText('修复', { exact: true })).toHaveLength(latestReleaseChanges.filter((change) => change.kind === 'fix').length)
+        expect(within(latestReleaseElement as HTMLElement).getAllByText('新增', { exact: true })[0]).toHaveClass('relative', 'top-px', 'sm:top-[0.5px]')
+        expect(screen.getByRole('link', { name: `打开 v${latestReleaseNote.version} 发行页` })).toBeInTheDocument()
         expect(screen.queryByText('查看完整发行说明')).not.toBeInTheDocument()
     })
 
