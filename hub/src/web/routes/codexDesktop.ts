@@ -1423,6 +1423,12 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
                 latestActivity = Math.max(latestActivity, message.invokedAt ?? message.createdAt)
             }
 
+            if (engine && [source.sessionId, canonical.sessionId].some((sessionId) => (
+                engine.getSessionByNamespace(sessionId, options.namespace)?.active
+            ))) {
+                throw new Error('Cannot merge a session that became active')
+            }
+
             const copiedMessages = options.store.commitDuplicateSessionMerge({
                 namespace: options.namespace,
                 sourceSessionId: source.sessionId,
