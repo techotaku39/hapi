@@ -41,6 +41,10 @@ describe('AttachmentStore', () => {
         expect(blob?.mimeType).toBe('image/png')
         expect(blob?.sha256).toBe(created.sha256)
 
+        const opened = await store.attachments.openForSessionAsync(created.id, 'namespace-a', 'session-a')
+        expect(opened?.size).toBe(original.length)
+        expect(Buffer.from(await opened!.file.arrayBuffer())).toEqual(original)
+
         expect(await store.attachments.deleteForSession(created.id, 'namespace-b', 'session-a')).toBe(false)
         expect(await store.attachments.deleteForSession(created.id, 'namespace-a', 'session-a')).toBe(true)
         expect(existsSync(created.originalPath)).toBe(false)

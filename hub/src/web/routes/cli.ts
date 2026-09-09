@@ -13,6 +13,7 @@ import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { SessionIdentityConflictError } from '../../store/sessions'
+import { attachmentResponseBody, readAttachmentForDownload } from '../attachmentDownload'
 import { attachmentContentDisposition } from '../attachmentHeaders'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
@@ -296,7 +297,8 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
-        const attachment = await engine.readAttachment(
+        const attachment = await readAttachmentForDownload(
+            engine,
             resolved.sessionId,
             namespace,
             c.req.param('attachmentId')
@@ -304,7 +306,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (!attachment) {
             return c.json({ error: 'Attachment not found' }, 404)
         }
-        return new Response(new Uint8Array(attachment.data), {
+        return new Response(attachmentResponseBody(attachment), {
             headers: {
                 'Content-Type': attachment.mimeType,
                 'Content-Length': String(attachment.size),

@@ -26,6 +26,14 @@ export type AttachmentBlob = {
     sha256: string
 }
 
+export type AttachmentFile = {
+    attachment: StoredAttachment
+    file: ReturnType<typeof Bun.file>
+    mimeType: string
+    size: number
+    sha256: string
+}
+
 export type CreateAttachmentInput = {
     namespace: string
     sessionId: string
@@ -166,6 +174,26 @@ export class AttachmentStore {
             data,
             mimeType: attachment.mimeType,
             size: data.length,
+            sha256: attachment.sha256
+        }
+    }
+
+    async openForSessionAsync(
+        id: string,
+        namespace: string,
+        sessionId: string
+    ): Promise<AttachmentFile | null> {
+        const attachment = this.getForSession(id, namespace, sessionId)
+        if (!attachment) return null
+
+        const file = Bun.file(attachment.originalPath)
+        if (!(await file.exists())) return null
+
+        return {
+            attachment,
+            file,
+            mimeType: attachment.mimeType,
+            size: file.size,
             sha256: attachment.sha256
         }
     }

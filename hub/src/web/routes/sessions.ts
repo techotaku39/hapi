@@ -32,6 +32,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
+import { attachmentResponseBody, readAttachmentForDownload } from '../attachmentDownload'
 import { attachmentContentDisposition } from '../attachmentHeaders'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
@@ -363,7 +364,8 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (sessionResult instanceof Response) {
             return sessionResult
         }
-        const attachment = await engine.readAttachment(
+        const attachment = await readAttachmentForDownload(
+            engine,
             sessionResult.sessionId,
             c.get('namespace'),
             c.req.param('attachmentId')
@@ -372,7 +374,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Attachment not found' }, 404)
         }
 
-        return new Response(new Uint8Array(attachment.data), {
+        return new Response(attachmentResponseBody(attachment), {
             headers: {
                 'Content-Type': attachment.mimeType,
                 'Content-Length': String(attachment.size),

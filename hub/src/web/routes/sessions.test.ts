@@ -73,6 +73,7 @@ function createApp(session: Session, opts?: {
     deleteAttachment?: SyncEngine['deleteAttachment']
     deleteUploadFile?: SyncEngine['deleteUploadFile']
     readAttachment?: SyncEngine['readAttachment']
+    readAttachmentStream?: SyncEngine['readAttachmentStream']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
     setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
 }) {
@@ -172,7 +173,8 @@ function createApp(session: Session, opts?: {
         createAttachment: opts?.createAttachment ?? (async () => ({ success: false, error: 'not configured' })),
         deleteAttachment: opts?.deleteAttachment ?? (async () => ({ success: false, error: 'not configured' })),
         deleteUploadFile: opts?.deleteUploadFile ?? (async () => ({ success: false, error: 'not configured' })),
-        readAttachment: opts?.readAttachment ?? (async () => null)
+        readAttachment: opts?.readAttachment ?? (async () => null),
+        readAttachmentStream: opts?.readAttachmentStream
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -1671,6 +1673,47 @@ describe('durable attachment routes', () => {
         expect(response.headers.get('etag')).toBe('"hash-1"')
         expect(response.headers.get('x-content-type-options')).toBe('nosniff')
         expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([7, 8, 9])
+    })
+
+    it('streams durable attachment originals without buffering them in the route', async () => {
+        const readAttachmentStream = async () => ({
+            attachment: { filename: 'photo.png' } as never,
+            file: new Blob([new Uint8Array([7, 8, 9])]) as never,
+            mimeType: 'image/png',
+            size: 3,
+            sha256: 'stream-hash'
+        })
+        const { app } = createApp(createSession(), { readAttachmentStream })
+
+        const response = await app.request('/api/sessions/session-1/attachments/attachment-1/original')
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-length')).toBe('3')
+        expect(response.headers.get('etag')).toBe('"stream-hash"')
+        expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([7, 8, 9])
+    })
+
+    it('rejects MIME control bytes before creating a durable attachment', async () => {
+        let createCalls = 0
+        const { app } = createApp(createSession(), {
+            createAttachment: async () => {
+                createCalls += 1
+                return { success: true, attachmentId: 'should-not-be-created' }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/upload', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                filename: 'photo.png',
+                content: 'AQID',
+                mimeType: 'image/png\r\nX-Injected: true'
+            })
+        })
+
+        expect(response.status).toBe(400)
+        expect(createCalls).toBe(0)
     })
 
     it('sandboxes active MIME types and sanitizes attachment filenames', async () => {

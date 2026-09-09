@@ -323,6 +323,33 @@ describe('cli durable attachment delivery', () => {
         expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3, 4])
     })
 
+    it('streams an owned original through the authenticated CLI endpoint', async () => {
+        const readAttachmentStream = mock(async () => ({
+            attachment: { filename: 'document.pdf' } as never,
+            file: new Blob([new Uint8Array([1, 2, 3, 4])]) as never,
+            mimeType: 'application/pdf',
+            size: 4,
+            sha256: 'stream-hash'
+        }))
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId: 'session-1',
+                session: {} as never
+            }),
+            readAttachmentStream
+        } as never)
+
+        const response = await app.request('/cli/sessions/session-1/attachments/attachment-1/original', {
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(200)
+        expect(readAttachmentStream).toHaveBeenCalledWith('session-1', 'default', 'attachment-1')
+        expect(response.headers.get('etag')).toBe('"stream-hash"')
+        expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3, 4])
+    })
+
     it('sandboxes active MIME types and sanitizes CLI attachment filenames', async () => {
         const app = createApp({
             resolveSessionAccess: () => ({

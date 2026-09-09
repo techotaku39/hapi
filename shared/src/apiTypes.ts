@@ -475,7 +475,11 @@ export type CursorMigrateRefusalReason =
 export const UploadFileRequestSchema = z.object({
     filename: z.string().min(1).max(255),
     content: z.string().min(1),
-    mimeType: z.string().min(1).max(255)
+    mimeType: z.string()
+        .trim()
+        .min(1)
+        .max(255)
+        .regex(/^[^\u0000-\u001F\u007F-\u009F]+$/, 'Invalid MIME type')
 })
 
 export type UploadFileRequest = z.infer<typeof UploadFileRequestSchema>

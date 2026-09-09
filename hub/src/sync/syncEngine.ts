@@ -4046,6 +4046,17 @@ export class SyncEngine {
         return await this.store.attachments.readForSessionAsync(attachmentId, namespace, access.sessionId)
     }
 
+    async readAttachmentStream(
+        sessionId: string,
+        namespace: string,
+        attachmentId: string
+    ) {
+        const access = this.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) return null
+        if (this.deletingAttachmentKeys.has(this.attachmentKey(namespace, attachmentId))) return null
+        return await this.store.attachments.openForSessionAsync(attachmentId, namespace, access.sessionId)
+    }
+
     hasAttachment(sessionId: string, namespace: string, attachmentId: string): boolean {
         const access = this.resolveSessionAccess(sessionId, namespace)
         return access.ok
