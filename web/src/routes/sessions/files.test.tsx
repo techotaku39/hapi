@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     navigate: vi.fn(),
     fileSearch: vi.fn(),
     listRecycleBin: vi.fn(async () => ({ success: true, entries: [], retentionDays: 30 })),
+    sessionId: 'session-1',
     transferComposerDraftThenNavigate: vi.fn(async (
         _source: string,
         _target: string,
@@ -19,15 +20,12 @@ const mocks = vi.hoisted(() => ({
     sessionHeaderProps: null as null | {
         onSessionReopened?: (newSessionId: string) => void | Promise<void>
     },
-    search: {
-        tab: 'directories' as const,
-        query: '感',
-    },
+    search: {} as { tab?: 'changes' | 'directories'; query?: string },
 }))
 
 vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => mocks.navigate,
-    useParams: () => ({ sessionId: 'session-1' }),
+    useParams: () => ({ sessionId: mocks.sessionId }),
     useSearch: () => mocks.search,
 }))
 
@@ -46,7 +44,7 @@ vi.mock('@/hooks/useAppGoBack', () => ({
 vi.mock('@/hooks/queries/useSession', () => ({
     useSession: () => ({
         session: {
-            id: 'session-1',
+            id: mocks.sessionId,
             metadata: { path: '/workspace/project' },
         },
     }),
@@ -109,6 +107,8 @@ describe('FilesPage search navigation', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.listRecycleBin.mockResolvedValue({ success: true, entries: [], retentionDays: 30 })
+        mocks.sessionId = 'session-1'
+        mocks.search = { tab: 'directories', query: '感' }
         window.localStorage.clear()
         window.sessionStorage.clear()
     })
@@ -166,10 +166,63 @@ describe('FilesPage search navigation', () => {
     })
 })
 
+describe('FilesPage tab preference', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.sessionId = 'session-1'
+        mocks.sessionHeaderProps = null
+        mocks.search = {}
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+    })
+
+    it('restores the globally remembered tab for a different session', () => {
+        const firstRender = renderFilesPage()
+
+        expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true')
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Directories' }))
+        expect(window.localStorage.getItem('hapi-files-tab')).toBe('directories')
+        firstRender.unmount()
+
+        mocks.sessionId = 'session-2'
+        renderFilesPage()
+
+        expect(screen.getByRole('tab', { name: 'Directories' })).toHaveAttribute('aria-selected', 'true')
+    })
+
+    it('remembers Changes after the user switches back from Directories', () => {
+        window.localStorage.setItem('hapi-files-tab', 'directories')
+        const firstRender = renderFilesPage()
+
+        expect(screen.getByRole('tab', { name: 'Directories' })).toHaveAttribute('aria-selected', 'true')
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Changes' }))
+        expect(window.localStorage.getItem('hapi-files-tab')).toBe('changes')
+        firstRender.unmount()
+
+        renderFilesPage()
+
+        expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true')
+    })
+
+    it('uses an explicit route tab before the stored browser preference', () => {
+        window.localStorage.setItem('hapi-files-tab', 'directories')
+        mocks.search = { tab: 'changes' }
+
+        renderFilesPage()
+
+        expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true')
+        expect(window.localStorage.getItem('hapi-files-tab')).toBe('changes')
+    })
+})
+
 describe('FilesPage reopen draft transfer', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.sessionId = 'session-1'
         mocks.sessionHeaderProps = null
+        mocks.search = { tab: 'directories', query: '感' }
         window.localStorage.clear()
         window.sessionStorage.clear()
     })

@@ -87,6 +87,29 @@ function SortIcon() {
 }
 
 const DIRECTORY_SORT_STORAGE_KEY = 'hapi-directory-sort'
+const FILES_TAB_STORAGE_KEY = 'hapi-files-tab'
+
+type FilesTab = 'changes' | 'directories'
+
+function readFilesTab(): FilesTab {
+    try {
+        const value = localStorage.getItem(FILES_TAB_STORAGE_KEY)
+        if (value === 'changes' || value === 'directories') {
+            return value
+        }
+    } catch {
+        // Use the default when storage is unavailable.
+    }
+    return 'changes'
+}
+
+function persistFilesTab(tab: FilesTab): void {
+    try {
+        localStorage.setItem(FILES_TAB_STORAGE_KEY, tab)
+    } catch {
+        // Tab switching still works when storage is unavailable.
+    }
+}
 
 function readDirectorySort(): DirectorySort {
     try {
@@ -341,8 +364,7 @@ export default function FilesPage() {
     const { session } = useSession(api, sessionId)
     const scrollRef = useRef<HTMLDivElement>(null)
 
-    const initialTab = search.tab === 'directories' ? 'directories' : 'changes'
-    const [activeTab, setActiveTab] = useState<'changes' | 'directories'>(initialTab)
+    const [activeTab, setActiveTab] = useState<FilesTab>(() => search.tab ?? readFilesTab())
     const [recycleBinOpen, setRecycleBinOpen] = useState(false)
     const [directorySort, setDirectorySort] = useState<DirectorySort>(readDirectorySort)
     const searchQuery = search.query ?? ''
@@ -367,6 +389,13 @@ export default function FilesPage() {
             // Sorting still works when storage is unavailable.
         }
     }, [directorySort])
+
+    useEffect(() => {
+        if (search.tab) {
+            setActiveTab(search.tab)
+            persistFilesTab(search.tab)
+        }
+    }, [search.tab])
 
     useEffect(() => {
         const el = scrollRef.current
@@ -462,8 +491,9 @@ export default function FilesPage() {
         ])
     }, [queryClient, sessionId])
 
-    const handleTabChange = useCallback((nextTab: 'changes' | 'directories') => {
+    const handleTabChange = useCallback((nextTab: FilesTab) => {
         setActiveTab(nextTab)
+        persistFilesTab(nextTab)
         navigate({
             to: '/sessions/$sessionId/files',
             params: { sessionId },

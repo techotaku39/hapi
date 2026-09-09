@@ -4,6 +4,7 @@ import { registerBashHandlers } from './handlers/bash'
 import { registerCodexModelHandlers } from './handlers/codexModels'
 import { registerCursorModelHandlers } from './handlers/cursorModels'
 import { registerOpencodeModelHandlers } from './handlers/opencodeModels'
+import { registerOpencodeModelVariantsHandlers } from './handlers/opencodeModelVariants'
 import { registerPiModelHandlers } from './handlers/piModels'
 import { registerGrokModelHandlers } from './handlers/grokModels'
 import { registerCopilotModelHandlers } from './handlers/copilotModels'
@@ -28,6 +29,7 @@ export function registerCommonHandlers(
     registerCodexModelHandlers(rpcHandlerManager)
     registerCursorModelHandlers(rpcHandlerManager)
     registerOpencodeModelHandlers(rpcHandlerManager)
+    registerOpencodeModelVariantsHandlers(rpcHandlerManager)
     registerPiModelHandlers(rpcHandlerManager)
     registerGrokModelHandlers(rpcHandlerManager)
     registerCopilotModelHandlers(rpcHandlerManager)
