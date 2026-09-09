@@ -1,3 +1,4 @@
+import { realpath } from 'fs/promises'
 import { resolve, sep } from 'path';
 
 export interface PathValidationResult {
@@ -30,4 +31,26 @@ export function validatePath(targetPath: string, workingDirectory: string): Path
     }
 
     return { valid: true };
+}
+
+/** Resolve a path and verify that its canonical target remains in the workspace. */
+export async function resolveRealPathWithinWorkingDirectory(
+    targetPath: string,
+    workingDirectory: string
+): Promise<string | null> {
+    if (!validatePath(targetPath, workingDirectory).valid) {
+        return null
+    }
+
+    try {
+        const [resolvedTarget, resolvedWorkingDirectory] = await Promise.all([
+            realpath(resolve(workingDirectory, targetPath)),
+            realpath(workingDirectory)
+        ])
+        return validatePath(resolvedTarget, resolvedWorkingDirectory).valid
+            ? resolvedTarget
+            : null
+    } catch {
+        return null
+    }
 }

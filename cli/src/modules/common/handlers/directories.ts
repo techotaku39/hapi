@@ -4,7 +4,7 @@ import { basename, join, resolve } from 'path'
 import type { DirectoryEntry, FileMetadataEntry, ListDirectoryResponse, StatFilesResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
-import { validatePath } from '../pathSecurity'
+import { resolveRealPathWithinWorkingDirectory, validatePath } from '../pathSecurity'
 import { getErrorMessage, rpcError } from '../rpcResponses'
 
 interface ListDirectoryRequest {
@@ -111,7 +111,11 @@ export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, 
 
         const entries = await Promise.all(data.paths.map(async (path) => {
             try {
-                const stats = await stat(resolve(workingDirectory, path))
+                const resolvedPath = await resolveRealPathWithinWorkingDirectory(path, workingDirectory)
+                if (!resolvedPath) {
+                    return { path }
+                }
+                const stats = await stat(resolvedPath)
                 const type: FileMetadataEntry['type'] = stats.isFile()
                     ? 'file'
                     : stats.isDirectory()
