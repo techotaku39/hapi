@@ -259,10 +259,12 @@ class SummaryPatchingTest {
             SessionPatch(
                 lastAssistantMessageAt = OptionalField.Present(1_000),
                 lastAssistantMessageVersion = 5,
+                assistantReplyClockBackfilled = true,
             ),
         )
         assertEquals(1_000L, backward.lastAssistantMessageAt)
         assertEquals(5L, backward.lastAssistantMessageVersion)
+        assertTrue(backward.assistantReplyClockBackfilled == true)
 
         val cleared = SummaryPatching.applySessionSummaryPatch(
             backward,

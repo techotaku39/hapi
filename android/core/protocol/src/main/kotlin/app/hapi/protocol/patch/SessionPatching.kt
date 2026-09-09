@@ -63,6 +63,11 @@ fun isRenderIrrelevantSessionPatch(session: Session, patch: SessionPatch): Boole
     ) {
         return false
     }
+    if (patch.assistantReplyClockBackfilled != null
+        && session.assistantReplyClockBackfilled != patch.assistantReplyClockBackfilled
+    ) {
+        return false
+    }
     if (patch.metadata != null) return false
     if (patch.agentState != null) return false
     if (patch.todos != null) return false
@@ -146,6 +151,11 @@ fun applySessionDetailPatch(session: Session, patch: SessionPatch): Session? {
             if (next.lastAssistantMessageAt != nextReplyAt) {
                 set(next.copy(lastAssistantMessageAt = nextReplyAt))
             }
+        }
+    }
+    if (patch.assistantReplyClockBackfilled != null && canApplyReplyClock) {
+        if (next.assistantReplyClockBackfilled != patch.assistantReplyClockBackfilled) {
+            set(next.copy(assistantReplyClockBackfilled = patch.assistantReplyClockBackfilled))
         }
     }
     val model = patch.model

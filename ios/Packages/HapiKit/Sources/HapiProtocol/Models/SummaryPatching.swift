@@ -238,6 +238,9 @@ public enum SummaryPatching {
                 next.lastAssistantMessageAt = max(current.lastAssistantMessageAt ?? Int.min, value)
             }
         }
+        if let value = patch.assistantReplyClockBackfilled, canApplyReplyClock {
+            next.assistantReplyClockBackfilled = value
+        }
         if let replyVersion {
             next.lastAssistantMessageVersion = max(current.lastAssistantMessageVersion ?? 0, replyVersion)
         }
@@ -310,6 +313,7 @@ public enum SummaryPatching {
         if current.thinking != next.thinking { return false }
         if current.updatedAt != next.updatedAt { return false }
         if current.lastAssistantMessageAt != next.lastAssistantMessageAt { return false }
+        if current.assistantReplyClockBackfilled != next.assistantReplyClockBackfilled { return false }
         if current.backgroundTaskCount != next.backgroundTaskCount { return false }
         if current.model != next.model { return false }
         if current.modelReasoningEffort != next.modelReasoningEffort { return false }

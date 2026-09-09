@@ -349,10 +349,14 @@ export class SessionCache {
                 sessionId,
                 namespace: session.namespace,
                 // This recomputation may legitimately move the reply clock
-                // backward or clear it after merge/rewind. Send the complete
-                // current record so web clients replace their cached summary
-                // instead of applying the monotonic structured-patch path.
-                data: { ...session }
+                // backward or clear it after merge/rewind. Keep the update
+                // narrow: a full snapshot here could overwrite metadata or
+                // runtime fields changed while the paginated scan yielded.
+                data: {
+                    lastAssistantMessageAt: refreshed.lastAssistantMessageAt,
+                    lastAssistantMessageVersion: refreshed.seq,
+                    assistantReplyClockBackfilled: refreshed.assistantReplyClockBackfilled
+                } satisfies SessionPatch
             })
             return false
         }
@@ -472,6 +476,9 @@ export class SessionCache {
                     )
                 }
             }
+        }
+        if (patch.assistantReplyClockBackfilled !== undefined && canApplyReplyClock) {
+            session.assistantReplyClockBackfilled = patch.assistantReplyClockBackfilled
         }
         if (patch.model !== undefined) session.model = patch.model
         if (patch.modelReasoningEffort !== undefined) session.modelReasoningEffort = patch.modelReasoningEffort

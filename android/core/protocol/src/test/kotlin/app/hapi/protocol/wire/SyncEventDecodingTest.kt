@@ -44,7 +44,7 @@ class SyncEventDecodingTest {
     fun `decodes session-updated keeping data raw for two-phase resolution`() {
         val event = assertIs<SyncEvent.SessionUpdated>(
             SyncEvents.parse(
-                """{"type":"session-updated","namespace":"default","sessionId":"s-1","data":{"activeAt":123,"active":true,"lastAssistantMessageAt":456,"lastAssistantMessageVersion":9}}"""
+                """{"type":"session-updated","namespace":"default","sessionId":"s-1","data":{"activeAt":123,"active":true,"lastAssistantMessageAt":456,"lastAssistantMessageVersion":9,"assistantReplyClockBackfilled":true}}"""
             )
         )
         assertEquals("s-1", event.sessionId)
@@ -53,6 +53,7 @@ class SyncEventDecodingTest {
         assertEquals(true, patch.active)
         assertEquals(OptionalField.Present<Long?>(456L), patch.lastAssistantMessageAt)
         assertEquals(9L, patch.lastAssistantMessageVersion)
+        assertEquals(true, patch.assistantReplyClockBackfilled)
     }
 
     @Test

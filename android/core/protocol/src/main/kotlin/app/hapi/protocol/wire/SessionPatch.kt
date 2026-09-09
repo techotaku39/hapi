@@ -48,6 +48,8 @@ data class SessionPatch(
     val lastAssistantMessageAt: OptionalField<Long?> = OptionalField.Absent,
     /** Session sequence that observed [lastAssistantMessageAt]. */
     val lastAssistantMessageVersion: Long? = null,
+    /** False while the legacy transcript reply-clock scan is incomplete. */
+    val assistantReplyClockBackfilled: Boolean? = null,
     val metadata: VersionedValue<SessionMetadata>? = null,
     val agentState: VersionedValue<AgentState>? = null,
     val todos: VersionedValue<List<TodoItem>>? = null,
@@ -67,7 +69,7 @@ data class SessionPatch(
 object SessionPatches {
     private val KNOWN_KEYS = setOf(
         "active", "thinking", "activeTurnStartedAt", "activeAt", "updatedAt",
-        "lastAssistantMessageAt", "lastAssistantMessageVersion",
+        "lastAssistantMessageAt", "lastAssistantMessageVersion", "assistantReplyClockBackfilled",
         "metadata", "agentState", "todos", "teamState",
         "model", "modelReasoningEffort", "effort", "serviceTier",
         "permissionMode", "collaborationMode", "copilotAgentMode",
@@ -103,6 +105,9 @@ object SessionPatches {
                 lastAssistantMessageAt = optionalNullableLong(obj, "lastAssistantMessageAt") ?: return null,
                 lastAssistantMessageVersion = obj["lastAssistantMessageVersion"]?.let {
                     it.longOrNull ?: return null
+                },
+                assistantReplyClockBackfilled = obj["assistantReplyClockBackfilled"]?.let {
+                    it.boolOrNull ?: return null
                 },
                 metadata = obj["metadata"]?.let { wrapper ->
                     versioned(wrapper) { value ->

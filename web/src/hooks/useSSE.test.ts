@@ -297,6 +297,72 @@ describe('reply-clock full-record cache ordering', () => {
         expect(queryClient.getQueryState(queryKeys.sessions)?.isInvalidated).toBe(true)
         unmount()
     })
+
+    it('keeps newer metadata when reply-clock backfill arrives as a narrow patch', () => {
+        const { queryClient, unmount } = renderUseSSE()
+        const currentDetail = {
+            id: 'session-1',
+            namespace: 'default',
+            seq: 10,
+            createdAt: 1_000,
+            updatedAt: 2_000,
+            active: false,
+            activeAt: 0,
+            metadata: { path: '/old', host: 'h' },
+            metadataVersion: 1,
+            agentState: null,
+            agentStateVersion: 0,
+            thinking: false,
+            thinkingAt: 0,
+            model: null,
+            modelReasoningEffort: null,
+            effort: null,
+            serviceTier: null,
+            lastAssistantMessageAt: null,
+            assistantReplyClockBackfilled: false
+        } as Session
+        queryClient.setQueryData<SessionResponse>(queryKeys.session('session-1'), { session: currentDetail })
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSummary({
+                id: 'session-1',
+                metadata: { path: '/old' },
+                metadataVersion: 1,
+                lastAssistantMessageVersion: 10,
+                assistantReplyClockBackfilled: false
+            })]
+        })
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId: 'session-1',
+                namespace: 'default',
+                data: {
+                    metadata: { version: 2, value: { path: '/new', host: 'h' } }
+                }
+            })
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId: 'session-1',
+                namespace: 'default',
+                data: {
+                    lastAssistantMessageAt: 3_000,
+                    lastAssistantMessageVersion: 11,
+                    assistantReplyClockBackfilled: true
+                }
+            })
+        })
+
+        const detail = queryClient.getQueryData<SessionResponse>(queryKeys.session('session-1'))?.session
+        const summary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]
+        expect(detail?.metadata?.path).toBe('/new')
+        expect(detail?.lastAssistantMessageAt).toBe(3_000)
+        expect(detail?.assistantReplyClockBackfilled).toBe(true)
+        expect(summary?.metadata?.path).toBe('/new')
+        expect(summary?.lastAssistantMessageAt).toBe(3_000)
+        expect(summary?.assistantReplyClockBackfilled).toBe(true)
+        unmount()
+    })
 })
 
 describe('canApplyVersionedSummaryPatch (PR #897 review, HAPI Bot 2026-07-23 Major)', () => {

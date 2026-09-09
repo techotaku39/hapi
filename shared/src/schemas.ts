@@ -405,6 +405,9 @@ export const SessionPatchSchema = z.object({
     activeAt: z.number().optional(),
     updatedAt: z.number().optional(),
     lastAssistantMessageAt: z.number().nullable().optional(),
+    // Carries the legacy transcript backfill readiness marker without
+    // requiring a full Session snapshot that could overwrite newer fields.
+    assistantReplyClockBackfilled: z.boolean().optional(),
     // Session `seq` at which the reply clock was observed. This lets dual
     // SSE connections reject an older full record or structured patch even
     // when the timestamp itself legitimately moves backward or becomes null.

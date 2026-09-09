@@ -23,6 +23,7 @@ struct SyncEventDecodingTests {
                 "updatedAt": 456,
                 "lastAssistantMessageAt": 789,
                 "lastAssistantMessageVersion": 9,
+                "assistantReplyClockBackfilled": true,
                 "serviceTier": null,
                 "metadata": {"version": 7, "value": null}
             }
@@ -39,6 +40,7 @@ struct SyncEventDecodingTests {
         #expect(patch.updatedAt == 456)
         #expect(patch.lastAssistantMessageAt == .value(789))
         #expect(patch.lastAssistantMessageVersion == 9)
+        #expect(patch.assistantReplyClockBackfilled == true)
         // Explicit null is preserved as .null, distinct from an absent key.
         #expect(patch.serviceTier == .null)
         #expect(patch.model == nil)

@@ -101,6 +101,9 @@ export function applySessionDetailPatch(session: Session, patch: SessionPatch): 
             )
         }
     }
+    if (patch.assistantReplyClockBackfilled !== undefined && canApplyReplyClock) {
+        assign('assistantReplyClockBackfilled', patch.assistantReplyClockBackfilled)
+    }
     if (patch.model !== undefined) assign('model', patch.model)
     if (patch.modelReasoningEffort !== undefined) assign('modelReasoningEffort', patch.modelReasoningEffort)
     if (patch.effort !== undefined) assign('effort', patch.effort)

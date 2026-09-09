@@ -249,10 +249,12 @@ struct SummaryPatchingTests {
         let current = makeSummary(lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 4)
         let backward = SummaryPatching.applySessionSummaryPatch(current, SessionPatch(
             lastAssistantMessageAt: .value(1_000),
-            lastAssistantMessageVersion: 5
+            lastAssistantMessageVersion: 5,
+            assistantReplyClockBackfilled: true
         ))
         #expect(backward.lastAssistantMessageAt == 1_000)
         #expect(backward.lastAssistantMessageVersion == 5)
+        #expect(backward.assistantReplyClockBackfilled == true)
 
         let cleared = SummaryPatching.applySessionSummaryPatch(backward, SessionPatch(
             lastAssistantMessageAt: .null,

@@ -104,7 +104,11 @@ describe('SessionCache.applySessionPatch', () => {
         expect(events.at(-1)).toMatchObject({
             type: 'session-updated',
             sessionId: session.id,
-            data: { lastAssistantMessageAt: 3_000 }
+            data: {
+                lastAssistantMessageAt: 3_000,
+                lastAssistantMessageVersion: backfilled.seq,
+                assistantReplyClockBackfilled: true
+            }
         })
         cache.stop()
         store.close()
@@ -189,8 +193,9 @@ describe('SessionCache.applySessionPatch', () => {
             type: 'session-updated',
             sessionId: session.id,
             data: {
-                id: session.id,
-                lastAssistantMessageAt: firstReply.createdAt
+                lastAssistantMessageAt: firstReply.createdAt,
+                lastAssistantMessageVersion: backfilled.seq,
+                assistantReplyClockBackfilled: true
             }
         })
         cache.stop()

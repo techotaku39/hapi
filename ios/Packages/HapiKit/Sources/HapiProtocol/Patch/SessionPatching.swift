@@ -54,6 +54,10 @@ public func isRenderIrrelevantSessionPatch(session: Session, patch: SessionPatch
     if let field = patch.lastAssistantMessageAt, field.wireValue != session.lastAssistantMessageAt {
         return false
     }
+    if let value = patch.assistantReplyClockBackfilled,
+       value != session.assistantReplyClockBackfilled {
+        return false
+    }
     // Versioned wrappers never equal the session's plain fields in the TS
     // reference (object identity), so their presence is always relevant.
     if patch.metadata != nil { return false }
@@ -112,6 +116,9 @@ public func applySessionDetailPatch(session: Session, patch: SessionPatch) -> Se
         } else if let value = field.wireValue {
             assign(\.lastAssistantMessageAt, max(next.lastAssistantMessageAt ?? Int.min, value))
         }
+    }
+    if let value = patch.assistantReplyClockBackfilled, canApplyReplyClock {
+        assign(\.assistantReplyClockBackfilled, value as Bool?)
     }
     if let field = patch.model { assign(\.model, field.wireValue) }
     if let field = patch.modelReasoningEffort { assign(\.modelReasoningEffort, field.wireValue) }

@@ -197,11 +197,13 @@ class SessionPatchingTest {
                 SessionPatch(
                     lastAssistantMessageAt = OptionalField.Present(1_000),
                     lastAssistantMessageVersion = 11,
+                    assistantReplyClockBackfilled = true,
                 ),
             )
         )
         assertEquals(1_000L, backward.lastAssistantMessageAt)
         assertEquals(11L, backward.seq)
+        assertTrue(backward.assistantReplyClockBackfilled == true)
 
         val staleClear = applySessionDetailPatch(
             backward,

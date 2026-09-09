@@ -160,6 +160,7 @@ export function isRenderIrrelevantPatch(current: SessionSummary, next: SessionSu
         && current.thinking === next.thinking
         && current.updatedAt === next.updatedAt
         && current.lastAssistantMessageAt === next.lastAssistantMessageAt
+        && current.assistantReplyClockBackfilled === next.assistantReplyClockBackfilled
         && current.backgroundTaskCount === next.backgroundTaskCount
         && current.model === next.model
         && current.modelReasoningEffort === next.modelReasoningEffort
@@ -555,6 +556,9 @@ export function useSSE(options: {
                     lastAssistantMessageVersion: replyVersion !== undefined
                         ? Math.max(current.lastAssistantMessageVersion ?? 0, replyVersion)
                         : current.lastAssistantMessageVersion,
+                    assistantReplyClockBackfilled: patch.assistantReplyClockBackfilled !== undefined && canApplyReplyClock
+                        ? patch.assistantReplyClockBackfilled
+                        : current.assistantReplyClockBackfilled,
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
                         ? patch.backgroundTaskCount ?? 0
                         : current.backgroundTaskCount,

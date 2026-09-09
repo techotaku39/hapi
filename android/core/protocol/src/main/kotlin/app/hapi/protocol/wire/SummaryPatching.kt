@@ -231,6 +231,11 @@ object SummaryPatching {
         } else {
             current.lastAssistantMessageVersion
         }
+        val nextReplyClockBackfilled = if (patch.assistantReplyClockBackfilled != null && canApplyReplyClock) {
+            patch.assistantReplyClockBackfilled
+        } else {
+            current.assistantReplyClockBackfilled
+        }
         var next = current.copy(
             active = patch.active ?: current.active,
             thinking = patch.thinking ?: current.thinking,
@@ -238,6 +243,7 @@ object SummaryPatching {
             updatedAt = patch.updatedAt?.let { max(current.updatedAt, it) } ?: current.updatedAt,
             lastAssistantMessageAt = nextReplyAt,
             lastAssistantMessageVersion = nextReplyVersion,
+            assistantReplyClockBackfilled = nextReplyClockBackfilled,
             backgroundTaskCount = patch.backgroundTaskCount ?: current.backgroundTaskCount,
             model = when (val model = patch.model) {
                 is OptionalField.Present -> model.value
@@ -333,6 +339,7 @@ object SummaryPatching {
             && current.thinking == next.thinking
             && current.updatedAt == next.updatedAt
             && current.lastAssistantMessageAt == next.lastAssistantMessageAt
+            && current.assistantReplyClockBackfilled == next.assistantReplyClockBackfilled
             && current.backgroundTaskCount == next.backgroundTaskCount
             && current.model == next.model
             && current.modelReasoningEffort == next.modelReasoningEffort

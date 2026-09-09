@@ -211,10 +211,12 @@ struct SessionPatchingTests {
         let current = makeSession(seq: 10, lastAssistantMessageAt: 9_000)
         let backward = try #require(applySessionDetailPatch(session: current, patch: SessionPatch(
             lastAssistantMessageAt: .value(1_000),
-            lastAssistantMessageVersion: 11
+            lastAssistantMessageVersion: 11,
+            assistantReplyClockBackfilled: true
         )))
         #expect(backward.lastAssistantMessageAt == 1_000)
         #expect(backward.seq == 11)
+        #expect(backward.assistantReplyClockBackfilled == true)
 
         let staleClear = applySessionDetailPatch(session: backward, patch: SessionPatch(
             lastAssistantMessageAt: .null,
