@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Database } from 'bun:sqlite'
@@ -62,11 +62,6 @@ const sanitizeFilename = (filename: string): string => {
 }
 
 const hashBytes = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
-
-const isManagedAttachmentFilename = (filename: string): boolean => (
-    /^[0-9a-f-]{36}\.original$/i.test(filename)
-    || /^\.[0-9a-f-]{36}\.original\.[0-9a-f-]{36}\.tmp$/i.test(filename)
-)
 
 const expandHome = (value: string): string => {
     if (value === '~') return homedir()
@@ -230,39 +225,6 @@ export class AttachmentStore {
 
         await rm(attachment.original_path, { force: true })
         return true
-    }
-
-    /** Remove files in the attachment root that are not referenced by SQLite. */
-    async cleanupUntrackedFiles(): Promise<number> {
-        let entries: Array<{ name: string; isFile(): boolean }>
-        try {
-            entries = await readdir(this.root, { withFileTypes: true })
-        } catch (error) {
-            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-                return 0
-            }
-            throw error
-        }
-
-        const trackedPaths = new Set(
-            (this.db.prepare('SELECT original_path FROM attachments').all() as Array<{ original_path: string }>)
-                .map((row) => resolve(row.original_path))
-        )
-        let removed = 0
-        let firstError: unknown
-        for (const entry of entries) {
-            if (!entry.isFile() || !isManagedAttachmentFilename(entry.name)) continue
-            const path = join(this.root, entry.name)
-            if (trackedPaths.has(resolve(path))) continue
-            try {
-                await rm(path, { force: true })
-                removed += 1
-            } catch (error) {
-                firstError ??= error
-            }
-        }
-        if (firstError) throw firstError
-        return removed
     }
 
     async cloneForSession(

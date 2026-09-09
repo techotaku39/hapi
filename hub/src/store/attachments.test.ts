@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './index'
@@ -127,28 +127,30 @@ describe('AttachmentStore', () => {
         reopened.close()
     })
 
-    it('removes untracked attachment files during reconciliation', async () => {
+    it('does not sweep files that may belong to another database sharing the root', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-attachments-'))
         tempDirs.push(dir)
-        const dbPath = join(dir, 'hapi.sqlite')
+        const databaseA = join(dir, 'hapi-a.sqlite')
+        const databaseB = join(dir, 'hapi-b.sqlite')
         const attachmentsRoot = join(dir, 'attachments')
-        const initial = new Store(dbPath, { attachmentsRoot })
-        initial.close()
+        const storeA = new Store(databaseA, { attachmentsRoot })
+        const sessionA = storeA.sessions.getOrCreateSession('database-a-session', {}, {}, 'default')
+        const attachment = await storeA.attachments.create({
+            namespace: 'default',
+            sessionId: sessionA.id,
+            filename: 'owned-by-a.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('owned by database A')
+        })
 
-        mkdirSync(attachmentsRoot, { recursive: true })
-        const untrackedOriginal = join(attachmentsRoot, `${randomUUID()}.original`)
-        const interruptedTemp = join(attachmentsRoot, `.${randomUUID()}.original.${randomUUID()}.tmp`)
-        const unrelatedFile = join(attachmentsRoot, 'do-not-delete.txt')
-        writeFileSync(untrackedOriginal, 'untracked')
-        writeFileSync(interruptedTemp, 'interrupted')
-        writeFileSync(unrelatedFile, 'unrelated')
+        const storeB = new Store(databaseB, { attachmentsRoot })
+        expect(await storeB.cleanupOrphanedAttachments()).toBe(0)
+        expect(existsSync(attachment.originalPath)).toBe(true)
+        expect((await storeA.attachments.readForSessionAsync(attachment.id, 'default', sessionA.id))?.data)
+            .toEqual(Buffer.from('owned by database A'))
 
-        const reopened = new Store(dbPath, { attachmentsRoot })
-        expect(await reopened.cleanupOrphanedAttachments()).toBe(2)
-        expect(existsSync(untrackedOriginal)).toBe(false)
-        expect(existsSync(interruptedTemp)).toBe(false)
-        expect(readFileSync(unrelatedFile, 'utf8')).toBe('unrelated')
-        reopened.close()
+        storeB.close()
+        storeA.close()
     })
 
     it('clones durable message attachments for a fork without changing the source', async () => {

@@ -159,7 +159,13 @@ export class Store {
         this.attachments = new AttachmentStore(this.db, options?.attachmentsRoot)
     }
 
-    /** Reclaim attachment rows whose owning session no longer exists. */
+    /**
+     * Reclaim attachment rows whose owning session no longer exists.
+     *
+     * Do not sweep files that are absent from this database's attachment rows:
+     * `DB_PATH` can be changed while `HAPI_HOME` remains the same, so another
+     * database may legitimately own files in the shared attachment root.
+     */
     async cleanupOrphanedAttachments(): Promise<number> {
         const rows = this.db.prepare(`
             SELECT DISTINCT a.namespace, a.session_id
@@ -177,11 +183,6 @@ export class Store {
             } catch (error) {
                 firstError ??= error
             }
-        }
-        try {
-            deleted += await this.attachments.cleanupUntrackedFiles()
-        } catch (error) {
-            firstError ??= error
         }
         if (firstError) throw firstError
         return deleted
