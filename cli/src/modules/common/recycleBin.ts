@@ -236,6 +236,19 @@ async function clearEntryStagingFile(
     await updateEntryStagingFiles(root, entry, stagingFiles)
 }
 
+async function syncStagingParentIfPresent(path: string): Promise<void> {
+    try {
+        await syncParentDirectory(path)
+    } catch (error) {
+        if (!isNotFound(error)) throw error
+    }
+}
+
+async function removeStagingFileDurably(path: string): Promise<void> {
+    await rm(path, { force: true })
+    await syncStagingParentIfPresent(path)
+}
+
 async function readRegularFileStats(path: string): Promise<FileStats> {
     const handle = await open(path, READ_FILE_FLAGS)
     try {
@@ -799,7 +812,7 @@ async function reconcileEntryStagingFiles(
             }
             if (stagingFile.kind === 'restore') {
                 try {
-                    await rm(stagingFile.path, { force: true })
+                    await removeStagingFileDurably(stagingFile.path)
                     stagingFilesChanged = true
                 } catch (error) {
                     clean = false
@@ -821,7 +834,7 @@ async function reconcileEntryStagingFiles(
                 continue
             }
             try {
-                await rm(stagingFile.path, { force: true })
+                await removeStagingFileDurably(stagingFile.path)
                 stagingFilesChanged = true
             } catch (error) {
                 clean = false
@@ -830,8 +843,19 @@ async function reconcileEntryStagingFiles(
             }
         } catch (error) {
             if (isNotFound(error)) {
-                stagingFilesChanged = true
-                continue
+                try {
+                    await syncStagingParentIfPresent(stagingFile.path)
+                    stagingFilesChanged = true
+                    continue
+                } catch (syncError) {
+                    clean = false
+                    remainingStagingFiles.push(stagingFile)
+                    logger.debug('[RECYCLE BIN] Failed to sync a missing staging file parent', {
+                        stagingPath: stagingFile.path,
+                        syncError,
+                    })
+                    continue
+                }
             }
             clean = false
             remainingStagingFiles.push(stagingFile)

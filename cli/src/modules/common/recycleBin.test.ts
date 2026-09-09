@@ -18,6 +18,8 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     rejectOwnedStageRemoval: false,
     rejectRestoreStageRemoval: false,
     rejectRestoreWrite: false,
+    rejectStagingParentSync: false,
+    stagingParentPath: undefined as string | undefined,
     replaceRestoreParentOnRealpath: undefined as {
         path: string
         outsidePath: string
@@ -100,7 +102,9 @@ vi.mock('node:fs/promises', async () => {
             if ((!isDestinationHandle || (!recycleBinIoHarness.shortWrite
                 && !recycleBinIoHarness.rejectSync
                 && !recycleBinIoHarness.rejectRestoreWrite))
-                && (!isDirectoryHandle || !recycleBinIoHarness.rejectDirectorySync)) {
+                && (!isDirectoryHandle || (!recycleBinIoHarness.rejectDirectorySync
+                    && (!recycleBinIoHarness.rejectStagingParentSync
+                        || args[0] !== recycleBinIoHarness.stagingParentPath)))) {
                 return handle
             }
 
@@ -126,10 +130,18 @@ vi.mock('node:fs/promises', async () => {
                             throw error
                         }
                     }
-                    if (property === 'sync' && (recycleBinIoHarness.rejectSync || recycleBinIoHarness.rejectDirectorySync)) {
+                    if (property === 'sync' && (recycleBinIoHarness.rejectSync
+                        || recycleBinIoHarness.rejectDirectorySync
+                        || recycleBinIoHarness.rejectStagingParentSync)) {
                         return async () => {
                             if (isDirectoryHandle) {
                                 recycleBinIoHarness.directorySyncCalls += 1
+                                if (recycleBinIoHarness.rejectStagingParentSync
+                                    && args[0] === recycleBinIoHarness.stagingParentPath) {
+                                    const error = new Error('Simulated recycle-bin directory sync failure') as NodeJS.ErrnoException
+                                    error.code = 'EIO'
+                                    throw error
+                                }
                                 if (recycleBinIoHarness.directorySyncFailureAt !== undefined
                                     && recycleBinIoHarness.directorySyncCalls >= recycleBinIoHarness.directorySyncFailureAt) {
                                     const error = new Error('Simulated recycle-bin directory sync failure') as NodeJS.ErrnoException
@@ -192,6 +204,8 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.rejectOwnedStageRemoval = false
         recycleBinIoHarness.rejectRestoreStageRemoval = false
         recycleBinIoHarness.rejectRestoreWrite = false
+        recycleBinIoHarness.rejectStagingParentSync = false
+        recycleBinIoHarness.stagingParentPath = undefined
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
         homeDir = await createTempDir('hapi-recycle-home')
@@ -492,7 +506,7 @@ describe('RecycleBinManager', () => {
         } finally {
             await cleanup()
         }
-    })
+    }, 15_000)
 
     it('cleans expired entries even when their payload is missing or truncated', async () => {
         try {
@@ -717,6 +731,32 @@ describe('RecycleBinManager', () => {
             await expect(readFile(filePath, 'utf8')).resolves.toBe('retain the recoverable payload')
         } finally {
             recycleBinIoHarness.rejectDetachedUnlink = false
+            await cleanup()
+        }
+    })
+
+    it('retains staging ownership when the staging parent sync fails', async () => {
+        try {
+            const filePath = join(workspaceDir, 'staging-parent-sync-failure.txt')
+            await writeFile(filePath, 'retain staging ownership')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.rejectDetachedUnlink = true
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.stagingParentPath = workspaceDir
+            recycleBinIoHarness.rejectStagingParentSync = true
+
+            const failed = await manager.purge(moved.entry.id, workspaceDir)
+            expect(failed).toMatchObject({ success: false, error: 'Failed to remove recycle-bin staging data' })
+            await expect(stat(join(getRecycleBinRoot(homeDir), moved.entry.id))).resolves.toBeDefined()
+
+            recycleBinIoHarness.rejectStagingParentSync = false
+            await expect(manager.purge(moved.entry.id, workspaceDir)).resolves.toEqual({ success: true })
+        } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            recycleBinIoHarness.rejectStagingParentSync = false
+            recycleBinIoHarness.stagingParentPath = undefined
             await cleanup()
         }
     })
