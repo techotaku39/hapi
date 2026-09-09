@@ -433,18 +433,11 @@ export function useHubScratchlist(
                 queryClient.setQueryData(queryKey, context.previousData)
             }
         },
-        onSuccess: (data) => {
-            // The optimistic edit uses the browser clock, while the Hub's
-            // monotonic updatedAt is the revision token used by send cleanup.
-            // Reconcile it before the row can be sent again.
-            queryClient.setQueryData<ScratchlistResponse>(queryKey, (prev) => {
-                if (!prev) return prev
-                return {
-                    entries: prev.entries.map((entry) =>
-                        entry.entryId === data.entry.entryId ? data.entry : entry
-                    )
-                }
-            })
+        onSuccess: async () => {
+            // The response can race an SSE-triggered refetch from another
+            // device. Refetch the authoritative list instead of applying a
+            // possibly older response over newer cross-device state.
+            await queryClient.invalidateQueries({ queryKey })
         }
     })
 
@@ -510,8 +503,11 @@ export function useHubScratchlist(
             }
             void queryClient.invalidateQueries({ queryKey })
         },
-        onSuccess: (data) => {
-            queryClient.setQueryData(queryKey, data)
+        onSuccess: async () => {
+            // The response can race an SSE-triggered refetch from another
+            // device. Refetch the authoritative order instead of replacing
+            // a newer cross-device list with this mutation's snapshot.
+            await queryClient.invalidateQueries({ queryKey })
         }
     })
 
