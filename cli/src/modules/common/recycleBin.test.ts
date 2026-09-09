@@ -7,8 +7,17 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     directorySyncCalls: 0,
     directorySyncFailureAt: undefined as number | undefined,
     replaceSourceBeforeDetach: undefined as { path: string; replacementPath: string } | undefined,
+    replaceSourceParentBeforeDetach: undefined as {
+        path: string
+        parentPath: string
+        outsidePath: string
+        triggerAt: number
+        seen: number
+    } | undefined,
     rejectDetachedUnlink: false,
     rejectOwnedStageRemoval: false,
+    rejectRestoreStageRemoval: false,
+    rejectRestoreWrite: false,
     replaceRestoreParentOnRealpath: undefined as {
         path: string
         outsidePath: string
@@ -49,9 +58,23 @@ vi.mock('node:fs/promises', async () => {
                 error.code = 'EIO'
                 throw error
             }
+            if (recycleBinIoHarness.rejectRestoreStageRemoval && path.includes('.hapi-restore-')) {
+                const error = new Error('Simulated restore-stage removal failure') as NodeJS.ErrnoException
+                error.code = 'EIO'
+                throw error
+            }
             return await actual.rm(path, options)
         }),
         realpath: vi.fn(async (path: string) => {
+            const sourceParentReplacement = recycleBinIoHarness.replaceSourceParentBeforeDetach
+            let redirectedSourcePath: string | undefined
+            if (sourceParentReplacement && path === sourceParentReplacement.path) {
+                sourceParentReplacement.seen += 1
+                if (sourceParentReplacement.seen === sourceParentReplacement.triggerAt) {
+                    recycleBinIoHarness.replaceSourceParentBeforeDetach = undefined
+                    redirectedSourcePath = join(sourceParentReplacement.outsidePath, basename(path))
+                }
+            }
             const replacement = recycleBinIoHarness.replaceRestoreParentOnRealpath
             if (replacement && path === replacement.path) {
                 replacement.seen += 1
@@ -61,7 +84,7 @@ vi.mock('node:fs/promises', async () => {
                     await actual.symlink(replacement.outsidePath, replacement.path, process.platform === 'win32' ? 'junction' : undefined)
                 }
             }
-            return await actual.realpath(path)
+            return redirectedSourcePath ?? await actual.realpath(path)
         }),
         open: vi.fn(async (...args: [string, string | number, number?]) => {
             const handle = await actual.open(...args)
@@ -74,7 +97,9 @@ vi.mock('node:fs/promises', async () => {
             }
             const isDestinationHandle = args[1] === 'wx'
             const isDirectoryHandle = typeof args[1] === 'number'
-            if ((!isDestinationHandle || (!recycleBinIoHarness.shortWrite && !recycleBinIoHarness.rejectSync))
+            if ((!isDestinationHandle || (!recycleBinIoHarness.shortWrite
+                && !recycleBinIoHarness.rejectSync
+                && !recycleBinIoHarness.rejectRestoreWrite))
                 && (!isDirectoryHandle || !recycleBinIoHarness.rejectDirectorySync)) {
                 return handle
             }
@@ -85,6 +110,20 @@ vi.mock('node:fs/promises', async () => {
                         return async (buffer: Buffer, bufferOffset: number, length: number, position: number) => {
                             const shortLength = Math.max(1, Math.floor(length / 2))
                             return await target.write(buffer, bufferOffset, shortLength, position)
+                        }
+                    }
+                    if (
+                        property === 'write'
+                        && recycleBinIoHarness.rejectRestoreWrite
+                        && typeof args[0] === 'string'
+                        && args[0].includes('.hapi-restore-')
+                    ) {
+                        return async (buffer: Buffer, bufferOffset: number, length: number, position: number) => {
+                            const partialLength = Math.max(1, Math.min(length, Math.floor(length / 2)))
+                            await target.write(buffer, bufferOffset, partialLength, position)
+                            const error = new Error('Simulated restore-stage write failure') as NodeJS.ErrnoException
+                            error.code = 'EIO'
+                            throw error
                         }
                     }
                     if (property === 'sync' && (recycleBinIoHarness.rejectSync || recycleBinIoHarness.rejectDirectorySync)) {
@@ -148,8 +187,11 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.directorySyncCalls = 0
         recycleBinIoHarness.directorySyncFailureAt = undefined
         recycleBinIoHarness.replaceSourceBeforeDetach = undefined
+        recycleBinIoHarness.replaceSourceParentBeforeDetach = undefined
         recycleBinIoHarness.rejectDetachedUnlink = false
         recycleBinIoHarness.rejectOwnedStageRemoval = false
+        recycleBinIoHarness.rejectRestoreStageRemoval = false
+        recycleBinIoHarness.rejectRestoreWrite = false
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         recycleBinIoHarness.replaceRestoreTargetBeforePublish = undefined
         homeDir = await createTempDir('hapi-recycle-home')
@@ -338,6 +380,36 @@ describe('RecycleBinManager', () => {
             await expect(readFile(linkedPath, 'utf8')).resolves.toBe('original contents')
             await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-source-/))
         } finally {
+            await cleanup()
+        }
+    })
+
+    it('rejects a source parent that is replaced outside the authorized workspace before detach', async () => {
+        const outsideRoot = await createTempDir('hapi-recycle-outside')
+        try {
+            const sourceParent = join(workspaceDir, 'nested-source')
+            const outsideParent = join(outsideRoot, 'moved-source')
+            const filePath = join(sourceParent, 'outside-race.txt')
+            await mkdir(sourceParent)
+            await writeFile(filePath, 'must remain authorized')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.replaceSourceParentBeforeDetach = {
+                path: filePath,
+                parentPath: sourceParent,
+                outsidePath: outsideParent,
+                triggerAt: 2,
+                seen: 0,
+            }
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            expect(moved).toMatchObject({
+                success: false,
+                error: 'File path changed outside the authorized working directory',
+            })
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
+        } finally {
+            recycleBinIoHarness.replaceSourceParentBeforeDetach = undefined
+            await rm(outsideRoot, { recursive: true, force: true })
             await cleanup()
         }
     })
@@ -598,7 +670,7 @@ describe('RecycleBinManager', () => {
         }
     })
 
-    it('does not remove a pre-existing restore staging file when staging fails', async () => {
+    it('does not remove a pre-existing fixed-name restore staging file', async () => {
         try {
             const filePath = join(workspaceDir, 'restore-stage-collision.txt')
             await writeFile(filePath, 'original contents')
@@ -610,12 +682,9 @@ describe('RecycleBinManager', () => {
             await writeFile(stagingPath, 'pre-existing user file')
             const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
 
-            expect(restored).toMatchObject({ success: false })
+            expect(restored).toEqual({ success: true, restoredPath: filePath })
             await expect(readFile(stagingPath, 'utf8')).resolves.toBe('pre-existing user file')
-            await expect(manager.list(workspaceDir)).resolves.toMatchObject({
-                success: true,
-                entries: [moved.entry],
-            })
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [] })
         } finally {
             await cleanup()
         }
@@ -970,6 +1039,34 @@ describe('RecycleBinManager', () => {
                 content: Buffer.from('keep the payload').toString('base64'),
             })
         } finally {
+            await cleanup()
+        }
+    })
+
+    it('retries after an interrupted restore leaves a partial staging file', async () => {
+        try {
+            const filePath = join(workspaceDir, 'interrupted-restore.txt')
+            const content = 'partial restore staging must be recoverable\n'.repeat(64)
+            await writeFile(filePath, content)
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.rejectRestoreWrite = true
+            recycleBinIoHarness.rejectRestoreStageRemoval = true
+            const failed = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(failed).toMatchObject({ success: false, error: 'Simulated restore-stage write failure' })
+            await expect(readdir(workspaceDir)).resolves.toEqual(expect.arrayContaining([expect.stringMatching(/^\.hapi-restore-/)]))
+
+            recycleBinIoHarness.rejectRestoreWrite = false
+            recycleBinIoHarness.rejectRestoreStageRemoval = false
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toEqual({ success: true, restoredPath: filePath })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe(content)
+            await expect(readdir(workspaceDir)).resolves.not.toContain(expect.stringMatching(/^\.hapi-restore-/))
+        } finally {
+            recycleBinIoHarness.rejectRestoreWrite = false
+            recycleBinIoHarness.rejectRestoreStageRemoval = false
             await cleanup()
         }
     })

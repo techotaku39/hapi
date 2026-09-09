@@ -51,6 +51,7 @@ type RecycleBinStagingFile = {
     path: string
     dev: string
     ino: string
+    kind: 'source' | 'restore'
 }
 
 type StoredRecycleBinEntry = RecycleBinEntry & {
@@ -77,6 +78,7 @@ const StoredRecycleBinEntrySchema = z.object({
         path: z.string().min(1),
         dev: z.string().regex(/^\d+$/),
         ino: z.string().regex(/^\d+$/),
+        kind: z.enum(['source', 'restore']).default('source'),
     })).default([]),
     deletedAt: z.number().int().nonnegative(),
     expiresAt: z.number().int().nonnegative(),
@@ -217,9 +219,10 @@ async function recordEntryStagingFile(
     entry: StoredRecycleBinEntry,
     path: string,
     stats: FileStats,
+    kind: RecycleBinStagingFile['kind'],
 ): Promise<void> {
     const stagingFiles = entry.stagingFiles.filter((file) => file.path !== path)
-    stagingFiles.push({ path, dev: String(stats.dev), ino: String(stats.ino) })
+    stagingFiles.push({ path, dev: String(stats.dev), ino: String(stats.ino), kind })
     await updateEntryStagingFiles(root, entry, stagingFiles)
 }
 
@@ -331,8 +334,14 @@ type RecycleBinCopyOptions = {
     unlinkSource?: boolean
     /** Stable entry id used to name a recoverable source-detach staging file. */
     stageId?: string
+    /** Verify that the source path remains authorized immediately before detaching it. */
+    beforeDetach?: () => Promise<void>
+    /** Verify that a copy destination remains inside the authorized scope before creation. */
+    beforeDestinationCreate?: () => Promise<void>
+    /** Classify the persisted staging file for crash recovery. */
+    stagingFileKind?: RecycleBinStagingFile['kind']
     /** Persist a staging file identity as soon as it is created. */
-    onStagingFileCreated?: (path: string, stats: FileStats) => Promise<void>
+    onStagingFileCreated?: (path: string, stats: FileStats, kind: RecycleBinStagingFile['kind']) => Promise<void>
     /** Remove a staging file identity after its directory entry is gone. */
     onStagingFileRemoved?: (path: string) => Promise<void>
 }
@@ -354,12 +363,13 @@ async function copyFileWithoutReplacing(
             throw new Error('File changed before the recycle-bin operation completed')
         }
         const desiredMode = (options.mode ?? openedStats.mode) & 0o7777
+        await options.beforeDestinationCreate?.()
         const destinationHandle = await open(destinationPath, 'wx', desiredMode)
         destinationCreated = true
         try {
             if (options.unlinkSource === false) {
                 const destinationStats = await destinationHandle.stat()
-                await options.onStagingFileCreated?.(destinationPath, destinationStats)
+                await options.onStagingFileCreated?.(destinationPath, destinationStats, options.stagingFileKind ?? 'restore')
             }
             while (offset < openedStats.size) {
                 const result = await sourceHandle.read(buffer, 0, Math.min(buffer.length, openedStats.size - offset), offset)
@@ -393,7 +403,9 @@ async function copyFileWithoutReplacing(
                 throw new Error('Recycle-bin staging id is required when removing the source')
             }
             const detachedPath = join(dirname(sourcePath), `.hapi-source-${options.stageId}.tmp`)
-            await options.onStagingFileCreated?.(detachedPath, openedStats)
+            await options.onStagingFileCreated?.(detachedPath, openedStats, options.stagingFileKind ?? 'source')
+            await options.beforeDetach?.()
+            await assertFileUnchanged(sourcePath, openedStats)
             await rename(sourcePath, detachedPath)
             const detachedStats = await lstat(detachedPath)
             if (!isSameFileStats(detachedStats, openedStats)) {
@@ -404,7 +416,7 @@ async function copyFileWithoutReplacing(
                 throw new Error('File changed before the recycle-bin operation completed')
             }
             sourceRemoved = true
-            await options.onStagingFileCreated?.(detachedPath, detachedStats)
+            await options.onStagingFileCreated?.(detachedPath, detachedStats, options.stagingFileKind ?? 'source')
             try {
                 await unlink(detachedPath)
             } catch (error) {
@@ -539,6 +551,66 @@ async function resolveExistingFile(rawPath: string, root: string, protectedRoot?
 
     const stats = await readRegularFileStats(canonicalPath)
     return { path: canonicalPath, stats }
+}
+
+async function assertSourcePathAuthorizedBeforeDetach(
+    sourcePath: string,
+    expectedCanonicalPath: string,
+    scopeRoot: string,
+    protectedRoot?: string,
+): Promise<void> {
+    let canonicalPath: string
+    try {
+        canonicalPath = await realpath(sourcePath)
+    } catch (error) {
+        if (isNotFound(error)) {
+            throw new Error('File changed before the recycle-bin operation completed')
+        }
+        throw error
+    }
+    if (
+        normalizeForComparison(canonicalPath) !== normalizeForComparison(expectedCanonicalPath)
+        || !isPathWithin(canonicalPath, scopeRoot)
+        || hasGitMetadataSegment(canonicalPath)
+        || (protectedRoot && isPathWithin(canonicalPath, protectedRoot))
+    ) {
+        throw invalidPathError('File path changed outside the authorized working directory')
+    }
+}
+
+async function assertRestoreDestinationAuthorized(
+    destinationPath: string,
+    scopeRoot: string,
+    protectedRoot?: string,
+): Promise<void> {
+    let canonicalParent: string
+    try {
+        canonicalParent = await realpath(dirname(destinationPath))
+    } catch (error) {
+        if (isNotFound(error)) {
+            throw invalidPathError('The original restore directory no longer exists')
+        }
+        throw error
+    }
+    if (
+        !isPathWithin(canonicalParent, scopeRoot)
+        || hasGitMetadataSegment(canonicalParent)
+        || (protectedRoot && isPathWithin(canonicalParent, protectedRoot))
+    ) {
+        throw invalidPathError('Restore target is outside the authorized working directory')
+    }
+    try {
+        const canonicalTarget = await realpath(destinationPath)
+        if (
+            !isPathWithin(canonicalTarget, scopeRoot)
+            || hasGitMetadataSegment(canonicalTarget)
+            || (protectedRoot && isPathWithin(canonicalTarget, protectedRoot))
+        ) {
+            throw invalidPathError('Restore target is outside the authorized working directory')
+        }
+    } catch (error) {
+        if (!isNotFound(error)) throw error
+    }
 }
 
 async function resolveRestoreTarget(originalPath: string, root: string, protectedRoot?: string): Promise<ResolvedRestoreTarget> {
@@ -680,6 +752,7 @@ async function reconcileEntryStagingFiles(
     entry: StoredRecycleBinEntry,
     protectedRoot?: string,
 ): Promise<boolean> {
+    if (entry.stagingFiles.length === 0) return true
     let clean = true
     const entryDirectory = join(root, entry.id)
     const safeDirectories = new Set([entryDirectory])
@@ -718,8 +791,24 @@ async function reconcileEntryStagingFiles(
         }
         try {
             const stats = await lstat(stagingFile.path)
-            if (!stats.isFile() || stats.isSymbolicLink() || stats.size !== entry.size
+            if (!stats.isFile() || stats.isSymbolicLink()
                 || String(stats.dev) !== stagingFile.dev || String(stats.ino) !== stagingFile.ino) {
+                clean = false
+                remainingStagingFiles.push(stagingFile)
+                continue
+            }
+            if (stagingFile.kind === 'restore') {
+                try {
+                    await rm(stagingFile.path, { force: true })
+                    stagingFilesChanged = true
+                } catch (error) {
+                    clean = false
+                    remainingStagingFiles.push(stagingFile)
+                    logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath: stagingFile.path, error })
+                }
+                continue
+            }
+            if (stats.size !== entry.size) {
                 clean = false
                 remainingStagingFiles.push(stagingFile)
                 continue
@@ -904,7 +993,9 @@ export class RecycleBinManager {
                 await syncParentDirectory(entryDirectory)
                 await moveRegularFile(source.path, payloadPath, source.stats, {
                     stageId: entryId,
-                    onStagingFileCreated: (path, stats) => recordEntryStagingFile(root, entry, path, stats),
+                    stagingFileKind: 'source',
+                    beforeDetach: () => assertSourcePathAuthorizedBeforeDetach(source.path, source.path, scopeRoot, protectedRoot),
+                    onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
                     onStagingFileRemoved: (path) => clearEntryStagingFile(root, entry, path),
                 })
                 await assertPayloadIntegrity(entry, payloadPath)
@@ -914,7 +1005,9 @@ export class RecycleBinManager {
                     try {
                         await moveRegularFile(payloadPath, source.path, undefined, {
                             stageId: entryId,
-                            onStagingFileCreated: (path, stats) => recordEntryStagingFile(root, entry, path, stats),
+                            stagingFileKind: 'source',
+                            beforeDestinationCreate: () => assertRestoreDestinationAuthorized(source.path, scopeRoot, protectedRoot),
+                            onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
                             onStagingFileRemoved: (path) => clearEntryStagingFile(root, entry, path),
                         })
                     } catch (error) {
@@ -1068,11 +1161,12 @@ export class RecycleBinManager {
             let stagedCreated = false
             try {
                 const stagingParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
-                stagedPath = join(stagingParent, `.hapi-restore-${entry.id}.tmp`)
+                stagedPath = join(stagingParent, `.hapi-restore-${entry.id}-${randomUUID()}.tmp`)
                 await copyFileWithoutReplacing(payloadPath, stagedPath, payloadStats, {
                     mode: entry.mode & 0o7777,
                     unlinkSource: false,
-                    onStagingFileCreated: (path, stats) => recordEntryStagingFile(root, entry, path, stats),
+                    stagingFileKind: 'restore',
+                    onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
                 })
                 stagedCreated = true
                 const publicationParent = await revalidateRestoreParent(target, validatedParent, scopeRoot, protectedRoot)
