@@ -1959,6 +1959,14 @@ export class SyncEngine {
         await this.sessionCache.deleteSession(sessionId)
     }
 
+    finalizeDeletedSession(
+        sessionId: string,
+        namespace: string,
+        scratchlistAttachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[] = []
+    ): void {
+        this.sessionCache.finalizeDeletedSession(sessionId, namespace, scratchlistAttachments)
+    }
+
     async applySessionConfig(
         sessionId: string,
         config: {

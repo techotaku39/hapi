@@ -1082,6 +1082,21 @@ export class SessionCache {
             })
         }
 
+        this.finalizeDeletedSession(sessionId, session.namespace, scratchlistAttachments)
+    }
+
+    /**
+     * Finish the in-memory half of a deletion whose database transaction has
+     * already removed the session row (for example, duplicate-session merge).
+     */
+    finalizeDeletedSession(
+        sessionId: string,
+        namespace: string,
+        scratchlistAttachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[] = []
+    ): void {
+        const session = this.sessions.get(sessionId)
+        if (!session || session.namespace !== namespace) return
+
         this.sessions.delete(sessionId)
         this.lastBroadcastAtBySessionId.delete(sessionId)
         this.todoBackfillAttemptedSessionIds.delete(sessionId)
@@ -1094,10 +1109,10 @@ export class SessionCache {
         }) => {
             const hapiHome = getHapiHomeDir()
             await deleteScratchlistAttachmentFiles(hapiHome, scratchlistAttachments)
-            await deleteScratchlistSessionAttachmentDir(hapiHome, session.namespace, sessionId)
+            await deleteScratchlistSessionAttachmentDir(hapiHome, namespace, sessionId)
         })
 
-        this.publisher.emit({ type: 'session-removed', sessionId, namespace: session.namespace })
+        this.publisher.emit({ type: 'session-removed', sessionId, namespace })
     }
 
     async mergeSessions(oldSessionId: string, newSessionId: string, namespace: string): Promise<void> {

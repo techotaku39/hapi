@@ -50,6 +50,19 @@ type PreparedMessageAttachmentClones = {
     clonedAttachments: Map<string, StoredAttachment>
 }
 
+type DuplicateSessionMergeMessage = Pick<
+    StoredMessage,
+    'content' | 'createdAt' | 'localId' | 'invokedAt' | 'scheduledAt' | 'deliveryState'
+>
+
+export type DuplicateSessionMergePlan = {
+    namespace: string
+    sourceSessionId: string
+    targetSessionId: string
+    updates: Array<{ messageId: string; content: unknown }>
+    inserts: DuplicateSessionMergeMessage[]
+}
+
 function sameMessageIds(left: Set<string>, right: Set<string>): boolean {
     if (left.size !== right.size) return false
     for (const id of left) {
@@ -172,6 +185,48 @@ export class Store {
         }
         if (firstError) throw firstError
         return deleted
+    }
+
+    /**
+     * Commit one duplicate-session merge as a single SQLite transaction.
+     *
+     * Attachment bytes are cloned before this method is called because those
+     * filesystem writes cannot participate in SQLite's transaction. The
+     * transaction itself keeps canonical message mutations and source-session
+     * deletion together, so a failed merge cannot leave a retryable source
+     * beside a partially updated canonical transcript.
+     */
+    commitDuplicateSessionMerge(plan: DuplicateSessionMergePlan): StoredMessage[] {
+        return this.db.transaction(() => {
+            const source = this.sessions.getSessionByNamespace(plan.sourceSessionId, plan.namespace)
+            const target = this.sessions.getSessionByNamespace(plan.targetSessionId, plan.namespace)
+            if (!source || !target) {
+                throw new Error('Session not found for duplicate merge')
+            }
+            if (source.active) {
+                throw new Error('Cannot merge an active duplicate session')
+            }
+
+            const targetMessageIds = new Set(
+                this.messages.getAllMessages(plan.targetSessionId).map((message) => message.id)
+            )
+            for (const update of plan.updates) {
+                if (!targetMessageIds.has(update.messageId)
+                    || !this.messages.updateMessageContent(update.messageId, update.content)) {
+                    throw new Error(`Failed to merge duplicate Codex message: ${update.messageId}`)
+                }
+            }
+
+            const copiedMessages = plan.inserts.map((message) => (
+                this.messages.copyMessageToSession(plan.targetSessionId, message)
+            ))
+
+            if (!this.sessions.deleteSession(plan.sourceSessionId, plan.namespace)) {
+                throw new Error(`Failed to delete duplicate Hapi session: ${plan.sourceSessionId}`)
+            }
+
+            return copiedMessages
+        })()
     }
 
     /**
