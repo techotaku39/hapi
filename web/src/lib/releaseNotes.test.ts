@@ -47,17 +47,18 @@ describe('release notes catalog', () => {
     })
 
     it('hides a prepared future entry from the current app', () => {
+        const currentIndex = RELEASE_NOTES.findIndex((release) => release.version === __APP_VERSION__)
+        const expected = RELEASE_NOTES.slice(currentIndex)
         const futureRelease = {
             ...RELEASE_NOTES[0],
-            version: '0.30.0',
-            date: '2026-09-10',
-            url: 'https://github.com/tiann/hapi/releases/tag/v0.30.0',
+            version: '999.0.0',
+            date: '9999-12-31',
+            url: 'https://github.com/tiann/hapi/releases/tag/v999.0.0',
         }
         const preparedCatalog = [futureRelease, ...RELEASE_NOTES]
-        const visible = getVisibleReleaseNotes('0.29.1', preparedCatalog)
+        const visible = getVisibleReleaseNotes(__APP_VERSION__, preparedCatalog)
 
-        expect(visible[0].version).toBe('0.29.1')
-        expect(visible).toHaveLength(RELEASE_NOTES.length)
-        expect(visible.some((release) => release.version === '0.30.0')).toBe(false)
+        expect(visible).toEqual(expected)
+        expect(visible.some((release) => release.version === '999.0.0')).toBe(false)
     })
 })
