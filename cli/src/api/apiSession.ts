@@ -855,21 +855,34 @@ export class ApiSessionClient extends EventEmitter {
                 materializationResults = []
                 for (const attachment of userResult.data.content.attachments) {
                     if (this.isClosed()) return
-                    try {
-                        materializationResults.push({
-                            attachment: await this.attachmentMaterializer.materialize(attachment),
-                            failure: null
-                        })
-                    } catch (error) {
-                        logger.debug('[API] Failed to materialize one attachment', {
-                            attachmentId: attachment.attachmentId,
-                            error
-                        })
-                        if (this.isClosed()) return
-                        materializationResults.push({
-                            attachment,
-                            failure: `Attachment unavailable: ${attachment.filename}`
-                        })
+                    let retryDelayMs = MATERIALIZATION_RETRY_MIN_MS
+                    for (;;) {
+                        try {
+                            materializationResults.push({
+                                attachment: await this.attachmentMaterializer.materialize(attachment),
+                                failure: null
+                            })
+                            break
+                        } catch (error) {
+                            logger.debug('[API] Failed to materialize one attachment', {
+                                attachmentId: attachment.attachmentId,
+                                error
+                            })
+                            if (this.isClosed()) return
+                            if (!isTransientMaterializationError(error)) {
+                                materializationResults.push({
+                                    attachment,
+                                    failure: `Attachment unavailable: ${attachment.filename}`
+                                })
+                                break
+                            }
+                            await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+                            retryDelayMs = Math.min(retryDelayMs * 2, MATERIALIZATION_RETRY_MAX_MS)
+                            if (this.isClosed()
+                                || (message.localId && this.cancelledMaterializingLocalIds.has(message.localId))) {
+                                return
+                            }
+                        }
                     }
                 }
             }

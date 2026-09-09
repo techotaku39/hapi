@@ -976,6 +976,50 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('retries transient attachment downloads before delivering the prompt', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const transientError = Object.assign(new Error('hub temporarily unavailable'), {
+            isAxiosError: true,
+            response: { status: 503 }
+        })
+        axiosHarness.get
+            .mockRejectedValueOnce(transientError)
+            .mockResolvedValueOnce({
+                data: Buffer.from('hello'),
+                headers: {
+                    'content-length': '5',
+                    'x-hapi-attachment-size': '5',
+                    'x-hapi-attachment-sha256': '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+                }
+            })
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+
+        triggerIncomingUserMessage(socket, {
+            id: 'transient-attachment-message',
+            seq: 1,
+            text: 'retry this file',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'hello.txt',
+                mimeType: 'text/plain',
+                size: 5,
+                attachmentId: 'transient-attachment'
+            }]
+        })
+
+        await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce(), { timeout: 3_000 })
+        expect(axiosHarness.get).toHaveBeenCalledTimes(2)
+        expect(onUserMessage.mock.calls[0]?.[0].content.text).toBe('retry this file')
+        expect(onUserMessage.mock.calls[0]?.[0].content.attachments[0]?.path).toBeTruthy()
+        client.close()
+    })
+
     it('delivers the text turn when an attachment cannot be materialized', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()

@@ -479,7 +479,7 @@ export const UploadFileRequestSchema = z.object({
         .trim()
         .min(1)
         .max(255)
-        .regex(/^[^\u0000-\u001F\u007F-\u009F]+$/, 'Invalid MIME type')
+        .regex(/^[\x21-\x7E]+(?: [\x21-\x7E]+)*$/, 'Invalid MIME type')
 })
 
 export type UploadFileRequest = z.infer<typeof UploadFileRequestSchema>

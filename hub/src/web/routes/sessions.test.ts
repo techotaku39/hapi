@@ -1716,6 +1716,29 @@ describe('durable attachment routes', () => {
         expect(createCalls).toBe(0)
     })
 
+    it('rejects non-ASCII MIME values before creating a durable attachment', async () => {
+        let createCalls = 0
+        const { app } = createApp(createSession(), {
+            createAttachment: async () => {
+                createCalls += 1
+                return { success: true, attachmentId: 'should-not-be-created' }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/upload', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                filename: 'photo.png',
+                content: 'AQID',
+                mimeType: 'image/png😀'
+            })
+        })
+
+        expect(response.status).toBe(400)
+        expect(createCalls).toBe(0)
+    })
+
     it('sandboxes active MIME types and sanitizes attachment filenames', async () => {
         const { app } = createApp(createSession(), {
             readAttachment: async () => ({
