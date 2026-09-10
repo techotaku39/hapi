@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
     DEFAULT_USAGE_QUERY_TEMPLATE,
     DEFAULT_USAGE_QUERY_TEMPLATES,
@@ -138,11 +138,14 @@ export default function SettingsUsageQueryPage() {
 
     const currentTemplate = useMemo(() => parseTemplate(templateText), [templateText])
     const selectedTemplateId = currentTemplate?.id ?? settingsQuery.data?.templateId ?? DEFAULT_USAGE_QUERY_TEMPLATE.id
+    const saveKey = ['usage-query-save', machineId, agent] as const
+    const savePending = useIsMutating({ mutationKey: saveKey, exact: true }) > 0
 
     const testMutation = useMutation({
         mutationFn: async (template: UsageQueryTemplate) => await api.testMachineUsageQuery(machineId, agent, template)
     })
     const saveMutation = useMutation({
+        mutationKey: saveKey,
         mutationFn: async (input: SaveInput) => await api.saveMachineUsageQuerySettings(input.machineId, input.agent, {
             enabled: input.enabled,
             templateId: input.template.id,
@@ -186,7 +189,7 @@ export default function SettingsUsageQueryPage() {
 
     const handleSave = () => {
         const template = validateEditor()
-        if (!template || !machineId) return
+        if (!template || !machineId || savePending) return
         saveMutation.mutate({ machineId, agent, template, enabled: settingsQuery.data?.enabled ?? false })
     }
 
@@ -253,7 +256,7 @@ export default function SettingsUsageQueryPage() {
                             checked={settingsQuery.data.enabled}
                             onChange={(enabled) => {
                                 const template = validateEditor()
-                                if (!template || saveMutation.isPending) return
+                                if (!template || savePending) return
                                 saveMutation.mutate({ machineId, agent, template, enabled })
                             }}
                         />
@@ -270,7 +273,7 @@ export default function SettingsUsageQueryPage() {
                                 value={selectedTemplateId}
                                 onChange={selectTemplate}
                                 options={DEFAULT_USAGE_QUERY_TEMPLATES.map((template) => ({ value: template.id, label: template.name }))}
-                                disabled={saveMutation.isPending}
+                                disabled={savePending}
                                 containerClassName="mb-2"
                             />
                             <textarea
@@ -279,7 +282,7 @@ export default function SettingsUsageQueryPage() {
                                 onChange={(event) => { setTemplateText(event.target.value); setEditorError(null) }}
                                 spellCheck={false}
                                 rows={18}
-                                disabled={saveMutation.isPending}
+                                disabled={savePending}
                                 className="w-full resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-2 font-mono text-xs leading-relaxed text-[var(--app-fg)] outline-none focus:border-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             {editorError ? <div role="alert" className="mt-2 text-sm text-red-500">{editorError}</div> : null}
@@ -287,8 +290,8 @@ export default function SettingsUsageQueryPage() {
                                 <button type="button" onClick={handleTest} disabled={!machineId || testMutation.isPending} className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50">
                                     {testMutation.isPending ? t('settings.usageQuery.testing') : t('settings.usageQuery.test')}
                                 </button>
-                                <button type="button" onClick={handleSave} disabled={!machineId || saveMutation.isPending} className="rounded-lg bg-[var(--app-button)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] hover:opacity-90 disabled:opacity-50">
-                                    {saveMutation.isPending ? t('settings.usageQuery.saving') : t('settings.usageQuery.save')}
+                                <button type="button" onClick={handleSave} disabled={!machineId || savePending} className="rounded-lg bg-[var(--app-button)] px-3 py-2 text-sm font-medium text-[var(--app-button-text)] hover:opacity-90 disabled:opacity-50">
+                                    {savePending ? t('settings.usageQuery.saving') : t('settings.usageQuery.save')}
                                 </button>
                             </div>
                             {testMutation.error ? <div role="alert" className="mt-2 text-sm text-red-500">{testMutation.error instanceof Error ? testMutation.error.message : t('settings.usageQuery.testFailed')}</div> : null}

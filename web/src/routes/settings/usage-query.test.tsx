@@ -152,7 +152,22 @@ describe('SettingsUsageQueryPage', () => {
 
         fireEvent.click(screen.getByRole('combobox', { name: 'Agent' }))
         fireEvent.click(screen.getByRole('option', { name: 'Kimi CLI' }))
-        const saved = { agent: 'claude', enabled: true, templateId: 'saved-template' }
+        fireEvent.click(screen.getByRole('combobox', { name: 'Agent' }))
+        fireEvent.click(screen.getByRole('option', { name: 'Claude Code' }))
+        await waitFor(() => {
+            expect(screen.getByRole('combobox', { name: 'Template' })).toBeDisabled()
+            expect(screen.getByRole('textbox', { name: 'Usage query template JSON' })).toBeDisabled()
+        })
+        const saved = {
+            agent: 'claude',
+            enabled: true,
+            templateId: DEFAULT_USAGE_QUERY_TEMPLATE.id,
+            template: DEFAULT_USAGE_QUERY_TEMPLATE,
+            credentials: {
+                baseUrl: { configured: true, source: 'config' },
+                apiKey: { configured: true, source: 'config' }
+            }
+        }
         resolveSave(saved)
 
         await waitFor(() => expect(queryClient.getQueryData(queryKeys.machineUsageQuery('machine-1', 'claude'))).toMatchObject(saved))
