@@ -41,6 +41,10 @@ export type SecureUnlinkOptions = {
 
 const IS_WINDOWS = process.platform === 'win32'
 const POSIX_AT_REMOVEDIR = process.platform === 'darwin' ? 0x80 : 0x200
+const POSIX_AT_SYMLINK_NOFOLLOW = process.platform === 'darwin' ? 0x20 : 0x100
+const POSIX_S_IFMT = 0o170000
+const POSIX_S_IFREG = 0o100000
+const POSIX_S_IFDIR = 0o040000
 const POSIX_QUARANTINE_DIRECTORY_PATTERN = /^\.hapi-recycle-quarantine-[0-9a-f-]{36}$/i
 const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY
     | (constants.O_DIRECTORY ?? 0)
@@ -362,6 +366,7 @@ async function getPosixSymbols() {
             renameatx_np: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
             unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
             mkdirat: { args: ['i32', 'cstring', 'u32'], returns: 'i32' },
+            fstatat: { args: ['i32', 'cstring', 'ptr', 'i32'], returns: 'i32' },
             openat: { args: ['i32', 'cstring', 'i32', 'u32'], returns: 'i32' },
             close: { args: ['i32'], returns: 'i32' },
         })
@@ -369,6 +374,7 @@ async function getPosixSymbols() {
             renameNoReplace: symbols.renameatx_np,
             unlinkat: symbols.unlinkat,
             mkdirat: symbols.mkdirat,
+            fstatat: symbols.fstatat,
             openat: symbols.openat,
             close: symbols.close,
             noReplaceFlag: 0x00000004,
@@ -378,6 +384,7 @@ async function getPosixSymbols() {
         renameat2: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
         unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
         mkdirat: { args: ['i32', 'cstring', 'u32'], returns: 'i32' },
+        fstatat: { args: ['i32', 'cstring', 'ptr', 'i32'], returns: 'i32' },
         openat: { args: ['i32', 'cstring', 'i32', 'u32'], returns: 'i32' },
         close: { args: ['i32'], returns: 'i32' },
     })
@@ -385,6 +392,7 @@ async function getPosixSymbols() {
         renameNoReplace: symbols.renameat2,
         unlinkat: symbols.unlinkat,
         mkdirat: symbols.mkdirat,
+        fstatat: symbols.fstatat,
         openat: symbols.openat,
         close: symbols.close,
         noReplaceFlag: 0x00000001,
@@ -398,9 +406,59 @@ async function getCachedPosixSymbols() {
     return await posixSymbols
 }
 
-function posixDescriptorPath(fd: number, childName?: string): string {
+function posixDescriptorPath(fd: number): string {
     const prefix = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd'
-    return childName ? `${prefix}/${fd}/${childName}` : `${prefix}/${fd}`
+    return `${prefix}/${fd}`
+}
+
+type PosixChildStat = {
+    dev: string
+    ino: string
+    mode: number
+}
+
+function decodePosixChildStat(buffer: Buffer): PosixChildStat {
+    if (process.platform === 'darwin') {
+        return {
+            dev: String(buffer.readUInt32LE(0)),
+            ino: buffer.readBigUInt64LE(8).toString(),
+            mode: buffer.readUInt16LE(4),
+        }
+    }
+    const modeOffset = process.arch === 'arm64' ? 16 : 24
+    return {
+        dev: buffer.readBigUInt64LE(0).toString(),
+        ino: buffer.readBigUInt64LE(8).toString(),
+        mode: buffer.readUInt32LE(modeOffset),
+    }
+}
+
+async function statPosixChild(
+    directory: PosixDirectory,
+    name: string,
+    fallbackPath?: string,
+): Promise<PosixChildStat> {
+    if (!isSimpleName(name)) throw new Error('Secure directory-relative stat name is invalid')
+    const symbols = await getCachedPosixSymbols()
+    const buffer = Buffer.alloc(process.platform === 'darwin' ? 256 : 512)
+    const { ptr } = await loadFfi()
+    const result = symbols.fstatat(
+        directory.handle.fd,
+        name,
+        ptr(buffer),
+        POSIX_AT_SYMLINK_NOFOLLOW,
+    )
+    if (result !== 0) {
+        if (fallbackPath) {
+            try {
+                await lstat(fallbackPath)
+            } catch (error) {
+                if (isNotFound(error)) throw error
+            }
+        }
+        throw new Error('Directory-relative stat failed')
+    }
+    return decodePosixChildStat(buffer)
 }
 
 async function openPosixDirectoryAt(parent: PosixDirectory, name: string): Promise<PosixDirectory> {
@@ -465,12 +523,11 @@ async function removeFileFromPosixDirectory(
     if (moved !== 0) throw new Error('Identity-bound POSIX cleanup could not isolate the file')
     let cleanupContainsFile = true
     try {
-        const stats = await lstat(posixDescriptorPath(directory.handle.fd, cleanupName))
+        const stats = await statPosixChild(directory, cleanupName)
         if (
-            !stats.isFile()
-            || stats.isSymbolicLink()
-            || String(stats.dev) !== expectedIdentity.dev
-            || String(stats.ino) !== expectedIdentity.ino
+            (stats.mode & POSIX_S_IFMT) !== POSIX_S_IFREG
+            || stats.dev !== expectedIdentity.dev
+            || stats.ino !== expectedIdentity.ino
         ) {
             throw new Error('POSIX cleanup identity changed during the operation')
         }
@@ -767,7 +824,10 @@ export async function secureRemoveQuarantinedFile(
     let quarantineDirectoryExists = false
     try {
         try {
-            await lstat(posixDescriptorPath(parent.handle.fd, directoryName))
+            const stats = await statPosixChild(parent, directoryName, quarantineDirectoryPath)
+            if ((stats.mode & POSIX_S_IFMT) !== POSIX_S_IFDIR) {
+                throw new Error('Secure quarantine path is not a directory')
+            }
             quarantineDirectoryExists = true
         } catch (error) {
             if (isNotFound(error)) return
@@ -777,12 +837,19 @@ export async function secureRemoveQuarantinedFile(
         assertDirectoryIdentity(quarantineDirectory.identity, quarantine.directoryIdentity)
         let sourceName = fileName
         try {
-            await lstat(posixDescriptorPath(quarantineDirectory.handle.fd, sourceName))
+            const stats = await statPosixChild(quarantineDirectory, sourceName, quarantine.path)
+            if ((stats.mode & POSIX_S_IFMT) === POSIX_S_IFDIR) {
+                throw new Error('Secure quarantine path is a directory')
+            }
         } catch (error) {
             if (!isNotFound(error)) throw error
             sourceName = quarantineCleanupName(fileName)
             try {
-                await lstat(posixDescriptorPath(quarantineDirectory.handle.fd, sourceName))
+                const cleanupPath = join(quarantineDirectoryPath, sourceName)
+                const stats = await statPosixChild(quarantineDirectory, sourceName, cleanupPath)
+                if ((stats.mode & POSIX_S_IFMT) === POSIX_S_IFDIR) {
+                    throw new Error('Secure quarantine cleanup path is a directory')
+                }
             } catch (cleanupError) {
                 if (isNotFound(cleanupError)) return
                 throw cleanupError
