@@ -226,9 +226,12 @@ public actor MessageWindowController {
 
             if !canIncrement {
                 let requestBaseline = baseline()
+                let latestPageSize = initial.requiresLatestReset || initialCursor != nil
+                    ? MessageWindowConstants.pageSize
+                    : MessageWindowConstants.initialPageSize
                 let response = try await provider.messages(
                     sessionId: sessionId,
-                    query: .latest(limit: MessageWindowConstants.pageSize)
+                    query: .latest(limit: latestPageSize)
                 )
                 guard isCurrentTailSync(generation) else { return }
                 update { previous in
