@@ -209,6 +209,7 @@ type CodexConfigSnapshot = {
 function parseCodexConfig(configText: string): CodexConfigSnapshot {
     let activeProvider: string | null = null
     let currentProvider: string | null = null
+    let inRootTable = true
     const providers = new Map<string, CodexProviderConfig>()
 
     for (const rawLine of configText.split(/\r?\n/)) {
@@ -217,16 +218,18 @@ function parseCodexConfig(configText: string): CodexConfigSnapshot {
 
         const section = /^\[model_providers(?:\."([^"]+)"|\.'([^']+)'|\.([A-Za-z0-9_-]+))\]$/.exec(line)
         if (section) {
+            inRootTable = false
             currentProvider = section[1] ?? section[2] ?? section[3] ?? null
             continue
         }
         if (line.startsWith('[')) {
+            inRootTable = false
             currentProvider = null
             continue
         }
 
         const providerMatch = /^model_provider\s*=\s*(.+)$/.exec(line)
-        if (providerMatch && currentProvider === null) {
+        if (providerMatch && inRootTable) {
             activeProvider = unquoteTomlString(providerMatch[1])
             continue
         }

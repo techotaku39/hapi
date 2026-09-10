@@ -349,6 +349,7 @@ function createAbortSignal(signal: AbortSignal | undefined, timeoutMs: number): 
         dispose: () => {
             clearTimeout(timeout)
             signal?.removeEventListener('abort', abort)
+            controller.abort()
         }
     }
 }
@@ -386,8 +387,9 @@ export async function executeUsageQueryTemplate(
             signal
         })
     } catch (error) {
+        const timedOut = signal.aborted
         dispose()
-        if (signal.aborted) throw new UsageQueryExecutionError('Usage request timed out')
+        if (timedOut) throw new UsageQueryExecutionError('Usage request timed out')
         throw new UsageQueryExecutionError(error instanceof Error ? error.message : 'Usage request failed')
     }
 
