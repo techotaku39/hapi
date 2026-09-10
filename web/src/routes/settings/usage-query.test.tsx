@@ -147,6 +147,8 @@ describe('SettingsUsageQueryPage', () => {
             'claude',
             expect.objectContaining({ enabled: false, templateId: DEFAULT_USAGE_QUERY_TEMPLATE.id })
         ))
+        expect(screen.getByRole('combobox', { name: 'Template' })).toBeDisabled()
+        expect(screen.getByRole('textbox', { name: 'Usage query template JSON' })).toBeDisabled()
 
         fireEvent.click(screen.getByRole('combobox', { name: 'Agent' }))
         fireEvent.click(screen.getByRole('option', { name: 'Kimi CLI' }))
@@ -155,6 +157,8 @@ describe('SettingsUsageQueryPage', () => {
 
         await waitFor(() => expect(queryClient.getQueryData(queryKeys.machineUsageQuery('machine-1', 'claude'))).toMatchObject(saved))
         expect(queryClient.getQueryData(queryKeys.machineUsageQuery('machine-1', 'kimi'))).not.toMatchObject(saved)
+        expect(screen.getByRole('combobox', { name: 'Template' })).not.toBeDisabled()
+        expect(screen.getByRole('textbox', { name: 'Usage query template JSON' })).not.toBeDisabled()
     })
 
     it('surfaces machine-list errors and exposes a retry action', async () => {

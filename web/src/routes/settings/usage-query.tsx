@@ -270,6 +270,7 @@ export default function SettingsUsageQueryPage() {
                                 value={selectedTemplateId}
                                 onChange={selectTemplate}
                                 options={DEFAULT_USAGE_QUERY_TEMPLATES.map((template) => ({ value: template.id, label: template.name }))}
+                                disabled={saveMutation.isPending}
                                 containerClassName="mb-2"
                             />
                             <textarea
@@ -278,7 +279,8 @@ export default function SettingsUsageQueryPage() {
                                 onChange={(event) => { setTemplateText(event.target.value); setEditorError(null) }}
                                 spellCheck={false}
                                 rows={18}
-                                className="w-full resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-2 font-mono text-xs leading-relaxed text-[var(--app-fg)] outline-none focus:border-[var(--app-link)]"
+                                disabled={saveMutation.isPending}
+                                className="w-full resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-2 font-mono text-xs leading-relaxed text-[var(--app-fg)] outline-none focus:border-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             {editorError ? <div role="alert" className="mt-2 text-sm text-red-500">{editorError}</div> : null}
                             <div className="mt-3 flex flex-wrap justify-end gap-2">
