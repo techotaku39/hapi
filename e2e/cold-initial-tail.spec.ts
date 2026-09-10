@@ -16,6 +16,9 @@ test('cold sessions request a small latest page and keep older loads at 200', as
         childCount: expect.any(Number)
     })
 
+    await expect.poll(async () => await page.evaluate(() => window.__probe.windowState().messageCount)).toBe(20)
+    await expect(page.getByText('Fixture message 1200', { exact: true })).toBeVisible()
+
     // Call the same loadMore callback that the top sentinel invokes. The
     // dedicated history-load suite covers pointer/scroll gesture detection;
     // this regression should isolate the page-size contract without relying
