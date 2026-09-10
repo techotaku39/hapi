@@ -13,17 +13,19 @@ struct ToolCallBlockView: View {
     let block: ToolCallBlock
     let basePath: String?
 
-    @State private var expanded: Bool
-    @State private var childrenOpen: Bool
+    @ChatStoredState private var expanded: Bool
+    @ChatStoredState private var childrenOpen: Bool
     @Environment(\.hapiTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .footnote) private var iconWidth: CGFloat = 18
     @Environment(\.chatInteractions) private var interactions
 
     init(block: ToolCallBlock, basePath: String?) {
         self.block = block
         self.basePath = basePath
         let pending = block.tool.permission?.status == .pending
-        _expanded = State(initialValue: pending)
-        _childrenOpen = State(initialValue: pending)
+        _expanded = ChatStoredState(wrappedValue: pending, id: block.id, field: "expanded")
+        _childrenOpen = ChatStoredState(wrappedValue: pending, id: block.id, field: "children")
     }
 
     var body: some View {
@@ -79,28 +81,37 @@ struct ToolCallBlockView: View {
                 expanded.toggle()
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: presentation.icon)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(presentation.title)
-                        .font(.subheadline)
-                        .foregroundStyle(theme.textPrimary)
-                        .lineLimit(1)
-                    if let subtitle = presentation.subtitle {
-                        Text(subtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: presentation.icon)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(width: iconWidth)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(presentation.title)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let subtitle = presentation.subtitle {
+                            Text(subtitle)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                // Full commands belong in the expanded body, not above approval controls.
+                                .lineLimit(2)
+                                .truncationMode(.tail)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
-                Spacer(minLength: 8)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 ToolStatusIndicator(state: block.tool.state)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -175,7 +186,7 @@ private struct StatusChip: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2)
+            .font(.footnote)
             .foregroundStyle(tint)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -220,7 +231,7 @@ private struct PermissionLine: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2)
+            .font(.footnote)
             .foregroundStyle(isError ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
             .padding(.horizontal, 10)
             .padding(.bottom, 6)

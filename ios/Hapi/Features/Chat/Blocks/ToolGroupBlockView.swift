@@ -11,18 +11,24 @@ struct ToolGroupBlockView: View {
     let basePath: String?
 
     @State private var expanded: Bool
+    private let expansion: Binding<Bool>?
+    private let showsTools: Bool
     @Environment(\.hapiTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .footnote) private var iconWidth: CGFloat = 18
 
-    init(block: ToolGroupBlock, basePath: String?) {
+    init(block: ToolGroupBlock, basePath: String?, expansion: Binding<Bool>? = nil, showsTools: Bool = true) {
         self.block = block
         self.basePath = basePath
         _expanded = State(initialValue: block.defaultOpen)
+        self.expansion = expansion
+        self.showsTools = showsTools
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerRow
-            if expanded {
+            if showsTools && (expansion?.wrappedValue ?? expanded) {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(block.tools, id: \.id) { tool in
                         ToolCallBlockView(block: tool, basePath: basePath)
@@ -40,31 +46,38 @@ struct ToolGroupBlockView: View {
     private var headerRow: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.15)) {
-                expanded.toggle()
+                if let expansion { expansion.wrappedValue.toggle() }
+                else { expanded.toggle() }
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "wrench.and.screwdriver")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.subheadline)
-                        .foregroundStyle(theme.textPrimary)
-                        .lineLimit(1)
-                    if !summaryText.isEmpty {
-                        Text(summaryText)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(width: iconWidth)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !summaryText.isEmpty {
+                            Text(summaryText)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
-                Spacer(minLength: 8)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 trailingIndicator
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -103,10 +116,10 @@ struct ToolGroupBlockView: View {
                 .controlSize(.small)
         } else if block.summary.errorCount > 0 {
             Text("\(block.summary.errorCount) ⚠")
-                .font(.caption2)
+                .font(.footnote)
                 .foregroundStyle(.red)
         } else {
-            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+            Image(systemName: (expansion?.wrappedValue ?? expanded) ? "chevron.down" : "chevron.right")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

@@ -38,3 +38,5 @@ jobs:
               run: xcodebuild -version
             - name: Build Hapi app for iOS Simulator
               run: xcodebuild build -project ios/Hapi.xcodeproj -scheme Hapi -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+            - name: Transcript layout regression tests
+              run: ios/scripts/test-transcript.sh

@@ -54,6 +54,7 @@ sealed interface OlderLoadOutcome {
         Invalidated("invalidated"),
         EpochReset("epoch-reset"),
         Exhausted("exhausted"),
+        CursorDidNotAdvance("cursor-did-not-advance"),
     }
 }
 
@@ -78,6 +79,8 @@ data class MessageWindowState(
     val isLoadingMore: Boolean = false,
     val warning: String? = null,
     val viewMode: MessageViewMode = MessageViewMode.Tail,
+    /** Local presentation policy, never persisted or sent to the hub. */
+    val historyRetentionLimit: Int = HISTORY_WINDOW_SIZE,
     /** Bumped whenever the [messages] list instance changes. */
     val messagesVersion: Long = 0,
     /** Bumped per applied older page (scroll-anchoring handle). */

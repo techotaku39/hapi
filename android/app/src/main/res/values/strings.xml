@@ -522,4 +522,9 @@
     <string name="new_session_error_runner_upgrade_required">Upgrade and restart this machine’s HAPI runner before creating sessions.</string>
     <string name="new_session_error_no_available_agents">No supported Agents are installed on this machine.</string>
     <string name="new_session_error_selected_agent_unavailable">The selected Agent is not available on this machine.</string>
+    <string name="chat_back_to_latest">Back to latest ↓</string>
+    <string name="chat_history_retry">Couldn\'t load history. Tap to retry.</string>
+    <string name="chat_history_continue">Continue loading history</string>
+    <string name="chat_history_load">Load older messages</string>
+    <string name="chat_history_beginning">Beginning of conversation</string>
 </resources>

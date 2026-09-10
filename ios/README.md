@@ -16,6 +16,9 @@ it shares only the protocol contract (`docs/api/`) and the golden fixtures
 
 ## Build
 
+Native chat scrolling architecture and acceptance checklist:
+[Native transcript scrolling](../docs/native-chat-scrolling.md).
+
 Open `ios/Hapi.xcodeproj` in Xcode and run the shared `Hapi` scheme, or from
 the command line:
 
@@ -36,6 +39,32 @@ changes under `ios/**` and `shared/fixtures/**`).
 `Hapi/Resources/Localizable.xcstrings` is hand-maintained. Compiler string
 extraction stays disabled so opening or building the project does not rewrite
 the catalog with decorative or intentionally verbatim strings.
+
+### Reading typography
+
+`HapiUI` separates color palettes (`HapiTheme`) from resolved Dynamic Type
+metrics (`HapiTypography`). Install `.hapiTypography()` at a presentation root,
+outside `AnchoredTranscriptList`; hosted rows inherit those metrics. Do not
+scale the resolved values again. Body/user/composer text starts at 16pt,
+inline code at 15pt, code/diffs/terminal at 14pt, and captions at 12pt.
+Body and code add 3pt and 2pt of scaled inter-line spacing respectively.
+
+The transcript and composer share a centered, at-most-720pt reading column
+with 16pt minimum side margins. Font, Bold Text, locale, and effective width
+changes invalidate height measurements while preserving the reading anchor.
+Ordinary streaming updates retain unchanged hosting roots and measurements.
+
+The UIKit transcript suite covers typography changes, recycling, shrinking
+text, tablet/phone widths, and tail following. Optional deterministic visual
+specimens cover light/dark/OLED, mixed Chinese/English, code, tables, diffs,
+approvals, and the actual composer. They use a non-networked test interactor;
+they are **not** live conversations or App Store screenshots. Capture into a
+new temporary directory, never over the release gallery:
+
+```sh
+TEST_RUNNER_HAPI_TYPOGRAPHY_CAPTURE=/tmp/hapi-typography-review \
+  ios/scripts/test-transcript.sh -only-testing:HapiTests/TypographySnapshotTests
+```
 
 ### Linux verification (no Mac needed)
 
@@ -106,9 +135,9 @@ ios/
                                       ChatPipeline off-main, ~100 ms
                                       coalesced, last-seen stamping, header
                                       cascade; ChatView — bottom-anchored
-                                      ScrollView/LazyVStack with auto-stick,
-                                      new-messages pill, top sentinel paging
-                                      with scroll re-anchoring, degraded
+                                      UICollectionView with cached heights,
+                                      ID/offset anchoring, viewport paging,
+                                      explicit return-to-latest, degraded
                                       banners; Blocks/ — user bubble, agent
                                       markdown, reasoning, tool cards with
                                       per-tool bodies + knownTools-parity
