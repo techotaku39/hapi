@@ -205,6 +205,35 @@ describe('usage query executor', () => {
         })).rejects.toThrow('too large')
     })
 
+    it('aborts unread responses when rejecting early', async () => {
+        let errorSignal: AbortSignal | undefined
+        await expect(executeUsageQueryTemplate('claude', makeTemplate(), credentials, {
+            fetchImpl: async (_url, init) => {
+                errorSignal = init.signal
+                return response({}, { ok: false, status: 502 })
+            }
+        })).rejects.toThrow('HTTP 502')
+        expect(errorSignal?.aborted).toBe(true)
+
+        let oversizedSignal: AbortSignal | undefined
+        await expect(executeUsageQueryTemplate('claude', makeTemplate(), credentials, {
+            fetchImpl: async (_url, init) => {
+                oversizedSignal = init.signal
+                return response({}, { contentLength: String(USAGE_QUERY_MAX_RESPONSE_BYTES + 1) })
+            }
+        })).rejects.toThrow('too large')
+        expect(oversizedSignal?.aborted).toBe(true)
+
+        let networkSignal: AbortSignal | undefined
+        await expect(executeUsageQueryTemplate('claude', makeTemplate(), credentials, {
+            fetchImpl: async (_url, init) => {
+                networkSignal = init.signal
+                throw new Error('network unavailable')
+            }
+        })).rejects.toThrow('network unavailable')
+        expect(networkSignal?.aborted).toBe(true)
+    })
+
     it('aborts a request at the ten-second default timeout boundary', async () => {
         const template = makeTemplate()
         await expect(executeUsageQueryTemplate('claude', template, credentials, {
