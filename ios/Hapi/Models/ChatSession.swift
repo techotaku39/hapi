@@ -93,12 +93,17 @@ final class ChatSession {
 
     /// Open the window, then subscribe: every routed message event finds the
     /// controller already in place (the Android wiring order). Idempotent.
-    func start() async {
+    func start(preservingHistory: Bool = false) async {
         guard !started, !stopped else { return }
         started = true
         registerActive(self)
         let controller = await windows.open(sessionId: sessionId)
-        await controller.activate()
+        guard !stopped else { return }
+        if preservingHistory {
+            await controller.setViewMode(.history)
+        } else {
+            await controller.activate()
+        }
         // A stop() can land while the opens above were suspended; do not
         // bring the SSE up for a dead chat.
         guard !stopped else { return }
@@ -106,7 +111,7 @@ final class ChatSession {
         startSessionSSE()
         // Explicit catch-up on entry (the snapshot may be stale); the SSE
         // handshake's own gap handling covers everything missed after this.
-        Task { await controller.syncTail() }
+        if !preservingHistory { Task { await controller.syncTail() } }
     }
 
     /// Tears the session pipe down; the engine-side resume cursor is saved

@@ -691,6 +691,16 @@
         }
       }
     },
+    "Back to latest": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回到最新"
+          }
+        }
+      }
+    },
     "Background task": {
       "localizations": {
         "zh-Hans": {
@@ -707,6 +717,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "修改前"
+          }
+        }
+      }
+    },
+    "Beginning of conversation": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已到会话起点"
           }
         }
       }
@@ -931,6 +951,16 @@
         }
       }
     },
+    "Continue loading history": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续加载历史"
+          }
+        }
+      }
+    },
     "Copy Contents": {
       "localizations": {
         "zh-Hans": {
@@ -1027,6 +1057,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法删除笔记 — 请检查 Hub 连接"
+          }
+        }
+      }
+    },
+    "Couldn't load history. Tap to retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "历史加载失败，点此重试"
           }
         }
       }
