@@ -1,6 +1,6 @@
 import { constants, type Stats } from 'node:fs'
 import { lstat, open, stat, type FileHandle } from 'node:fs/promises'
-import { basename, dirname } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 // Recycle-bin mutations must keep using the directory object selected during
@@ -26,7 +26,22 @@ export type SecureWritableFile = {
     close(): Promise<void>
 }
 
+export type SecureQuarantine = {
+    path: string
+    directoryIdentity: string
+    parentDirectoryIdentity: string
+}
+
+export type SecureUnlinkOptions = {
+    /** Private same-filesystem destination to journal before detaching the file. */
+    quarantinePath?: string
+    /** Persist the quarantine destination before the source name is detached. */
+    onQuarantinePrepared?: (quarantine: SecureQuarantine) => Promise<void>
+}
+
 const IS_WINDOWS = process.platform === 'win32'
+const POSIX_AT_REMOVEDIR = 0x200
+const POSIX_QUARANTINE_DIRECTORY_PATTERN = /^\.hapi-recycle-quarantine-[0-9a-f-]{36}$/i
 const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY
     | (constants.O_DIRECTORY ?? 0)
     | (constants.O_NOFOLLOW ?? 0)
@@ -68,6 +83,10 @@ function assertSiblingPaths(sourcePath: string, targetPath: string): { sourceDir
 
 function assertDirectoryIdentity(actual: string, expected: string): void {
     if (actual !== expected) throw new Error('Secure file operation parent changed during the operation')
+}
+
+function isNotFound(error: unknown): boolean {
+    return error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
 async function assertFileIdentity(path: string, expected: FileIdentity | undefined): Promise<void> {
@@ -342,12 +361,14 @@ async function getPosixSymbols() {
         const { symbols } = dlopen(library, {
             renameatx_np: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
             unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
+            mkdirat: { args: ['i32', 'cstring', 'u32'], returns: 'i32' },
             openat: { args: ['i32', 'cstring', 'i32', 'u32'], returns: 'i32' },
             close: { args: ['i32'], returns: 'i32' },
         })
         return {
             renameNoReplace: symbols.renameatx_np,
             unlinkat: symbols.unlinkat,
+            mkdirat: symbols.mkdirat,
             openat: symbols.openat,
             close: symbols.close,
             noReplaceFlag: 0x00000004,
@@ -356,12 +377,14 @@ async function getPosixSymbols() {
     const { symbols } = dlopen(library, {
         renameat2: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
         unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
+        mkdirat: { args: ['i32', 'cstring', 'u32'], returns: 'i32' },
         openat: { args: ['i32', 'cstring', 'i32', 'u32'], returns: 'i32' },
         close: { args: ['i32'], returns: 'i32' },
     })
     return {
         renameNoReplace: symbols.renameat2,
         unlinkat: symbols.unlinkat,
+        mkdirat: symbols.mkdirat,
         openat: symbols.openat,
         close: symbols.close,
         noReplaceFlag: 0x00000001,
@@ -373,6 +396,146 @@ let posixSymbols: Promise<Awaited<ReturnType<typeof getPosixSymbols>>> | null = 
 async function getCachedPosixSymbols() {
     if (!posixSymbols) posixSymbols = getPosixSymbols()
     return await posixSymbols
+}
+
+function posixDescriptorPath(fd: number, childName?: string): string {
+    const prefix = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd'
+    return childName ? `${prefix}/${fd}/${childName}` : `${prefix}/${fd}`
+}
+
+async function openPosixDirectoryAt(parent: PosixDirectory, name: string): Promise<PosixDirectory> {
+    if (!isSimpleName(name)) throw new Error('Secure quarantine directory name is invalid')
+    const symbols = await getCachedPosixSymbols()
+    const rawFd = symbols.openat(parent.handle.fd, name, DIRECTORY_OPEN_FLAGS, 0)
+    if (rawFd < 0) throw new Error('Secure quarantine directory open failed')
+    let handle: FileHandle | null = null
+    try {
+        // The descriptor path is backed by the already pinned raw fd, so this
+        // duplication does not re-resolve the writable parent pathname.
+        handle = await open(posixDescriptorPath(rawFd), constants.O_RDONLY | (constants.O_DIRECTORY ?? 0))
+        const stats = await handle.stat()
+        if (!stats.isDirectory() || stats.isSymbolicLink()) {
+            throw new Error('Secure quarantine directory is not a real directory')
+        }
+        return { kind: 'posix', handle, identity: identityKey(identityFromStats(stats)) }
+    } catch (error) {
+        if (handle) await handle.close().catch(() => {})
+        throw error
+    } finally {
+        symbols.close(rawFd)
+    }
+}
+
+function quarantineParts(sourcePath: string, quarantinePath: string): { directoryName: string; fileName: string } {
+    const sourceDirectory = resolve(dirname(sourcePath))
+    const quarantineDirectory = resolve(dirname(quarantinePath))
+    const directoryName = basename(quarantineDirectory)
+    const fileName = basename(quarantinePath)
+    if (
+        resolve(dirname(quarantineDirectory)) !== sourceDirectory
+        || !POSIX_QUARANTINE_DIRECTORY_PATTERN.test(directoryName)
+        || !isSimpleName(fileName)
+        || fileName !== basename(sourcePath)
+    ) {
+        throw new Error('Secure quarantine path must be a private sibling directory')
+    }
+    return { directoryName, fileName }
+}
+
+function quarantineCleanupName(fileName: string): string {
+    return fileName === '.hapi-recycle-cleanup'
+        ? '.hapi-recycle-cleanup-2'
+        : '.hapi-recycle-cleanup'
+}
+
+async function removeFileFromPosixDirectory(
+    directory: PosixDirectory,
+    sourceName: string,
+    expectedIdentity: FileIdentity,
+): Promise<void> {
+    const symbols = await getCachedPosixSymbols()
+    const cleanupName = quarantineCleanupName(sourceName)
+    const moved = symbols.renameNoReplace(
+        directory.handle.fd,
+        sourceName,
+        directory.handle.fd,
+        cleanupName,
+        symbols.noReplaceFlag,
+    )
+    if (moved !== 0) throw new Error('Identity-bound POSIX cleanup could not isolate the file')
+    let cleanupContainsFile = true
+    try {
+        const stats = await lstat(posixDescriptorPath(directory.handle.fd, cleanupName))
+        if (
+            !stats.isFile()
+            || stats.isSymbolicLink()
+            || String(stats.dev) !== expectedIdentity.dev
+            || String(stats.ino) !== expectedIdentity.ino
+        ) {
+            throw new Error('POSIX cleanup identity changed during the operation')
+        }
+        const removed = symbols.unlinkat(directory.handle.fd, cleanupName, 0)
+        if (removed !== 0) throw new Error('Secure quarantine file cleanup failed')
+        cleanupContainsFile = false
+    } finally {
+        if (cleanupContainsFile) {
+            const restored = symbols.renameNoReplace(
+                directory.handle.fd,
+                cleanupName,
+                directory.handle.fd,
+                sourceName,
+                symbols.noReplaceFlag,
+            )
+            if (restored === 0) {
+                cleanupContainsFile = false
+            } else {
+                // Keep the deterministic cleanup name in the private
+                // quarantine directory when a replacement occupies sourceName.
+                // The journaled cleanup path can find it on the next pass.
+            }
+        }
+    }
+}
+
+async function removeEmptyPosixQuarantineDirectory(parent: PosixDirectory, directoryName: string): Promise<void> {
+    const symbols = await getCachedPosixSymbols()
+    const result = symbols.unlinkat(parent.handle.fd, directoryName, POSIX_AT_REMOVEDIR)
+    if (result !== 0) throw new Error('Secure quarantine directory cleanup failed')
+    await parent.handle.sync()
+}
+
+async function preparePosixQuarantine(
+    parent: PosixDirectory,
+    sourcePath: string,
+    quarantinePath: string | undefined,
+): Promise<{ info: SecureQuarantine; directoryName: string; directory: PosixDirectory }> {
+    const resolvedQuarantinePath = resolve(quarantinePath
+        ?? join(dirname(sourcePath), `.hapi-recycle-quarantine-${randomUUID()}`, basename(sourcePath)))
+    const { directoryName } = quarantineParts(sourcePath, resolvedQuarantinePath)
+    const symbols = await getCachedPosixSymbols()
+    if (symbols.mkdirat(parent.handle.fd, directoryName, 0o700) !== 0) {
+        throw new Error('Secure quarantine directory creation failed')
+    }
+    let directory: PosixDirectory | null = null
+    try {
+        directory = await openPosixDirectoryAt(parent, directoryName)
+        // Persist the private directory entry before exposing its path to the
+        // manager journal or moving a file into it.
+        await parent.handle.sync()
+        return {
+            info: {
+                path: resolvedQuarantinePath,
+                directoryIdentity: directory.identity,
+                parentDirectoryIdentity: parent.identity,
+            },
+            directoryName,
+            directory,
+        }
+    } catch (error) {
+        if (directory) await closeSecureDirectory(directory).catch(() => {})
+        await removeEmptyPosixQuarantineDirectory(parent, directoryName).catch(() => {})
+        throw error
+    }
 }
 
 async function openPosixStagingFile(path: string, directoryIdentity: string, mode: number): Promise<SecureWritableFile> {
@@ -541,7 +704,12 @@ export async function secureRename(
     }
 }
 
-export async function secureUnlink(path: string, directoryIdentity: string, fileIdentity?: FileIdentity): Promise<void> {
+export async function secureUnlink(
+    path: string,
+    directoryIdentity: string,
+    fileIdentity?: FileIdentity,
+    options: SecureUnlinkOptions = {},
+): Promise<void> {
     const directoryPath = dirname(path)
     const name = basename(path)
     if (!isSimpleName(name)) throw new Error('Secure file operations require a simple file name')
@@ -555,43 +723,83 @@ export async function secureUnlink(path: string, directoryIdentity: string, file
         if (!fileIdentity) throw new Error('Identity-bound POSIX cleanup requires a file identity')
         const posixDirectory = directory as PosixDirectory
         const symbols = await getCachedPosixSymbols()
-        const quarantineName = `.hapi-recycle-quarantine-${randomUUID()}.tmp`
-        const moved = symbols.renameNoReplace(
-            posixDirectory.handle.fd,
-            name,
-            posixDirectory.handle.fd,
-            quarantineName,
-            symbols.noReplaceFlag,
-        )
-        if (moved !== 0) throw new Error('Identity-bound POSIX cleanup could not detach the file')
-        const descriptorPath = process.platform === 'linux'
-            ? `/proc/self/fd/${posixDirectory.handle.fd}/${quarantineName}`
-            : `/dev/fd/${posixDirectory.handle.fd}/${quarantineName}`
-        const detachedStats = await stat(descriptorPath)
-        if (String(detachedStats.dev) !== fileIdentity.dev || String(detachedStats.ino) !== fileIdentity.ino) {
-            const restored = symbols.renameNoReplace(
+        const prepared = await preparePosixQuarantine(posixDirectory, path, options.quarantinePath)
+        let quarantineContainsFile = false
+        try {
+            await options.onQuarantinePrepared?.(prepared.info)
+            const moved = symbols.renameNoReplace(
                 posixDirectory.handle.fd,
-                quarantineName,
-                posixDirectory.handle.fd,
+                name,
+                prepared.directory.handle.fd,
                 name,
                 symbols.noReplaceFlag,
             )
-            if (restored !== 0) throw new Error('POSIX cleanup identity changed and rollback failed')
-            throw new Error('POSIX cleanup identity changed during the operation')
-        }
-        const removed = symbols.unlinkat(posixDirectory.handle.fd, quarantineName, 0)
-        if (removed !== 0) {
-            symbols.renameNoReplace(
-                posixDirectory.handle.fd,
-                quarantineName,
-                posixDirectory.handle.fd,
-                name,
-                symbols.noReplaceFlag,
-            )
-            throw new Error('Directory-relative unlink failed')
+            if (moved !== 0) throw new Error('Identity-bound POSIX cleanup could not detach the file')
+            quarantineContainsFile = true
+            await prepared.directory.handle.sync()
+            await removeFileFromPosixDirectory(prepared.directory, name, fileIdentity)
+            quarantineContainsFile = false
+        } finally {
+            await closeSecureDirectory(prepared.directory)
+            if (!quarantineContainsFile) {
+                await removeEmptyPosixQuarantineDirectory(posixDirectory, basename(dirname(prepared.info.path)))
+            }
         }
     } finally {
         await closeSecureDirectory(directory)
+    }
+}
+
+export async function secureRemoveQuarantinedFile(
+    quarantine: SecureQuarantine,
+    fileIdentity: FileIdentity,
+): Promise<void> {
+    if (IS_WINDOWS) throw new Error('POSIX quarantine cleanup is unavailable on Windows')
+    const quarantineDirectoryPath = dirname(quarantine.path)
+    const directoryName = basename(quarantineDirectoryPath)
+    const fileName = basename(quarantine.path)
+    if (!POSIX_QUARANTINE_DIRECTORY_PATTERN.test(directoryName) || !isSimpleName(fileName)) {
+        throw new Error('Secure quarantine path is invalid')
+    }
+    const parentPath = dirname(dirname(quarantine.path))
+    const parent = await openSecureDirectory(parentPath, quarantine.parentDirectoryIdentity) as PosixDirectory
+    let quarantineDirectory: PosixDirectory | null = null
+    let quarantineDirectoryExists = false
+    try {
+        try {
+            await lstat(posixDescriptorPath(parent.handle.fd, directoryName))
+            quarantineDirectoryExists = true
+        } catch (error) {
+            if (isNotFound(error)) return
+            throw error
+        }
+        quarantineDirectory = await openPosixDirectoryAt(parent, directoryName)
+        assertDirectoryIdentity(quarantineDirectory.identity, quarantine.directoryIdentity)
+        let sourceName = fileName
+        try {
+            await lstat(posixDescriptorPath(quarantineDirectory.handle.fd, sourceName))
+        } catch (error) {
+            if (!isNotFound(error)) throw error
+            sourceName = quarantineCleanupName(fileName)
+            try {
+                await lstat(posixDescriptorPath(quarantineDirectory.handle.fd, sourceName))
+            } catch (cleanupError) {
+                if (isNotFound(cleanupError)) return
+                throw cleanupError
+            }
+        }
+        await removeFileFromPosixDirectory(quarantineDirectory, sourceName, fileIdentity)
+    } finally {
+        if (quarantineDirectory) await closeSecureDirectory(quarantineDirectory)
+        if (quarantineDirectoryExists) {
+            try {
+                await removeEmptyPosixQuarantineDirectory(parent, directoryName)
+            } finally {
+                await closeSecureDirectory(parent)
+            }
+        } else {
+            await closeSecureDirectory(parent)
+        }
     }
 }
 

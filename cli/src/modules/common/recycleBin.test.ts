@@ -19,6 +19,7 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     rejectRestoreStageRemoval: false,
     rejectRestoreWrite: false,
     rejectStagingParentSync: false,
+    journalQuarantine: false,
     stagingParentPath: undefined as string | undefined,
     replaceRestoreParentOnRealpath: undefined as {
         path: string
@@ -214,7 +215,27 @@ vi.mock('./secureFileOperations', async () => {
             }
             return await fs.rename(sourcePath, destinationPath)
         }),
-        secureUnlink: vi.fn(async (path: string) => {
+        secureUnlink: vi.fn(async (
+            path: string,
+            _directoryIdentity?: string,
+            _fileIdentity?: unknown,
+            options?: {
+                onQuarantinePrepared?: (quarantine: {
+                    path: string
+                    directoryIdentity: string
+                    parentDirectoryIdentity: string
+                }) => Promise<void>
+            },
+        ) => {
+            if (recycleBinIoHarness.journalQuarantine && options?.onQuarantinePrepared) {
+                const quarantineDirectory = join(dirname(path), `.hapi-recycle-quarantine-${randomUUID()}`)
+                await fs.mkdir(quarantineDirectory, { mode: 0o700 })
+                await options.onQuarantinePrepared({
+                    path: join(quarantineDirectory, basename(path)),
+                    directoryIdentity: 'journaled-quarantine',
+                    parentDirectoryIdentity: 'journaled-parent',
+                })
+            }
             if (recycleBinIoHarness.rejectDetachedUnlink && path.includes('.hapi-source-')) {
                 const error = new Error('Simulated detached-source unlink failure') as NodeJS.ErrnoException
                 error.code = 'EIO'
@@ -237,7 +258,7 @@ vi.mock('./secureFileOperations', async () => {
 
 import { chmod, link, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { basename, join, sep } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
     DEFAULT_RECYCLE_BIN_RETENTION_DAYS,
@@ -279,6 +300,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.rejectRestoreStageRemoval = false
         recycleBinIoHarness.rejectRestoreWrite = false
         recycleBinIoHarness.rejectStagingParentSync = false
+        recycleBinIoHarness.journalQuarantine = false
         recycleBinIoHarness.stagingParentPath = undefined
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         recycleBinIoHarness.replaceRestoreParentBeforeStaging = undefined
@@ -804,6 +826,45 @@ describe('RecycleBinManager', () => {
             })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('retain the recoverable payload')
         } finally {
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            await cleanup()
+        }
+    })
+
+    it('journals a POSIX quarantine before detached-source cleanup can fail', async () => {
+        try {
+            const filePath = join(workspaceDir, 'journaled-quarantine.txt')
+            await writeFile(filePath, 'retain the journaled payload')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.journalQuarantine = true
+            recycleBinIoHarness.rejectDetachedUnlink = true
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+                stagingFiles?: Array<{
+                    path: string
+                    quarantine?: {
+                        path: string
+                        directoryIdentity: string
+                        parentDirectoryIdentity: string
+                    }
+                }>
+            }
+            expect(metadata.stagingFiles).toEqual([
+                expect.objectContaining({
+                    path: join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`),
+                    quarantine: {
+                        path: expect.stringContaining('.hapi-recycle-quarantine-'),
+                        directoryIdentity: 'journaled-quarantine',
+                        parentDirectoryIdentity: 'journaled-parent',
+                    },
+                }),
+            ])
+        } finally {
+            recycleBinIoHarness.journalQuarantine = false
             recycleBinIoHarness.rejectDetachedUnlink = false
             await cleanup()
         }
