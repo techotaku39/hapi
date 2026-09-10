@@ -117,6 +117,7 @@ async function testPosix(root: string): Promise<void> {
         'quarantine identity mismatch was not rejected',
     )
     assert(await readFile(mismatchPath, 'utf8') === 'replacement must survive', 'replacement was removed after identity mismatch')
+    await rm(mismatchDirectory, { recursive: true, force: true })
 
     const callbackFailurePath = join(workspace, 'callback-failure.txt')
     await writeFile(callbackFailurePath, 'must remain')

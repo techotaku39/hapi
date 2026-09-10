@@ -161,6 +161,22 @@ vi.mock('./secureFileOperations', async () => {
     return {
         ...actual,
         getSecureDirectoryIdentity: vi.fn(async (path: string) => path),
+        secureRemoveQuarantinedFile: vi.fn(async (
+            quarantine: { path: string; directoryIdentity: string; parentDirectoryIdentity: string },
+            fileIdentity: { dev: string; ino: string },
+        ) => {
+            if (recycleBinIoHarness.journalQuarantine) return
+            try {
+                await fs.stat(quarantine.path)
+            } catch (error) {
+                if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+                    await fs.rm(dirname(quarantine.path), { recursive: true, force: true })
+                    return
+                }
+                throw error
+            }
+            return await actual.secureRemoveQuarantinedFile(quarantine, fileIdentity)
+        }),
         openSecureStagingFile: vi.fn(async (path: string, _directoryIdentity: string, mode: number) => {
             const parentReplacement = recycleBinIoHarness.replaceRestoreParentBeforeStaging
             if (parentReplacement) {
@@ -866,6 +882,66 @@ describe('RecycleBinManager', () => {
         } finally {
             recycleBinIoHarness.journalQuarantine = false
             recycleBinIoHarness.rejectDetachedUnlink = false
+            await cleanup()
+        }
+    })
+
+    it('retains the original staging name after a prepared-only quarantine', async () => {
+        try {
+            const filePath = join(workspaceDir, 'prepared-only-quarantine.txt')
+            await writeFile(filePath, 'retain the original staging name')
+            const manager = createManager(homeDir)
+            recycleBinIoHarness.journalQuarantine = true
+            recycleBinIoHarness.rejectDetachedUnlink = true
+
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            const stagingPath = join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`)
+
+            const purged = await manager.purge(moved.entry.id, workspaceDir)
+            expect(purged).toMatchObject({ success: false, error: 'Failed to remove recycle-bin staging data' })
+            await expect(readFile(stagingPath, 'utf8')).resolves.toBe('retain the original staging name')
+
+            recycleBinIoHarness.journalQuarantine = false
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            await expect(manager.purge(moved.entry.id, workspaceDir)).resolves.toEqual({ success: true })
+        } finally {
+            recycleBinIoHarness.journalQuarantine = false
+            recycleBinIoHarness.rejectDetachedUnlink = false
+            await cleanup()
+        }
+    })
+
+    it('journals restore staging cleanup when the restore write fails', async () => {
+        try {
+            const filePath = join(workspaceDir, 'restore-quarantine-journal.txt')
+            await writeFile(filePath, 'retain restore payload')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.journalQuarantine = true
+            recycleBinIoHarness.rejectRestoreWrite = true
+            recycleBinIoHarness.rejectRestoreStageRemoval = true
+            const failed = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(failed).toMatchObject({ success: false, error: 'Simulated restore-stage write failure' })
+
+            const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+                stagingFiles?: Array<{ path: string; quarantine?: { path: string } }>
+            }
+            expect(metadata.stagingFiles).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    path: expect.stringContaining(`.hapi-restore-${moved.entry.id}-`),
+                    quarantine: expect.objectContaining({
+                        path: expect.stringContaining('.hapi-recycle-quarantine-'),
+                    }),
+                }),
+            ]))
+        } finally {
+            recycleBinIoHarness.journalQuarantine = false
+            recycleBinIoHarness.rejectRestoreWrite = false
+            recycleBinIoHarness.rejectRestoreStageRemoval = false
             await cleanup()
         }
     })

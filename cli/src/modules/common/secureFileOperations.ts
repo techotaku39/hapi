@@ -40,7 +40,7 @@ export type SecureUnlinkOptions = {
 }
 
 const IS_WINDOWS = process.platform === 'win32'
-const POSIX_AT_REMOVEDIR = 0x200
+const POSIX_AT_REMOVEDIR = process.platform === 'darwin' ? 0x80 : 0x200
 const POSIX_QUARANTINE_DIRECTORY_PATTERN = /^\.hapi-recycle-quarantine-[0-9a-f-]{36}$/i
 const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY
     | (constants.O_DIRECTORY ?? 0)

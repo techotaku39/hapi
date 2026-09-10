@@ -512,21 +512,25 @@ async function copyFileWithoutReplacing(
                 throw new Error('File changed before the recycle-bin operation completed')
             }
             await options.onStagingFileCreated?.(detachedPath, detachedStats, options.stagingFileKind ?? 'source')
+            let detachedCleanupSucceeded = false
             try {
                 await secureUnlink(detachedPath, options.sourceDirectoryIdentity, fileIdentityFromStats(detachedStats), {
                     onQuarantinePrepared: async (quarantine) => {
                         await options.onQuarantinePrepared?.(detachedPath, quarantine)
                     },
                 })
+                await syncParentDirectory(sourcePath)
+                await options.onStagingFileRemoved?.(detachedPath)
+                detachedCleanupSucceeded = true
             } catch (error) {
                 logger.debug('[RECYCLE BIN] Deferring detached-source cleanup', { detachedPath, error })
             }
-            if (!(await pathExists(detachedPath))) {
-                await options.onStagingFileRemoved?.(detachedPath).catch((error) => {
-                    logger.debug('[RECYCLE BIN] Failed to clear detached staging metadata', { detachedPath, error })
-                })
+            if (!detachedCleanupSucceeded) {
+                // Keep the staging journal after any cleanup failure. The
+                // source detach still changed this directory entry, so retain
+                // the durability barrier without inspecting a swappable name.
+                await syncParentDirectory(sourcePath)
             }
-            await syncParentDirectory(sourcePath)
         }
     } catch (error) {
         if (destinationCreated && !sourceRemoved) {
@@ -922,6 +926,17 @@ async function reconcileEntryStagingFiles(
                     ino: stagingFile.ino,
                 })
                 stagingFilesChanged = true
+                if (await pathExists(stagingFile.path)) {
+                    // A crash can happen after journaling but before the
+                    // original staging name is detached. Keep that name in
+                    // the journal so the normal identity-bound cleanup can
+                    // handle it on the next pass.
+                    remainingStagingFiles.push({
+                        ...stagingFile,
+                        quarantine: undefined,
+                    })
+                    clean = false
+                }
             } catch (error) {
                 clean = false
                 remainingStagingFiles.push(stagingFile)
@@ -1362,7 +1377,17 @@ export class RecycleBinManager {
                 return { success: true, restoredPath: target }
             } catch (error) {
                 if (stagedCreated && stagedPath && stagedStats && stagingParentIdentity) {
-                    await secureUnlink(stagedPath, stagingParentIdentity, fileIdentityFromStats(stagedStats)).catch(() => {})
+                    const restoreStagingPath = stagedPath
+                    try {
+                        await secureUnlink(restoreStagingPath, stagingParentIdentity, fileIdentityFromStats(stagedStats), {
+                            onQuarantinePrepared: (quarantine) =>
+                                recordEntryStagingQuarantine(root, entry, restoreStagingPath, quarantine),
+                        })
+                        await syncParentDirectory(restoreStagingPath)
+                        await clearEntryStagingFile(root, entry, restoreStagingPath)
+                    } catch (cleanupError) {
+                        logger.debug('[RECYCLE BIN] Deferring restore staging cleanup', { stagedPath: restoreStagingPath, cleanupError })
+                    }
                 }
                 throw error
             }
