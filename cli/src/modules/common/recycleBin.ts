@@ -962,7 +962,9 @@ async function reconcileEntryStagingFiles(
                     stagingFilesChanged = true
                 } catch (error) {
                     clean = false
-                    remainingStagingFiles.push(stagingFile)
+                    remainingStagingFiles.push(
+                        entry.stagingFiles.find((file) => file.path === stagingFile.path) ?? stagingFile,
+                    )
                     logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath: stagingFile.path, error })
                 }
                 continue
@@ -984,7 +986,9 @@ async function reconcileEntryStagingFiles(
                 stagingFilesChanged = true
             } catch (error) {
                 clean = false
-                remainingStagingFiles.push(stagingFile)
+                remainingStagingFiles.push(
+                    entry.stagingFiles.find((file) => file.path === stagingFile.path) ?? stagingFile,
+                )
                 logger.debug('[RECYCLE BIN] Failed to remove owned staging file', { stagingPath: stagingFile.path, error })
             }
         } catch (error) {
@@ -1370,8 +1374,8 @@ export class RecycleBinManager {
                     targetDirectoryIdentity: publicationParent.identity,
                     sourceFileIdentity: fileIdentityFromStats(stagedStats),
                 })
-                await clearEntryStagingFile(root, entry, stagedPath)
                 await syncParentDirectory(target)
+                await clearEntryStagingFile(root, entry, stagedPath)
                 await removeEntryUnlocked(root, entry, protectedRoot)
                 await syncDirectory(root)
                 return { success: true, restoredPath: target }

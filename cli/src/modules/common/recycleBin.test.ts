@@ -20,6 +20,8 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     rejectRestoreWrite: false,
     rejectStagingParentSync: false,
     journalQuarantine: false,
+    failJournaledQuarantineRemovalPath: undefined as string | undefined,
+    publicationRename: false,
     stagingParentPath: undefined as string | undefined,
     replaceRestoreParentOnRealpath: undefined as {
         path: string
@@ -221,6 +223,9 @@ vi.mock('./secureFileOperations', async () => {
             })
         }),
         secureRename: vi.fn(async (sourcePath: string, destinationPath: string) => {
+            if (!destinationPath.includes('.hapi-source-')) {
+                recycleBinIoHarness.publicationRename = true
+            }
             const sourceReplacement = recycleBinIoHarness.replaceSourceBeforeDetach
             if (sourceReplacement && sourcePath === sourceReplacement.path && destinationPath.includes('.hapi-source-')) {
                 recycleBinIoHarness.replaceSourceBeforeDetach = undefined
@@ -251,6 +256,11 @@ vi.mock('./secureFileOperations', async () => {
                     directoryIdentity: 'journaled-quarantine',
                     parentDirectoryIdentity: 'journaled-parent',
                 })
+            }
+            if (recycleBinIoHarness.failJournaledQuarantineRemovalPath === path) {
+                const error = new Error('Simulated journaled quarantine cleanup failure') as NodeJS.ErrnoException
+                error.code = 'EIO'
+                throw error
             }
             if (recycleBinIoHarness.rejectDetachedUnlink && path.includes('.hapi-source-')) {
                 const error = new Error('Simulated detached-source unlink failure') as NodeJS.ErrnoException
@@ -317,6 +327,8 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.rejectRestoreWrite = false
         recycleBinIoHarness.rejectStagingParentSync = false
         recycleBinIoHarness.journalQuarantine = false
+        recycleBinIoHarness.failJournaledQuarantineRemovalPath = undefined
+        recycleBinIoHarness.publicationRename = false
         recycleBinIoHarness.stagingParentPath = undefined
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         recycleBinIoHarness.replaceRestoreParentBeforeStaging = undefined
@@ -946,6 +958,53 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('preserves a quarantine journal when a later staging cleanup fails', async () => {
+        try {
+            const content = 'mixed staging cleanup payload'
+            const filePath = join(workspaceDir, 'mixed-staging-cleanup.txt')
+            await writeFile(filePath, content)
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+                stagingFiles?: Array<{ path: string; dev: string; ino: string; kind: 'source' | 'restore' }>
+            }
+            const firstStage = join(workspaceDir, `.hapi-source-${moved.entry.id}-first.tmp`)
+            const secondStage = join(workspaceDir, `.hapi-source-${moved.entry.id}-second.tmp`)
+            await writeFile(firstStage, content)
+            await writeFile(secondStage, content)
+            const firstStats = await stat(firstStage)
+            const secondStats = await stat(secondStage)
+            metadata.stagingFiles = [
+                { path: firstStage, dev: String(firstStats.dev), ino: String(firstStats.ino), kind: 'source' },
+                { path: secondStage, dev: String(secondStats.dev), ino: String(secondStats.ino), kind: 'source' },
+            ]
+            await writeFile(metadataPath, JSON.stringify(metadata))
+
+            recycleBinIoHarness.journalQuarantine = true
+            recycleBinIoHarness.failJournaledQuarantineRemovalPath = secondStage
+            await expect(manager.list(workspaceDir)).resolves.toMatchObject({ success: true, entries: [moved.entry] })
+
+            const updated = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+                stagingFiles?: Array<{ path: string; quarantine?: { path: string } }>
+            }
+            expect(updated.stagingFiles).toEqual([
+                expect.objectContaining({
+                    path: secondStage,
+                    quarantine: expect.objectContaining({
+                        path: expect.stringContaining('.hapi-recycle-quarantine-'),
+                    }),
+                }),
+            ])
+        } finally {
+            recycleBinIoHarness.journalQuarantine = false
+            recycleBinIoHarness.failJournaledQuarantineRemovalPath = undefined
+            await cleanup()
+        }
+    })
+
     it('retains staging ownership when the staging parent sync fails', async () => {
         try {
             const filePath = join(workspaceDir, 'staging-parent-sync-failure.txt')
@@ -1316,6 +1375,36 @@ describe('RecycleBinManager', () => {
             expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
             await expect(readFile(filePath, 'utf8')).resolves.toBe('restore destination')
         } finally {
+            await cleanup()
+        }
+    })
+
+    it('retains restore staging ownership until publication is durable', async () => {
+        try {
+            const filePath = join(workspaceDir, 'publication-sync-failure.txt')
+            await writeFile(filePath, 'publication durability')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.directorySyncCalls = 0
+            recycleBinIoHarness.rejectDirectorySync = true
+            recycleBinIoHarness.directorySyncFailureAt = 4
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({ success: false, error: 'Simulated recycle-bin directory sync failure' })
+            expect(recycleBinIoHarness.publicationRename).toBe(true)
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('publication durability')
+
+            const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+                stagingFiles?: Array<{ path: string }>
+            }
+            expect(metadata.stagingFiles).toEqual(expect.arrayContaining([
+                expect.objectContaining({ path: expect.stringContaining(`.hapi-restore-${moved.entry.id}-`) }),
+            ]))
+        } finally {
+            recycleBinIoHarness.rejectDirectorySync = false
+            recycleBinIoHarness.directorySyncFailureAt = undefined
             await cleanup()
         }
     })
