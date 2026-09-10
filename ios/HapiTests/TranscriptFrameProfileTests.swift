@@ -7,6 +7,38 @@ import XCTest
 @testable import Hapi
 @testable import HapiProtocol
 
+private struct DisplayProbeResult: Sendable {
+    let seconds: Double
+    let callbacks: Int
+    let callbackFPS: Double
+    let intervalP50Ms: Double
+    let intervalP95Ms: Double
+    let intervalP99Ms: Double
+    let maxIntervalMs: Double
+    let intervalsOver25Ms: Int
+    let intervalsOver50Ms: Int
+    let distancePoints: Double
+    let offsetUpdateMaxMs: Double
+    let intervalsMs: [Double]
+
+    var jsonObject: [String: Any] {
+        [
+            "seconds": seconds,
+            "callbacks": callbacks,
+            "callbackFPS": callbackFPS,
+            "intervalP50Ms": intervalP50Ms,
+            "intervalP95Ms": intervalP95Ms,
+            "intervalP99Ms": intervalP99Ms,
+            "maxIntervalMs": maxIntervalMs,
+            "intervalsOver25Ms": intervalsOver25Ms,
+            "intervalsOver50Ms": intervalsOver50Ms,
+            "distancePoints": distancePoints,
+            "offsetUpdateMaxMs": offsetUpdateMaxMs,
+            "intervalsMs": intervalsMs,
+        ]
+    }
+}
+
 /// Opt-in, real-vsync diagnostic. No FPS assertion: host load affects Simulator.
 /// CADisplayLink cadence is NOT compositor-presented FPS; correlate with Instruments.
 @MainActor
@@ -122,7 +154,7 @@ final class TranscriptFrameProfileTests: XCTestCase {
                 }
                 let result = await probe.run()
                 os_signpost(.end, log: log, name: "Transcript Scroll", signpostID: signpost)
-                var record = result
+                var record = result.jsonObject
                 record["scenario"] = scenario
                 record["repetition"] = repetition
                 record["rows"] = 800
@@ -138,7 +170,7 @@ final class TranscriptFrameProfileTests: XCTestCase {
                 attachment.name = label
                 attachment.lifetime = .keepAlways
                 add(attachment)
-                XCTAssertGreaterThan(result["distancePoints"] as? Double ?? 0, 5_000, "Probe must actually scroll")
+                XCTAssertGreaterThan(result.distancePoints, 5_000, "Probe must actually scroll")
             }
         }
     }
@@ -150,7 +182,7 @@ final class TranscriptFrameProfileTests: XCTestCase {
         let speed: Double
         let update: (Double) -> Void
         var link: CADisplayLink?
-        var continuation: CheckedContinuation<[String: Any], Never>?
+        var continuation: CheckedContinuation<DisplayProbeResult, Never>?
         var began: Double?
         var previous: Double?
         var intervals: [Double] = []
@@ -164,7 +196,7 @@ final class TranscriptFrameProfileTests: XCTestCase {
             self.update = update
         }
 
-        func run() async -> [String: Any] {
+        func run() async -> DisplayProbeResult {
             await withCheckedContinuation { continuation in
                 self.continuation = continuation
                 initialOffset = collection.contentOffset.y
@@ -186,17 +218,20 @@ final class TranscriptFrameProfileTests: XCTestCase {
                 self.link = nil
                 let sorted = intervals.sorted()
                 func percentile(_ p: Double) -> Double { sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * p))] }
-                let result: [String: Any] = [
-                    "seconds": elapsed, "callbacks": intervals.count,
-                    "callbackFPS": Double(intervals.count) / elapsed,
-                    "intervalP50Ms": percentile(0.5), "intervalP95Ms": percentile(0.95),
-                    "intervalP99Ms": percentile(0.99), "maxIntervalMs": sorted.last ?? 0,
-                    "intervalsOver25Ms": intervals.filter { $0 > 25 }.count,
-                    "intervalsOver50Ms": intervals.filter { $0 > 50 }.count,
-                    "distancePoints": collection.contentOffset.y - initialOffset,
-                    "offsetUpdateMaxMs": updateTimes.max() ?? 0,
-                    "intervalsMs": intervals,
-                ]
+                let result = DisplayProbeResult(
+                    seconds: elapsed,
+                    callbacks: intervals.count,
+                    callbackFPS: Double(intervals.count) / elapsed,
+                    intervalP50Ms: percentile(0.5),
+                    intervalP95Ms: percentile(0.95),
+                    intervalP99Ms: percentile(0.99),
+                    maxIntervalMs: sorted.last ?? 0,
+                    intervalsOver25Ms: intervals.filter { $0 > 25 }.count,
+                    intervalsOver50Ms: intervals.filter { $0 > 50 }.count,
+                    distancePoints: Double(collection.contentOffset.y - initialOffset),
+                    offsetUpdateMaxMs: updateTimes.max() ?? 0,
+                    intervalsMs: intervals
+                )
                 continuation?.resume(returning: result)
                 continuation = nil
                 return
