@@ -1357,8 +1357,8 @@ export class RecycleBinManager {
             try {
                 const targetStats = await lstat(target)
                 targetExists = true
-                if (targetStats.isSymbolicLink() || !targetStats.isFile()) {
-                    throw invalidPathError('The restore target is not a regular file')
+                if (targetStats.isSymbolicLink() || (!targetStats.isFile() && !targetStats.isDirectory())) {
+                    throw invalidPathError('The restore target is not a regular file or directory')
                 }
             } catch (error) {
                 if (!isNotFound(error)) throw error

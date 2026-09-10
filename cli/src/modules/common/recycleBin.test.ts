@@ -1260,6 +1260,28 @@ describe('RecycleBinManager', () => {
         }
     })
 
+    it('restores beside an existing directory with the new-name policy', async () => {
+        try {
+            const filePath = join(workspaceDir, 'directory-conflict.txt')
+            await writeFile(filePath, 'original beside directory')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+            await mkdir(filePath)
+
+            const failed = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(failed).toMatchObject({ success: false, code: 'target_exists', targetPath: filePath })
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'new-name')
+            expect(restored.success).toBe(true)
+            if (!restored.success || !restored.restoredPath) throw new Error('directory-conflict restore did not return a path')
+            expect(basename(restored.restoredPath)).toBe('directory-conflict (restored).txt')
+            expect((await stat(filePath)).isDirectory()).toBe(true)
+            await expect(readFile(restored.restoredPath, 'utf8')).resolves.toBe('original beside directory')
+        } finally {
+            await cleanup()
+        }
+    })
+
     it('restores the recorded permission bits after a copy-based restore', async () => {
         try {
             const filePath = join(workspaceDir, 'permissions.txt')
