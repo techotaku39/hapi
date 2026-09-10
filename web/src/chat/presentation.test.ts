@@ -14,6 +14,12 @@ describe('formatDuration', () => {
         expect(formatDuration(537_000)).toBe('8m 57s')
     })
 
+    it('rounds fractional seconds across minute and hour boundaries', () => {
+        expect(formatDuration(119_500)).toBe('2m')
+        expect(formatDuration(3_599_500)).toBe('1h')
+        expect(formatDuration(3_601_000)).toBe('1h 1s')
+    })
+
     it('uses hours and omits zero trailing components', () => {
         expect(formatDuration(3_600_000)).toBe('1h')
         expect(formatDuration(3_661_000)).toBe('1h 1m 1s')
