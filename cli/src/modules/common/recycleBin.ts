@@ -1345,6 +1345,11 @@ export class RecycleBinManager {
             if (entry.expiresAt <= currentTime || !isEntryVisible(entry, scopeRoot, protectedRoot, this.ownerNamespace)) {
                 throw recycleBinEntryNotFound()
             }
+            const recordedStagingIdentity = (path: string): FileIdentity => {
+                const stagingFile = entry.stagingFiles.find((file) => file.path === path)
+                if (!stagingFile) throw new Error('Restore staging identity is unavailable')
+                return { dev: stagingFile.dev, ino: stagingFile.ino }
+            }
             const resolvedTarget = await resolveRestoreTarget(entry.originalPath, scopeRoot, protectedRoot)
             let target = resolvedTarget.path
             let validatedParent = resolvedTarget.parent.path
@@ -1423,12 +1428,19 @@ export class RecycleBinManager {
                 if (!stagedPath || !stagedStats || !stagingParentIdentity) {
                     throw new Error('Restore staging state is unavailable')
                 }
-                const stagedIdentity = await fileIdentityFromPath(stagedPath)
+                const stagedIdentity = recordedStagingIdentity(stagedPath)
                 await secureRename(stagedPath, target, {
                     sourceDirectoryIdentity: stagingParentIdentity,
                     targetDirectoryIdentity: publicationParent.identity,
                     sourceFileIdentity: stagedIdentity,
                 })
+                const publishedIdentity = await fileIdentityFromPath(target)
+                if (
+                    publishedIdentity.dev !== stagedIdentity.dev
+                    || publishedIdentity.ino !== stagedIdentity.ino
+                ) {
+                    throw new Error('Restore staging file changed during publication')
+                }
                 await syncParentDirectory(target)
                 await clearEntryStagingFile(root, entry, stagedPath)
                 await removeEntryUnlocked(root, entry, protectedRoot)
@@ -1438,7 +1450,7 @@ export class RecycleBinManager {
                 if (stagedCreated && stagedPath && stagedStats && stagingParentIdentity) {
                     const restoreStagingPath = stagedPath
                     try {
-                        await secureUnlink(restoreStagingPath, stagingParentIdentity, await fileIdentityFromPath(restoreStagingPath), {
+                        await secureUnlink(restoreStagingPath, stagingParentIdentity, recordedStagingIdentity(restoreStagingPath), {
                             onQuarantinePrepared: (quarantine) =>
                                 recordEntryStagingQuarantine(root, entry, restoreStagingPath, quarantine),
                         })

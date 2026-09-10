@@ -22,6 +22,7 @@ const recycleBinIoHarness = vi.hoisted(() => ({
     journalQuarantine: false,
     failJournaledQuarantineRemovalPath: undefined as string | undefined,
     publicationRename: false,
+    replaceRestoreStageBeforePublish: undefined as { replacementPath: string } | undefined,
     stagingParentPath: undefined as string | undefined,
     replaceRestoreParentOnRealpath: undefined as {
         path: string
@@ -234,6 +235,13 @@ vi.mock('./secureFileOperations', async () => {
                 await fs.rename(sourceReplacement.replacementPath, sourceReplacement.path)
                 return await fs.rename(sourcePath, destinationPath)
             }
+            const restoreReplacement = recycleBinIoHarness.replaceRestoreStageBeforePublish
+            if (restoreReplacement && sourcePath.includes('.hapi-restore-') && !destinationPath.includes('.hapi-source-')) {
+                recycleBinIoHarness.replaceRestoreStageBeforePublish = undefined
+                await fs.writeFile(restoreReplacement.replacementPath, 'unrelated replacement')
+                await fs.rm(sourcePath, { force: true })
+                await fs.rename(restoreReplacement.replacementPath, sourcePath)
+            }
             return await fs.rename(sourcePath, destinationPath)
         }),
         secureUnlink: vi.fn(async (
@@ -329,6 +337,7 @@ describe('RecycleBinManager', () => {
         recycleBinIoHarness.journalQuarantine = false
         recycleBinIoHarness.failJournaledQuarantineRemovalPath = undefined
         recycleBinIoHarness.publicationRename = false
+        recycleBinIoHarness.replaceRestoreStageBeforePublish = undefined
         recycleBinIoHarness.stagingParentPath = undefined
         recycleBinIoHarness.replaceRestoreParentOnRealpath = undefined
         recycleBinIoHarness.replaceRestoreParentBeforeStaging = undefined
@@ -1405,6 +1414,32 @@ describe('RecycleBinManager', () => {
         } finally {
             recycleBinIoHarness.rejectDirectorySync = false
             recycleBinIoHarness.directorySyncFailureAt = undefined
+            await cleanup()
+        }
+    })
+
+    it('rejects a restore staging replacement before publication', async () => {
+        try {
+            const filePath = join(workspaceDir, 'restore-staging-replacement.txt')
+            const replacementPath = join(workspaceDir, 'restore-staging-replacement.new')
+            await writeFile(filePath, 'original restore payload')
+            const manager = createManager(homeDir)
+            const moved = await manager.moveFile(filePath, workspaceDir)
+            if (!moved.success || !moved.entry) throw new Error('move did not return an entry')
+
+            recycleBinIoHarness.replaceRestoreStageBeforePublish = { replacementPath }
+            const restored = await manager.restore(moved.entry.id, workspaceDir, 'fail')
+            expect(restored).toMatchObject({
+                success: false,
+                error: 'Restore staging file changed during publication',
+            })
+            await expect(readFile(filePath, 'utf8')).resolves.toBe('unrelated replacement')
+            await expect(manager.read(moved.entry.id, workspaceDir)).resolves.toMatchObject({
+                success: true,
+                content: Buffer.from('original restore payload').toString('base64'),
+            })
+        } finally {
+            recycleBinIoHarness.replaceRestoreStageBeforePublish = undefined
             await cleanup()
         }
     })
