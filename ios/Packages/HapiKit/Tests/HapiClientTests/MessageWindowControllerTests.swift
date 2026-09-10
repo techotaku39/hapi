@@ -126,6 +126,7 @@ struct MessageWindowControllerTests {
         cachedState.epoch = 1
         cachedState.oldestPosition = MessagePosition(at: 1000, seq: 1)
         cachedState.newestPosition = MessagePosition(at: 1000, seq: 1)
+        cachedState.preferLatestOnActivation = true
         let cachedController = MessageWindowController(
             sessionId: "cached",
             provider: provider,
@@ -134,12 +135,12 @@ struct MessageWindowControllerTests {
         let cachedSync = Task { await cachedController.syncTail() }
         await provider.waitForRequests(2)
         let cachedRequests = await provider.requests
-        guard case .after(_, _, _, _, _, let cachedLimit) = cachedRequests[1] else {
-            Issue.record("cached sync should use the after-cursor path, got \(cachedRequests[1])")
+        guard case .latest(let cachedLimit) = cachedRequests[1] else {
+            Issue.record("cached re-entry should request the latest page, got \(cachedRequests[1])")
             return
         }
         #expect(cachedLimit == MessageWindowConstants.pageSize)
-        await provider.release(afterPage([], epoch: 1, nextAfter: (at: 1000, seq: 1), hasMore: false))
+        await provider.release(latestPage([agentRow(id: "cached-2", seq: 2, at: 2000)], epoch: 1))
         await cachedSync.value
     }
 
