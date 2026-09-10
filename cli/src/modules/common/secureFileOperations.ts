@@ -50,7 +50,12 @@ const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY
     | (constants.O_DIRECTORY ?? 0)
     | (constants.O_NOFOLLOW ?? 0)
 
-function identityFromStats(stats: Stats): FileIdentity {
+export type FileIdentityStats = {
+    dev: number | bigint
+    ino: number | bigint
+}
+
+function identityFromStats(stats: FileIdentityStats): FileIdentity {
     return { dev: String(stats.dev), ino: String(stats.ino) }
 }
 
@@ -95,7 +100,7 @@ function isNotFound(error: unknown): boolean {
 
 async function assertFileIdentity(path: string, expected: FileIdentity | undefined): Promise<void> {
     if (!expected) return
-    const stats = await lstat(path)
+    const stats = await lstat(path, { bigint: true })
     if (!stats.isFile() || stats.isSymbolicLink() || identityKey(identityFromStats(stats)) !== identityKey(expected)) {
         throw new Error('Secure file operation source changed during the operation')
     }
@@ -362,11 +367,12 @@ async function getPosixSymbols() {
     const library = isDarwin ? 'libSystem.B.dylib' : 'libc.so.6'
     const { dlopen } = await loadFfi()
     if (isDarwin) {
+        const statSymbol = process.arch === 'x64' ? 'fstatat64' : 'fstatat'
         const { symbols } = dlopen(library, {
             renameatx_np: { args: ['i32', 'cstring', 'i32', 'cstring', 'u32'], returns: 'i32' },
             unlinkat: { args: ['i32', 'cstring', 'i32'], returns: 'i32' },
             mkdirat: { args: ['i32', 'cstring', 'u32'], returns: 'i32' },
-            fstatat: { args: ['i32', 'cstring', 'ptr', 'i32'], returns: 'i32' },
+            [statSymbol]: { args: ['i32', 'cstring', 'ptr', 'i32'], returns: 'i32' },
             openat: { args: ['i32', 'cstring', 'i32', 'u32'], returns: 'i32' },
             close: { args: ['i32'], returns: 'i32' },
         })
@@ -374,7 +380,7 @@ async function getPosixSymbols() {
             renameNoReplace: symbols.renameatx_np,
             unlinkat: symbols.unlinkat,
             mkdirat: symbols.mkdirat,
-            fstatat: symbols.fstatat,
+            fstatat: symbols[statSymbol],
             openat: symbols.openat,
             close: symbols.close,
             noReplaceFlag: 0x00000004,
@@ -870,6 +876,22 @@ export async function secureRemoveQuarantinedFile(
     }
 }
 
-export function fileIdentityFromStats(stats: Stats): FileIdentity {
+export function fileIdentityFromStats(stats: FileIdentityStats): FileIdentity {
+    return identityFromStats(stats)
+}
+
+export async function fileIdentityFromFileHandle(handle: FileHandle): Promise<FileIdentity> {
+    const stats = await handle.stat({ bigint: true })
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+        throw new Error('Secure file operation source is not a regular file')
+    }
+    return identityFromStats(stats)
+}
+
+export async function fileIdentityFromPath(path: string): Promise<FileIdentity> {
+    const stats = await lstat(path, { bigint: true })
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+        throw new Error('Secure file operation source is not a regular file')
+    }
     return identityFromStats(stats)
 }

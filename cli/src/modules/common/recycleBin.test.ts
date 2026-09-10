@@ -689,12 +689,12 @@ describe('RecycleBinManager', () => {
             for (const name of stagingNames) {
                 const stagingPath = join(workspaceDir, name)
                 await writeFile(stagingPath, 'reconcile staging files')
-                const stats = await stat(stagingPath)
+                const stats = await stat(stagingPath, { bigint: true })
                 ownedStagingFiles.push({ path: stagingPath, dev: String(stats.dev), ino: String(stats.ino) })
             }
             const rollbackStage = join(getRecycleBinRoot(homeDir), moved.entry.id, `.hapi-source-${moved.entry.id}.tmp`)
             await writeFile(rollbackStage, 'reconcile staging files')
-            const rollbackStats = await stat(rollbackStage)
+            const rollbackStats = await stat(rollbackStage, { bigint: true })
             ownedStagingFiles.push({ path: rollbackStage, dev: String(rollbackStats.dev), ino: String(rollbackStats.ino) })
             const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
             const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as { stagingFiles?: typeof ownedStagingFiles }
@@ -726,9 +726,9 @@ describe('RecycleBinManager', () => {
             const restoreStage = join(workspaceDir, `.hapi-restore-${moved.entry.id}.tmp`)
             const collisionContent = 'original contents'
             await writeFile(sourceStage, collisionContent)
-            const sourceStats = await stat(sourceStage)
+            const sourceStats = await stat(sourceStage, { bigint: true })
             await writeFile(restoreStage, collisionContent)
-            const restoreStats = await stat(restoreStage)
+            const restoreStats = await stat(restoreStage, { bigint: true })
             const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
             const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
                 stagingFiles?: Array<{ path: string; dev: string; ino: string }>
@@ -761,9 +761,9 @@ describe('RecycleBinManager', () => {
             const sourceStage = join(workspaceDir, `.hapi-source-${moved.entry.id}.tmp`)
             const restoreStage = join(workspaceDir, `.hapi-restore-${moved.entry.id}.tmp`)
             await writeFile(sourceStage, '')
-            const sourceStats = await stat(sourceStage)
+            const sourceStats = await stat(sourceStage, { bigint: true })
             await writeFile(restoreStage, '')
-            const restoreStats = await stat(restoreStage)
+            const restoreStats = await stat(restoreStage, { bigint: true })
             const metadataPath = join(getRecycleBinRoot(homeDir), moved.entry.id, 'metadata.json')
             const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
                 stagingFiles?: Array<{ path: string; dev: string; ino: string }>
@@ -975,8 +975,8 @@ describe('RecycleBinManager', () => {
             const secondStage = join(workspaceDir, `.hapi-source-${moved.entry.id}-second.tmp`)
             await writeFile(firstStage, content)
             await writeFile(secondStage, content)
-            const firstStats = await stat(firstStage)
-            const secondStats = await stat(secondStage)
+            const firstStats = await stat(firstStage, { bigint: true })
+            const secondStats = await stat(secondStage, { bigint: true })
             metadata.stagingFiles = [
                 { path: firstStage, dev: String(firstStats.dev), ino: String(firstStats.ino), kind: 'source' },
                 { path: secondStage, dev: String(secondStats.dev), ino: String(secondStats.ino), kind: 'source' },

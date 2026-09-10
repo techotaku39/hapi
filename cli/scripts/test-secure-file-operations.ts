@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
     fileIdentityFromStats,
+    fileIdentityFromPath,
     getSecureDirectoryIdentity,
     openSecureStagingFile,
     secureRemoveQuarantinedFile,
@@ -57,7 +58,7 @@ async function testPosix(root: string): Promise<void> {
     const sourcePath = join(workspace, 'source.txt')
     const targetPath = join(workspace, 'target.txt')
     await writeFile(sourcePath, 'secure rename')
-    const sourceIdentity = fileIdentityFromStats(await stat(sourcePath))
+    const sourceIdentity = await fileIdentityFromPath(sourcePath)
 
     await secureRename(sourcePath, targetPath, {
         sourceDirectoryIdentity: directoryIdentity,
@@ -76,7 +77,7 @@ async function testPosix(root: string): Promise<void> {
 
     const callbackFile = join(workspace, 'callback.txt')
     await writeFile(callbackFile, 'callback')
-    const callbackIdentity = fileIdentityFromStats(await stat(callbackFile))
+    const callbackIdentity = await fileIdentityFromPath(callbackFile)
     let prepared: SecureQuarantine | undefined
     await secureUnlink(callbackFile, directoryIdentity, callbackIdentity, {
         onQuarantinePrepared: async (quarantine) => {
@@ -91,7 +92,7 @@ async function testPosix(root: string): Promise<void> {
     const journalDirectory = join(workspace, `.hapi-recycle-quarantine-${randomUUID()}`)
     const journalPath = join(journalDirectory, basename(journalSource))
     await writeFile(journalSource, 'journaled payload')
-    const journalIdentity = fileIdentityFromStats(await stat(journalSource))
+    const journalIdentity = await fileIdentityFromPath(journalSource)
     await mkdir(journalDirectory, { mode: 0o700 })
     await rename(journalSource, journalPath)
     await secureRemoveQuarantinedFile({
@@ -105,7 +106,7 @@ async function testPosix(root: string): Promise<void> {
     const mismatchPath = join(mismatchDirectory, 'mismatch.txt')
     const expectedPath = join(workspace, 'expected.txt')
     await writeFile(expectedPath, 'expected identity')
-    const expectedIdentity = fileIdentityFromStats(await stat(expectedPath))
+    const expectedIdentity = await fileIdentityFromPath(expectedPath)
     await mkdir(mismatchDirectory, { mode: 0o700 })
     await writeFile(mismatchPath, 'replacement must survive')
     await assertRejects(
@@ -121,7 +122,7 @@ async function testPosix(root: string): Promise<void> {
 
     const callbackFailurePath = join(workspace, 'callback-failure.txt')
     await writeFile(callbackFailurePath, 'must remain')
-    const callbackFailureIdentity = fileIdentityFromStats(await stat(callbackFailurePath))
+    const callbackFailureIdentity = await fileIdentityFromPath(callbackFailurePath)
     await assertRejects(
         secureUnlink(callbackFailurePath, directoryIdentity, callbackFailureIdentity, {
             onQuarantinePrepared: async () => {
@@ -145,7 +146,7 @@ async function testWindows(root: string): Promise<void> {
     const sourcePath = join(workspace, 'source.txt')
     const targetPath = join(workspace, 'target.txt')
     await writeFile(sourcePath, 'secure rename')
-    const sourceIdentity = fileIdentityFromStats(await stat(sourcePath))
+    const sourceIdentity = await fileIdentityFromPath(sourcePath)
     await secureRename(sourcePath, targetPath, {
         sourceDirectoryIdentity: directoryIdentity,
         targetDirectoryIdentity: directoryIdentity,
@@ -160,7 +161,7 @@ async function testWindows(root: string): Promise<void> {
     await staging.sync()
     await staging.close()
     assert(await readFile(stagingPath, 'utf8') === 'secure staging', 'Windows secure staging content mismatch')
-    await secureUnlink(stagingPath, directoryIdentity, fileIdentityFromStats(await stat(stagingPath)))
+    await secureUnlink(stagingPath, directoryIdentity, await fileIdentityFromPath(stagingPath))
 
     const readonlyPath = join(workspace, 'readonly.txt')
     await writeFile(readonlyPath, 'readonly')
@@ -175,6 +176,8 @@ async function testWindows(root: string): Promise<void> {
 
 const root = await mkdtemp(join(tmpdir(), 'hapi-secure-file-operations-'))
 try {
+    const exactIdentity = fileIdentityFromStats({ dev: 1n, ino: 9_007_199_254_740_993n })
+    assert(exactIdentity.ino === '9007199254740993', 'bigint file identity lost precision')
     if (process.platform === 'win32') {
         await testWindows(root)
     } else {

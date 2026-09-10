@@ -27,6 +27,13 @@ describe('secureFileOperations', () => {
         await rm(root, { recursive: true, force: true })
     })
 
+    it('preserves bigint file identities without numeric rounding', () => {
+        expect(fileIdentityFromStats({ dev: 1n, ino: 9_007_199_254_740_993n })).toEqual({
+            dev: '1',
+            ino: '9007199254740993',
+        })
+    })
+
     secureIt('renames and unlinks through a pinned directory', async () => {
         const sourcePath = join(root, 'source.txt')
         const targetPath = join(root, 'target.txt')

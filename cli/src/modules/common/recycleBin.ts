@@ -1,12 +1,14 @@
 import { constants, type Stats } from 'node:fs'
 import {
-    fileIdentityFromStats,
+    fileIdentityFromFileHandle,
+    fileIdentityFromPath,
     getSecureDirectoryIdentity,
     openSecureStagingFile,
     secureRemoveQuarantinedFile,
     secureRename,
     secureUnlink,
     type SecureQuarantine,
+    type FileIdentity,
 } from './secureFileOperations'
 import {
     chmod,
@@ -17,6 +19,7 @@ import {
     realpath,
     rename,
     rm,
+    type FileHandle,
 } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
@@ -108,6 +111,7 @@ type ResolvedRoot = {
 type ResolvedFile = {
     path: string
     stats: FileStats
+    identity: FileIdentity
 }
 
 type ResolvedRestoreTarget = {
@@ -238,11 +242,11 @@ async function recordEntryStagingFile(
     root: string,
     entry: StoredRecycleBinEntry,
     path: string,
-    stats: FileStats,
     kind: RecycleBinStagingFile['kind'],
+    identity: FileIdentity,
 ): Promise<void> {
     const stagingFiles = entry.stagingFiles.filter((file) => file.path !== path)
-    stagingFiles.push({ path, dev: String(stats.dev), ino: String(stats.ino), kind })
+    stagingFiles.push({ path, dev: identity.dev, ino: identity.ino, kind })
     await updateEntryStagingFiles(root, entry, stagingFiles)
 }
 
@@ -290,14 +294,14 @@ async function removeStagingFileDurably(
     root: string,
     entry: StoredRecycleBinEntry,
     stagingFile: RecycleBinStagingFile,
-    stats: FileStats,
 ): Promise<void> {
+    const stagingIdentity: FileIdentity = { dev: stagingFile.dev, ino: stagingFile.ino }
     if (stagingFile.quarantine) {
-        await secureRemoveQuarantinedFile(stagingFile.quarantine, fileIdentityFromStats(stats))
+        await secureRemoveQuarantinedFile(stagingFile.quarantine, stagingIdentity)
         return
     }
     const directoryIdentity = await getSecureDirectoryIdentity(dirname(stagingFile.path))
-    await secureUnlink(stagingFile.path, directoryIdentity, fileIdentityFromStats(stats), {
+    await secureUnlink(stagingFile.path, directoryIdentity, stagingIdentity, {
         onQuarantinePrepared: (quarantine) => recordEntryStagingQuarantine(root, entry, stagingFile.path, quarantine),
     })
     await syncStagingParentIfPresent(stagingFile.path)
@@ -311,6 +315,22 @@ async function readRegularFileStats(path: string): Promise<FileStats> {
             throw invalidPathError('Only regular files can be moved to the HAPI Recycle Bin')
         }
         return stats
+    } finally {
+        await handle.close()
+    }
+}
+
+async function readRegularFileSnapshot(path: string): Promise<{ stats: FileStats; identity: FileIdentity }> {
+    const handle = await open(path, READ_FILE_FLAGS)
+    try {
+        const stats = await handle.stat()
+        if (!stats.isFile() || stats.isSymbolicLink()) {
+            throw invalidPathError('Only regular files can be moved to the HAPI Recycle Bin')
+        }
+        return {
+            stats,
+            identity: await fileIdentityFromFileHandle(handle),
+        }
     } finally {
         await handle.close()
     }
@@ -412,9 +432,11 @@ type RecycleBinCopyOptions = {
     /** Classify the persisted staging file for crash recovery. */
     stagingFileKind?: RecycleBinStagingFile['kind']
     /** Persist a staging file identity as soon as it is created. */
-    onStagingFileCreated?: (path: string, stats: FileStats, kind: RecycleBinStagingFile['kind']) => Promise<void>
+    onStagingFileCreated?: (path: string, stats: FileStats, kind: RecycleBinStagingFile['kind'], identity: FileIdentity) => Promise<void>
     /** Remove a staging file identity after its directory entry is gone. */
     onStagingFileRemoved?: (path: string) => Promise<void>
+    /** Exact identity captured from the authorized source before copying. */
+    sourceFileIdentity?: FileIdentity
     /** Persist a POSIX quarantine path before the tracked staging file is detached. */
     onQuarantinePrepared?: (path: string, quarantine: SecureQuarantine) => Promise<void>
 }
@@ -429,11 +451,19 @@ async function copyFileWithoutReplacing(
     let destinationCreated = false
     let sourceRemoved = false
     let createdDestinationStats: FileStats | null = null
+    let createdDestinationIdentity: FileIdentity | null = null
     let finalDestinationStats: FileStats | null = null
     const buffer = Buffer.allocUnsafe(1024 * 1024)
     let offset = 0
     try {
         const openedStats = await sourceHandle.stat()
+        const sourceIdentity = await fileIdentityFromFileHandle(sourceHandle)
+        if (options.sourceFileIdentity && (
+            options.sourceFileIdentity.dev !== sourceIdentity.dev
+            || options.sourceFileIdentity.ino !== sourceIdentity.ino
+        )) {
+            throw new Error('File changed before the recycle-bin operation completed')
+        }
         if (!isSameFileStats(openedStats, expected)) {
             throw new Error('File changed before the recycle-bin operation completed')
         }
@@ -445,8 +475,14 @@ async function copyFileWithoutReplacing(
         destinationCreated = true
         try {
             createdDestinationStats = await destinationHandle.stat()
+            createdDestinationIdentity = await fileIdentityFromFileHandle(destinationHandle as unknown as FileHandle)
             if (options.unlinkSource === false) {
-                await options.onStagingFileCreated?.(destinationPath, createdDestinationStats, options.stagingFileKind ?? 'restore')
+                await options.onStagingFileCreated?.(
+                    destinationPath,
+                    createdDestinationStats,
+                    options.stagingFileKind ?? 'restore',
+                    createdDestinationIdentity,
+                )
             }
             while (offset < openedStats.size) {
                 const result = await sourceHandle.read(buffer, 0, Math.min(buffer.length, openedStats.size - offset), offset)
@@ -481,7 +517,12 @@ async function copyFileWithoutReplacing(
                 throw new Error('Recycle-bin staging id is required when removing the source')
             }
             const detachedPath = join(dirname(sourcePath), `.hapi-source-${options.stageId}.tmp`)
-            await options.onStagingFileCreated?.(detachedPath, openedStats, options.stagingFileKind ?? 'source')
+            await options.onStagingFileCreated?.(
+                detachedPath,
+                openedStats,
+                options.stagingFileKind ?? 'source',
+                sourceIdentity,
+            )
             await options.beforeDetach?.()
             await assertFileUnchanged(sourcePath, openedStats)
             if (!options.sourceDirectoryIdentity) {
@@ -490,7 +531,7 @@ async function copyFileWithoutReplacing(
             await secureRename(sourcePath, detachedPath, {
                 sourceDirectoryIdentity: options.sourceDirectoryIdentity,
                 targetDirectoryIdentity: options.sourceDirectoryIdentity,
-                sourceFileIdentity: fileIdentityFromStats(openedStats),
+                sourceFileIdentity: sourceIdentity,
             })
             sourceRemoved = true
             const detachedStats = await lstat(detachedPath)
@@ -499,7 +540,7 @@ async function copyFileWithoutReplacing(
                     await secureRename(detachedPath, sourcePath, {
                         sourceDirectoryIdentity: options.sourceDirectoryIdentity,
                         targetDirectoryIdentity: options.sourceDirectoryIdentity,
-                        sourceFileIdentity: fileIdentityFromStats(detachedStats),
+                        sourceFileIdentity: await fileIdentityFromPath(detachedPath),
                     })
                     sourceRemoved = false
                     await options.onStagingFileRemoved?.(detachedPath)
@@ -511,10 +552,15 @@ async function copyFileWithoutReplacing(
                 }
                 throw new Error('File changed before the recycle-bin operation completed')
             }
-            await options.onStagingFileCreated?.(detachedPath, detachedStats, options.stagingFileKind ?? 'source')
+            await options.onStagingFileCreated?.(
+                detachedPath,
+                detachedStats,
+                options.stagingFileKind ?? 'source',
+                sourceIdentity,
+            )
             let detachedCleanupSucceeded = false
             try {
-                await secureUnlink(detachedPath, options.sourceDirectoryIdentity, fileIdentityFromStats(detachedStats), {
+                await secureUnlink(detachedPath, options.sourceDirectoryIdentity, sourceIdentity, {
                     onQuarantinePrepared: async (quarantine) => {
                         await options.onQuarantinePrepared?.(detachedPath, quarantine)
                     },
@@ -534,8 +580,8 @@ async function copyFileWithoutReplacing(
         }
     } catch (error) {
         if (destinationCreated && !sourceRemoved) {
-            if (options.destinationDirectoryIdentity && createdDestinationStats) {
-                await secureUnlink(destinationPath, options.destinationDirectoryIdentity, fileIdentityFromStats(createdDestinationStats), {
+            if (options.destinationDirectoryIdentity && createdDestinationStats && createdDestinationIdentity) {
+                await secureUnlink(destinationPath, options.destinationDirectoryIdentity, createdDestinationIdentity, {
                     onQuarantinePrepared: options.unlinkSource === false
                         ? async (quarantine) => {
                             await options.onQuarantinePrepared?.(destinationPath, quarantine)
@@ -670,8 +716,8 @@ async function resolveExistingFile(rawPath: string, root: string, protectedRoot?
         throw invalidPathError('File path is outside the authorized working directory')
     }
 
-    const stats = await readRegularFileStats(canonicalPath)
-    return { path: canonicalPath, stats }
+    const snapshot = await readRegularFileSnapshot(canonicalPath)
+    return { path: canonicalPath, ...snapshot }
 }
 
 async function assertSourcePathAuthorizedBeforeDetach(
@@ -950,15 +996,16 @@ async function reconcileEntryStagingFiles(
         }
         try {
             const stats = await lstat(stagingFile.path)
+            const identityStats = await lstat(stagingFile.path, { bigint: true })
             if (!stats.isFile() || stats.isSymbolicLink()
-                || String(stats.dev) !== stagingFile.dev || String(stats.ino) !== stagingFile.ino) {
+                || String(identityStats.dev) !== stagingFile.dev || String(identityStats.ino) !== stagingFile.ino) {
                 clean = false
                 remainingStagingFiles.push(stagingFile)
                 continue
             }
             if (stagingFile.kind === 'restore') {
                 try {
-                    await removeStagingFileDurably(root, entry, stagingFile, stats)
+                    await removeStagingFileDurably(root, entry, stagingFile)
                     stagingFilesChanged = true
                 } catch (error) {
                     clean = false
@@ -976,13 +1023,19 @@ async function reconcileEntryStagingFiles(
             }
             const contentHash = await hashFile(stagingFile.path)
             const finalStats = await lstat(stagingFile.path)
-            if (contentHash !== entry.contentHash || !isSameFileStats(stats, finalStats)) {
+            const finalIdentityStats = await lstat(stagingFile.path, { bigint: true })
+            if (
+                contentHash !== entry.contentHash
+                || !isSameFileStats(stats, finalStats)
+                || String(finalIdentityStats.dev) !== stagingFile.dev
+                || String(finalIdentityStats.ino) !== stagingFile.ino
+            ) {
                 clean = false
                 remainingStagingFiles.push(stagingFile)
                 continue
             }
             try {
-                await removeStagingFileDurably(root, entry, stagingFile, stats)
+                await removeStagingFileDurably(root, entry, stagingFile)
                 stagingFilesChanged = true
             } catch (error) {
                 clean = false
@@ -1168,8 +1221,9 @@ export class RecycleBinManager {
                 await moveRegularFile(source.path, payloadPath, source.stats, {
                     stageId: entryId,
                     stagingFileKind: 'source',
+                    sourceFileIdentity: source.identity,
                     beforeDetach: () => assertSourcePathAuthorizedBeforeDetach(source.path, source.path, scopeRoot, protectedRoot),
-                    onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
+                    onStagingFileCreated: (path, _stats, kind, identity) => recordEntryStagingFile(root, entry, path, kind, identity),
                     onStagingFileRemoved: (path) => clearEntryStagingFile(root, entry, path),
                     onQuarantinePrepared: (path, quarantine) => recordEntryStagingQuarantine(root, entry, path, quarantine),
                 })
@@ -1184,7 +1238,7 @@ export class RecycleBinManager {
                             stagingFileKind: 'source',
                             beforeDestinationCreate: () => assertRestoreDestinationAuthorized(source.path, scopeRoot, protectedRoot),
                             destinationDirectoryIdentity: rollbackTarget.parent.identity,
-                            onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
+                            onStagingFileCreated: (path, _stats, kind, identity) => recordEntryStagingFile(root, entry, path, kind, identity),
                             onStagingFileRemoved: (path) => clearEntryStagingFile(root, entry, path),
                             onQuarantinePrepared: (path, quarantine) => recordEntryStagingQuarantine(root, entry, path, quarantine),
                         })
@@ -1355,7 +1409,7 @@ export class RecycleBinManager {
                     unlinkSource: false,
                     destinationDirectoryIdentity: stagingParentIdentity,
                     stagingFileKind: 'restore',
-                    onStagingFileCreated: (path, stats, kind) => recordEntryStagingFile(root, entry, path, stats, kind),
+                    onStagingFileCreated: (path, _stats, kind, identity) => recordEntryStagingFile(root, entry, path, kind, identity),
                     onQuarantinePrepared: (path, quarantine) => recordEntryStagingQuarantine(root, entry, path, quarantine),
                 })
                 stagedCreated = true
@@ -1369,10 +1423,11 @@ export class RecycleBinManager {
                 if (!stagedPath || !stagedStats || !stagingParentIdentity) {
                     throw new Error('Restore staging state is unavailable')
                 }
+                const stagedIdentity = await fileIdentityFromPath(stagedPath)
                 await secureRename(stagedPath, target, {
                     sourceDirectoryIdentity: stagingParentIdentity,
                     targetDirectoryIdentity: publicationParent.identity,
-                    sourceFileIdentity: fileIdentityFromStats(stagedStats),
+                    sourceFileIdentity: stagedIdentity,
                 })
                 await syncParentDirectory(target)
                 await clearEntryStagingFile(root, entry, stagedPath)
@@ -1383,7 +1438,7 @@ export class RecycleBinManager {
                 if (stagedCreated && stagedPath && stagedStats && stagingParentIdentity) {
                     const restoreStagingPath = stagedPath
                     try {
-                        await secureUnlink(restoreStagingPath, stagingParentIdentity, fileIdentityFromStats(stagedStats), {
+                        await secureUnlink(restoreStagingPath, stagingParentIdentity, await fileIdentityFromPath(restoreStagingPath), {
                             onQuarantinePrepared: (quarantine) =>
                                 recordEntryStagingQuarantine(root, entry, restoreStagingPath, quarantine),
                         })
