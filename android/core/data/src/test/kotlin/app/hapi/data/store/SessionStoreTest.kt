@@ -65,6 +65,7 @@ class SessionStoreTest {
             )
         )
         store.refresh()
+        assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
 
         server.enqueue(
             MockResponse()
@@ -137,6 +138,7 @@ class SessionStoreTest {
     fun `delayed detail response cannot overwrite a newer full-session event`() = runStoreTest { store, server ->
         server.enqueueJson("""{"session":${fullSessionJson(session("s1", seq = 5, lastAssistantMessageAt = 9_000))}}""")
         store.loadSessionDetail("s1")
+        assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
 
         val newer = session("s1", seq = 6, updatedAt = 11_000, lastAssistantMessageAt = 10_000, metadataVersion = 2)
 
