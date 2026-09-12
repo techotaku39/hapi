@@ -1102,6 +1102,7 @@ export async function loadMessageContext(
         return false
     }
 
+    const requestBaseline = new Map(initial.messages.map((message) => [message.id, message]))
     const generation = initial.olderGeneration + 1
     updateState(sessionId, (previous) => buildState(previous, {
         olderGeneration: generation,
@@ -1145,7 +1146,13 @@ export async function loadMessageContext(
             const preservedLocalMessages = previous.messages.filter((message) => (
                 optimisticMessage(message) || isQueuedForInvocation(message)
             ))
-            const merged = mergeMessages(preservedLocalMessages, retained)
+            const concurrentMessages = previous.messages.filter((message) => (
+                requestBaseline.get(message.id) !== message
+            ))
+            const merged = mergeMessages(
+                mergeMessages(preservedLocalMessages, retained),
+                concurrentMessages
+            )
             const { kept } = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'prepend')
             applied = true
             return buildState(previous, {

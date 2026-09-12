@@ -1501,6 +1501,50 @@ describe('search-target message context', () => {
         })
     })
 
+    it('preserves acknowledgement and SSE updates received during a context request', async () => {
+        const id = sessionId('search-context-concurrent-updates')
+        const queued = makeUserMessage({
+            id: 'queued',
+            seq: 1,
+            localId: 'queued-local',
+            createdAt: 1_000,
+            invokedAt: null,
+            status: 'queued'
+        })
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const concurrent = makeAgentMessage({ id: 'concurrent', seq: 41, at: 41_000 })
+        ingestIncomingMessages(id, [queued])
+
+        const response = deferred<MessageContextResponse>()
+        const getMessageContext = vi.fn(async () => await response.promise)
+        const api = createApi(vi.fn(async () => latestResponse([])))
+        api.getMessageContext = getMessageContext
+
+        const loading = loadMessageContext(api, id, target.id)
+        await vi.waitFor(() => expect(getMessageContext).toHaveBeenCalledWith(id, target.id))
+
+        markMessagesConsumed(id, ['queued-local'], 5_000)
+        ingestIncomingMessages(id, [concurrent])
+
+        response.resolve(contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 41_000,
+            snapshotHeadSeq: 41,
+            targetMessageId: target.id
+        }))
+
+        await expect(loading).resolves.toBe(true)
+
+        expect(getMessageWindowState(id).messages).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: queued.id, status: 'sent', invokedAt: 5_000 }),
+            expect.objectContaining({ id: concurrent.id }),
+            expect.objectContaining({ id: target.id })
+        ]))
+    })
+
     it('does not persist a stale latest-reset boundary for historical contexts', async () => {
         const id = sessionId('search-context-persistence')
         const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
