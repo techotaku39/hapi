@@ -36,6 +36,9 @@ re-runs this suite whenever `android/**` or `shared/fixtures/**` change.
 
 ## Building
 
+Native chat scrolling architecture and acceptance checklist:
+[Native transcript scrolling](../docs/native-chat-scrolling.md).
+
 Requires an Android SDK for `:app`/`:core:data` (set `ANDROID_HOME` or
 `android/local.properties` with `sdk.dir=...`). `:core:protocol` alone needs
 only a JDK.
@@ -56,6 +59,25 @@ only the needed projects:
 
 CI (`.github/workflows/android.yml`) runs the protocol tests and
 `:app:assembleDebug` on every PR touching `android/**` or `shared/fixtures/**`.
+
+## Tool previews
+
+Expanded cards recognize namespaced command/script/patch calls, unwrap common
+nested result envelopes, and keep command exit/status metadata visible. File
+reads use source-language highlighting; web/agent prose uses Markdown. **Source**
+reveals the original input/result, including fields omitted from the preview.
+Mixed text/media results stay JSON instead of dropping non-text blocks.
+
+Question details show recorded selections, custom answers and notes with
+Markdown questions/options. `request_user_input` also restores answers from
+historical results; live permission answers take precedence. Answered cards
+avoid duplicate results, but retain errors and the full input/result/answers
+under **Source**. The pending answer form remains unchanged.
+
+Long inputs and outputs load in 20,000-character parts with **Copy full content**
+and **Load more content**, never silent truncation. Large diffs/Markdown use
+paged source rather than eagerly rendering the entire document. JSON formatting
+and output preparation run off the UI thread.
 
 ## Pairing
 
@@ -97,7 +119,7 @@ drops it from the roster.
 
 - **M0** — this scaffold: modules, version catalog, CI, placeholder screen.
 - **M1** — foundations: wire types + modes catalog; auth + `HapiApi` (MockWebServer-tested); `SseEngine` reconnect state machine + versioned patches (gzip streaming verified); pairing UI + `hapicompanion://bind` deep link.
-- **M2** — read-only chat: chat pipeline port gated on fixtures all-green; session list; `MessageWindowStore` port; Markdown renderer; read-only chat screen (`LazyColumn(reverseLayout = true)`).
+- **M2** — read-only chat: chat pipeline port gated on fixtures all-green; session list; `MessageWindowStore` port; Markdown renderer; read-only chat screen (`LazyColumn` with chronological stable keys).
 - **M3** — interaction: composer (optimistic send/queue/steer/drafts), permission approvals UX, session controls (mode/model/abort/resume/rename/archive), new session, dictation.
   - **B-M3ce landed** — voice dictation: mic button in the composer (`RECORD_AUDIO` requested at first use), `MediaRecorder` → m4a/AAC, provider discovery via `GET /api/voice/transcription/providers` on chat entry (first `standard`-capable provider; mic hidden until available, including unconfigured/unreachable hubs), upload through the multipart `POST /api/voice/transcription`, transcript appended at the composer text with a space separator; `DictationController` is a plain seam over recorder + API, JVM-tested with fakes. Slash commands: typing a lone `/token` opens a dropdown merging the session's `metadata.slashCommands` names with the `GET /slash-commands` RPC list (RPC entries win dedupe; exact → prefix → contains filtering), tap inserts `/name ` (the skills `$` trigger is deferred). Session ops: list long-press sheet and chat top-bar overflow gain Rename (`PATCH /sessions/:id`, optimistic name with roll-forward on failure), Delete (confirm; 409-while-active surfaced), and Reopen for inactive sessions (`POST /reopen`; a superseding id reuses the supersede path — window seed + draft move + navigate-replace; 422 missing-metadata formatted); chat shows an inactive-session bar ("send to resume, or Reopen").
 - **M4** — FCM push (register → notification actions via expedited WorkManager) + files/git viewer, Scratchlist, usage/storage stats.
