@@ -5,7 +5,8 @@ import {
     extractInjectedTurnUuid,
     extractMessageRenderKey,
     extractSearchableMessageText,
-    isLiveStreamSnapshot
+    isLiveStreamSnapshot,
+    unwrapRoleWrappedRecordEnvelope
 } from '@hapi/protocol/messages'
 import { decodeMessageContent } from './contentCodec'
 
@@ -480,7 +481,8 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
 
     const maxSourceCharacters = MAX_INDEXED_MESSAGE_CHARACTERS
     const initialSearchable = extractSearchableMessageText(message.content, { maxSourceCharacters })
-    const parentUuid = extractAssistantParentUuid(message.content)
+    const record = unwrapRoleWrappedRecordEnvelope(message.content)
+    const parentUuid = extractAssistantParentUuid(record?.content)
     const searchable = parentUuid
         && initialSearchable?.role === 'assistant'
         && NO_RESPONSE_REQUESTED_TEXTS.has(initialSearchable.text.trim())

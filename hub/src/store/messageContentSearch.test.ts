@@ -214,6 +214,39 @@ describe('message content search', () => {
             .toHaveLength(1)
     })
 
+    it('does not return an incremental-only injected Claude sentinel hit', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'sentinel-incremental-only')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'incremental-injected-turn',
+                    message: { content: '<system-reminder>...</system-reminder>' }
+                }
+            }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'incremental-injected-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        })
+
+        expect(store.messages.searchContentInSession(
+            'No response requested',
+            'default',
+            session.id
+        )).toEqual({ matches: [], total: 0 })
+    })
+
     it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
         const store = new Store(':memory:')
         const defaultSession = makeSession(store, 'cjk-default')

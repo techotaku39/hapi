@@ -82,6 +82,7 @@ export function useMessages(
             // Avoid fetching the latest 200 messages first: inactive sessions
             // can contain very large tool payloads, and that request can delay
             // the much smaller, targeted context request for a long time.
+            setMessageViewMode(sessionId, 'history')
             setInitialSyncReadyKey(sessionId)
             return () => {
                 setMessageWindowTargetLock(sessionId, false)
