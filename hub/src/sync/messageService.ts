@@ -17,6 +17,7 @@ import type { MessageDeliveryMode, MessagesResponse, QueuedStateResponse } from 
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
 import type { Store, CancelQueuedMessageResult } from '../store'
+import { isScratchlistAttachmentPathForSession } from '../scratchlistAttachments/storage'
 import { EventPublisher } from './eventPublisher'
 
 type StoredMessageForDelivery = ReturnType<Store['messages']['getMessages']>[number]
@@ -330,6 +331,8 @@ export class MessageService {
             // scheduled acceptance and explicit draft deletion. A snapshot
             // taken before the lock could delete a blob for a newly accepted
             // scheduled row.
+            const owner = this.store.sessions.getSession(sessionId)
+            if (!owner) return
             const unique = new Map(attachments.map((attachment) => [attachment.path, attachment]))
             const scratchlistPaths = new Set(
                 this.store.scratchlist
@@ -337,7 +340,12 @@ export class MessageService {
                     .flatMap((entry) => entry.attachments.map((attachment) => attachment.path))
             )
             const deletable = [...unique.values()].filter(
-                (attachment) => !this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)
+                (attachment) => isScratchlistAttachmentPathForSession(
+                    attachment.path,
+                    owner.namespace,
+                    sessionId,
+                )
+                    && !this.store.messages.hasUninvokedAttachmentReference(sessionId, attachment.path)
                     && !scratchlistPaths.has(attachment.path)
             )
             if (deletable.length === 0) return
@@ -1338,6 +1346,8 @@ export class MessageService {
                     this.materializingScheduledMessageKeys.delete(materializingKey)
                 }
             }
+            if (this.store.isOpenCodeClearDeliveryGated(sessionId)) break
+            if (this.store.messages.lookupQueuedMessage(sessionId, msg.id).status !== 'queued') continue
             const update = {
                 id: msg.id,
                 seq: msg.seq,
@@ -1485,6 +1495,9 @@ export class MessageService {
                     this.materializingScheduledMessageKeys.delete(materializingKey)
                 }
             }
+
+            if (this.store.isOpenCodeClearDeliveryGated(sessionId)) break
+            if (this.store.messages.lookupQueuedMessage(sessionId, msg.id).status !== 'queued') continue
 
             const localId = msg.localId
             if (typeof localId === 'string' && !this.scheduledMatureNotifiedLocalIds.has(localId)) {
