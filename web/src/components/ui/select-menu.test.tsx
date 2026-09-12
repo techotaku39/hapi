@@ -56,4 +56,21 @@ describe('SelectMenu', () => {
         expect(screen.getByRole('option', { name: 'Kimi Coding Plan' })).toHaveAttribute('tabindex', '-1')
         expect(screen.getByRole('option', { name: 'Custom JSON paths' })).toHaveAttribute('tabindex', '0')
     })
+
+    it('does not steal focus when the menu is dismissed outside', () => {
+        const { container } = render(
+            <div>
+                <SelectMenu aria-label="Template" value="generic" options={options} onChange={vi.fn()} />
+                <input aria-label="Editor" />
+            </div>
+        )
+
+        const trigger = screen.getByRole('combobox', { name: 'Template' })
+        const editor = screen.getByRole('textbox', { name: 'Editor' })
+        fireEvent.click(trigger)
+        editor.focus()
+        fireEvent.pointerDown(editor)
+        fireEvent.click(editor)
+        expect(container.ownerDocument.activeElement).toBe(editor)
+    })
 })

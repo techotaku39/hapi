@@ -182,10 +182,7 @@ export function SelectMenu(props: SelectMenuProps) {
                         sideOffset={4}
                         collisionPadding={8}
                         onOpenAutoFocus={(event) => event.preventDefault()}
-                        onCloseAutoFocus={(event) => {
-                            event.preventDefault()
-                            triggerRef.current?.focus()
-                        }}
+                        onCloseAutoFocus={(event) => event.preventDefault()}
                         className="z-50 max-h-64 w-[var(--radix-popover-trigger-width)] min-w-[12rem] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg outline-none"
                     >
                         <div id={listboxId} role="listbox" aria-label={props['aria-label']}>
