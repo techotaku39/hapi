@@ -49,6 +49,25 @@ hapi resume <session-id>
 
 `hapi resume` lists resumable sessions for the current machine. `hapi resume <session-id>` hands off an active remote session and opens the same HAPI session in the local terminal.
 
+### Answer local Claude prompts from HAPI
+
+In a local Claude session started by `hapi`, main-session `AskUserQuestion`
+questions and tool permission prompts can also be answered from the web app.
+The terminal dialog stays usable; answering does not restart Claude or switch
+the session to remote mode. Claude arbitrates terminal/web races, and HAPI
+records the native result rather than assuming the web response won.
+
+The bridge uses Claude's `PermissionRequest` hook, not a blocking
+`PreToolUse` approval gate. An unanswered remote request expires after one
+hour; expiration, disconnection, or bridge failure leaves the native prompt
+available. Local answers/cancellation, session changes, and mode switches
+withdraw stale web controls. Cancellation detection may wait for the next
+transcript scan.
+
+Verified with Claude Code **2.1.221**. Background subagents, `ExitPlanMode`,
+and requests that cannot be unambiguously matched to a native tool call remain
+terminal-only. Earlier Claude versions have not been verified.
+
 ### Authentication
 
 - `hapi auth status` - Show authentication configuration and token source.

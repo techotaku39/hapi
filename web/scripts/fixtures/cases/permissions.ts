@@ -1,6 +1,24 @@
 import type { FixtureCase } from '../fixtureTypes'
 import { T0, wireMessage } from './support'
 
+const localQuestionInput = {
+    questions: [{ question: 'Which database?', header: 'Database', multiSelect: false, options: [
+        { label: 'SQLite', description: 'Local file' }, { label: 'Postgres', description: 'Server' }
+    ] }]
+}
+const localQuestionMessages = [
+    wireMessage({ id: 'local-user', seq: 1, createdAt: T0, content: {
+        role: 'user', content: { type: 'text', text: 'Choose a database.' }
+    } }),
+    wireMessage({ id: 'local-tool-call', seq: 2, createdAt: T0 + 1_000, content: {
+        role: 'agent', content: { type: 'output', data: {
+            type: 'assistant', uuid: 'local-tool-call', parentUuid: null,
+            message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_local_question', name: 'AskUserQuestion', input: localQuestionInput }] }
+        } }
+    } })
+]
+const localRequest = { tool: 'AskUserQuestion', toolCallId: 'toolu_local_question', arguments: localQuestionInput, createdAt: T0 + 1_100 }
+
 /**
  * Permission requests are NOT messages: they live in session.agentState
  * (requests → completedRequests). A pending request whose tool_use message is
@@ -10,6 +28,32 @@ import { T0, wireMessage } from './support'
  * the oldest loaded message (web/src/chat/reducer.ts).
  */
 export const permissionCases: FixtureCase[] = [
+    {
+        name: 'permission-local-question-pending',
+        description: 'A local permission has an independent request ID: attach to the existing native toolCallId, but submit answers using permission.id. Do not synthesize a duplicate card.',
+        messages: localQuestionMessages,
+        agentState: { controlledByUser: true, requests: { 'claude-local:reply-1': localRequest } }
+    },
+    {
+        name: 'permission-local-question-synthesized',
+        description: 'Before the native tool_use arrives, synthesize one local question card keyed by toolCallId, with the independent reply ID preserved.',
+        messages: localQuestionMessages.slice(0, 1),
+        agentState: { controlledByUser: true, requests: { 'claude-local:reply-1': localRequest } }
+    },
+    {
+        name: 'permission-local-question-completed',
+        description: 'Native confirmation completes the same local question card with actual answers; permission.id remains the original reply ID, not the tool_use ID.',
+        messages: [...localQuestionMessages, wireMessage({ id: 'local-result', seq: 3, createdAt: T0 + 5_000, content: {
+            role: 'agent', content: { type: 'output', data: {
+                type: 'user', uuid: 'local-result', parentUuid: 'local-tool-call',
+                toolUseResult: { ...localQuestionInput, answers: { 'Which database?': 'Postgres' } },
+                message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_local_question', content: 'The user answered: "Which database?"="Postgres".' }] }
+            } }
+        } })],
+        agentState: { controlledByUser: true, requests: {}, completedRequests: {
+            'claude-local:reply-1': { ...localRequest, status: 'approved', completedAt: T0 + 4_900, answers: { '0': ['Postgres'] } }
+        } }
+    },
     {
         name: 'permission-synthesized-pending',
         description: 'A pending agentState request with no matching tool_use in the (older) message window synthesizes a pending tool-call block: state pending, permission.status pending, input from request.arguments.',
