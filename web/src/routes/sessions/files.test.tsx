@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
+import { clearDraft, getDraft } from '@/lib/composer-drafts'
 import { encodeBase64 } from '@/lib/utils'
 import FilesPage from './files'
 
@@ -19,8 +20,13 @@ const mocks = vi.hoisted(() => ({
     sessionHeaderProps: null as null | {
         onSessionReopened?: (newSessionId: string) => void | Promise<void>
     },
-    gitError: null as string | null,
     search: {} as { tab?: 'changes' | 'directories'; query?: string },
+    gitStatus: {
+        status: null as null | Record<string, unknown>,
+        error: null as null | string,
+        isLoading: false,
+        refetch: vi.fn(),
+    },
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -51,12 +57,7 @@ vi.mock('@/hooks/queries/useSession', () => ({
 }))
 
 vi.mock('@/hooks/queries/useGitStatusFiles', () => ({
-    useGitStatusFiles: () => ({
-        status: null,
-        error: mocks.gitError,
-        isLoading: false,
-        refetch: vi.fn(),
-    }),
+    useGitStatusFiles: () => mocks.gitStatus,
 }))
 
 vi.mock('@/hooks/queries/useSessionFileSearch', () => ({
@@ -103,11 +104,15 @@ function renderFilesPage() {
     )
 }
 
+// Most tests do not render git rows; only the changes-row suite installs a status.
+beforeEach(() => {
+    mocks.gitStatus = { status: null, error: null, isLoading: false, refetch: vi.fn() }
+})
+
 describe('FilesPage search navigation', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.sessionId = 'session-1'
-        mocks.gitError = null
         mocks.search = { tab: 'directories', query: '感' }
         window.localStorage.clear()
         window.sessionStorage.clear()
@@ -222,7 +227,6 @@ describe('FilesPage reopen draft transfer', () => {
         vi.clearAllMocks()
         mocks.sessionId = 'session-1'
         mocks.sessionHeaderProps = null
-        mocks.gitError = null
         mocks.search = { tab: 'directories', query: '感' }
         window.localStorage.clear()
         window.sessionStorage.clear()
@@ -262,7 +266,7 @@ describe('FilesPage reopen draft transfer', () => {
 describe('FilesPage change errors', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mocks.gitError = null
+        mocks.gitStatus = { status: null, error: null, isLoading: false, refetch: vi.fn() }
         mocks.search = { tab: 'changes', query: undefined }
         window.localStorage.clear()
         window.sessionStorage.clear()
@@ -271,7 +275,7 @@ describe('FilesPage change errors', () => {
     it('collapses long Git status errors until clicked', () => {
         const tail = 'FULL GIT STATUS ERROR TAIL'
         const longError = `Command failed: git status --porcelain=v2 --branch --untracked-files=all ${'diagnostic '.repeat(30)}${tail}`
-        mocks.gitError = longError
+        mocks.gitStatus.error = longError
 
         renderFilesPage()
 
@@ -287,5 +291,128 @@ describe('FilesPage change errors', () => {
         fireEvent.click(errorToggle)
         expect(errorToggle).toHaveAttribute('aria-expanded', 'false')
         expect(errorToggle).not.toHaveTextContent(tail)
+    })
+})
+
+describe('FilesPage file context menu', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.sessionId = 'session-1'
+        mocks.search = { tab: 'directories', query: '感' }
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+        clearDraft('session-1')
+    })
+
+    it('adds a file to the composer draft and navigates back to the chat', () => {
+        renderFilesPage()
+
+        fireEvent.contextMenu(screen.getByRole('button', { name: /感言\.ts/ }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Add to composer' }))
+
+        expect(getDraft('session-1')).toBe('`src/感言.ts`')
+        expect(mocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId',
+            params: { sessionId: 'session-1' },
+            resetScroll: false,
+        })
+    })
+
+    it('copies the absolute path resolved from the session workspace', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined)
+        Object.defineProperty(navigator, 'clipboard', {
+            value: { writeText },
+            configurable: true,
+        })
+
+        renderFilesPage()
+
+        fireEvent.contextMenu(screen.getByRole('button', { name: /感言\.ts/ }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Copy absolute path' }))
+
+        await vi.waitFor(() => {
+            expect(writeText).toHaveBeenCalledWith('/workspace/project/src/感言.ts')
+        })
+    })
+})
+
+describe('FilesPage changes-row context menu', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.sessionId = 'session-1'
+        mocks.search = {}
+        mocks.gitStatus = {
+            status: {
+                stagedFiles: [],
+                unstagedFiles: [{
+                    fileName: 'README.md',
+                    filePath: '',
+                    fullPath: 'README.md',
+                    status: 'modified',
+                    isStaged: false,
+                    linesAdded: 2,
+                    linesRemoved: 1,
+                }],
+                branch: 'main',
+                totalStaged: 0,
+                totalUnstaged: 1,
+            },
+            error: null,
+            isLoading: false,
+            refetch: vi.fn(),
+        }
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+        clearDraft('session-1')
+    })
+
+    it('opens the menu on a git change row and adds it to the composer', () => {
+        renderFilesPage()
+
+        fireEvent.contextMenu(screen.getByText('README.md').closest('button')!)
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Add to composer' }))
+
+        expect(getDraft('session-1')).toBe('`README.md`')
+        expect(mocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId',
+            params: { sessionId: 'session-1' },
+            resetScroll: false,
+        })
+    })
+
+    it('copies the absolute path for a git change row', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined)
+        Object.defineProperty(navigator, 'clipboard', {
+            value: { writeText },
+            configurable: true,
+        })
+
+        renderFilesPage()
+
+        fireEvent.contextMenu(screen.getByText('README.md').closest('button')!)
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Copy absolute path' }))
+
+        await vi.waitFor(() => {
+            expect(writeText).toHaveBeenCalledWith('/workspace/project/README.md')
+        })
+    })
+
+    it('opens the menu on touch long-press and does not navigate on release', () => {
+        vi.useFakeTimers()
+        try {
+            renderFilesPage()
+            const row = screen.getByText('README.md').closest('button')!
+
+            fireEvent.touchStart(row, { touches: [{ clientX: 120, clientY: 240 }] })
+            act(() => {
+                vi.advanceTimersByTime(600)
+            })
+            expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeInTheDocument()
+
+            fireEvent.touchEnd(row, { changedTouches: [{ clientX: 120, clientY: 240 }] })
+            expect(mocks.navigate).not.toHaveBeenCalled()
+        } finally {
+            vi.useRealTimers()
+        }
     })
 })
