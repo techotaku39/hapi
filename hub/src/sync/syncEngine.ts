@@ -15,7 +15,7 @@ import {
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageContextResponse, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
-import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
 import type { Store, CancelQueuedMessageResult } from '../store'
@@ -217,6 +217,16 @@ export class SyncEngine {
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
+        this.eventPublisher.subscribe((event) => {
+            if (event.type === 'message-received') {
+                if (!this.sessionCache.getSession(event.sessionId)?.hasConversationContent
+                    && hasConversationMessageContent(event.message.content)) {
+                    this.sessionCache.refreshConversationContent(event.sessionId)
+                }
+            } else if (event.type === 'message-cancelled' || event.type === 'messages-invalidated') {
+                this.sessionCache.refreshConversationContent(event.sessionId)
+            }
+        })
         this.machineCache = new MachineCache(store, this.eventPublisher)
         this.messageService = new MessageService(
             store,
@@ -2075,9 +2085,11 @@ export class SyncEngine {
         const operation = access.session.metadata?.opencodeClearOperation
         if (!operation) return { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
         if (operation.state === 'aborted') {
-            return replacementSessionId === operation.replacementSessionId
-                ? { type: 'success', sessionId }
-                : { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
+            if (replacementSessionId !== operation.replacementSessionId) {
+                return { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
+            }
+            this.sessionCache.refreshConversationContent(operation.replacementSessionId)
+            return { type: 'success', sessionId }
         }
         const required = { replacementSessionId, state: expectedState, requireInactive }
         for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2086,6 +2098,7 @@ export class SyncEngine {
             const current = latest.metadata.opencodeClearOperation
             if (!current) break
             if (current.replacementSessionId === required.replacementSessionId && current.state === 'aborted') {
+                this.sessionCache.refreshConversationContent(current.replacementSessionId)
                 return { type: 'success', sessionId }
             }
             if ((required.requireInactive && latest.active)
@@ -2097,6 +2110,7 @@ export class SyncEngine {
             }, latest.metadataVersion, namespace, required)
             if (result.result === 'success') {
                 this.sessionCache.refreshSession(sessionId)
+                this.sessionCache.refreshConversationContent(current.replacementSessionId)
                 return { type: 'success', sessionId }
             }
             if (result.result !== 'version-mismatch') break
@@ -3944,8 +3958,11 @@ export class SyncEngine {
         return await this.rpcGateway.listSkills(sessionId, flavor)
     }
 
-    async listAgyModelsForMachine(machineId: string): Promise<RpcListAgyModelsResponse> {
-        return await this.rpcGateway.listAgyModelsForMachine(machineId)
+    async listAgyModelsForMachine(
+        machineId: string,
+        options?: { refresh?: boolean }
+    ): Promise<RpcListAgyModelsResponse> {
+        return await this.rpcGateway.listAgyModelsForMachine(machineId, options)
     }
 
     async listPiModelsForMachine(machineId: string): Promise<RpcListPiModelsResponse> {
