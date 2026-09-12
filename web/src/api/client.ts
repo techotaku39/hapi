@@ -48,6 +48,7 @@ import type {
     MachineListDirectoryResponse,
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
+    OpencodeModelVariantsResponse,
     OpencodeReasoningEffortResponse,
     PiModelsResponse,
     QueuedStateResponse,
@@ -857,9 +858,14 @@ export class ApiClient {
         })
     }
 
-    async getMachineAgyModels(machineId: string): Promise<AgyModelsResponse> {
+    async getMachineAgyModels(
+        machineId: string,
+        options?: { refresh?: boolean }
+    ): Promise<AgyModelsResponse> {
+        // Without `refresh` the machine may answer from its cached catalog.
+        const query = options?.refresh ? '?refresh=true' : ''
         return await this.request<AgyModelsResponse>(
-            `/api/machines/${encodeURIComponent(machineId)}/agy-models`
+            `/api/machines/${encodeURIComponent(machineId)}/agy-models${query}`
         )
     }
 
@@ -916,6 +922,12 @@ export class ApiClient {
     async getMachineOpencodeModelsForCwd(machineId: string, cwd: string): Promise<OpencodeModelsResponse> {
         return await this.request<OpencodeModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/opencode-models?cwd=${encodeURIComponent(cwd)}`
+        )
+    }
+
+    async getMachineOpencodeModelVariants(machineId: string, cwd?: string | null): Promise<OpencodeModelVariantsResponse> {
+        return await this.request<OpencodeModelVariantsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/opencode-model-variants${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`
         )
     }
 
