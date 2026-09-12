@@ -16,6 +16,7 @@ import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { getAppSseResyncQueryKeys } from '@/lib/sseResync'
+import { refreshAllAgyCatalogs } from '@/lib/agyCatalogAnnouncement'
 import { AppContextProvider } from '@/lib/app-context'
 import { clearMessageWindow, rewindMessageWindow, syncTailMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -273,7 +274,10 @@ function AppInner() {
         } else {
             startSync()
         }
-        const invalidations = invalidationKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey }))
+        const invalidations = [
+            ...invalidationKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+            refreshAllAgyCatalogs(queryClient)
+        ]
         const refreshMessages = (selectedSessionId && api)
             ? syncTailMessages(api, selectedSessionId)
             : Promise.resolve()
