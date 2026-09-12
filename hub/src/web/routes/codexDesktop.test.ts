@@ -387,7 +387,7 @@ describe('Codex Desktop import routes', () => {
     it('imports normal response_item chat messages', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-test-'))
         const store = new Store(':memory:')
-        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        const engine = new SyncEngineClass(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
         const codexSessionId = '11111111-1111-4111-8111-111111111111'
         process.env.CODEX_HOME = codexHome
 
