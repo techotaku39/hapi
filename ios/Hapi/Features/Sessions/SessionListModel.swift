@@ -256,7 +256,7 @@ final class SessionListModel {
         guard let summary = sessionStore.sessions.first(where: { $0.id == sessionId }) else {
             return
         }
-        session.lastSeenStore.markSeen(
+        lastSeenStore.markSeen(
             sessionId: sessionId,
             seenAt: LastSeenStore.seenTimestamp(summary)
         )

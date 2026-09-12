@@ -33,7 +33,7 @@ class LastSeenStoreTest {
         store.initializeBaseline("hub-a", listOf(pending))
         store.markUnread("legacy", 6_000)
         assertEquals(5_999, store.lastSeenAt("legacy"))
-        store.markUnread("legacy", 5_500)
+        store.markUnread("legacy", 6_500)
         assertEquals(5_999, store.lastSeenAt("legacy"))
 
         val complete = pending.copy(
