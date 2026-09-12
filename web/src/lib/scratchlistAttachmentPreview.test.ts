@@ -41,6 +41,19 @@ describe('scratchlist attachment preview cache', () => {
         expect(getScratchlistAttachmentPreview(item)).toBeUndefined()
     })
 
+    it('keeps the first URL when duplicate preview downloads finish', () => {
+        const revoke = vi.fn()
+        Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke })
+        const item = attachment('duplicate-download')
+
+        expect(rememberScratchlistAttachmentObjectUrl(item, 'blob:first')).toBe('blob:first')
+        expect(rememberScratchlistAttachmentObjectUrl(item, 'blob:second')).toBe('blob:first')
+
+        expect(getScratchlistAttachmentPreview(item)).toBe('blob:first')
+        expect(revoke).not.toHaveBeenCalledWith('blob:first')
+        expect(revoke).toHaveBeenCalledWith('blob:second')
+    })
+
     it('bounds the cache and evicts the least recently used preview', () => {
         const revoke = vi.fn()
         Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke })

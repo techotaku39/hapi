@@ -102,11 +102,9 @@ export function rememberScratchlistAttachmentObjectUrl(
 ): string {
     const cached = previews.get(attachment.id)
     if (cached?.signature === signature(attachment)) {
-        if (cached.kind === 'data') {
-            if (typeof URL !== 'undefined') URL.revokeObjectURL(objectUrl)
-            return cached.src
-        }
         if (cached.src === objectUrl) return cached.src
+        if (typeof URL !== 'undefined') URL.revokeObjectURL(objectUrl)
+        return cached.src
     }
     return putPreview(attachment, objectUrl, 'object-url')
 }
