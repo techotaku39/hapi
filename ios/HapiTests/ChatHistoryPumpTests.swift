@@ -48,6 +48,52 @@ final class ChatHistoryPumpTests: XCTestCase {
         XCTAssertEqual(model.historyPaging.phase, .awaitingLayout(1))
     }
 
+    func testInspectorSurfaceKeepsLivePipelineAcrossNavigationHandoff() async throws {
+        let performer = HistoryPumpHTTP()
+        let url = "http://127.0.0.1:1/tool-inspector-\(UUID().uuidString)"
+        let credentials = InMemoryCredentialStore()
+        let payload = Data(#"{"uid":1,"exp":4102444800,"ns":"test"}"#.utf8).base64EncodedString()
+        try credentials.store(HubCredentials(hubUrl: "http://127.0.0.1:1", accessToken: "test", jwt: "e30.\(payload).test"))
+        let hub = try XCTUnwrap(HubSession(hubUrl: url, credentialStore: credentials, performer: performer))
+        let model = ChatModel(session: hub, sessionId: "inspection")
+        defer { model.stop(); hub.shutdown() }
+        model.retainSurface("chat")
+        try await eventually { !model.blocks.isEmpty && !model.isSyncingTail }
+        let controller = await hub.windows.open(sessionId: "inspection")
+        await controller.syncTail(ensureAfterCurrent: true)
+        let initialRevision = await controller.state.tailRevision
+        model.beginContentInspection()
+        model.retainSurface("inspector:chat")
+        model.retainSurface("inspector:chat") // Idempotent appearance.
+        model.releaseSurface("chat")
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(model.visibleSurfaces, ["inspector:chat"])
+        await performer.enableTailUpdate()
+        await controller.syncTail(ensureAfterCurrent: true)
+        try await eventually { model.tailRevision > initialRevision }
+        XCTAssertFalse(model.followsTail)
+        model.retainSurface("process:task")
+        model.releaseSurface("inspector:chat")
+        XCTAssertEqual(model.visibleSurfaces, ["process:task"])
+        model.retainSurface("chat")
+        model.releaseSurface("process:task")
+        XCTAssertEqual(model.visibleSurfaces, ["chat"])
+        // Reading a full user log follows the same navigation lease and
+        // must suppress hidden paging/tail-follow reports until dismissal.
+        model.beginContentInspection()
+        model.retainSurface("message:chat")
+        XCTAssertTrue(model.isInspectingContent)
+        model.readingViewportChanged(followsTail: true, needsOlder: true)
+        XCTAssertFalse(model.followsTail)
+        try await Task.sleep(for: .milliseconds(30))
+        let olderRequests = await performer.beforeRequests
+        XCTAssertEqual(olderRequests, 0)
+        model.releaseSurface("message:chat")
+        XCTAssertFalse(model.isInspectingContent)
+        XCTAssertFalse(model.followsTail, "Closing the reader must not silently return to latest")
+        model.releaseSurface("chat")
+    }
+
     private func eventually(file: StaticString = #filePath, line: UInt = #line, _ condition: () async -> Bool) async throws {
         for _ in 0..<200 {
             if await condition() { return }

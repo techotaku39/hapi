@@ -4,9 +4,10 @@ import HapiUI
 import SwiftUI
 
 /// Presentation-only flattening; protocol groups and their semantics stay intact.
-private enum TranscriptRow: Identifiable, Equatable {
+enum TranscriptRow: Identifiable, Equatable {
     case history(ChatHistoryPagingState.Phase, Bool)
     case message(VisibleChatBlock)
+    case groupedTool(ToolCallBlock, groupID: String, isLast: Bool)
     case group(ToolGroupBlock, Bool)
 
     static let historyID = "chat-history-control"
@@ -14,6 +15,7 @@ private enum TranscriptRow: Identifiable, Equatable {
         switch self {
         case .history: .history
         case .group: .tool
+        case .groupedTool: .tool
         case .message(.toolGroup): .tool
         case .message(.block(.userText)): .user
         case .message(.block(.toolCall)): .tool
@@ -25,7 +27,21 @@ private enum TranscriptRow: Identifiable, Equatable {
         case .history: Self.historyID
         case .message(let block): block.stableId
         case .group(let group, _): group.id
+        case .groupedTool(let block, _, _): block.id
         }
+    }
+
+    var groupID: String? {
+        switch self {
+        case .group(let block, _): block.id
+        case .groupedTool(_, let groupID, _): groupID
+        default: nil
+        }
+    }
+
+    func spacing(after previous: TranscriptRow?) -> CGFloat {
+        if case .groupedTool = self, let previous, previous.groupID == groupID { return 0 }
+        return role.spacing(after: previous?.role)
     }
 }
 
@@ -39,7 +55,9 @@ struct ChatTranscriptView: View {
                 let expanded = model.expandedToolGroups[group.id] ?? group.defaultOpen
                 rows.append(.group(group, expanded))
                 if expanded {
-                    rows.append(contentsOf: group.tools.map { .message(.block(.toolCall($0))) })
+                    rows.append(contentsOf: group.tools.map {
+                        .groupedTool($0, groupID: group.id, isLast: $0.id == group.tools.last?.id)
+                    })
                 }
             } else {
                 rows.append(.message(block))
@@ -54,11 +72,12 @@ struct ChatTranscriptView: View {
             historyVersion: model.historyVersion,
             jumpToken: model.jumpToLatestToken,
             historyControlID: TranscriptRow.historyID,
+            isInspectionPresented: model.isInspectingContent,
             onViewport: { viewport in
                 model.readingViewportChanged(followsTail: viewport.followsTail, needsOlder: viewport.needsOlder)
             },
             onLayout: { version, progress in model.historyLaidOut(version: version, madeProgress: progress) },
-            spacingBefore: { previous, row in row.role.spacing(after: previous?.role) }
+            spacingBefore: { previous, row in row.spacing(after: previous) }
         ) { row in
             // The list bridges the current environment into its hosting roots.
             AnyView(rowView(row))
@@ -112,6 +131,8 @@ struct ChatTranscriptView: View {
             .accessibilityIdentifier("chat-history")
         case .message(let block):
             ChatBlockCard(block: block, basePath: model.basePath)
+        case .groupedTool(let block, _, let isLast):
+            ToolGroupChildRow(block: block, basePath: model.basePath, isLast: isLast)
         case .group(let group, let expanded):
             ToolGroupBlockView(
                 block: group,

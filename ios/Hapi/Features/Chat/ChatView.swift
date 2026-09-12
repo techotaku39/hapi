@@ -145,6 +145,9 @@ struct ChatView: View {
                 interactor: model.interactor
             )
         }
+        .toolPresentations(model: model, session: session, owner: "chat") { path in
+            viewerRoute = FileViewerRoute(sessionId: sessionId, path: path, mode: .file)
+        }
         .environment(\.chatMedia, model.imageLoader)
         .environment(\.chatPresentationState, model.presentationState)
         .environment(\.hapiMarkdownCache, model.markdownCache)
@@ -153,15 +156,6 @@ struct ChatView: View {
             if let superseding = model.supersededSessionId {
                 onNavigateToSession?(superseding)
             }
-        }
-        .onAppear {
-            model.start()
-        }
-        .onDisappear {
-            // Closed, or a files/viewer push covered the chat — either way
-            // the pipe parks; start() rebuilds fresh wiring at the saved
-            // cursor when the screen returns.
-            model.stop()
         }
     }
 

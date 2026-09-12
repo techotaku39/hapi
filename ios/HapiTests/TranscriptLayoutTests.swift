@@ -17,6 +17,8 @@ final class TranscriptLayoutTests: XCTestCase {
     final class Driver {
         var rows: [Row]
         var version = 0
+        var inspecting = false
+        var jump = 0
         var layouts: [Int] = []
         var viewport: TranscriptViewport?
         let presentation = ChatPresentationState()
@@ -27,8 +29,9 @@ final class TranscriptLayoutTests: XCTestCase {
         var driver: Driver
         var body: some View {
             AnchoredTranscriptList(
-                items: driver.rows, historyVersion: driver.version, jumpToken: 0,
+                items: driver.rows, historyVersion: driver.version, jumpToken: driver.jump,
                 historyControlID: "history",
+                isInspectionPresented: driver.inspecting,
                 onViewport: { driver.viewport = $0 },
                 onLayout: { version, _ in driver.layouts.append(version) }
             ) { row in
@@ -105,6 +108,41 @@ final class TranscriptLayoutTests: XCTestCase {
     private func diagnostic(_ driver: Driver, _ view: UICollectionView) -> String {
         let cells = view.visibleCells.map { ($0.accessibilityIdentifier ?? "?") + ":" + String(describing: $0.frame.minY - view.contentOffset.y) }
         return "offset=\(view.contentOffset.y) height=\(view.contentSize.height) follows=\(String(describing: driver.viewport?.followsTail)) cells=\(cells)"
+    }
+
+    func testInspectorPausesTailAndPreservesAnchorUntilExplicitJump() async throws {
+        let driver = Driver(rows(0..<50))
+        let (window, view) = host(driver)
+        defer { window.isHidden = true }
+        await settle { driver.layouts.contains(0) }
+        XCTAssertEqual(driver.viewport?.followsTail, true)
+        let anchor = try XCTUnwrap(readingAnchor(view))
+        driver.inspecting = true
+        await settle { driver.viewport?.followsTail == false }
+        XCTAssertEqual(driver.viewport?.needsOlder, false)
+        driver.rows.append(contentsOf: rows(50..<65))
+        driver.version += 1
+        await settle { driver.layouts.contains(1) }
+        XCTAssertEqual(try XCTUnwrap(anchorY(anchor.id, in: view)), anchor.y, accuracy: 1)
+        driver.inspecting = false
+        await settle()
+        XCTAssertEqual(try XCTUnwrap(anchorY(anchor.id, in: view)), anchor.y, accuracy: 1)
+        XCTAssertEqual(driver.viewport?.followsTail, false)
+        driver.jump += 1
+        await settle { driver.viewport?.followsTail == true }
+        XCTAssertEqual(driver.viewport?.isAtBottom, true)
+    }
+
+    func testInspectorPausesShortTranscriptHistoryDemand() async {
+        let driver = Driver(rows(0..<1))
+        let (window, _) = host(driver)
+        defer { window.isHidden = true }
+        await settle { driver.layouts.contains(0) }
+        XCTAssertEqual(driver.viewport?.needsOlder, true)
+        driver.inspecting = true
+        await settle { driver.viewport?.needsOlder == false }
+        driver.inspecting = false
+        await settle { driver.viewport?.needsOlder == true }
     }
 
     func testPrependKeepsTheCurrentPartialRowNotTheRequestStartRow() async throws {

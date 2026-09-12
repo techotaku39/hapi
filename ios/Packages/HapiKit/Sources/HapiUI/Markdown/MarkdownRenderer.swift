@@ -522,7 +522,8 @@ struct MarkdownBlockListView: View {
         }
     }
 
-    static func spacing(before block: MarkdownBlockNode, after previous: MarkdownBlockNode?) -> CGFloat {
+    // Pure layout calculation; does not need View's inferred MainActor isolation.
+    nonisolated static func spacing(before block: MarkdownBlockNode, after previous: MarkdownBlockNode?) -> CGFloat {
         guard let previous else { return 0 }
         if case .heading = block { return 24 }
         if case .heading = previous { return 8 }

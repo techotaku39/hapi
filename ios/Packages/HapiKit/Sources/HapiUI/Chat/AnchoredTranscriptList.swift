@@ -17,6 +17,7 @@ public struct AnchoredTranscriptList<Item: Identifiable & Equatable>: UIViewCont
     public var historyVersion: Int
     public var jumpToken: Int
     public var historyControlID: String
+    public var isInspectionPresented: Bool
     public var onViewport: (TranscriptViewport) -> Void
     public var onLayout: (Int, Bool) -> Void
     public var spacingBefore: (Item?, Item) -> CGFloat
@@ -24,6 +25,7 @@ public struct AnchoredTranscriptList<Item: Identifiable & Equatable>: UIViewCont
     fileprivate var environment = EnvironmentValues()
 
     public init(items: [Item], historyVersion: Int, jumpToken: Int, historyControlID: String,
+                isInspectionPresented: Bool = false,
                 onViewport: @escaping (TranscriptViewport) -> Void,
                 onLayout: @escaping (Int, Bool) -> Void,
                 spacingBefore: @escaping (Item?, Item) -> CGFloat = { _, _ in 12 },
@@ -32,6 +34,7 @@ public struct AnchoredTranscriptList<Item: Identifiable & Equatable>: UIViewCont
         self.historyVersion = historyVersion
         self.jumpToken = jumpToken
         self.historyControlID = historyControlID
+        self.isInspectionPresented = isInspectionPresented
         self.onViewport = onViewport
         self.onLayout = onLayout
         self.spacingBefore = spacingBefore
@@ -386,6 +389,9 @@ public final class TranscriptCollectionController<Item: Identifiable & Equatable
         let jump = next.jumpToken != lastJumpToken
         lastJumpToken = next.jumpToken
         if jump { layout.followsTail = true }
+        // Opening an inspector expresses reading intent, even at the tail.
+        // Closing it does not silently opt back into following new messages.
+        if next.isInspectionPresented { layout.followsTail = false }
         // Capture at COMMIT, after any reader motion during the request.
         layout.anchorForUpdate = layout.followsTail ? nil : captureAnchor()
         configuration = next
@@ -453,7 +459,7 @@ public final class TranscriptCollectionController<Item: Identifiable & Equatable
         let short = layout.collectionViewContentSize.height <= height + 1
         let viewport = TranscriptViewport(
             followsTail: layout.followsTail,
-            needsOlder: short || (!layout.followsTail && top <= height),
+            needsOlder: configuration?.isInspectionPresented != true && (short || (!layout.followsTail && top <= height)),
             isAtBottom: bottomDistance <= 1
         )
         guard viewport != lastViewport else { return }
@@ -468,7 +474,7 @@ public final class TranscriptCollectionController<Item: Identifiable & Equatable
     }
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if !applying, (collection.isDragging || collection.isDecelerating) {
+        if configuration?.isInspectionPresented != true, !applying, (collection.isDragging || collection.isDecelerating) {
             layout.followsTail = layout.bottomOffset(collection) - collection.contentOffset.y <= 1
         }
         reportViewport(deferred: !(collection.isDragging || collection.isDecelerating))
@@ -481,7 +487,7 @@ public final class TranscriptCollectionController<Item: Identifiable & Equatable
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { finishGesture() }
 
     private func finishGesture() {
-        layout.followsTail = layout.bottomOffset(collection) - collection.contentOffset.y <= 1
+        layout.followsTail = configuration?.isInspectionPresented != true && layout.bottomOffset(collection) - collection.contentOffset.y <= 1
         reportViewport(deferred: false)
     }
 }

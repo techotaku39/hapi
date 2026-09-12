@@ -72,6 +72,16 @@ display rows, without changing protocol groups. The per-chat Markdown cache
 prepares new sources off-main before publication; image decoding/display
 preparation also runs off-main.
 
+iOS tool groups now flatten only lightweight summary rows. Ordinary output
+opens in a large native sheet, while sidechain processes use a navigation page.
+The screen-level presenter resolves live tool IDs rather than storing a sheet
+inside a recycled cell. `isInspectionPresented` freezes tail-follow intent and
+suppresses hidden history demand, retaining the normal ID/offset anchor through
+streaming and dismissal; closing alone never forces a jump to latest. Navigation
+surfaces share one chat pipeline/SSE lifetime; a covered composer cancels recording.
+Normal retention/epoch rules still apply: a tool trimmed from the window can be
+read as a labeled last snapshot, not mistaken for a live record.
+
 ### Android
 
 `ChatTranscript` uses a chronological `LazyColumn`, not `reverseLayout`.
