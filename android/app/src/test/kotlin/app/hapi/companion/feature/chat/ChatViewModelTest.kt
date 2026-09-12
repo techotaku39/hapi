@@ -180,6 +180,8 @@ private open class FakeMessagesApi : ChatSessionApi {
     override suspend fun steerMessage(sessionId: String, messageId: String): SteerQueuedMessageResponse =
         SteerQueuedMessageResponse(status = "steered", localId = messageId)
     override suspend fun abortSession(sessionId: String) {}
+    override suspend fun clearConversation(sessionId: String): ResumeSessionResponse = error("Unexpected clear")
+
     override suspend fun resumeSession(sessionId: String, permissionMode: String?): ResumeSessionResponse =
         ResumeSessionResponse(sessionId = sessionId)
     override suspend fun approvePermission(sessionId: String, requestId: String, options: ApprovePermissionRequest) {}
@@ -647,6 +649,11 @@ class ChatViewModelTest {
                 blocks.filterIsInstance<ToolCallBlock>().any { it.tool.name == "Bash" }
             },
             "claude-assistant-text.json" to { blocks -> blocks.any { it is AgentTextBlock } },
+            "codex-plan-proposal-completed.json" to { blocks ->
+                blocks.filterIsInstance<ToolCallBlock>().any {
+                    app.hapi.companion.feature.chat.blocks.planProposalMarkdown(it.tool) != null
+                }
+            },
         )
 
         for ((name, expectation) in fixtures) {
@@ -671,6 +678,11 @@ class ChatViewModelTest {
             harness.viewModel.start()
             val state = harness.viewModel.uiState.first { it.blocks.isNotEmpty() }
             assertTrue(expectation(state.blocks), "fixture $name should satisfy its block expectation")
+            for (block in state.blocks.filterIsInstance<ToolCallBlock>()) {
+                app.hapi.companion.feature.chat.blocks.planProposalMarkdown(block.tool)?.let { plan ->
+                    assertTrue(harness.viewModel.markdownCache.cached(plan) != null, "Plans must be prepared before publication")
+                }
+            }
             harness.viewModel.stop()
         }
     }

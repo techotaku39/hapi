@@ -1,7 +1,14 @@
 # Native transcript scrolling
 
-Native-only presentation policy. No Web, Hub, REST/SSE format, or generated
-fixture changes. iOS and Android still reduce the same protocol messages.
+Native-only presentation policy. No Web, Hub or REST/SSE format changes.
+iOS and Android still reduce the same protocol messages; golden fixtures pin
+that contract, not the native view appearance.
+
+Plan proposals are an exception to compact tool summaries: both native clients
+show the complete input document as Markdown by default, before approvals.
+Android retains explicit manual folding; iOS retains its separate inspector.
+Plan text joins off-main Markdown preparation before transcript publication;
+stable tool IDs and normal self-sizing/anchor compensation remain unchanged.
 
 ## Behavior
 
@@ -67,20 +74,28 @@ belong to the row. Dynamic heights still use UIKit self-sizing; no frozen-height
 or measurement-result cache is introduced.
 
 `ChatPresentationState` keeps expansion/form state outside recycled cells,
-pruned to retained message/request IDs. Expanded tool groups become individual
-display rows, without changing protocol groups. The per-chat Markdown cache
+pruned to retained message/request IDs. Tool groups remain one summary display
+row, without changing protocol groups. The per-chat Markdown cache
 prepares new sources off-main before publication; image decoding/display
 preparation also runs off-main.
 
-iOS tool groups now flatten only lightweight summary rows. Ordinary output
-opens in a large native sheet, while sidechain processes use a navigation page.
-The screen-level presenter resolves live tool IDs rather than storing a sheet
-inside a recycled cell. `isInspectionPresented` freezes tail-follow intent and
-suppresses hidden history demand, retaining the normal ID/offset anchor through
+iOS tool groups open a large native sheet with a lazy list of summary rows;
+tool details push within that sheet. Each new presentation starts at the latest
+tool, but streaming never initiates another scroll. Returning from details
+retains the list position; **Latest tool** explicitly scrolls to the end. Group
+summary equality excludes member results, avoiding redundant transcript cell
+reconfiguration. Sidechain processes continue to use a navigation page.
+The screen-level presenter resolves live group/tool IDs rather than storing a
+sheet inside a recycled cell. A group root owns inspection without requiring a
+selected tool; its lease lasts through dismissal. `isInspectionPresented` freezes
+tail-follow intent and suppresses hidden history demand, retaining the normal ID/offset anchor through
 streaming and dismissal; closing alone never forces a jump to latest. Navigation
 surfaces share one chat pipeline/SSE lifetime; a covered composer cancels recording.
-Normal retention/epoch rules still apply: a tool trimmed from the window can be
-read as a labeled last snapshot, not mistaken for a live record.
+Normal retention/epoch rules still apply: a tool or group trimmed from the window
+can be read as a labeled last snapshot, not mistaken for a live record. Missing
+groups retain their last membership rather than switching to another group.
+Partially loaded groups identify incomplete history without issuing hidden
+history requests from the inspector.
 
 ### Android
 
@@ -192,8 +207,8 @@ Use a release/profile build on iOS 17 and a recent iPhone (60/120 Hz), plus
 Android API 26 and a recent Android device, including a lower-end device.
 
 1. Replay a 10,000+ message session with mixed Markdown, long code/diffs,
-   images, permissions, and expanded tool groups. Traverse well beyond the
-   800-message window repeatedly.
+   images, permissions, and tool groups (iOS inspectors / Android expanded rows).
+   Traverse well beyond the 800-message window repeatedly.
 2. Test slow dragging, fast upward flings, reversing direction during a
    request, and a response arriving during deceleration. No forced animation,
    cancelled momentum, or unexplained reading-position jump.

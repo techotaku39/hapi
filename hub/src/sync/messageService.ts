@@ -5,7 +5,7 @@ import {
     type HapiSessionExport,
     type HapiSessionExportResult
 } from '@hapi/protocol/sessionExport'
-import type { AttachmentMetadata, DecryptedMessage, Session } from '@hapi/protocol/types'
+import type { AttachmentMetadata, DecryptedMessage, Metadata, Session } from '@hapi/protocol/types'
 import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
 import {
     isClaudeChatVisibleMessage,
@@ -712,6 +712,17 @@ export class MessageService {
         // Phase 2: row is still queued. Ask the CLI whether it already shifted the item
         // (race window between collectBatch() shift and messages-consumed ack).
         const { localId, resolvedId, scheduledAt } = lookup
+        const shared = (this.store.sessions.getSession(sessionId)?.metadata as Metadata | null)?.capabilities?.concurrentClients === true
+        const connected = (this.io.of('/cli').adapter.rooms.get(`session:${sessionId}`)?.size ?? 0) > 0
+        if (shared && localId && !connected && (scheduledAt === null || scheduledAt <= Date.now())) {
+            // A shared worker keeps running through hub outages. Offline does
+            // not mean its native queue is empty; never claim cancellation.
+            if (localId) {
+                this.store.messages.setMessagesDeliveryState(sessionId, [localId], 'indeterminate')
+                this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [localId] })
+            }
+            return { status: 'busy', localId }
+        }
         const message = this.store.messages.getMessageById(sessionId, resolvedId)
         if (!message) throw new Error('Queued message disappeared after lookup')
         const isDispatching = lookup.status === 'dispatching'
@@ -758,7 +769,8 @@ export class MessageService {
             if (ackResult === 'consumed') {
                 return await this.recordConsumedAcknowledgement(sessionId, localId)
             }
-            if (ackResult === 'in-flight' || ackResult === 'indeterminate' || (ackResult === 'timeout' && cliCount > 0)) {
+            if (ackResult === 'in-flight' || ackResult === 'indeterminate' || (ackResult === 'timeout' && cliCount > 0)
+                || (shared && ackResult !== 'removed')) {
                 return { status: 'busy', localId }
             }
             const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
@@ -950,6 +962,10 @@ export class MessageService {
         if (cancelResult === 'in-flight' || cancelResult === 'timeout') {
             return { status: 'retry-unavailable', localId: lookup.localId }
         }
+        if ((this.store.sessions.getSession(sessionId)?.metadata as Metadata | null)?.capabilities?.concurrentClients
+            && cancelResult !== 'removed') {
+            return { status: 'retry-unavailable', localId: lookup.localId }
+        }
         const refreshed = this.store.messages.lookupQueuedMessage(sessionId, messageId)
         if (refreshed.status === 'invoked') {
             return { status: 'invoked', message: toDecryptedMessage(refreshed.message) }
@@ -965,7 +981,9 @@ export class MessageService {
 
         let deliveryContent: unknown
         try {
-            deliveryContent = await this.getScheduledDeliveryContent(message)
+            deliveryContent = message.scheduledAt === null
+                ? contentForDeferredDelivery(message.content)
+                : await this.getScheduledDeliveryContent(message)
         } catch {
             this.store.messages.setMessagesDeliveryState(sessionId, [message.localId], 'indeterminate')
             this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [message.localId] })

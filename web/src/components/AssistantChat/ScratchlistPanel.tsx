@@ -1087,7 +1087,11 @@ function ScratchlistInventory({
         const hasAttachments = (entry.attachments?.length ?? 0) > 0
         if (nextText !== entry.text && (nextText.length > 0 || hasAttachments)) {
             try {
-                void Promise.resolve(onUpdate(entry, nextText)).catch(() => {
+                void Promise.resolve(onUpdate(
+                    entry,
+                    nextText,
+                    nextText === '' ? entry.attachments : undefined,
+                )).catch(() => {
                     // Inline edits do not have a confirmation dialog to show
                     // mutation errors; the hook rolls back and the next SSE
                     // refresh reconciles the row. Delete confirmations await

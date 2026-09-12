@@ -51,8 +51,8 @@ import kotlinx.serialization.json.JsonPrimitive
  * One tool invocation (web `ToolCard`): collapsed header row — icon glyph,
  * title, subtitle, status — expanding to the per-tool body ([ToolCallBody]),
  * the read-only permission state, and nested children (sidechain transcript).
- * Cards with a pending permission start expanded and carry the
- * "awaiting approval" banner (actions land in M3b).
+ * Plan proposals and pending permissions start expanded. Only actual pending
+ * permissions carry the "awaiting approval" banner.
  */
 @Composable
 fun ToolCallBlockView(block: ToolCallBlock, basePath: String?, modifier: Modifier = Modifier) {
@@ -60,7 +60,10 @@ fun ToolCallBlockView(block: ToolCallBlock, basePath: String?, modifier: Modifie
     val resources = LocalContext.current.resources
     val presentation = remember(tool, basePath, resources) { toolCardPresentation(tool, basePath, resources) }
     val pendingPermission = tool.permission?.status == "pending"
-    var expanded by rememberSaveable(block.id) { mutableStateOf(pendingPermission) }
+    val planProposal = isPlanProposalTool(tool.name)
+    // An output-first placeholder can acquire its real tool name later. Open a
+    // newly recognized plan, but retain explicit folding across input updates.
+    var expanded by rememberSaveable(block.id, planProposal) { mutableStateOf(pendingPermission || planProposal) }
     val colors = MaterialTheme.hapi
 
     Surface(
@@ -99,6 +102,14 @@ fun ToolCallBlockView(block: ToolCallBlock, basePath: String?, modifier: Modifie
                 ToolStatusIndicator(tool.state)
             }
 
+            if (planProposal && expanded) {
+                ToolCallBody(
+                    tool = tool,
+                    basePath = basePath,
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                )
+            }
+
             tool.permission?.let { permission ->
                 val interactions = LocalChatInteractions.current
                 if (permission.status == "pending" && interactions != null) {
@@ -126,7 +137,7 @@ fun ToolCallBlockView(block: ToolCallBlock, basePath: String?, modifier: Modifie
                 }
             }
 
-            if (expanded) {
+            if (!planProposal && expanded) {
                 ToolCallBody(
                     tool = tool,
                     basePath = basePath,
@@ -253,6 +264,7 @@ private fun PermissionStateRow(permission: ToolPermission) {
             stringResource(R.string.chat_tool_denied) + (permission.reason?.let { " · $it" } ?: ""),
             error = true,
         )
+        "resolved" -> PermissionLine(stringResource(R.string.chat_tool_resolved))
         "canceled" -> PermissionLine(stringResource(R.string.chat_tool_canceled))
     }
 }

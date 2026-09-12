@@ -1,11 +1,4 @@
 export default {
-  'codexUsage.title': 'Codex Usage',
-  'codexUsage.ordinary': 'Ordinary usage',
-  'codexUsage.unknown': 'Unknown',
-  'codexUsage.remaining': '{percent}% remaining',
-  'codexUsage.window': '{minutes} min window',
-  'codexUsage.resets': 'Resets {time}',
-
   // Loading states
   'loading': 'Loading…',
   'authorizing': 'Authorizing…',
@@ -596,6 +589,7 @@ export default {
   'tool.question': 'Question',
   'tool.selectOption': 'Please select at least one option or type an answer.',
   'tool.waitingForApproval': 'Waiting for approval…',
+  'tool.resolved': 'Resolved in Codex',
   'tool.canceled': 'Canceled',
   'tool.approvedForSession': 'Approved For Session',
   'tool.aborted': 'Aborted',

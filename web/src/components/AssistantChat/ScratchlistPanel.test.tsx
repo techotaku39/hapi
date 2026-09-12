@@ -580,7 +580,7 @@ describe('ScratchlistDrawer disabled operations', () => {
         fireEvent.change(editor, { target: { value: '' } })
         fireEvent.blur(editor)
 
-        expect(onUpdate).toHaveBeenCalledWith(entry.id, '')
+        expect(onUpdate).toHaveBeenCalledWith(entry.id, '', entry.attachments)
         expect(onUpdate).not.toHaveBeenCalledWith(entry.id, 'remove this text')
     })
 

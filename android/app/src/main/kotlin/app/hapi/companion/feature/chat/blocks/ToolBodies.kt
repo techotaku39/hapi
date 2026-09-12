@@ -46,16 +46,22 @@ import kotlinx.serialization.json.JsonPrimitive
  * - `Write` → the written content as a code block;
  * - `CodexDiff` (and any input/result that parses as a unified diff) → [DiffView];
  * - `TodoWrite`/`update_plan` → checklist rows;
+ * - `ExitPlanMode`/`exit_plan_mode` → complete Markdown proposal from input;
  * - Ask/RequestUserInput → questions + selected answers, read-only;
  * - anything else → pretty-printed JSON input, then the generic result.
  */
 @Composable
 internal fun ToolCallBody(tool: ChatToolCall, basePath: String?, modifier: Modifier = Modifier) {
     val questionTool = isQuestionDetailsTool(tool.name)
+    val plan = planProposalMarkdown(tool)
     val answers = if (questionTool) tool.permission?.answers else null
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (questionTool) {
             QuestionToolBody(tool)
+        } else if (plan != null) {
+            // Plans are reading documents, never paged/truncated tool source.
+            Markdown(text = plan)
+            if (planProposalShowsResult(tool)) ToolResultSection(tool)
         } else {
             SectionLabel(stringResource(R.string.settings_usage_input))
             ToolInputSection(tool)

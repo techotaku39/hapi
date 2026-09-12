@@ -140,6 +140,28 @@ class ChatTranscriptTest {
         list.layoutInfo.visibleItemsInfo.first { it.key != "chat-history-control" }.let { it.key to it.offset }
     }
 
+    @Test fun planUpdatesAndRecyclingPreserveTheReadingAnchor() {
+        fun plan(text: String) = previewToolCall("proposal", "ExitPlanMode", input = mapOf("plan" to text))
+        val initial = "# Visible proposal\n\nRead the plan without tapping a tool."
+        markdown.prepare(setOf(initial))
+        mount(rows(0..19) + plan(initial) + rows(21..79))
+        browse(21, 0)
+        compose.onNodeWithText("Visible proposal").assertIsDisplayed()
+        val before = anchor()
+        val updated = "# Revised proposal\n\n" + "More plan detail. ".repeat(100)
+        markdown.prepare(setOf(updated))
+        compose.runOnIdle {
+            state.value = state.value.copy(blocks = rows(0..19) + plan(updated) + rows(21..79), messagesVersion = 1)
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Revised proposal").assertIsDisplayed()
+        assertEquals(before, anchor())
+        browse(60, 0)
+        browse(21, 0)
+        compose.onNodeWithText("Revised proposal").assertIsDisplayed()
+        compose.onNodeWithText("Visible proposal").assertDoesNotExist()
+    }
+
     @Test fun tailStillFollowsTallRowGrowthAppendsAndViewportResize() {
         mount(rows(0..39))
         fun assertFollowing() {

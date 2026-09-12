@@ -104,11 +104,23 @@ TEST_RUNNER_HAPI_TYPOGRAPHY_CAPTURE=/tmp/hapi-typography-review \
 
 ### Tool inspection
 
+Plan proposals (`ExitPlanMode` / `exit_plan_mode`) are reading documents, not
+activity summaries: their complete `input.plan` Markdown stays visible in the
+conversation, before any approval controls. The same renderer is used in the
+inspector; null output does not show a misleading "No output" placeholder.
+Plans are prewarmed in the chat Markdown cache and never use the ordinary
+tool-output preview/paging budget. The inspector retains raw fields under Source.
+
 Tool summaries open a native large sheet instead of expanding their output
-inside the conversation. Groups expand only summary rows; the inspector can
-move between group members while resolving each stable tool ID from live data.
-Group headers prioritize total calls over category counts. Expanded tools retain
-individual recycled rows, joined by continuous surfaces and inset separators.
+inside the conversation. Tool groups also stay as one summary row: tapping one
+opens a native lazy list in the same inspector. Calls remain chronological, with
+each new presentation initially positioned at the latest tool. Streaming never
+scrolls the list; **Latest tool** explicitly returns to its end. Details push
+inside the same sheet, retaining the list position on Back. Both levels keep a
+toolbar Close action and native swipe dismissal. The inspector resolves stable
+group/tool IDs from live data; output-only changes do not reconfigure unchanged
+group summaries in the transcript. Group headers prioritize total calls over
+category counts.
 File/image summaries show the action and basename; commands use a bounded preview.
 Success is quiet, while running/errors remain visible; every row keeps a 44pt target.
 Edits show their recorded input, with a separate **View current file** action.
@@ -121,11 +133,35 @@ historical results; live permission answers take precedence. Answered cards
 avoid duplicate results, but retain errors and the full input/result/answers
 under **Source**. Answer submission remains in the conversation.
 
+Synchronous questions use a dedicated inline card, not the orange approval
+footer. Only one question is shown at a time: single-selection taps advance
+to the next question, while multiple-selection and text questions use **Next
+question**. **Previous question** retains all choices and notes; the last step
+always requires **Submit answer**. Recommended labels are display-only badges,
+never default selections or rewritten wire values. Other-answer/note fields
+expand on demand; text-only questions and prefilled drafts show them immediately.
+All form state survives transcript-cell recycling for the retained request.
+Successful records collapse to answer summaries; missing recorded answers are
+shown as handled, not inferred from local drafts. Ordinary approvals and the
+asynchronous question path are unchanged.
+
+Question tests include pure navigation/answer-building checks and app-hosted
+layout/recycling specimens (fake data; no live agent or saved credentials):
+
+```sh
+TEST_RUNNER_HAPI_QUESTION_CAPTURE=/tmp/hapi-question-review \
+  ios/scripts/test-transcript.sh -only-testing:HapiTests/QuestionAnswerDraftTests \
+    -only-testing:HapiTests/QuestionCardPresentationTests
+```
+
 Inspection pauses transcript tail-following and hidden history paging, without
 opening another SSE subscription. Closing returns to the reading anchor;
 **Back to latest** explicitly resumes following. Trimmed records remain visible
-as labeled, read-only snapshots. Large text is loaded in 20,000-character parts
-and can be copied in full; large diffs use paged source instead of eager rows.
+as labeled, read-only snapshots; missing groups retain their last membership,
+without switching to another group. Incomplete history is labeled and can be
+loaded from the conversation after closing the inspector. Large text is loaded
+in 20,000-character parts and can be copied in full; large diffs use paged source
+instead of eager rows.
 
 The inspector recognizes namespaced command/script/patch calls. File reads use
 source-language highlighting; web/agent prose uses Markdown (large documents
@@ -134,8 +170,10 @@ command exit/status metadata kept visible. **Source** reveals the original
 input/result, including fields not shown in the preview; mixed text/media
 results stay JSON instead of losing non-text blocks.
 
-The app-hosted suite covers selection, live updates, native sheet dismissal,
-surface handoffs, Unicode paging, and reading-position preservation. Transcript
+The app-hosted suite covers selection, live updates, native sheet presentation,
+2/42/240-call lists, initial positioning, detail navigation, surface handoffs,
+Unicode paging, and reading-position preservation. Native swipe gestures and
+release-device animation smoothness still need manual acceptance. Transcript
 specimens run the real ChatModel/ChatTranscriptView with fake HTTP and closed
 loopback SSE; sheet specimens are non-networked. Both use deterministic test
 records, not live sessions or App Store screenshots. Capture into a fresh directory:

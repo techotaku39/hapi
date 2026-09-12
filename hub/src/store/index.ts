@@ -42,7 +42,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 26
+const SCHEMA_VERSION: number = 27
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -373,6 +373,7 @@ export class Store {
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
             25: () => this.migrateFromV25ToV26(),
+            26: () => this.migrateFromV26ToV27(),
         })
 
         if (currentVersion === 0) {
@@ -1012,36 +1013,8 @@ export class Store {
         }
     }
 
-    /** v25→v26: persist scratchlist order and index immediate queue replay. */
+    /** v25→v26: make empty immediate-queue heartbeat replay an indexed lookup. */
     private migrateFromV25ToV26(): void {
-        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
-        if (columns.length > 0) {
-            if (!columns.some((column) => column.name === 'position')) {
-                this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
-            }
-
-            const sessionRows = this.db.prepare(
-                'SELECT DISTINCT session_id FROM session_scratchlist'
-            ).all() as Array<{ session_id: string }>
-            const rowsForSession = this.db.prepare(
-                `SELECT entry_id FROM session_scratchlist
-                 WHERE session_id = ?
-                 ORDER BY created_at DESC, entry_id DESC`
-            )
-            const updatePosition = this.db.prepare(
-                'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
-            )
-            for (const { session_id } of sessionRows) {
-                const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
-                rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
-            }
-
-            this.db.exec(`
-                CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
-                    ON session_scratchlist(session_id, position)
-            `)
-        }
-
         this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
                 ON messages(session_id, seq)
@@ -1049,6 +1022,36 @@ export class Store {
                   AND local_id IS NOT NULL
                   AND scheduled_at IS NULL
                   AND delivery_state = 'queued';
+        `)
+    }
+
+    /** v26→v27: persist scratchlist order for databases that already reached v26. */
+    private migrateFromV26ToV27(): void {
+        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
+        if (columns.length === 0) return
+        if (!columns.some((column) => column.name === 'position')) {
+            this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
+        }
+
+        const sessionRows = this.db.prepare(
+            'SELECT DISTINCT session_id FROM session_scratchlist'
+        ).all() as Array<{ session_id: string }>
+        const rowsForSession = this.db.prepare(
+            `SELECT entry_id FROM session_scratchlist
+             WHERE session_id = ?
+             ORDER BY created_at DESC, entry_id DESC`
+        )
+        const updatePosition = this.db.prepare(
+            'UPDATE session_scratchlist SET position = ? WHERE session_id = ? AND entry_id = ?'
+        )
+        for (const { session_id } of sessionRows) {
+            const rows = rowsForSession.all(session_id) as Array<{ entry_id: string }>
+            rows.forEach((row, index) => updatePosition.run(index, session_id, row.entry_id))
+        }
+
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
+                ON session_scratchlist(session_id, position)
         `)
     }
 

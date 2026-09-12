@@ -61,7 +61,7 @@ test.describe('scratchlist drawer inline editing', () => {
         await page.screenshot({ path: SCREENSHOT_PATH, fullPage: false })
     })
 
-    test('opens row actions from the PC context menu and deletes without confirmation', async ({ page }) => {
+    test('opens row actions from the PC context menu and deletes after confirmation', async ({ page }) => {
         await gotoFixture(page, 'scratchlist-row-actions')
 
         await page.getByTestId('scratchlist-mode-toggle').click()
@@ -75,6 +75,10 @@ test.describe('scratchlist drawer inline editing', () => {
         await expect(page.getByRole('menuitem', { name: 'Delete entry' })).toBeVisible()
 
         await page.getByRole('menuitem', { name: 'Delete entry' }).click()
+        const dialog = page.getByRole('dialog', { name: 'Delete draft?' })
+        await expect(dialog).toBeVisible()
+        await expect(page.getByTestId('scratchlist-entry')).toHaveCount(1)
+        await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
         await expect(page.getByTestId('scratchlist-entry')).toHaveCount(0)
     })
 

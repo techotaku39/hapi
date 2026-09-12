@@ -62,6 +62,11 @@ CI (`.github/workflows/android.yml`) runs the protocol tests and
 
 ## Tool previews
 
+Plan proposals (`ExitPlanMode` / `exit_plan_mode`) start fully expanded, rendering
+the complete `input.plan` Markdown before approval controls. Users can still fold
+the card. Plan documents are prewarmed in the chat Markdown cache and do not use
+the ordinary tool-output paging budget; raw input/result remains under Source.
+
 Expanded cards recognize namespaced command/script/patch calls, unwrap common
 nested result envelopes, and keep command exit/status metadata visible. File
 reads use source-language highlighting; web/agent prose uses Markdown. **Source**
