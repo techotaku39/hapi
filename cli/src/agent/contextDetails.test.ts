@@ -28,6 +28,21 @@ describe('Claude context details', () => {
         })
     })
 
+    it('does not duplicate Claude skills in the Agent command inventory', () => {
+        const details = buildClaudeContextDetails({
+            updatedAt: 100,
+            system: {
+                skills: ['hapi'],
+                slash_commands: ['help', 'hapi']
+            }
+        })
+
+        expect(details?.claude).toEqual({
+            skills: [{ name: 'hapi' }],
+            slashCommands: ['help']
+        })
+    })
+
     it('keeps only displayed inventories without prompt or resource content', () => {
         const details = buildClaudeContextDetails({
             updatedAt: 100,
@@ -233,6 +248,28 @@ describe('Codex context details', () => {
             { name: 'qmd', status: 'ready', toolNames: ['search'] },
             { name: 'hapi', toolNames: ['change_title'] }
         ])
+    })
+
+    it('preserves resolved MCP tools over configuration approval overrides', () => {
+        const details = buildCodexContextDetails({
+            updatedAt: 100,
+            mcpServers: {
+                qmd: {
+                    command: 'qmd',
+                    args: [],
+                    tools: { search: {} }
+                }
+            },
+            mcpServerInventory: [{
+                name: 'qmd',
+                toolNames: ['search', 'fetch']
+            }]
+        })
+
+        expect(details.codex?.mcpServers).toEqual([{
+            name: 'qmd',
+            toolNames: ['search', 'fetch']
+        }])
     })
 })
 

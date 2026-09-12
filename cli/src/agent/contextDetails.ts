@@ -151,7 +151,9 @@ export function buildClaudeContextDetails(args: {
     const skills = buildClaudeSkills(contextUsage?.skills) ?? buildClaudeSkills(system?.skills)
     const mcpTools = buildClaudeMcpTools(contextUsage?.mcp_tools ?? contextUsage?.mcpTools)
     const systemTools = asStringList(system?.tools)
+    const skillNames = new Set((skills ?? []).map((skill) => skill.name))
     const slashCommands = asStringList(system?.slash_commands)
+        ?.filter((command) => !skillNames.has(command))
     const claude: ClaudeContextDetails = {
         ...(skills ? { skills } : {}),
         ...(mcpTools ? { mcpTools } : {}),
@@ -244,13 +246,10 @@ export function buildCodexContextDetails(args: {
     for (const [name, server] of Object.entries(args.mcpServers ?? {})) {
         const previous = mcpServerByName.get(name)
         const tools = asRecord(asRecord(server)?.tools)
+        const toolNames = previous?.toolNames ?? (tools ? Object.keys(tools) : undefined)
         mcpServerByName.set(name, {
             name,
-            ...(tools
-                ? { toolNames: Object.keys(tools) }
-                : previous?.toolNames
-                    ? { toolNames: previous.toolNames }
-                    : {}),
+            ...(toolNames !== undefined ? { toolNames } : {}),
             ...(previous?.status ? { status: previous.status } : {})
         })
     }
