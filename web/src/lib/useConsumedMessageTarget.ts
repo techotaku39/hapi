@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type ConsumedMessageTarget = {
     sessionId: string
@@ -13,10 +13,21 @@ export function useConsumedMessageTarget(
 ): {
     effectiveMessageId?: string
     effectiveMessageQuery?: string
+    searchRequestId: number
     consume: () => void
     clear: () => void
 } {
     const [consumedTarget, setConsumedTarget] = useState<ConsumedMessageTarget | null>(null)
+    const previousInputKeyRef = useRef<string | null>(null)
+    const searchRequestIdRef = useRef(0)
+
+    const inputKey = messageId
+        ? `${sessionId}\u0000${messageId}\u0000${messageQuery ?? ''}`
+        : null
+    if (inputKey !== previousInputKeyRef.current) {
+        previousInputKeyRef.current = inputKey
+        if (inputKey !== null) searchRequestIdRef.current += 1
+    }
 
     useEffect(() => {
         setConsumedTarget(null)
@@ -38,5 +49,11 @@ export function useConsumedMessageTarget(
         setConsumedTarget(null)
     }, [])
 
-    return { effectiveMessageId, effectiveMessageQuery, consume, clear }
+    return {
+        effectiveMessageId,
+        effectiveMessageQuery,
+        searchRequestId: searchRequestIdRef.current,
+        consume,
+        clear
+    }
 }

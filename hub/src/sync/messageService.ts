@@ -223,7 +223,13 @@ export class MessageService {
             targetPosition,
             snapshotHead ?? undefined
         )
-        const contextRows = [...before, target, ...after]
+        // Keep pending local prompts visible when a cold client opens a
+        // historical result. They are intentionally out-of-band: pending
+        // rows must not change the bounded context's pagination cursor.
+        const queued = this.store.messages.getUninvokedLocalMessages(sessionId)
+        const contextRows = [...new Map(
+            [...before, target, ...after, ...queued].map((message) => [message.id, message])
+        ).values()].sort((a, b) => comparePosition(messagePosition(a), messagePosition(b)))
         const oldest = before[0] ?? target
         const oldestPosition = messagePosition(oldest)
 

@@ -370,6 +370,20 @@ describe('message content search', () => {
             .toMatchObject([{ sessionId: session.id }])
     })
 
+    it('centers long-result snippets on a match near the indexed tail', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'snippet-near-tail')
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: `${'unrelated prefix '.repeat(2_000)}needle near tail` }
+        })
+
+        const [result] = store.messages.searchContent('needle near tail', 'default')
+
+        expect(result?.snippet).toContain('needle near tail')
+        expect(result?.snippet.length).toBeLessThan(200)
+    })
+
     it('indexes visible non-sidechain Claude user records', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'claude-user-content-search')

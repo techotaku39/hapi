@@ -761,9 +761,10 @@ export function searchMessageContent(
             INNER JOIN ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
                 ON f.rowid = ranked.search_rowid
             WHERE ranked.session_rank = 1
+              AND ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?
             ORDER BY ranked.updated_at DESC, CAST(ranked.seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, escapeFtsPhrase(normalizedQuery), ...sessionScopeParams, safeLimit) as DbSearchRow[]
+        `).all(namespace, escapeFtsPhrase(normalizedQuery), ...sessionScopeParams, escapeFtsPhrase(normalizedQuery), safeLimit) as DbSearchRow[]
 
     return rows.map((row) => ({
         sessionId: row.session_id,

@@ -360,6 +360,7 @@ function SessionPage() {
     const {
         effectiveMessageId: effectiveInitialMessageId,
         effectiveMessageQuery: effectiveInitialMessageQuery,
+        searchRequestId,
         consume: consumeMessageTarget,
         clear: clearConsumedMessageTarget,
     } = useConsumedMessageTarget(sessionId, messageId, messageQuery)
@@ -871,6 +872,7 @@ function SessionPage() {
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
             initialTargetMessageId={hasCompleteInitialMessageTarget ? effectiveInitialMessageId : undefined}
             initialTargetMessageQuery={hasCompleteInitialMessageTarget ? effectiveInitialMessageQuery : undefined}
+            searchRequestId={searchRequestId}
             onLoadMessageContext={loadMessageContextForSession}
             onInitialTargetConsumed={handleInitialMessageConsumed}
             onSearchTargetDismissed={handleSearchTargetDismissed}

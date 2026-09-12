@@ -605,6 +605,7 @@ type SessionChatProps = {
     onInitialOutlineConsumed?: () => void
     initialTargetMessageId?: string
     initialTargetMessageQuery?: string
+    searchRequestId?: number
     onLoadMessageContext?: (messageId: string) => Promise<boolean>
     onInitialTargetConsumed?: () => void
     onSearchTargetDismissed?: () => void
@@ -1943,6 +1944,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onOutlineOpenChange={setOutlineOpen}
                         initialTargetMessageId={props.initialTargetMessageId}
                         initialTargetMessageQuery={props.initialTargetMessageQuery}
+                        searchRequestId={props.searchRequestId}
                         onLoadMessageContext={props.onLoadMessageContext}
                         onInitialTargetConsumed={props.onInitialTargetConsumed}
                         onSearchTargetDismissed={props.onSearchTargetDismissed}

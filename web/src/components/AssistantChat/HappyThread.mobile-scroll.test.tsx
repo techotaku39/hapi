@@ -155,6 +155,7 @@ afterEach(() => {
 function renderSearchThread(options: {
     initialTargetMessageId?: string
     initialTargetMessageQuery?: string
+    searchRequestId?: number
     onLoadMessageContext: (messageId: string) => Promise<boolean>
     onInitialTargetConsumed: () => void
     onSearchTargetDismissed?: () => void
@@ -210,6 +211,7 @@ function renderSearchThread(options: {
                     onOutlineOpenChange={vi.fn()}
                     initialTargetMessageId={options.initialTargetMessageId}
                     initialTargetMessageQuery={options.initialTargetMessageQuery}
+                    searchRequestId={options.searchRequestId}
                     onLoadMessageContext={options.onLoadMessageContext}
                     onInitialTargetConsumed={options.onInitialTargetConsumed}
                     onSearchTargetDismissed={options.onSearchTargetDismissed}
@@ -728,6 +730,7 @@ describe('search target loading', () => {
 
         const options = {
             initialTargetMessageId: 'target-message' as string | undefined,
+            searchRequestId: undefined as number | undefined,
             onLoadMessageContext,
             onInitialTargetConsumed,
             messagesVersion: 1,
@@ -754,11 +757,7 @@ describe('search target loading', () => {
         })
         expect(onInitialTargetConsumed).toHaveBeenCalledTimes(1)
 
-        options.initialTargetMessageId = undefined
-        act(() => {
-            result.rerender(renderHappyThread())
-        })
-        options.initialTargetMessageId = 'target-message'
+        options.searchRequestId = 1
         searchTargetTestState.renderMessages = () => null
         searchTargetTestState.extras = { messagesVersion: 3, historyVersion: 2 }
         options.messagesVersion = 3

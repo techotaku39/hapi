@@ -687,6 +687,7 @@ export function HappyThread(props: {
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
     initialTargetMessageId?: string
     initialTargetMessageQuery?: string
+    searchRequestId?: number
     onLoadMessageContext?: (messageId: string) => Promise<boolean>
     onInitialTargetConsumed?: () => void
     onSearchTargetDismissed?: () => void
@@ -754,6 +755,7 @@ export function HappyThread(props: {
     const initialSearchTargetId = props.initialTargetMessageId?.trim() ?? ''
     const hasSearchTarget = Boolean(initialSearchTargetId && targetSearchQuery)
     const [activeSearchMatchId, setActiveSearchMatchId] = useState<string | null>(null)
+    const activeSearchMatchRequestIdRef = useRef<number | undefined>(undefined)
     const sessionContentMatchesQuery = useQuery({
         queryKey: queryKeys.sessionContentSearch(props.sessionId, targetSearchQuery),
         queryFn: ({ signal }) => props.api.searchSessionContentMatches(
@@ -767,7 +769,9 @@ export function HappyThread(props: {
         retry: false
     })
     const searchMatches: SessionContentMatch[] = sessionContentMatchesQuery.data?.matches ?? []
-    const activeSearchTargetId = activeSearchMatchId ?? initialSearchTargetId
+    const activeSearchTargetId = activeSearchMatchRequestIdRef.current === props.searchRequestId
+        ? activeSearchMatchId ?? initialSearchTargetId
+        : initialSearchTargetId
     const activeSearchMatchIndex = searchMatches.findIndex((match) => match.messageId === activeSearchTargetId)
     const searchMatchTotal = sessionContentMatchesQuery.data?.total ?? searchMatches.length
     const searchMatchTotalLabel = sessionContentMatchesQuery.isLoading
@@ -848,6 +852,7 @@ export function HappyThread(props: {
     const searchTargetJumpRef = useRef<{
         messageId: string
         messageQuery?: string
+        requestId?: number
         phase: SearchTargetPhase
     } | null>(null)
     // Keep automatic initial/tail reconciliation from reclaiming the viewport
@@ -883,14 +888,15 @@ export function HappyThread(props: {
         sessionIdRef.current = props.sessionId
     }, [props.sessionId])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const inputKey = hasSearchTarget
-            ? `${props.sessionId}\u0000${initialSearchTargetId}\u0000${targetSearchQuery}`
+            ? `${props.sessionId}\u0000${initialSearchTargetId}\u0000${targetSearchQuery}\u0000${props.searchRequestId ?? 0}`
             : null
         if (searchTargetInputKeyRef.current === inputKey) return
         searchTargetInputKeyRef.current = inputKey
+        activeSearchMatchRequestIdRef.current = props.searchRequestId
         setActiveSearchMatchId(initialSearchTargetId || null)
-    }, [hasSearchTarget, initialSearchTargetId, props.sessionId, targetSearchQuery])
+    }, [hasSearchTarget, initialSearchTargetId, props.searchRequestId, props.sessionId, targetSearchQuery])
 
     const navigateSearchMatch = useCallback((direction: -1 | 1) => {
         if (searchMatches.length < 2) return
@@ -898,9 +904,10 @@ export function HappyThread(props: {
         const nextIndex = (currentIndex + direction + searchMatches.length) % searchMatches.length
         const nextMatch = searchMatches[nextIndex]
         if (nextMatch) {
+            activeSearchMatchRequestIdRef.current = props.searchRequestId
             setActiveSearchMatchId(nextMatch.messageId)
         }
-    }, [activeSearchMatchIndex, searchMatches])
+    }, [activeSearchMatchIndex, props.searchRequestId, searchMatches])
 
     const isInitialScrollSettling = useCallback(() => {
         return initialScrollSessionRef.current === sessionIdRef.current && Date.now() < initialScrollDeadlineRef.current
@@ -1585,6 +1592,7 @@ export function HappyThread(props: {
             previous
             && previous.messageId === targetMessageId
             && previous.messageQuery === targetSearchQuery
+            && previous.requestId === props.searchRequestId
             && previous.phase === 'complete'
         ) {
             setIsLocatingSearchTarget(false)
@@ -1594,6 +1602,7 @@ export function HappyThread(props: {
             previous
             && previous.messageId === targetMessageId
             && previous.messageQuery === targetSearchQuery
+            && previous.requestId === props.searchRequestId
             && previous.phase === 'failed'
         ) {
             searchTargetHistoryLockRef.current = false
@@ -1613,6 +1622,7 @@ export function HappyThread(props: {
             !previous
             || previous.messageId !== targetMessageId
             || previous.messageQuery !== targetSearchQuery
+            || previous.requestId !== props.searchRequestId
         ) {
             clearSearchTargetRetryTimer()
             clearSearchTargetMarker()
@@ -1623,6 +1633,7 @@ export function HappyThread(props: {
             searchTargetJumpRef.current = {
                 messageId: targetMessageId,
                 messageQuery: targetSearchQuery,
+                requestId: props.searchRequestId,
                 phase: 'idle'
             }
         }
@@ -1722,9 +1733,10 @@ export function HappyThread(props: {
 
         jump.phase = 'loading'
         setIsLocatingSearchTarget(true)
+        const searchRequestId = props.searchRequestId
         void props.onLoadMessageContext(targetMessageId).then((loaded) => {
             const current = searchTargetJumpRef.current
-            if (!current || current.messageId !== targetMessageId) return
+            if (!current || current.messageId !== targetMessageId || current.requestId !== searchRequestId) return
             if (!loaded) {
                 // A false result can be a transient busy/invalidated window.
                 // Retry a few times while preserving the route target instead
@@ -1744,7 +1756,7 @@ export function HappyThread(props: {
             scheduleSearchTargetRetry(0)
         }).catch(() => {
             const current = searchTargetJumpRef.current
-            if (!current || current.messageId !== targetMessageId) return
+            if (!current || current.messageId !== targetMessageId || current.requestId !== searchRequestId) return
             if (searchTargetContextRetryCountRef.current < MAX_SEARCH_TARGET_CONTEXT_RETRIES) {
                 searchTargetContextRetryCountRef.current += 1
                 current.phase = 'idle'
@@ -1773,6 +1785,7 @@ export function HappyThread(props: {
         props.onInitialTargetConsumed,
         props.onLoadMessageContext,
         props.rawMessagesCount,
+        props.searchRequestId,
         searchTargetRetryVersion,
         targetSearchQuery
     ])
