@@ -5,10 +5,7 @@ import type { ApiClient } from '@/api/client'
 import { ApiError } from '@/api/client'
 import { queryKeys } from '@/lib/query-keys'
 import { extractScratchlistAttachmentMetadata } from '@/lib/scratchlistAttachmentAdapter'
-import {
-    getScratchlistAttachmentPreview,
-    type ScratchlistAttachmentWithPreview,
-} from '@/lib/scratchlistAttachmentPreview'
+import type { ScratchlistAttachmentWithPreview } from '@/lib/scratchlistAttachmentPreview'
 import {
     moveScratchlistEntry,
     persistScratchlist,
@@ -132,10 +129,10 @@ function toLocalEntry(hub: HubEntry): ScratchlistEntry {
         createdAt: hub.createdAt,
         updatedAt: hub.updatedAt,
         position: hub.position,
-        attachments: (hub.attachments ?? []).map((attachment) => {
-            const previewUrl = getScratchlistAttachmentPreview(attachment)
-            return previewUrl ? { ...attachment, previewUrl } : attachment
-        })
+        // Preview URLs belong to the client cache, not the Hub metadata.
+        // ScratchlistAttachmentThumbnails resolves the cache directly so a
+        // parent rerender cannot turn a cache-owned blob URL into entry state.
+        attachments: hub.attachments ?? []
     }
 }
 

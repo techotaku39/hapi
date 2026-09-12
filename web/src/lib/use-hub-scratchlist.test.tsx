@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook, act, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, renderHook, act, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
+import type { ScratchlistAttachmentMetadata } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import { ApiError } from '@/api/client'
+import { I18nProvider } from '@/lib/i18n-context'
+import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
+import {
+    clearScratchlistAttachmentPreviewCache,
+} from './scratchlistAttachmentPreview'
 import { useHubScratchlist } from './use-hub-scratchlist'
 import { queryKeys } from './query-keys'
 
@@ -28,7 +35,14 @@ import { queryKeys } from './query-keys'
  * path. Unique session ids sidestep the race.
  */
 
-type HubEntry = { entryId: string; text: string; createdAt: number; updatedAt: number; position?: number }
+type HubEntry = {
+    entryId: string
+    text: string
+    createdAt: number
+    updatedAt: number
+    position?: number
+    attachments?: ScratchlistAttachmentMetadata[]
+}
 
 function createWrapper() {
     const queryClient = new QueryClient({
@@ -88,6 +102,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+    cleanup()
+    clearScratchlistAttachmentPreviewCache()
     localStorage.clear()
     vi.restoreAllMocks()
 })
@@ -106,6 +122,98 @@ describe('useHubScratchlist - initial fetch', () => {
         const { result } = renderHook(() => useHubScratchlist(sid, api), { wrapper: createWrapper() })
         await waitFor(() => expect(result.current.entries.length).toBe(2))
         expect(result.current.entries.map((e) => e.id)).toEqual(['a', 'b'])
+    })
+})
+
+describe('useHubScratchlist - preview cache', () => {
+    it('keeps mounted blob URLs valid when the hook parent rerenders after downloads', async () => {
+        const sid = makeSid()
+        const entries: HubEntry[] = Array.from({ length: 3 }, (_, index) => ({
+            entryId: `preview-entry-${index}`,
+            text: `preview ${index}`,
+            createdAt: index,
+            updatedAt: index,
+            attachments: [{
+                id: `preview-attachment-${index}`,
+                filename: `preview-${index}.png`,
+                mimeType: 'image/png',
+                size: 8 * 1024 * 1024,
+                path: `hapi-hub:scratchlist/default/${sid}/preview-${index}.png`,
+            }],
+        }))
+        const fetchScratchlistAttachmentBlob = vi.fn(async () => new Blob(['preview'], { type: 'image/png' }))
+        let nextObjectUrl = 0
+        const originalCreateObjectURL = URL.createObjectURL
+        const originalRevokeObjectURL = URL.revokeObjectURL
+        const revokeObjectURL = vi.fn()
+        Object.defineProperty(URL, 'createObjectURL', {
+            configurable: true,
+            value: vi.fn(() => `blob:hook-preview-${nextObjectUrl++}`),
+        })
+        Object.defineProperty(URL, 'revokeObjectURL', {
+            configurable: true,
+            value: revokeObjectURL,
+        })
+
+        const api = {
+            ...createMockApi({ getScratchlist: async () => ({ entries }) }),
+            fetchScratchlistAttachmentBlob,
+        } as unknown as ApiClient
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false, gcTime: Infinity },
+                mutations: { retry: false },
+            },
+        })
+        function Harness() {
+            const scratchlist = useHubScratchlist(sid, api)
+            const [, setRenderVersion] = useState(0)
+            return (
+                <I18nProvider>
+                    <button type="button" onClick={() => setRenderVersion((version) => version + 1)}>
+                        Force scratchlist rerender
+                    </button>
+                    <ScratchlistDrawer
+                        entries={scratchlist.entries}
+                        sessionId={sid}
+                        api={api}
+                        onUpdate={vi.fn()}
+                        onReorder={vi.fn()}
+                        onDelete={vi.fn()}
+                    />
+                </I18nProvider>
+            )
+        }
+
+        const rendered = render(
+            <QueryClientProvider client={queryClient}>
+                <Harness />
+            </QueryClientProvider>,
+        )
+        try {
+            await waitFor(() => expect(screen.getAllByTestId('scratchlist-attachment-thumb')).toHaveLength(3))
+            expect(fetchScratchlistAttachmentBlob).toHaveBeenCalledTimes(3)
+            const urls = screen.getAllByRole('img').map((image) => image.getAttribute('src'))
+            expect(urls).toEqual(['blob:hook-preview-0', 'blob:hook-preview-1', 'blob:hook-preview-2'])
+
+            fireEvent.click(screen.getByRole('button', { name: 'Force scratchlist rerender' }))
+            await waitFor(() => {
+                expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toEqual(urls)
+            })
+            expect(revokeObjectURL).not.toHaveBeenCalledWith(urls[0])
+            expect(revokeObjectURL).not.toHaveBeenCalledWith(urls[1])
+            expect(revokeObjectURL).not.toHaveBeenCalledWith(urls[2])
+        } finally {
+            rendered.unmount()
+            Object.defineProperty(URL, 'createObjectURL', {
+                configurable: true,
+                value: originalCreateObjectURL,
+            })
+            Object.defineProperty(URL, 'revokeObjectURL', {
+                configurable: true,
+                value: originalRevokeObjectURL,
+            })
+        }
     })
 })
 
@@ -595,7 +703,7 @@ describe('useHubScratchlist - localStorage migration', () => {
             text: string
             entryId?: string
             createdAt?: number
-            attachments?: Array<Record<string, unknown>>
+            attachments?: ScratchlistAttachmentMetadata[]
         }) => ({
             entry: {
                 entryId: body.entryId ?? 'photo-only',

@@ -110,17 +110,6 @@ function messageReferencesAttachment(content: unknown, path: string): boolean {
     })
 }
 
-function hasUserMessageAttachments(content: unknown): boolean {
-    if (content === null || typeof content !== 'object' || Array.isArray(content)) return false
-    const record = content as { role?: unknown; content?: unknown }
-    if (record.role !== 'user') return false
-    if (record.content === null || typeof record.content !== 'object' || Array.isArray(record.content)) {
-        return false
-    }
-    const attachments = (record.content as { attachments?: unknown }).attachments
-    return Array.isArray(attachments) && attachments.length > 0
-}
-
 /**
  * Scheduled scratchlist attachments outlive their draft row. Keep the hub
  * blob while any uninvoked message still references it, even if the draft is
@@ -485,9 +474,9 @@ export function getFirstMessages(
 }
 
 /** CLI reconnect backfill: returns messages above the seq cursor that are
- *  deliverable through the ordinary CLI backfill path. Future scheduled rows
- *  are excluded, and scheduled rows carrying attachments stay on the
- *  mature-scan path so Hub-resident files can be materialized before delivery.
+ *  deliverable through the ordinary CLI backfill path. Scheduled rows (future
+ *  or mature) stay on the mature-scan path so scheduled attachments and their
+ *  following text keep the same FIFO delivery boundary.
  *  Only the CLI backfill route should use this; the Web thread API still calls
  *  byPosition / getMessages and needs the full set so scheduled rows surface in
  *  the queued floating bar. */
@@ -525,9 +514,7 @@ export function getDeliverableMessagesAfter(
 
         for (const row of rows) {
             const message = toStoredMessage(row)
-            if (message.scheduledAt !== null && hasUserMessageAttachments(message.content)) {
-                continue
-            }
+            if (message.scheduledAt !== null) continue
             deliverable.push(message)
             if (deliverable.length >= safeLimit) break
         }
