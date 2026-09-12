@@ -5,6 +5,7 @@ import {
     parseCodexMcpInventoryOutput,
     parseCodexMcpStatusResponse
 } from './codexMcpInventory'
+import { buildCodexContextDetails } from '@/agent/contextDetails'
 
 describe('codex MCP inventory', () => {
     it('parses configured non-HAPI servers without persisting commands or secrets', () => {
@@ -63,6 +64,21 @@ describe('codex MCP inventory', () => {
             status: 'ready',
             toolNames: ['search', 'fetch']
         }])
+    })
+
+    it.each([{}, []])('preserves an authoritative empty runtime tool list: %j', (tools) => {
+        const inventory = parseCodexMcpStatusResponse({
+            data: [{ name: 'qmd', tools }]
+        })
+        const details = buildCodexContextDetails({
+            updatedAt: 100,
+            mcpServers: {
+                qmd: { command: 'qmd', args: [], tools: { search: {} } }
+            },
+            mcpServerInventory: inventory
+        })
+
+        expect(details.codex?.mcpServers).toEqual([{ name: 'qmd', toolNames: [] }])
     })
 
     it('merges resolved fields over configured server names', () => {

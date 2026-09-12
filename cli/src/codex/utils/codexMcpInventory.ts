@@ -50,7 +50,9 @@ function asToolNames(value: unknown): string[] | undefined {
         : asRecord(value)
             ? Object.entries(asRecord(value)!).map(([name]) => name)
             : []
-    if (items.length === 0) return undefined
+    if (items.length === 0) {
+        return Array.isArray(value) || asRecord(value) ? [] : undefined
+    }
     const names = items.flatMap((item) => {
         const name = typeof item === 'string' ? asString(item) : asString(asRecord(item)?.name)
         return name ? [name] : []
