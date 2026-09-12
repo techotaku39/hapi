@@ -99,6 +99,7 @@ class HubGraph(
         api = session.api,
         scope = scope,
         snapshots = WindowSnapshots(File(snapshotDir, "windows")),
+        historyRetentionLimit = app.hapi.protocol.window.OLDER_LOAD_WINDOW_SIZE,
     )
 
     private val mutableToasts = MutableSharedFlow<SyncEvent.Toast>(extraBufferCapacity = 16)

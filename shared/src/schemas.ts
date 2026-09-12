@@ -166,6 +166,8 @@ export type Metadata = z.infer<typeof MetadataSchema>
 
 export const AgentStateRequestSchema = z.object({
     tool: z.string(),
+    // Correlation only; replies use the request map key, never this tool id.
+    toolCallId: z.string().optional(),
     arguments: z.unknown(),
     createdAt: z.number().nullish()
 })
@@ -174,6 +176,7 @@ export type AgentStateRequest = z.infer<typeof AgentStateRequestSchema>
 
 export const AgentStateCompletedRequestSchema = z.object({
     tool: z.string(),
+    toolCallId: z.string().optional(),
     arguments: z.unknown(),
     createdAt: z.number().nullish(),
     completedAt: z.number().nullish(),
@@ -325,6 +328,7 @@ export const DecryptedMessageSchema = z.object({
 export type DecryptedMessage = z.infer<typeof DecryptedMessageSchema>
 
 export const SessionSchema = z.object({
+    hasConversationContent: z.boolean().optional(),
     id: z.string(),
     namespace: z.string(),
     seq: z.number(),
@@ -602,6 +606,14 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
     MachineChangedSchema.extend({
         type: z.literal('machine-updated'),
         data: MachineUpdatedDataSchema.optional()
+    }),
+    /**
+     * The machine re-checked `agy models` in the background and the listing
+     * changed. Carries no catalog: clients refetch the machine's agy-models
+     * route, which answers from the machine's cache.
+     */
+    MachineChangedSchema.extend({
+        type: z.literal('machine-agy-models-updated')
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('toast'),

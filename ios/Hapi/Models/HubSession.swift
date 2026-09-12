@@ -102,7 +102,8 @@ final class HubSession {
             provider: api,
             snapshots: WindowSnapshotStore(
                 directory: snapshotDirectory.appendingPathComponent("windows", isDirectory: true)
-            )
+            ),
+            historyRetentionLimit: MessageWindowConstants.olderLoadWindowSize
         )
         let scratchlist = ScratchlistStore(api: api)
         self.scratchlist = scratchlist
