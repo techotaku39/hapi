@@ -206,4 +206,63 @@ describe('workspace file RPC handlers', () => {
         expect(ripgrep).toMatchObject({ success: true })
         expect(String(ripgrep.stdout).replaceAll('\\', '/')).toContain('src/index.ts')
     })
+
+    it('keeps Git fallback operations inside a nested session workspace', async () => {
+        const workspaceDir = join(rootDir, 'nested-workspace')
+        await mkdir(workspaceDir)
+        await writeFile(join(rootDir, 'sibling.txt'), 'sibling initial\n')
+        await writeFile(join(workspaceDir, 'inside.txt'), 'inside initial\n')
+
+        await execFileAsync('git', ['init', '-q'], { cwd: rootDir })
+        await execFileAsync('git', ['add', '.'], { cwd: rootDir })
+        await execFileAsync('git', [
+            '-c', 'user.name=HAPI test',
+            '-c', 'user.email=hapi-test@example.invalid',
+            'commit', '-qm', 'initial'
+        ], { cwd: rootDir })
+
+        await writeFile(join(rootDir, 'sibling.txt'), 'sibling changed\n')
+        await writeFile(join(workspaceDir, 'inside.txt'), 'inside changed\n')
+
+        const status = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceGitStatus, { cwd: workspaceDir })
+        expect(status).toMatchObject({ success: true })
+        expect(String(status.stdout)).toContain('inside.txt')
+        expect(String(status.stdout)).not.toContain('sibling.txt')
+
+        const unstagedNumstat = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceGitDiffNumstat, {
+            cwd: workspaceDir,
+            staged: false,
+        })
+        expect(unstagedNumstat).toMatchObject({ success: true })
+        expect(String(unstagedNumstat.stdout)).toContain('inside.txt')
+        expect(String(unstagedNumstat.stdout)).not.toContain('sibling.txt')
+
+        await execFileAsync('git', ['add', join('nested-workspace', 'inside.txt')], { cwd: rootDir })
+        await writeFile(join(workspaceDir, 'inside.txt'), 'inside staged and changed\n')
+        const stagedNumstat = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceGitDiffNumstat, {
+            cwd: workspaceDir,
+            staged: true,
+        })
+        expect(stagedNumstat).toMatchObject({ success: true })
+        expect(String(stagedNumstat.stdout)).toContain('inside.txt')
+        expect(String(stagedNumstat.stdout)).not.toContain('sibling.txt')
+
+        const insideDiff = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceGitDiffFile, {
+            cwd: workspaceDir,
+            filePath: 'inside.txt',
+            staged: false,
+        })
+        expect(insideDiff).toMatchObject({ success: true })
+        expect(String(insideDiff.stdout)).toContain('inside staged and changed')
+
+        for (const filePath of [':(top)sibling.txt', ':(exclude)sibling.txt']) {
+            const escapedDiff = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceGitDiffFile, {
+                cwd: workspaceDir,
+                filePath,
+                staged: false,
+            })
+            expect(escapedDiff).toMatchObject({ success: true })
+            expect(String(escapedDiff.stdout)).not.toContain('sibling changed')
+        }
+    })
 })

@@ -263,7 +263,7 @@ export function registerWorkspaceFileHandlers(
 
             try {
                 return await runGitCommand(
-                    ['status', '--porcelain=v2', '--branch', '--untracked-files=all'],
+                    ['status', '--porcelain=v2', '--branch', '--untracked-files=all', '--', '.'],
                     resolved.cwd,
                     data.timeout,
                 )
@@ -282,8 +282,8 @@ export function registerWorkspaceFileHandlers(
             }
 
             const args = data.staged
-                ? ['diff', '--cached', '--numstat']
-                : ['diff', '--numstat']
+                ? ['diff', '--cached', '--numstat', '--', '.']
+                : ['diff', '--numstat', '--', '.']
             try {
                 return await runGitCommand(args, resolved.cwd, data.timeout)
             } catch (error) {
@@ -302,8 +302,8 @@ export function registerWorkspaceFileHandlers(
             }
 
             const args = data.staged
-                ? ['diff', '--cached', '--no-ext-diff', '--', filePath]
-                : ['diff', '--no-ext-diff', '--', filePath]
+                ? ['--literal-pathspecs', 'diff', '--cached', '--no-ext-diff', '--', filePath]
+                : ['--literal-pathspecs', 'diff', '--no-ext-diff', '--', filePath]
             try {
                 return await runGitCommand(args, resolved.cwd, data.timeout)
             } catch (error) {
