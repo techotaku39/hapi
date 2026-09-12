@@ -1183,7 +1183,11 @@ function ScratchlistInventory({
                                         value={editingText}
                                         maxLength={SCRATCHLIST_MAX_TEXT_LENGTH}
                                         aria-label={t('scratchlist.action.editEntry')}
-                                        onChange={(event) => setEditingText(event.target.value)}
+                                        readOnly={disabled}
+                                        onChange={(event) => {
+                                            if (editCompletionRef.current) return
+                                            setEditingText(event.target.value)
+                                        }}
                                         onBlur={() => { void finishEditing(entry) }}
                                         onKeyDown={(event) => {
                                             if (event.key === 'Escape') {

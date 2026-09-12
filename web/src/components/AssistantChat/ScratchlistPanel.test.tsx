@@ -622,6 +622,52 @@ describe('ScratchlistDrawer disabled operations', () => {
         await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Edit scratchlist entry' })).toBeNull())
     })
 
+    it.each(['enter', 'blur'] as const)('blocks changes while an inline %s save is pending', async (completion) => {
+        const { ScratchlistDrawer } = await import('./ScratchlistPanel')
+        const entry = makeEntry({ id: `pending-inline-${completion}`, text: 'before' })
+        let pending = false
+        let rerender!: ReturnType<typeof render>['rerender']
+        let resolveUpdate!: () => void
+        const updateResponse = new Promise<void>((resolve) => { resolveUpdate = resolve })
+        const renderDrawer = (disabled: boolean) => (
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[entry]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={async () => {
+                        pending = true
+                        rerender(renderDrawer(pending))
+                        await updateResponse
+                    }}
+                    onReorder={vi.fn()}
+                    onDelete={vi.fn()}
+                    disabled={disabled}
+                />
+            </I18nProvider>
+        )
+
+        const rendered = render(renderDrawer(false))
+        rerender = rendered.rerender
+
+        fireEvent.click(screen.getByTestId('scratchlist-entry-text'))
+        const editor = screen.getByRole('textbox', { name: 'Edit scratchlist entry' })
+        fireEvent.change(editor, { target: { value: 'first edit' } })
+        if (completion === 'enter') {
+            fireEvent.keyDown(editor, { key: 'Enter' })
+        } else {
+            fireEvent.blur(editor)
+        }
+
+        await waitFor(() => expect(editor).toHaveAttribute('readonly'))
+        if (completion === 'blur') fireEvent.focus(editor)
+        fireEvent.change(editor, { target: { value: 'edit after save started' } })
+        expect(editor).toHaveValue('first edit')
+
+        resolveUpdate()
+        await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Edit scratchlist entry' })).toBeNull())
+    })
+
     it('requires confirmation before removing one attachment', async () => {
         const { ScratchlistDrawer } = await import('./ScratchlistPanel')
         const attachment = {
