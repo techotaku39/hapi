@@ -3,6 +3,7 @@ package app.hapi.data.store
 import app.hapi.data.sse.SseSubscriptionKey
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -76,7 +77,6 @@ class SessionStoreTest {
                         summary("other", updatedAt = 2_000),
                     )
                 )
-                .setBodyDelay(100, TimeUnit.MILLISECONDS)
         )
         server.enqueueJson(
             sessionsResponseJson(
@@ -84,13 +84,24 @@ class SessionStoreTest {
                 summary("other", updatedAt = 2_000),
             )
         )
+        val release = CountDownLatch(1)
+        val queued = server.dispatcher
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                check(release.await(5, TimeUnit.SECONDS))
+                return queued.dispatch(request)
+            }
+        }
         val pending = async(start = CoroutineStart.UNDISPATCHED) { store.refresh() }
-        assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
-
-        store.applySessionEvent(
-            globalScope,
-            sessionUpdatedEvent("reply", """{"lastAssistantMessageAt":10000,"lastAssistantMessageVersion":2}"""),
-        )
+        try {
+            assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
+            store.applySessionEvent(
+                globalScope,
+                sessionUpdatedEvent("reply", """{"lastAssistantMessageAt":10000,"lastAssistantMessageVersion":2}"""),
+            )
+        } finally {
+            release.countDown()
+        }
         pending.await()
 
         assertEquals(listOf("reply", "other"), store.sessions.value.map { it.id })
@@ -146,13 +157,23 @@ class SessionStoreTest {
             MockResponse()
                 .setHeader("Content-Type", "application/json")
                 .setBody("""{"session":${fullSessionJson(session("s1", seq = 4, updatedAt = 10_000, lastAssistantMessageAt = 1_000, metadataVersion = 2))}}""")
-                .setBodyDelay(100, TimeUnit.MILLISECONDS)
         )
         server.enqueueJson("""{"session":${fullSessionJson(newer)}}""")
+        val release = CountDownLatch(1)
+        val queued = server.dispatcher
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                check(release.await(5, TimeUnit.SECONDS))
+                return queued.dispatch(request)
+            }
+        }
         val pending = async(start = CoroutineStart.UNDISPATCHED) { store.loadSessionDetail("s1") }
-        assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
-
-        store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(newer)))
+        try {
+            assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
+            store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(newer)))
+        } finally {
+            release.countDown()
+        }
         assertEquals(newer, pending.await())
         assertEquals(newer, store.currentDetail("s1"))
     }
