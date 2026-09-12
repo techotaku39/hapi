@@ -1075,32 +1075,32 @@ function ScratchlistInventory({
         void runEntryAction(entry, (current) => onSchedule(current, pending))
     }, [onSchedule, runEntryAction])
 
-    const finishEditing = useCallback((entry: ScratchlistEntry) => {
+    const finishEditing = useCallback(async (entry: ScratchlistEntry) => {
         if (editCompletionRef.current) {
-            editCompletionRef.current = false
             return
         }
         editCompletionRef.current = true
         const nextText = editingText.trim()
-        setEditingEntryId(null)
-        setEditingText('')
         const hasAttachments = (entry.attachments?.length ?? 0) > 0
-        if (nextText !== entry.text && (nextText.length > 0 || hasAttachments)) {
-            try {
-                void Promise.resolve(onUpdate(
-                    entry,
-                    nextText,
-                    nextText === '' ? entry.attachments : undefined,
-                )).catch(() => {
-                    // Inline edits do not have a confirmation dialog to show
-                    // mutation errors; the hook rolls back and the next SSE
-                    // refresh reconciles the row. Delete confirmations await
-                    // the same callback and surface failures themselves.
-                })
-            } catch {
-                // Keep a synchronous callback failure from becoming an
-                // unhandled event-handler exception.
-            }
+        if (nextText === entry.text || (nextText.length === 0 && !hasAttachments)) {
+            setEditingEntryId(null)
+            setEditingText('')
+            return
+        }
+
+        try {
+            await onUpdate(
+                entry,
+                nextText,
+                nextText === '' ? entry.attachments : undefined,
+            )
+            setEditingEntryId(null)
+            setEditingText('')
+        } catch {
+            // Keep the editor and the user's text available for retry when an
+            // inline save fails. The hook may roll its cached row back, but
+            // that must not discard the only copy of the pending edit.
+            editCompletionRef.current = false
         }
     }, [editingText, onUpdate])
 
@@ -1184,14 +1184,14 @@ function ScratchlistInventory({
                                         maxLength={SCRATCHLIST_MAX_TEXT_LENGTH}
                                         aria-label={t('scratchlist.action.editEntry')}
                                         onChange={(event) => setEditingText(event.target.value)}
-                                        onBlur={() => finishEditing(entry)}
+                                        onBlur={() => { void finishEditing(entry) }}
                                         onKeyDown={(event) => {
                                             if (event.key === 'Escape') {
                                                 event.preventDefault()
                                                 cancelEditing()
                                             } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                                                 event.preventDefault()
-                                                finishEditing(entry)
+                                                void finishEditing(entry)
                                             }
                                         }}
                                         className="block min-h-6 w-full resize-none overflow-hidden bg-transparent p-0 text-sm leading-6 text-[var(--app-fg)] focus:outline-none focus:ring-0"

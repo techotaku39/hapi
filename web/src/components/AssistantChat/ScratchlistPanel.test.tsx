@@ -584,6 +584,44 @@ describe('ScratchlistDrawer disabled operations', () => {
         expect(onUpdate).not.toHaveBeenCalledWith(entry.id, 'remove this text')
     })
 
+    it.each(['enter', 'blur'] as const)('keeps an inline edit available for retry when %s save fails', async (completion) => {
+        const { ScratchlistDrawer } = await import('./ScratchlistPanel')
+        const entry = makeEntry({ id: `failed-inline-${completion}`, text: 'before' })
+        const onUpdate = vi.fn()
+            .mockRejectedValueOnce(new Error('save failed'))
+            .mockResolvedValueOnce(undefined)
+
+        render(
+            <I18nProvider>
+                <ScratchlistDrawer
+                    entries={[entry]}
+                    sessionId={SID}
+                    api={{} as never}
+                    onUpdate={onUpdate}
+                    onReorder={vi.fn()}
+                    onDelete={vi.fn()}
+                />
+            </I18nProvider>,
+        )
+
+        fireEvent.click(screen.getByTestId('scratchlist-entry-text'))
+        const editor = screen.getByRole('textbox', { name: 'Edit scratchlist entry' })
+        fireEvent.change(editor, { target: { value: 'unsaved edit' } })
+        if (completion === 'enter') {
+            fireEvent.keyDown(editor, { key: 'Enter' })
+        } else {
+            fireEvent.blur(editor)
+        }
+
+        await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+        await waitFor(() => expect(screen.getByRole('textbox', { name: 'Edit scratchlist entry' })).toHaveValue('unsaved edit'))
+
+        if (completion === 'blur') fireEvent.focus(editor)
+        fireEvent.keyDown(editor, { key: 'Enter' })
+        await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(2))
+        await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Edit scratchlist entry' })).toBeNull())
+    })
+
     it('requires confirmation before removing one attachment', async () => {
         const { ScratchlistDrawer } = await import('./ScratchlistPanel')
         const attachment = {

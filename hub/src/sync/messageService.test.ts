@@ -1756,7 +1756,7 @@ describe('MessageService.sendMessage with scheduledAt', () => {
                             callback: (err: Error | null, responses: Array<{ removed: boolean }>) => void,
                         ) => {
                             ackCalls += 1
-                            callback(null, [{ removed: false }])
+                            callback(null, [{ removed: true }])
                         }
                     })
                 }),
@@ -1816,7 +1816,7 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         resolveMaterialization([])
         await release
 
-        expect(ackCalls).toBe(0)
+        expect(ackCalls).toBe(1)
         expect(cliEmitted).toHaveLength(0)
         expect(deletedMaterializedPaths).toEqual(['/tmp/materialized-after-cancel.png'])
         expect(store.messages.lookupQueuedMessage(session.id, message.id)).toEqual({ status: 'absent' })

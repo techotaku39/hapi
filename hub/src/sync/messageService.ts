@@ -829,6 +829,12 @@ export class MessageService {
         // suppress its stale snapshot when the RPC eventually resolves.
         const materializingKey = `${sessionId}:${resolvedId}`
         if (this.materializingScheduledMessageKeys.has(materializingKey)) {
+            const ack = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
+            if (ack === 'consumed') {
+                return await this.recordConsumedAcknowledgement(sessionId, localId)
+            }
+            if (ack !== 'removed') return { status: 'busy', localId }
+
             const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
             if (deleted) {
                 await this.releaseCancelledScheduledAttachment(sessionId, message)
