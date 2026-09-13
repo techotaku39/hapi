@@ -1575,6 +1575,7 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => [session],
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
+            hasTruncatedSessionContent: () => true,
             searchSessionContent: (query: string, namespace: string, limit: number, sessionIds?: readonly string[]) => {
                 expect(query).toBe('needle')
                 expect(namespace).toBe('default')
@@ -1586,7 +1587,8 @@ describe('sessions routes', () => {
                     role: 'assistant' as const,
                     seq: 3,
                     createdAt: 123,
-                    snippet: 'context needle'
+                    snippet: 'context needle',
+                    truncated: true
                 }]
             }
         } as unknown as Partial<SyncEngine>
@@ -1608,6 +1610,7 @@ describe('sessions routes', () => {
         })
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
+            hasTruncatedMessages: true,
             results: [{
                 session: expect.objectContaining({ id: session.id }),
                 match: {
@@ -1615,7 +1618,8 @@ describe('sessions routes', () => {
                     role: 'assistant',
                     seq: 3,
                     createdAt: 123,
-                    snippet: 'context needle'
+                    snippet: 'context needle',
+                    truncated: true
                 }
             }]
         })
@@ -1628,6 +1632,7 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => sessions,
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
+            hasTruncatedSessionContent: () => false,
             searchSessionContent: (_query: string, _namespace: string, _limit: number, sessionIds?: readonly string[]) => {
                 receivedSessionIds = sessionIds
                 return []
@@ -1650,7 +1655,7 @@ describe('sessions routes', () => {
         })
 
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({ results: [] })
+        expect(await response.json()).toEqual({ results: [], hasTruncatedMessages: false })
         expect(receivedSessionIds).toEqual(sessions.map((session) => session.id))
     })
 
@@ -1741,7 +1746,8 @@ describe('sessions routes', () => {
                             role: 'assistant' as const,
                             seq: 8,
                             createdAt: 456,
-                            snippet: 'new needle'
+                            snippet: 'new needle',
+                            truncated: false
                         },
                         {
                             sessionId,
@@ -1749,9 +1755,11 @@ describe('sessions routes', () => {
                             role: 'user' as const,
                             seq: 3,
                             createdAt: 123,
-                            snippet: 'old needle'
+                            snippet: 'old needle',
+                            truncated: false
                         }
-                    ]
+                    ],
+                    hasTruncatedMessages: false
                 }
             }
         } as unknown as Partial<SyncEngine>
@@ -1771,17 +1779,20 @@ describe('sessions routes', () => {
                     role: 'assistant',
                     seq: 8,
                     createdAt: 456,
-                    snippet: 'new needle'
+                    snippet: 'new needle',
+                    truncated: false
                 },
                 {
                     messageId: 'message-old',
                     role: 'user',
                     seq: 3,
                     createdAt: 123,
-                    snippet: 'old needle'
+                    snippet: 'old needle',
+                    truncated: false
                 }
             ],
-            total: 2
+            total: 2,
+            hasTruncatedMessages: false
         })
     })
 

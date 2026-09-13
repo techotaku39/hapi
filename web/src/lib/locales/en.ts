@@ -91,6 +91,8 @@ export default {
   'sessions.search.content.error': 'Message content search failed.',
   'sessions.search.content.minQuery': 'Enter at least 2 characters to search message content.',
   'sessions.search.content.noResults': 'No messages match your search.',
+  'sessions.search.content.noResultsIncomplete': 'No indexed messages match your search. Some long messages were truncated, so results may be incomplete.',
+  'sessions.search.content.truncated': 'This message was truncated for search; some content may be missing.',
   'sessions.unreadFilter.toggle': 'Unread only',
   'sessions.markAllRead.button': 'Mark all as read ({count})',
   'sessions.markAllRead.title': 'Mark all as read?',

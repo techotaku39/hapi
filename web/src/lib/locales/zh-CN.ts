@@ -91,6 +91,8 @@ export default {
   'sessions.search.content.error': '消息内容搜索失败。',
   'sessions.search.content.minQuery': '搜索消息内容至少需要输入 2 个字符。',
   'sessions.search.content.noResults': '没有消息匹配搜索内容。',
+  'sessions.search.content.noResultsIncomplete': '没有已索引的消息匹配搜索内容。部分长消息被截断，结果可能不完整。',
+  'sessions.search.content.truncated': '此消息过长，搜索索引已截断，部分内容可能未被搜索。',
   'sessions.unreadFilter.toggle': '仅显示未读',
   'sessions.markAllRead.button': '全部标为已读（{count}）',
   'sessions.markAllRead.title': '全部标为已读？',

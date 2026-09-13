@@ -979,6 +979,7 @@ function SessionItem(props: {
     projectLabel?: string
     machineLabel?: string
     contentSnippet?: string
+    contentSearchTruncated?: boolean
     targetMessageId?: string
     targetMessageQuery?: string
     lastSeenVersion: number
@@ -997,6 +998,7 @@ function SessionItem(props: {
         projectLabel,
         machineLabel,
         contentSnippet,
+        contentSearchTruncated,
         targetMessageId,
         targetMessageQuery,
         lastSeenVersion
@@ -1126,6 +1128,7 @@ function SessionItem(props: {
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
                     contentSnippet={contentSnippet}
+                    contentSearchTruncated={contentSearchTruncated}
                 />
             </button>
 
@@ -1378,6 +1381,13 @@ export function SessionList(props: {
         }
         return messageIds
     }, [contentSearchResponse])
+    const contentSearchTruncatedBySessionId = useMemo(() => {
+        const truncated = new Set<string>()
+        for (const result of contentSearchResponse?.results ?? []) {
+            if (result.match.truncated) truncated.add(result.session.id)
+        }
+        return truncated
+    }, [contentSearchResponse])
     const allGroups = useMemo(
         () => groupSessionsByDirectory(allSessions),
         [allSessions]
@@ -1442,7 +1452,7 @@ export function SessionList(props: {
         setContentSearchResponse(null)
         setContentSearchError(false)
         if (contentSearchSessionIds.length === 0) {
-            setContentSearchResponse({ results: [] })
+            setContentSearchResponse({ results: [], hasTruncatedMessages: false })
             setContentSearchLoading(false)
             return
         }
@@ -1463,7 +1473,7 @@ export function SessionList(props: {
                 })
                 .catch(() => {
                     if (controller.signal.aborted) return
-                    setContentSearchResponse({ results: [] })
+                    setContentSearchResponse({ results: [], hasTruncatedMessages: false })
                     setContentSearchError(true)
                 })
                 .finally(() => {
@@ -1722,6 +1732,7 @@ export function SessionList(props: {
                                             projectLabel={getPathDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                            contentSearchTruncated={contentSearchTruncatedBySessionId.has(s.id)}
                                             targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
                                             targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
                                             lastSeenVersion={lastSeenVersion}
@@ -1852,6 +1863,7 @@ export function SessionList(props: {
                                     selected={s.id === selectedSessionId}
                                     showDetailedStatus={showDetailedStatus}
                                     contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                    contentSearchTruncated={contentSearchTruncatedBySessionId.has(s.id)}
                                     targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
                                     targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
                                     lastSeenVersion={lastSeenVersion}
@@ -2199,7 +2211,9 @@ export function SessionList(props: {
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {contentSearchActive
                             ? contentSearchReady
-                                ? t('sessions.search.content.noResults')
+                                ? contentSearchResponse?.hasTruncatedMessages
+                                    ? t('sessions.search.content.noResultsIncomplete')
+                                    : t('sessions.search.content.noResults')
                                 : t('sessions.search.content.minQuery')
                             : t('sessions.search.noResults')}
                     </div>
@@ -2250,6 +2264,7 @@ export function SessionList(props: {
                                             projectLabel={getPathDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                            contentSearchTruncated={contentSearchTruncatedBySessionId.has(s.id)}
                                             targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
                                             targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
                                             lastSeenVersion={lastSeenVersion}

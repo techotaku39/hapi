@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import type { Database } from 'bun:sqlite'
+import { Database } from 'bun:sqlite'
 import { Store } from './index'
 import {
+    createMessageContentSearchTable,
     MAX_INDEXED_MESSAGE_CHARACTERS,
     MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE,
     removeMessageContentSearchForSessions
@@ -23,6 +24,37 @@ function failSessionDelete(store: Store): void {
 }
 
 describe('message content search', () => {
+    it('adds truncation metadata to an existing lookup schema', () => {
+        const db = new Database(':memory:')
+        try {
+            db.exec(`
+                CREATE VIRTUAL TABLE message_content_search USING fts5(
+                    searchable_text,
+                    message_id UNINDEXED,
+                    session_id UNINDEXED,
+                    seq UNINDEXED,
+                    created_at UNINDEXED,
+                    role UNINDEXED,
+                    tokenize = 'trigram'
+                );
+                CREATE TABLE message_content_search_lookup (
+                    search_rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id TEXT NOT NULL UNIQUE,
+                    target_message_id TEXT NOT NULL
+                );
+            `)
+
+            createMessageContentSearchTable(db)
+
+            const columns = db.prepare(
+                'PRAGMA table_info(message_content_search_lookup)'
+            ).all() as Array<{ name: string }>
+            expect(columns.map((column) => column.name)).toContain('is_truncated')
+        } finally {
+            db.close()
+        }
+    })
+
     it('indexes visible user and assistant prose, including compressed messages', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'content-search')
@@ -244,7 +276,7 @@ describe('message content search', () => {
             'No response requested',
             'default',
             session.id
-        )).toEqual({ matches: [], total: 0 })
+        )).toEqual({ matches: [], total: 0, hasTruncatedMessages: false })
     })
 
     it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
@@ -266,7 +298,7 @@ describe('message content search', () => {
             .toEqual([otherSession.id])
         expect(store.messages.searchContent('搜', 'default')).toEqual([])
         expect(store.messages.searchContentInSession('搜', 'default', defaultSession.id))
-            .toEqual({ matches: [], total: 0 })
+            .toEqual({ matches: [], total: 0, hasTruncatedMessages: false })
     })
 
     it('bounds per-message short-index work for long high-entropy text', () => {
@@ -302,7 +334,10 @@ describe('message content search', () => {
         expect(indexedText.searchable_text).toContain('tail-search-needle')
         expect(Number(count.count)).toBeLessThanOrEqual(MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE)
         expect(store.messages.searchContent('tail-search-needle', 'default'))
-            .toMatchObject([{ sessionId: session.id }])
+            .toMatchObject([{ sessionId: session.id, truncated: true }])
+        expect(store.messages.hasTruncatedContent('default')).toBe(true)
+        expect(store.messages.searchContentInSession('missing-middle', 'default', session.id))
+            .toMatchObject({ hasTruncatedMessages: true })
     })
 
     it('defers live stream snapshots until the explicit terminal snapshot', () => {

@@ -14,7 +14,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migrations through v29', () => {
+describe('schema migrations through v30', () => {
     it('adds events and event_links tables to a V22 database', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v23-'))
         tempDirs.push(dir)
@@ -44,7 +44,7 @@ describe('schema migrations through v29', () => {
             expect(links?.name).toBe('event_links')
             const columns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
             expect(columns.map((column) => column.name)).toContain('delivery_state')
-            expect(version.user_version).toBe(29)
+            expect(version.user_version).toBe(30)
         } finally {
             migrated.close()
         }
@@ -77,7 +77,7 @@ describe('schema migrations through v29', () => {
             expect(migrated.messages.searchContent('backfill this', 'default')[0]?.sessionId).toBe(session.id)
             const internalDb = (migrated as unknown as { db: Database }).db
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-            expect(version.user_version).toBe(29)
+            expect(version.user_version).toBe(30)
         } finally {
             migrated.close()
         }
@@ -113,7 +113,7 @@ describe('schema migrations through v29', () => {
             ).get() as { name: string } | null
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
             expect(lookup?.name).toBe('message_content_search_lookup')
-            expect(version.user_version).toBe(29)
+            expect(version.user_version).toBe(30)
         } finally {
             migrated.close()
         }
@@ -176,7 +176,66 @@ describe('schema migrations through v29', () => {
             expect(target?.target_message_id).toBe(message.id)
             expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
             expect(indexed?.searchable_text).toContain('tail-migration-needle')
-            expect(version.user_version).toBe(29)
+            expect(version.user_version).toBe(30)
+        } finally {
+            migrated.close()
+        }
+    })
+
+    it('rebuilds a v29 content index with the larger cap and truncation metadata', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v29-content-search-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        const initial = new Store(dbPath)
+        const session = initial.sessions.getOrCreateSession(
+            'migration-content-cap',
+            { path: '/tmp/migration-content-cap' },
+            null,
+            'default'
+        )
+        const text = `${'a'.repeat(16_000)} v30-middle-needle ${'b'.repeat(18_000)}`
+        const message = initial.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text }
+        })
+        initial.close()
+
+        // Simulate the v29 derived index without deleting any user data. The
+        // old 16 KiB head/tail window misses the marker near its midpoint.
+        const legacy = new Database(dbPath)
+        const legacyIndexedText = `${text.slice(0, 8_191)} ${text.slice(-8_192)}`
+        legacy.prepare(
+            'UPDATE message_content_search SET searchable_text = ? WHERE message_id = ?'
+        ).run(legacyIndexedText, message.id)
+        legacy.prepare(
+            'UPDATE message_content_search_lookup SET is_truncated = 0 WHERE target_message_id = ?'
+        ).run(message.id)
+        legacy.exec('PRAGMA user_version = 29')
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        try {
+            expect(migrated.messages.searchContent('v30-middle-needle', 'default'))
+                .toMatchObject([{ sessionId: session.id, truncated: true }])
+
+            const internalDb = (migrated as unknown as { db: Database }).db
+            const indexed = internalDb.prepare(`
+                SELECT searchable_text
+                FROM message_content_search
+                WHERE message_id = ?
+            `).get(message.id) as { searchable_text: string } | undefined
+            const metadata = internalDb.prepare(`
+                SELECT is_truncated
+                FROM message_content_search_lookup
+                WHERE target_message_id = ?
+            `).get(message.id) as { is_truncated: number } | undefined
+            const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+
+            expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
+            expect(indexed?.searchable_text).toContain('v30-middle-needle')
+            expect(metadata?.is_truncated).toBe(1)
+            expect(version.user_version).toBe(30)
         } finally {
             migrated.close()
         }

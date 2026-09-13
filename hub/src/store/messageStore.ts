@@ -48,6 +48,7 @@ import {
     type MessagePosition,
 } from './messages'
 import {
+    hasTruncatedMessageContent,
     searchMessageContent,
     searchMessageContentInSession,
     type MessageContentSearchMatch,
@@ -204,6 +205,10 @@ export class MessageStore {
         limit: number = 500
     ): SessionMessageContentSearchResult {
         return searchMessageContentInSession(this.db, query, namespace, sessionId, limit)
+    }
+
+    hasTruncatedContent(namespace: string, sessionIds?: readonly string[]): boolean {
+        return hasTruncatedMessageContent(this.db, namespace, sessionIds)
     }
 
     cancelQueuedMessage(sessionId: string, messageId: string): CancelQueuedMessageResult {

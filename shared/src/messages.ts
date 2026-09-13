@@ -202,6 +202,16 @@ function normalizeSearchablePlainText(value: string): string | null {
     return text.length > 0 ? text : null
 }
 
+type BoundedText = {
+    text: string
+    truncated: boolean
+}
+
+type BoundedTextChunks = {
+    chunks: string[]
+    truncated: boolean
+}
+
 function sliceJoinedText(
     parts: readonly string[],
     separator: string,
@@ -249,22 +259,29 @@ function collectJoinedHeadTail(
     parts: readonly string[],
     separator: string,
     maxSourceCharacters: number
-): string[] {
-    if (parts.length === 0) return []
-    if (!Number.isFinite(maxSourceCharacters)) return [parts.join(separator)]
+): BoundedTextChunks {
+    if (parts.length === 0) return { chunks: [], truncated: false }
+    if (!Number.isFinite(maxSourceCharacters)) {
+        return { chunks: [parts.join(separator)], truncated: false }
+    }
 
     const maxCharacters = Math.max(0, Math.floor(maxSourceCharacters))
-    if (maxCharacters === 0) return []
+    if (maxCharacters === 0) return { chunks: [], truncated: parts.length > 0 }
 
     let totalCharacters = 0
     for (let index = 0; index < parts.length; index++) {
         totalCharacters += parts[index]!.length
         if (index > 0) totalCharacters += separator.length
     }
-    if (totalCharacters <= maxCharacters) return [parts.join(separator)]
+    if (totalCharacters <= maxCharacters) {
+        return { chunks: [parts.join(separator)], truncated: false }
+    }
 
     if (maxCharacters <= separator.length) {
-        return [sliceJoinedText(parts, separator, 0, maxCharacters)]
+        return {
+            chunks: [sliceJoinedText(parts, separator, 0, maxCharacters)],
+            truncated: true
+        }
     }
 
     const contentCharacters = maxCharacters - separator.length
@@ -274,7 +291,7 @@ function collectJoinedHeadTail(
     if (tailCharacters > 0) {
         chunks.push(sliceJoinedText(parts, separator, totalCharacters - tailCharacters, tailCharacters))
     }
-    return chunks
+    return { chunks, truncated: true }
 }
 
 function normalizeSearchableMarkdownChunks(chunks: readonly string[]): string | null {
@@ -290,15 +307,21 @@ function normalizeSearchableMarkdownChunks(chunks: readonly string[]): string | 
     return normalizeSearchablePlainText(rendered)
 }
 
-function normalizeSearchableMarkdownText(value: string, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
-    return normalizeSearchableMarkdownChunks(
-        collectJoinedHeadTail([value], ' ', maxSourceCharacters)
-    )
+function normalizeSearchableMarkdownTextWithMetadata(
+    value: string,
+    maxSourceCharacters = Number.POSITIVE_INFINITY
+): BoundedText | null {
+    const bounded = collectJoinedHeadTail([value], ' ', maxSourceCharacters)
+    const text = normalizeSearchableMarkdownChunks(bounded.chunks)
+    return text ? { text, truncated: bounded.truncated } : null
 }
 
-export function extractUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
+function extractUserPlainTextWithMetadata(
+    content: unknown,
+    maxSourceCharacters = Number.POSITIVE_INFINITY
+): BoundedText | null {
     if (typeof content === 'string') {
-        return normalizeSearchableMarkdownText(content, maxSourceCharacters)
+        return normalizeSearchableMarkdownTextWithMetadata(content, maxSourceCharacters)
     }
 
     const blocks = Array.isArray(content) ? content : [content]
@@ -311,12 +334,16 @@ export function extractUserPlainText(content: unknown, maxSourceCharacters = Num
         })
         .filter((text): text is string => text !== null)
 
-    return normalizeSearchableMarkdownChunks(
-        collectJoinedHeadTail(textParts, ' ', maxSourceCharacters)
-    )
+    const bounded = collectJoinedHeadTail(textParts, ' ', maxSourceCharacters)
+    const text = normalizeSearchableMarkdownChunks(bounded.chunks)
+    return text ? { text, truncated: bounded.truncated } : null
 }
 
-function extractClaudeUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
+export function extractUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
+    return extractUserPlainTextWithMetadata(content, maxSourceCharacters)?.text ?? null
+}
+
+function extractClaudeUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): BoundedText | null {
     if (!isObject(content) || content.type !== 'output') return null
     const data = isObject(content.data) ? content.data : null
     if (!data || data.type !== 'user' || Boolean(data.isSidechain)) return null
@@ -327,7 +354,7 @@ function extractClaudeUserPlainText(content: unknown, maxSourceCharacters = Numb
         isObject(block) && block.type === 'text' && typeof block.text === 'string'
     ))) return null
 
-    return extractUserPlainText(blocks, maxSourceCharacters)
+    return extractUserPlainTextWithMetadata(blocks, maxSourceCharacters)
 }
 
 export type SearchableMessageContext = {
@@ -366,19 +393,24 @@ function isNoResponseRequestedText(text: string): boolean {
 function extractSearchableAssistantPlainText(
     content: unknown,
     context?: SearchableMessageContext
-): string | null {
+): BoundedText | null {
     if (!isObject(content) || content.type !== 'output') {
-        return extractAssistantPlainText(content)
+        const text = extractAssistantPlainText(content)
+        return text === null ? null : { text, truncated: false }
     }
 
     const data = isObject(content.data) ? content.data : null
     if (!data || data.type !== 'assistant') {
-        return extractAssistantPlainText(content)
+        const text = extractAssistantPlainText(content)
+        return text === null ? null : { text, truncated: false }
     }
 
     const message = isObject(data.message) ? data.message : null
     const blocks = Array.isArray(message?.content) ? message.content : null
-    if (!blocks) return extractAssistantPlainText(content)
+    if (!blocks) {
+        const text = extractAssistantPlainText(content)
+        return text === null ? null : { text, truncated: false }
+    }
 
     const taskToolCall = blocks.find((block) => {
         if (!isObject(block) || block.type !== 'tool_use') return false
@@ -408,8 +440,14 @@ function extractSearchableAssistantPlainText(
             return null
         }
     }
-    return textParts.length > 0
-        ? collectJoinedHeadTail(textParts, '\n', context?.maxSourceCharacters ?? Number.POSITIVE_INFINITY).join('\n')
+    if (textParts.length === 0) return null
+    const bounded = collectJoinedHeadTail(
+        textParts,
+        '\n',
+        context?.maxSourceCharacters ?? Number.POSITIVE_INFINITY
+    )
+    return bounded.chunks.length > 0
+        ? { text: bounded.chunks.join('\n'), truncated: bounded.truncated }
         : null
 }
 
@@ -418,6 +456,8 @@ export type SearchableMessage = {
     text: string
     /** Stable renderer identity used to coalesce streamed assistant snapshots. */
     renderKey?: string
+    /** True when the source text exceeded the indexing budget and was bounded. */
+    truncated?: boolean
 }
 
 function getMessageRenderKey(content: unknown): string | undefined {
@@ -475,14 +515,26 @@ export function extractSearchableMessageText(
     if (!record) return null
 
     if (record.role === 'user') {
-        const text = extractUserPlainText(record.content, context?.maxSourceCharacters)
-        return text ? { role: 'user', text } : null
+        const extracted = extractUserPlainTextWithMetadata(record.content, context?.maxSourceCharacters)
+        return extracted
+            ? {
+                role: 'user',
+                text: extracted.text,
+                ...(extracted.truncated ? { truncated: true } : {})
+            }
+            : null
     }
 
     if (record.role === 'agent' || record.role === 'assistant') {
         if (isHiddenAssistantOutput(record.content)) return null
         const claudeUserText = extractClaudeUserPlainText(record.content, context?.maxSourceCharacters)
-        if (claudeUserText) return { role: 'user', text: claudeUserText }
+        if (claudeUserText) {
+            return {
+                role: 'user',
+                text: claudeUserText.text,
+                ...(claudeUserText.truncated ? { truncated: true } : {})
+            }
+        }
         const renderKey = getMessageRenderKey(record.content)
         const isAgyPlannerMessage = isObject(record.content)
             && record.content.type === 'output'
@@ -495,14 +547,33 @@ export function extractSearchableMessageText(
                 && typeof record.content.text === 'string'
                 ? record.content.text
                 : null
+        const extracted = isAgyPlannerMessage
+            ? (() => {
+                const text = directText ?? extractAssistantPlainText(record.content)
+                return text === null ? null : { text, truncated: false }
+            })()
+            : directText !== null
+                ? { text: directText, truncated: false }
+                : extractSearchableAssistantPlainText(record.content, context)
+        if (!extracted) return null
+
         const rawText = stripNotifySummaryFooter(
             isAgyPlannerMessage
-                ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
-                : (directText ?? extractSearchableAssistantPlainText(record.content, context) ?? '')
+                ? stripAgyEchoedTaskResult(extracted.text)
+                : extracted.text
         )
-        const text = normalizeSearchableMarkdownText(rawText, context?.maxSourceCharacters)
-        if (!text || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null
-        return { role: 'assistant', text, ...(renderKey ? { renderKey } : {}) }
+        const normalized = normalizeSearchableMarkdownTextWithMetadata(
+            rawText,
+            context?.maxSourceCharacters
+        )
+        if (!normalized || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null
+        const truncated = extracted.truncated || normalized.truncated
+        return {
+            role: 'assistant',
+            text: normalized.text,
+            ...(renderKey ? { renderKey } : {}),
+            ...(truncated ? { truncated: true } : {})
+        }
     }
 
     return null

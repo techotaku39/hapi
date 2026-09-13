@@ -167,6 +167,27 @@ describe('extractSearchableMessageText', () => {
         expect(text?.length).toBeLessThanOrEqual(32)
     })
 
+    test('marks searchable text that was truncated for indexing', () => {
+        const user = extractSearchableMessageText({
+            role: 'user',
+            content: { type: 'text', text: `head ${'middle filler '.repeat(20)}unique middle-only marker tail phrase` }
+        }, { maxSourceCharacters: 32 })
+        const assistant = extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', message: `head ${'middle filler '.repeat(20)}unique middle-only marker tail phrase` }
+            }
+        }, { maxSourceCharacters: 32 })
+
+        expect(user).toMatchObject({ role: 'user', truncated: true })
+        expect(user?.text).toContain('tail phrase')
+        expect(user?.text).not.toContain('unique middle-only marker')
+        expect(assistant).toMatchObject({ role: 'assistant', truncated: true })
+        expect(assistant?.text).toContain('tail phrase')
+        expect(assistant?.text).not.toContain('unique middle-only marker')
+    })
+
     test('extracts assistant prose but excludes tool and reasoning records', () => {
         expect(extractSearchableMessageText({
             role: 'agent',

@@ -114,16 +114,20 @@ export type SessionContentMatch = {
     seq: number
     createdAt: number
     snippet: string
+    truncated: boolean
 }
 export type SessionContentSearchResponse = {
     results: Array<{
         session: SessionSummary
         match: SessionContentMatch
     }>
+    /** True when the searched scope contains messages whose indexed text was truncated. */
+    hasTruncatedMessages: boolean
 }
 export type SessionContentMatchesResponse = {
     matches: SessionContentMatch[]
     total: number
+    hasTruncatedMessages: boolean
 }
 export type SessionResponse = { session: Session }
 export type MessagesResponse = {
