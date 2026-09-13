@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode, TextareaHTMLAttributes } from 'react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { ComposerMessageHistoryEntry } from '@/lib/composerMessageHistory'
@@ -29,6 +29,7 @@ const runtime = vi.hoisted(() => ({
     enterBehavior: 'send' as 'send' | 'newline',
     genericSuggestions: [] as Suggestion[],
     dictationOnTextChange: null as null | ((text: string) => void),
+    invalidateHistoryNavigation: null as null | (() => void),
 }))
 
 vi.mock('@assistant-ui/react', async () => {
@@ -164,6 +165,7 @@ const history: ComposerMessageHistoryEntry[] = [
 ]
 
 function ComposerHarness(props: { initialText: string; messageHistory?: ComposerMessageHistoryEntry[]; genericAutocomplete?: boolean }) {
+    const historyNavigationInvalidationRef = useRef<(() => void) | null>(null)
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
         composer: { text: props.initialText, attachments: [] },
         thread: { isRunning: false, isDisabled: false },
@@ -173,11 +175,13 @@ function ComposerHarness(props: { initialText: string; messageHistory?: Composer
     runtime.genericSuggestions = props.genericAutocomplete
         ? [{ key: 'slash:compact', text: '/compact', label: '/compact' }]
         : []
+    runtime.invalidateHistoryNavigation = () => historyNavigationInvalidationRef.current?.()
 
     return (
         <I18nProvider>
             <HappyComposer
                 sessionId="history-test"
+                historyNavigationInvalidationRef={historyNavigationInvalidationRef}
                 messageHistory={props.messageHistory ?? history}
                 agentFlavor="pi"
                 model="pi-model"
@@ -203,6 +207,7 @@ describe('HappyComposer message history', () => {
         runtime.enterBehavior = 'send'
         runtime.genericSuggestions = []
         runtime.dictationOnTextChange = null
+        runtime.invalidateHistoryNavigation = null
     })
 
     it('opens from # or ＃, searches locally, and strips the trigger on selection', () => {
@@ -312,6 +317,28 @@ describe('HappyComposer message history', () => {
         fireEvent.keyDown(input, { key: 'Enter' })
 
         expect(runtime.sentTexts).toEqual(['newest task dictated'])
+    })
+
+    it('exits history navigation when an external composer edit restores queued text', async () => {
+        render(<ComposerHarness initialText="" />)
+        const input = screen.getByRole('textbox') as HTMLTextAreaElement
+        input.focus()
+        input.setSelectionRange(0, 0)
+        fireEvent.select(input)
+
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        await waitFor(() => expect(input.value).toBe('newest task'))
+
+        act(() => {
+            runtime.invalidateHistoryNavigation?.()
+            runtime.setSnapshot?.((current) => ({
+                ...current,
+                composer: { ...current.composer, text: 'queued edit' },
+            }))
+        })
+        fireEvent.keyDown(input, { key: 'Enter' })
+
+        expect(runtime.sentTexts).toEqual(['queued edit'])
     })
 
     it('keeps prefix history search priority when generic autocomplete also matches', () => {

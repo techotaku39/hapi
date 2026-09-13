@@ -296,6 +296,8 @@ export function ModelEffortSettingsSection(props: {
 export function HappyComposer(props: {
     sessionId?: string
     focusInputRef?: MutableRefObject<(() => void) | null>
+    /** Lets sibling composer controls invalidate history after external text edits. */
+    historyNavigationInvalidationRef?: MutableRefObject<(() => void) | null>
     onUploadDraftSnapshot?: (text: string, attachments: AttachmentDraftInput[]) => void
     canRestoreAttachments?: boolean
     disabled?: boolean
@@ -490,6 +492,14 @@ export function HappyComposer(props: {
         clearHistoryNavigation()
         setHistoryDismissedText(null)
     }, [clearHistoryNavigation])
+    useEffect(() => {
+        const ref = props.historyNavigationInvalidationRef
+        if (!ref) return
+        ref.current = invalidateProgrammaticUserEdit
+        return () => {
+            if (ref.current === invalidateProgrammaticUserEdit) ref.current = null
+        }
+    }, [invalidateProgrammaticUserEdit, props.historyNavigationInvalidationRef])
     const localAttachmentOrderRef = useRef<string[]>([])
     const attachmentOrderRef = externalAttachmentOrderRef ?? localAttachmentOrderRef
     const attachmentIds = useMemo(
