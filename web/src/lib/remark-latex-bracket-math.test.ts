@@ -179,6 +179,38 @@ t_s\approx\frac{4}{0.5\times3}
         expect(html).not.toContain('class="katex"')
     })
 
+    it('preserves quoted fences and multiline code spans as literal Markdown', () => {
+        const quotedFence = [
+            '> ```latex',
+            '> \\[x^2\\]',
+            '> ````',
+        ].join('\n')
+        const quotedFenceHtml = render(quotedFence)
+        expect(quotedFenceHtml).not.toContain('class="katex"')
+        expect(quotedFenceHtml).toContain('\\[x^2\\]')
+
+        const multilineCodeSpan = [
+            'Use `before',
+            String.raw`\[x^2\]`,
+            'after` here.',
+        ].join('\n')
+        const multilineCodeSpanHtml = render(multilineCodeSpan)
+        expect(multilineCodeSpanHtml).not.toContain('class="katex"')
+        expect(multilineCodeSpanHtml).toContain('\\[x^2\\]')
+    })
+
+    it('removes blockquote prefixes from multiline bracket math', () => {
+        const html = render([
+            '> \\[',
+            '> x = 1',
+            '> \\]',
+        ].join('\n'))
+
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+        expect(html).toContain('<annotation encoding="application/x-tex">x = 1</annotation>')
+        expect(html).not.toContain('<annotation encoding="application/x-tex">&gt; x = 1')
+    })
+
     it('keeps currency prose literal while preserving existing dollar math', () => {
         const currency = render('The plan is $200/mo and the bill is $80.')
         expect(currency).not.toContain('class="katex"')

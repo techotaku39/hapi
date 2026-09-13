@@ -62,7 +62,7 @@ function findLineEnd(source: string, start: number): number {
 }
 
 function isFenceLine(line: string): { char: '`' | '~'; length: number; rest: string } | null {
-    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    const match = line.match(/^(?:[ \t]{0,3}>[ \t]?)*[ \t]{0,3}(`{3,}|~{3,})(.*)$/)
     if (!match) return null
     return {
         char: match[1][0] as '`' | '~',
@@ -71,25 +71,32 @@ function isFenceLine(line: string): { char: '`' | '~'; length: number; rest: str
     }
 }
 
-function markInlineCodeSpans(source: string, start: number, end: number, mask: ProtectedMask): void {
-    let cursor = start
-    while (cursor < end) {
-        if (source[cursor] !== '`' || !isUnescapedDelimiter(source, cursor)) {
+function containsProtectedRange(mask: ProtectedMask, start: number, end: number): boolean {
+    for (let index = start; index < end; index++) {
+        if (mask[index]) return true
+    }
+    return false
+}
+
+function markInlineCodeSpans(source: string, mask: ProtectedMask): void {
+    let cursor = 0
+    while (cursor < source.length) {
+        if (mask[cursor] || source[cursor] !== '`' || !isUnescapedDelimiter(source, cursor)) {
             cursor++
             continue
         }
 
         const runStart = cursor
-        while (cursor < end && source[cursor] === '`') cursor++
+        while (cursor < source.length && source[cursor] === '`') cursor++
         const delimiter = source.slice(runStart, cursor)
         let closing = source.indexOf(delimiter, cursor)
-        while (closing >= 0 && closing < end) {
-            const before = closing > start ? source[closing - 1] : ''
+        while (closing >= 0 && closing < source.length) {
+            const before = closing > 0 ? source[closing - 1] : ''
             const after = source[closing + delimiter.length] ?? ''
-            if (before !== '`' && after !== '`') break
+            if (before !== '`' && after !== '`' && !containsProtectedRange(mask, closing, closing + delimiter.length)) break
             closing = source.indexOf(delimiter, closing + 1)
         }
-        if (closing < 0 || closing >= end) continue
+        if (closing < 0 || containsProtectedRange(mask, runStart, closing + delimiter.length)) continue
 
         markProtectedRange(mask, runStart, closing + delimiter.length)
         cursor = closing + delimiter.length
@@ -120,12 +127,14 @@ function getProtectedMarkdownRanges(source: string): ProtectedMask {
             markProtectedRange(mask, lineStart, lineEnd)
             fenceChar = fence.char
             fenceLength = fence.length
-        } else {
-            markInlineCodeSpans(source, lineStart, contentEnd, mask)
         }
 
         lineStart = lineEnd
     }
+
+    // Code spans may cross line boundaries. Scan them after fenced ranges are
+    // marked so delimiters inside either kind of code remain opaque.
+    markInlineCodeSpans(source, mask)
 
     return mask
 }
@@ -143,6 +152,13 @@ function findNextDelimiter(source: string, delimiter: string, from: number, mask
         offset = source.indexOf(delimiter, offset + 1)
     }
     return offset
+}
+
+function stripMarkdownContainerPrefixes(value: string): string {
+    // Blockquote markers and continuation indentation belong to Markdown, not
+    // to the TeX source. Removing them also makes the restored AST token match
+    // the text value produced inside a list or blockquote container.
+    return value.replace(/(\r?\n)[ \t]*(?:>[ \t]?)?/g, '$1')
 }
 
 function findBracketMathMatches(source: string, mask: ProtectedMask): BracketMathMatch[] {
@@ -173,7 +189,9 @@ function findBracketMathMatches(source: string, mask: ProtectedMask): BracketMat
             continue
         }
 
-        const value = source.slice(start + openingLength, closingStart).trim()
+        const value = stripMarkdownContainerPrefixes(
+            source.slice(start + openingLength, closingStart)
+        ).trim()
         if (value.length > 0) {
             matches.push({
                 end: closingStart + closingDelimiter.length,
@@ -226,10 +244,27 @@ function findUnusedPlaceholderToken(source: string, start: number): string {
     throw new Error('Unable to allocate a LaTeX placeholder token')
 }
 
-function makePlaceholder(source: string, match: BracketMathMatch, token: string): string {
-    return Array.from(source.slice(match.start, match.end), (character) => (
-        character === '\r' || character === '\n' ? character : token
-    )).join('')
+function makePlaceholder(value: string, token: string): string {
+    let placeholder = ''
+    for (let index = 0; index < value.length; index++) {
+        const character = value[index]
+        placeholder += character === '\r' || character === '\n' ? character : token
+    }
+    return placeholder
+}
+
+function makeSourcePlaceholder(source: string, match: BracketMathMatch, token: string): string {
+    const raw = source.slice(match.start, match.end)
+    const parts = raw.split(/(\r?\n)/)
+    return parts.map((part, index) => {
+        if (/^\r?\n$/.test(part)) return part
+        if (index === 0) return token.repeat(part.length)
+
+        // Preserve Markdown container prefixes on continuation lines so the
+        // reparsed source stays inside the original blockquote/list.
+        const prefix = part.match(/^[ \t]*(?:>[ \t]?)?/u)?.[0] ?? ''
+        return prefix + token.repeat(part.length - prefix.length)
+    }).join('')
 }
 
 function prepareBracketMathSource(source: string): { source: string; placeholders: PlaceholderMap } | null {
@@ -243,9 +278,11 @@ function prepareBracketMathSource(source: string): { source: string; placeholder
     for (const match of matches) {
         const token = findUnusedPlaceholderToken(source, nextToken)
         nextToken = token.charCodeAt(0) + 1
-        const placeholder = makePlaceholder(source, match, token)
-        placeholders.set(token, { ...match, placeholder, raw: source.slice(match.start, match.end), token })
-        chunks.push(source.slice(cursor, match.start), placeholder)
+        const raw = source.slice(match.start, match.end)
+        const sourcePlaceholder = makeSourcePlaceholder(source, match, token)
+        const placeholder = makePlaceholder(stripMarkdownContainerPrefixes(raw), token)
+        placeholders.set(token, { ...match, placeholder, raw, token })
+        chunks.push(source.slice(cursor, match.start), sourcePlaceholder)
         cursor = match.end
     }
     chunks.push(source.slice(cursor))
@@ -351,6 +388,9 @@ function transformContainer(node: MarkdownNode, placeholders: PlaceholderMap): v
     const children: MarkdownNode[] = []
     for (const child of node.children) {
         if (OPAQUE_NODE_TYPES.has(child.type)) {
+            if (typeof child.value === 'string') {
+                child.value = restorePlaceholders(child.value, placeholders)
+            }
             if (child.children) restorePlaceholdersInContainer(child, placeholders)
             children.push(child)
             continue
