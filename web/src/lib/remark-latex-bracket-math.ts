@@ -174,6 +174,7 @@ function getMarkdownContainerPrefixes(source: string, offset: number): {
     let cursor = 0
     let blockquotePrefix = ''
     let listContinuationPrefix = ''
+    let recognizedContainer = false
 
     while (cursor < beforeDelimiter.length) {
         const containerStart = cursor
@@ -187,6 +188,7 @@ function getMarkdownContainerPrefixes(source: string, offset: number): {
             cursor++
             if (beforeDelimiter[cursor] === ' ' || beforeDelimiter[cursor] === '\t') cursor++
             blockquotePrefix = beforeDelimiter.slice(0, cursor)
+            recognizedContainer = true
             continue
         }
 
@@ -194,6 +196,7 @@ function getMarkdownContainerPrefixes(source: string, offset: number): {
         if (listMarker) {
             listContinuationPrefix = beforeDelimiter.slice(containerStart, cursor) + ' '.repeat(listMarker[0].length)
             cursor += listMarker[0].length
+            recognizedContainer = true
             continue
         }
 
@@ -201,7 +204,7 @@ function getMarkdownContainerPrefixes(source: string, offset: number): {
         break
     }
 
-    if (beforeDelimiter.slice(cursor).trim().length > 0) {
+    if (!recognizedContainer && beforeDelimiter.trim().length > 0) {
         return { blockquotePrefix: '', continuationPrefix: '' }
     }
 
@@ -209,7 +212,7 @@ function getMarkdownContainerPrefixes(source: string, offset: number): {
         blockquotePrefix,
         continuationPrefix: listContinuationPrefix
             ? blockquotePrefix + listContinuationPrefix
-            : beforeDelimiter,
+            : blockquotePrefix || beforeDelimiter,
     }
 }
 

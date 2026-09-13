@@ -211,6 +211,18 @@ t_s\approx\frac{4}{0.5\times3}
         expect(html).not.toContain('<annotation encoding="application/x-tex">&gt; x = 1')
     })
 
+    it('preserves blockquote prefixes when prose precedes multiline bracket math', () => {
+        const html = render([
+            '> Result: \\[',
+            '> x = 1',
+            '> \\]',
+        ].join('\n'))
+
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+        expect(html).toContain('<annotation encoding="application/x-tex">x = 1</annotation>')
+        expect(html).not.toContain('<annotation encoding="application/x-tex">&gt; x = 1')
+    })
+
     it('keeps mathematical greater-than signs in unquoted multiline bracket math', () => {
         const html = render([
             '\\[',
