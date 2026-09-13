@@ -179,6 +179,22 @@ t_s\approx\frac{4}{0.5\times3}
         expect(html).not.toContain('class="katex"')
     })
 
+    it('does not let an unmatched opener consume a protected code block', () => {
+        const html = render([
+            String.raw`Literal \(`,
+            '```latex',
+            String.raw`\[x^2\]`,
+            '```',
+            '',
+            String.raw`\(y^2\)`,
+        ].join('\n'))
+
+        expect(html).toContain('<pre><code class="language-latex">\\[x^2\\]\n</code></pre>')
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+        expect(html).toContain('Literal (')
+        expect(html).not.toContain('\uE000')
+    })
+
     it('preserves quoted fences and multiline code spans as literal Markdown', () => {
         const quotedFence = [
             '> ```latex',

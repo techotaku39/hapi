@@ -64,6 +64,13 @@ function markProtectedRange(mask: ProtectedMask, start: number, end: number): vo
     for (let index = start; index < end; index++) mask[index] = true
 }
 
+function containsProtectedRange(mask: ProtectedMask, start: number, end: number): boolean {
+    for (let index = start; index < end; index++) {
+        if (mask[index]) return true
+    }
+    return false
+}
+
 function getNodeOffsets(node: MarkdownNode): { end: number; start: number } | null {
     const start = node.position?.start.offset
     const end = node.position?.end.offset
@@ -164,6 +171,11 @@ function findNextDelimiter(source: string, delimiter: string, from: number, mask
     return offset
 }
 
+function findClosingDelimiter(source: string, delimiter: string, from: number, mask: ProtectedMask): number {
+    const offset = findNextDelimiter(source, delimiter, from, mask)
+    return offset >= 0 && !containsProtectedRange(mask, from, offset) ? offset : -1
+}
+
 function getMarkdownContainerPrefix(source: string, offset: number): string {
     const lineStart = source.lastIndexOf('\n', offset - 1) + 1
     const beforeDelimiter = source.slice(lineStart, offset)
@@ -235,7 +247,7 @@ function findBracketMathMatches(source: string, mask: ProtectedMask): BracketMat
 
         const openingLength = 2
         const closingDelimiter = kind === 'display' ? '\\]' : '\\)'
-        const closingStart = findNextDelimiter(source, closingDelimiter, start + openingLength, mask)
+        const closingStart = findClosingDelimiter(source, closingDelimiter, start + openingLength, mask)
         if (closingStart < 0) {
             cursor = start + openingLength
             continue
