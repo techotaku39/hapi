@@ -29,6 +29,7 @@ import type {
     DirectoryEntry,
     FileReadResponse,
     GeneratedImageResponse,
+    ImplementCodexPlanResult,
     CopilotModelsResponse,
     GrokModelsResponse,
     GrokReasoningEffortResponse,
@@ -38,6 +39,7 @@ import type {
     ArchiveCodexSessionRpcResponse,
     OpencodeModelsResponse,
     OpencodeModelSummary,
+    OpencodeModelVariantsResponse,
     OpencodeReasoningEffortResponse,
     PathExistsResponse,
     PiModelsResponse,
@@ -95,6 +97,7 @@ export type RpcListCursorModelsResponse = CursorModelsResponse
 export type RpcCursorChatStoreStatus = CursorChatStoreStatus
 export type RpcOpencodeModel = OpencodeModelSummary
 export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
+export type RpcListOpencodeModelVariantsResponse = OpencodeModelVariantsResponse
 export type RpcListGrokModelsResponse = GrokModelsResponse
 export type RpcListCopilotModelsResponse = CopilotModelsResponse
 export type RpcListGrokReasoningEffortOptionsResponse = GrokReasoningEffortResponse
@@ -425,6 +428,10 @@ export class RpcGateway {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
 
+    async listOpencodeModelVariantsForMachine(machineId: string, cwd?: string | null): Promise<RpcListOpencodeModelVariantsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListOpencodeModelVariants, { cwd: cwd ?? null }, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListOpencodeModelVariantsResponse
+    }
+
     async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
         return await this.sessionRpc(
             sessionId,
@@ -527,6 +534,14 @@ export class RpcGateway {
         ) as import('@hapi/protocol/apiTypes').ForkConversationRpcResult
     }
 
+    async clearConversation(sessionId: string): Promise<{ sessionId: string }> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ClearConversation, {}, 120_000) as { sessionId: string }
+    }
+
+    async implementCodexPlan(sessionId: string, planId: string): Promise<ImplementCodexPlanResult> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ImplementCodexPlan, { planId }, 60_000) as ImplementCodexPlanResult
+    }
+
     async rewindConversation(
         sessionId: string,
         params: { messageLocalId: string }
@@ -543,8 +558,9 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListOpencodeReasoningEffortOptions, {}) as RpcListOpencodeReasoningEffortOptionsResponse
     }
 
-    async listAgyModelsForMachine(machineId: string): Promise<RpcListAgyModelsResponse> {
-        return await this.machineRpc(machineId, RPC_METHODS.ListAgyModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListAgyModelsResponse
+    async listAgyModelsForMachine(machineId: string, options?: { refresh?: boolean }): Promise<RpcListAgyModelsResponse> {
+        const params = { refresh: options?.refresh === true }
+        return await this.machineRpc(machineId, RPC_METHODS.ListAgyModels, params, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListAgyModelsResponse
     }
 
     async listPiModelsForMachine(machineId: string): Promise<RpcListPiModelsResponse> {
