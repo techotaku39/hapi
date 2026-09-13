@@ -28,6 +28,8 @@ const OPAQUE_NODE_TYPES = new Set([
     'html',
 ])
 
+const SOURCE_OPAQUE_NODE_TYPES = new Set(['code', 'inlineCode', 'html'])
+
 function isUnescapedDelimiter(source: string, offset: number): boolean {
     // An odd run of backslashes before the delimiter escapes the final
     // backslash. An even run leaves the delimiter backslash unescaped, which
@@ -41,6 +43,7 @@ function isUnescapedDelimiter(source: string, offset: number): boolean {
 
 interface BracketMathMatch {
     blockquotePrefix: string
+    continuationPrefix: string
     end: number
     kind: MathKind
     start: number
@@ -57,98 +60,8 @@ interface BracketMathPlaceholder extends BracketMathMatch {
 
 type PlaceholderMap = Map<string, BracketMathPlaceholder>
 
-interface FenceLine {
-    char: '`' | '~'
-    continuationIndent: number
-    length: number
-    rest: string
-}
-
 function markProtectedRange(mask: ProtectedMask, start: number, end: number): void {
     for (let index = start; index < end; index++) mask[index] = true
-}
-
-function findLineEnd(source: string, start: number): number {
-    const newline = source.indexOf('\n', start)
-    return newline < 0 ? source.length : newline + 1
-}
-
-function isFenceLine(line: string, maxIndent = 3): FenceLine | null {
-    let cursor = 0
-    let listContainer = false
-    let continuationIndent = 0
-
-    while (cursor < line.length) {
-        const containerStart = cursor
-        while (cursor < line.length && (line[cursor] === ' ' || line[cursor] === '\t')) cursor++
-        if (cursor - containerStart > 3) {
-            cursor = containerStart
-            break
-        }
-
-        if (line[cursor] === '>') {
-            cursor++
-            if (line[cursor] === ' ' || line[cursor] === '\t') cursor++
-            continue
-        }
-
-        const listMarker = line.slice(cursor).match(/^(?:[-+*]|\d{1,9}[.)])[ \t]+/u)
-        if (listMarker) {
-            cursor += listMarker[0].length
-            listContainer = true
-            continuationIndent = cursor
-            continue
-        }
-
-        cursor = containerStart
-        break
-    }
-
-    const indentationStart = cursor
-    while (cursor < line.length && (line[cursor] === ' ' || line[cursor] === '\t')) cursor++
-    if (cursor - indentationStart > maxIndent) return null
-
-    const fence = line.slice(cursor).match(/^(`{3,}|~{3,})(.*)$/u)
-    if (!fence) return null
-
-    return {
-        char: fence[1][0] as '`' | '~',
-        continuationIndent: listContainer ? continuationIndent : 0,
-        length: fence[1].length,
-        rest: fence[2],
-    }
-}
-
-function containsProtectedRange(mask: ProtectedMask, start: number, end: number): boolean {
-    for (let index = start; index < end; index++) {
-        if (mask[index]) return true
-    }
-    return false
-}
-
-function markInlineCodeSpans(source: string, mask: ProtectedMask): void {
-    let cursor = 0
-    while (cursor < source.length) {
-        if (mask[cursor] || source[cursor] !== '`' || !isUnescapedDelimiter(source, cursor)) {
-            cursor++
-            continue
-        }
-
-        const runStart = cursor
-        while (cursor < source.length && source[cursor] === '`') cursor++
-        const delimiter = source.slice(runStart, cursor)
-        let closing = source.indexOf(delimiter, cursor)
-        while (closing >= 0 && closing < source.length) {
-            const before = closing > 0 ? source[closing - 1] : ''
-            const after = source[closing + delimiter.length] ?? ''
-            if (before !== '`' && after !== '`' && !containsProtectedRange(mask, closing, closing + delimiter.length)) break
-            closing = source.indexOf(delimiter, closing + 1)
-        }
-        if (closing < 0 || containsProtectedRange(mask, runStart, closing + delimiter.length)) continue
-
-        markProtectedRange(mask, runStart, closing + delimiter.length)
-        cursor = closing + delimiter.length
-    }
 }
 
 function getNodeOffsets(node: MarkdownNode): { end: number; start: number } | null {
@@ -178,11 +91,24 @@ function findClosingMarkdownBracket(source: string, start: number, end: number):
 
 function markMarkdownMetadataRanges(source: string, node: MarkdownNode, mask: ProtectedMask): void {
     const offsets = getNodeOffsets(node)
+    if (offsets && SOURCE_OPAQUE_NODE_TYPES.has(node.type)) {
+        markProtectedRange(mask, offsets.start, offsets.end)
+    }
+
     if (offsets && (node.type === 'link' || node.type === 'image' || node.type === 'definition')) {
         const labelStart = offsets.start + (node.type === 'image' ? 1 : 0)
         const labelEnd = findClosingMarkdownBracket(source, labelStart, offsets.end)
         if (labelEnd !== null) {
             const separator = source[labelEnd + 1]
+            if (node.type === 'image') {
+                // Image alt text is metadata, not rendered Markdown content.
+                markProtectedRange(mask, labelStart, labelEnd + 1)
+            }
+            if (node.type === 'definition') {
+                // Reference identifiers are metadata, not rendered Markdown
+                // content. Protect the identifier and its destination.
+                markProtectedRange(mask, labelStart, labelEnd + 1)
+            }
             if (node.type === 'definition' && separator === ':') {
                 markProtectedRange(mask, labelEnd + 1, offsets.end)
             } else if ((node.type === 'link' || node.type === 'image') && separator === '(') {
@@ -193,6 +119,15 @@ function markMarkdownMetadataRanges(source: string, node: MarkdownNode, mask: Pr
         }
     }
 
+    if (offsets && node.type === 'linkReference') {
+        const labelEnd = findClosingMarkdownBracket(source, offsets.start, offsets.end)
+        const referenceStart = labelEnd === null ? null : labelEnd + 1
+        if (referenceStart !== null && source[referenceStart] === '[') {
+            const referenceEnd = findClosingMarkdownBracket(source, referenceStart, offsets.end)
+            if (referenceEnd !== null) markProtectedRange(mask, referenceStart, referenceEnd + 1)
+        }
+    }
+
     for (const child of node.children ?? []) {
         markMarkdownMetadataRanges(source, child, mask)
     }
@@ -200,39 +135,6 @@ function markMarkdownMetadataRanges(source: string, node: MarkdownNode, mask: Pr
 
 function getProtectedMarkdownRanges(source: string, tree: MarkdownNode): ProtectedMask {
     const mask = Array<boolean>(source.length).fill(false)
-    let fenceChar: '`' | '~' | null = null
-    let fenceLength = 0
-    let fenceContinuationIndent = 3
-    let lineStart = 0
-
-    while (lineStart < source.length) {
-        const lineEnd = findLineEnd(source, lineStart)
-        const contentEnd = lineEnd > lineStart && source[lineEnd - 1] === '\n'
-            ? lineEnd - 1
-            : lineEnd
-        const line = source.slice(lineStart, contentEnd).replace(/\r$/, '')
-        const fence = isFenceLine(line, fenceChar === null ? 3 : fenceContinuationIndent)
-
-        if (fenceChar !== null) {
-            markProtectedRange(mask, lineStart, lineEnd)
-            if (fence && fence.char === fenceChar && fence.length >= fenceLength && /^\s*$/.test(fence.rest)) {
-                fenceChar = null
-                fenceLength = 0
-                fenceContinuationIndent = 3
-            }
-        } else if (fence) {
-            markProtectedRange(mask, lineStart, lineEnd)
-            fenceChar = fence.char
-            fenceLength = fence.length
-            fenceContinuationIndent = Math.max(3, fence.continuationIndent)
-        }
-
-        lineStart = lineEnd
-    }
-
-    // Code spans may cross line boundaries. Scan them after fenced ranges are
-    // marked so delimiters inside either kind of code remain opaque.
-    markInlineCodeSpans(source, mask)
     markMarkdownMetadataRanges(source, tree, mask)
 
     return mask
@@ -253,13 +155,55 @@ function findNextDelimiter(source: string, delimiter: string, from: number, mask
     return offset
 }
 
-function getBlockquotePrefix(source: string, offset: number): string {
+function getMarkdownContainerPrefixes(source: string, offset: number): {
+    blockquotePrefix: string
+    continuationPrefix: string
+} {
     const lineStart = source.lastIndexOf('\n', offset - 1) + 1
     const beforeDelimiter = source.slice(lineStart, offset)
-    return beforeDelimiter.match(/^(?:[ \t]{0,3}>[ \t]?)+/u)?.[0] ?? ''
+    let cursor = 0
+    let blockquotePrefix = ''
+    let listContinuationPrefix = ''
+
+    while (cursor < beforeDelimiter.length) {
+        const containerStart = cursor
+        while (cursor < beforeDelimiter.length && (beforeDelimiter[cursor] === ' ' || beforeDelimiter[cursor] === '\t')) cursor++
+        if (cursor - containerStart > 3) {
+            cursor = containerStart
+            break
+        }
+
+        if (beforeDelimiter[cursor] === '>') {
+            cursor++
+            if (beforeDelimiter[cursor] === ' ' || beforeDelimiter[cursor] === '\t') cursor++
+            blockquotePrefix = beforeDelimiter.slice(0, cursor)
+            continue
+        }
+
+        const listMarker = beforeDelimiter.slice(cursor).match(/^(?:[-+*]|\d{1,9}[.)])[ \t]+/u)
+        if (listMarker) {
+            listContinuationPrefix = beforeDelimiter.slice(containerStart, cursor) + ' '.repeat(listMarker[0].length)
+            cursor += listMarker[0].length
+            continue
+        }
+
+        cursor = containerStart
+        break
+    }
+
+    if (beforeDelimiter.slice(cursor).trim().length > 0) {
+        return { blockquotePrefix: '', continuationPrefix: '' }
+    }
+
+    return {
+        blockquotePrefix,
+        continuationPrefix: listContinuationPrefix
+            ? blockquotePrefix + listContinuationPrefix
+            : beforeDelimiter,
+    }
 }
 
-function stripBlockquotePrefix(value: string, prefix: string): string {
+function stripLinePrefix(value: string, prefix: string): string {
     if (!prefix) return value
 
     const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -294,14 +238,15 @@ function findBracketMathMatches(source: string, mask: ProtectedMask): BracketMat
             continue
         }
 
-        const blockquotePrefix = getBlockquotePrefix(source, start)
-        const value = stripBlockquotePrefix(
+        const { blockquotePrefix, continuationPrefix } = getMarkdownContainerPrefixes(source, start)
+        const value = stripLinePrefix(
             source.slice(start + openingLength, closingStart),
             blockquotePrefix
         ).trim()
         if (value.length > 0) {
             matches.push({
                 blockquotePrefix,
+                continuationPrefix,
                 end: closingStart + closingDelimiter.length,
                 kind,
                 start,
@@ -373,8 +318,8 @@ function makeSourcePlaceholder(source: string, match: BracketMathMatch, token: s
 
         // Preserve the quote prefix that was present on the formula's opening
         // line so the reparsed source stays inside the original blockquote.
-        const prefix = match.blockquotePrefix && part.startsWith(match.blockquotePrefix)
-            ? match.blockquotePrefix
+        const prefix = match.continuationPrefix && part.startsWith(match.continuationPrefix)
+            ? match.continuationPrefix
             : ''
         return replaceLineContentWithToken(part, prefix, token)
     }).join('')
@@ -394,7 +339,7 @@ function prepareBracketMathSource(source: string, tree: MarkdownNode): { source:
         const raw = source.slice(match.start, match.end)
         const sourcePlaceholder = makeSourcePlaceholder(source, match, token)
         const placeholder = makePlaceholder(
-            stripBlockquotePrefix(raw, match.blockquotePrefix),
+            stripLinePrefix(sourcePlaceholder, match.continuationPrefix),
             token
         )
         placeholders.set(token, { ...match, placeholder, raw, token })

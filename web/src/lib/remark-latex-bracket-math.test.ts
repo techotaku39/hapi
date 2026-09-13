@@ -255,6 +255,20 @@ t_s\approx\frac{4}{0.5\times3}
         expect(definitionHtml).not.toContain('class="katex"')
     })
 
+    it('preserves image alt text and reference identifiers containing delimiters', () => {
+        const imageHtml = render(String.raw`![\(x\)](https://example.com/image.png)`)
+        expect(imageHtml).toContain('alt="(x)"')
+        expect(imageHtml).not.toContain('\uE000')
+
+        const referenceHtml = render([
+            String.raw`[source][\(id\)]`,
+            '',
+            String.raw`[\(id\)]: https://example.com/foo`,
+        ].join('\n'))
+        expect(referenceHtml).toContain('href="https://example.com/foo"')
+        expect(referenceHtml).not.toContain('\uE000')
+    })
+
     it('renders bracket math across an empty TeX line', () => {
         const html = render([
             '\\[',
@@ -280,6 +294,31 @@ t_s\approx\frac{4}{0.5\times3}
 
         expect(html).toContain('<pre><code class="language-latex">\\[x^2\\]\n</code></pre>')
         expect(html.match(/class="katex"/g)).toHaveLength(1)
+    })
+
+    it('allows a list-relative closing fence indentation', () => {
+        const html = render([
+            '- ```latex',
+            '  \\[x^2\\]',
+            '    ````',
+            '',
+            String.raw`\(y^2\)`,
+        ].join('\n'))
+
+        expect(html).toContain('<pre><code class="language-latex">\\[x^2\\]\n</code></pre>')
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+    })
+
+    it('keeps multiline bracket math inside a list item', () => {
+        const html = render([
+            '- \\[',
+            '  x = 1',
+            '  \\]',
+        ].join('\n'))
+
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+        expect(html).toContain('<annotation encoding="application/x-tex">x = 1</annotation>')
+        expect(html).not.toContain('\uE000')
     })
 
     it('keeps currency prose literal while preserving existing dollar math', () => {
