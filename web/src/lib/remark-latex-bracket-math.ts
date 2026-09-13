@@ -29,7 +29,7 @@ const OPAQUE_NODE_TYPES = new Set([
     'html',
 ])
 
-const SOURCE_OPAQUE_NODE_TYPES = new Set(['code', 'inlineCode', 'html'])
+const SOURCE_OPAQUE_NODE_TYPES = new Set(['code', 'inlineCode', 'math', 'inlineMath', 'html'])
 
 function isUnescapedDelimiter(source: string, offset: number): boolean {
     // An odd run of backslashes before the delimiter escapes the final

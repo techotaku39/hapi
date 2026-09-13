@@ -385,6 +385,13 @@ $$`)
         expect(dollarMath).toContain('class="katex-display"')
     })
 
+    it('preserves bracket-like TeX commands inside existing dollar math', () => {
+        const html = render(String.raw`$$\verb|\(x\)|$$`)
+
+        expect(html).toContain('\\(x\\)')
+        expect(html).not.toContain('\uE000')
+    })
+
     it('keeps bracket math after the existing table source repair', () => {
         const markdown = [
             '| A | B | C |',
