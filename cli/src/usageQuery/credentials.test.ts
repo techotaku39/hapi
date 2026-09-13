@@ -115,6 +115,32 @@ describe('usage query credential resolution', () => {
         }
     })
 
+    it('treats an OpenAI-named custom provider as case-sensitive', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'hapi-codex-openai-named-custom-'))
+        try {
+            await writeFile(join(root, 'config.toml'), [
+                'model_provider = "OpenAI"',
+                '[model_providers.OpenAI]',
+                'base_url = "https://custom-openai.example/v1"',
+                'env_key = "CUSTOM_OPENAI_API_KEY"'
+            ].join('\n'))
+            const resolved = await resolveUsageCredentials('codex', {
+                CODEX_HOME: root,
+                CUSTOM_OPENAI_API_KEY: 'custom-provider-secret',
+                OPENAI_API_KEY: 'unrelated-openai-secret',
+                OPENAI_BASE_URL: 'https://api.openai.example/v1'
+            })
+            expect(resolved).toMatchObject({
+                baseUrl: 'https://custom-openai.example/v1',
+                apiKey: 'custom-provider-secret',
+                baseUrlSource: 'config',
+                apiKeySource: 'environment'
+            })
+        } finally {
+            await rm(root, { recursive: true, force: true })
+        }
+    })
+
     it('reads the active Kimi provider from config.toml and environment overrides', async () => {
         const root = await mkdtemp(join(tmpdir(), 'hapi-kimi-credentials-'))
         try {
