@@ -925,7 +925,9 @@ export function HappyComposer(props: {
     // History navigation owns the visible overlay and keyboard handling after
     // a message is recalled. Generic autocomplete remains eligible before
     // navigation starts, so existing slash/@/$ behavior keeps its priority.
-    const genericSuggestionsVisible = historyNavigation === null && suggestions.length > 0
+    const genericSuggestionsVisible = historyNavigation === null
+        && !historySuggestionsVisible
+        && suggestions.length > 0
     const historySelectedIndex = historyNavigation?.index ?? historySuggestionIndex
 
     useEffect(() => {

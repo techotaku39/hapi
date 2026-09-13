@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode, TextareaHTMLAttributes } from 'react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -287,6 +287,25 @@ describe('HappyComposer message history', () => {
         expect(input.value).toBe('newest task')
         fireEvent.keyDown(input, { key: 'ArrowDown' })
         expect(input.value).toBe('')
+    })
+
+    it('keeps prefix history search priority when generic autocomplete also matches', () => {
+        const matchingHistory: ComposerMessageHistoryEntry[] = [
+            { id: 'new-match', text: 'run /compact after this', attachments: [], createdAt: 2 },
+            { id: 'old-match', text: 'run /compare later', attachments: [], createdAt: 1 },
+        ]
+        const view = render(<ComposerHarness initialText="" messageHistory={matchingHistory} />)
+        const input = screen.getByRole('textbox') as HTMLTextAreaElement
+
+        setComposerValue(input, '#run /com')
+        view.rerender(<ComposerHarness initialText="" messageHistory={matchingHistory} genericAutocomplete />)
+
+        const historyAutocomplete = screen.getByTestId('history-autocomplete')
+        expect(within(historyAutocomplete).getByRole('button', { name: /run \/compact after this/ })).toHaveAttribute('data-selected', 'true')
+        fireEvent.keyDown(input, { key: 'ArrowDown' })
+        expect(within(historyAutocomplete).getByRole('button', { name: /run \/compare later/ })).toHaveAttribute('data-selected', 'true')
+        fireEvent.keyDown(input, { key: 'Tab' })
+        expect(input.value).toBe('run /compare later')
     })
 
     it('keeps native multiline ArrowUp behavior away from absolute offset zero', () => {
