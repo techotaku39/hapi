@@ -95,6 +95,32 @@ test('content search opens the matching message instead of the session tail', as
     }, { timeout: 30_000 }).toBe(true)
 })
 
+test('content search shows its loading state before the debounce completes', async ({ page }) => {
+    test.skip(!liveEnabled, 'Set HAPI_LIVE=1 to run against a real hub session')
+
+    const baseUrl = getHapiBaseUrl()
+    const accessToken = readCliAccessToken()
+    await installHapiAuth(page, baseUrl, accessToken)
+    await page.route('**/api/sessions/content-search', async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+        await route.continue()
+    })
+    await page.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+
+    const searchButton = page.getByRole('button', { name: /Search sessions/ }).first()
+    await expect(searchButton).toBeVisible({ timeout: 30_000 })
+    await searchButton.click()
+    const searchInput = page.getByRole('searchbox')
+    await expect(searchInput).toBeVisible()
+    await page.getByRole('button', { name: 'Search scope' }).click()
+    await page.getByRole('button', { name: 'Content', exact: true }).click()
+    await searchInput.fill('cache')
+
+    const loading = page.getByText(/Searching message content|正在搜索消息内容/).first()
+    await expect(loading).toBeVisible({ timeout: 150 })
+    await expect(page.getByText(/No messages match your search|没有消息匹配搜索内容/)).toHaveCount(0)
+})
+
 test('content search navigates between multiple matching messages in one session', async ({ page, request }) => {
     test.skip(!liveEnabled, 'Set HAPI_LIVE=1 to run against a real hub session')
 

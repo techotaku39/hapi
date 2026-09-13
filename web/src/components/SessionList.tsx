@@ -1458,8 +1458,8 @@ export function SessionList(props: {
         }
 
         const controller = new AbortController()
+        setContentSearchLoading(true)
         const timer = window.setTimeout(() => {
-            setContentSearchLoading(true)
             const limit = Math.min(100, Math.max(50, contentSearchSessionIds.length))
             void api.searchSessionContent(
                 normalizedQuery,

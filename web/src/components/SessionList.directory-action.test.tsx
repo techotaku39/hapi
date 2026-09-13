@@ -1058,6 +1058,7 @@ describe('SessionList search toggle', () => {
             fireEvent.change(input, { target: { value: 'new query' } })
 
             expect(screen.queryByRole('button', { name: /Content match/ })).toBeNull()
+            expect(screen.getByText('Searching message content…')).toBeInTheDocument()
         } finally {
             vi.useRealTimers()
         }
