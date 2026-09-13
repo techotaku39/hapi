@@ -36,6 +36,7 @@ function isUnescapedDelimiter(source: string, offset: number): boolean {
 }
 
 interface BracketMathMatch {
+    blockquotePrefix: string
     end: number
     kind: MathKind
     start: number
@@ -62,7 +63,7 @@ function findLineEnd(source: string, start: number): number {
 }
 
 function isFenceLine(line: string): { char: '`' | '~'; length: number; rest: string } | null {
-    const match = line.match(/^(?:[ \t]{0,3}>[ \t]?)*[ \t]{0,3}(`{3,}|~{3,})(.*)$/)
+    const match = line.match(/^(?:(?:[ \t]{0,3}>[ \t]?)|(?:[ \t]{0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+))*[ \t]{0,3}(`{3,}|~{3,})(.*)$/)
     if (!match) return null
     return {
         char: match[1][0] as '`' | '~',
@@ -154,11 +155,17 @@ function findNextDelimiter(source: string, delimiter: string, from: number, mask
     return offset
 }
 
-function stripMarkdownContainerPrefixes(value: string): string {
-    // Blockquote markers and continuation indentation belong to Markdown, not
-    // to the TeX source. Removing them also makes the restored AST token match
-    // the text value produced inside a list or blockquote container.
-    return value.replace(/(\r?\n)[ \t]*(?:>[ \t]?)?/g, '$1')
+function getBlockquotePrefix(source: string, offset: number): string {
+    const lineStart = source.lastIndexOf('\n', offset - 1) + 1
+    const beforeDelimiter = source.slice(lineStart, offset)
+    return beforeDelimiter.match(/^(?:[ \t]{0,3}>[ \t]?)+/u)?.[0] ?? ''
+}
+
+function stripBlockquotePrefix(value: string, prefix: string): string {
+    if (!prefix) return value
+
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return value.replace(new RegExp(`(\\r?\\n)${escapedPrefix}`, 'gu'), '$1')
 }
 
 function findBracketMathMatches(source: string, mask: ProtectedMask): BracketMathMatch[] {
@@ -189,11 +196,14 @@ function findBracketMathMatches(source: string, mask: ProtectedMask): BracketMat
             continue
         }
 
-        const value = stripMarkdownContainerPrefixes(
-            source.slice(start + openingLength, closingStart)
+        const blockquotePrefix = getBlockquotePrefix(source, start)
+        const value = stripBlockquotePrefix(
+            source.slice(start + openingLength, closingStart),
+            blockquotePrefix
         ).trim()
         if (value.length > 0) {
             matches.push({
+                blockquotePrefix,
                 end: closingStart + closingDelimiter.length,
                 kind,
                 start,
@@ -260,9 +270,11 @@ function makeSourcePlaceholder(source: string, match: BracketMathMatch, token: s
         if (/^\r?\n$/.test(part)) return part
         if (index === 0) return token.repeat(part.length)
 
-        // Preserve Markdown container prefixes on continuation lines so the
-        // reparsed source stays inside the original blockquote/list.
-        const prefix = part.match(/^[ \t]*(?:>[ \t]?)?/u)?.[0] ?? ''
+        // Preserve the quote prefix that was present on the formula's opening
+        // line so the reparsed source stays inside the original blockquote.
+        const prefix = match.blockquotePrefix && part.startsWith(match.blockquotePrefix)
+            ? match.blockquotePrefix
+            : ''
         return prefix + token.repeat(part.length - prefix.length)
     }).join('')
 }
@@ -280,7 +292,10 @@ function prepareBracketMathSource(source: string): { source: string; placeholder
         nextToken = token.charCodeAt(0) + 1
         const raw = source.slice(match.start, match.end)
         const sourcePlaceholder = makeSourcePlaceholder(source, match, token)
-        const placeholder = makePlaceholder(stripMarkdownContainerPrefixes(raw), token)
+        const placeholder = makePlaceholder(
+            stripBlockquotePrefix(raw, match.blockquotePrefix),
+            token
+        )
         placeholders.set(token, { ...match, placeholder, raw, token })
         chunks.push(source.slice(cursor, match.start), sourcePlaceholder)
         cursor = match.end

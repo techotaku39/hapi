@@ -211,6 +211,32 @@ t_s\approx\frac{4}{0.5\times3}
         expect(html).not.toContain('<annotation encoding="application/x-tex">&gt; x = 1')
     })
 
+    it('keeps mathematical greater-than signs in unquoted multiline bracket math', () => {
+        const html = render([
+            '\\[',
+            'x',
+            '> 0',
+            '\\]',
+        ].join('\n'))
+
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+        expect(html).toContain('<annotation encoding="application/x-tex">x\n> 0</annotation>')
+        expect(html).not.toContain('\uE000')
+    })
+
+    it('preserves list-contained fences and renders following bracket math', () => {
+        const html = render([
+            '- ```latex',
+            '  \\[x^2\\]',
+            '  ````',
+            '',
+            String.raw`\(y^2\)`,
+        ].join('\n'))
+
+        expect(html).toContain('<pre><code class="language-latex">\\[x^2\\]\n</code></pre>')
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+    })
+
     it('keeps currency prose literal while preserving existing dollar math', () => {
         const currency = render('The plan is $200/mo and the bill is $80.')
         expect(currency).not.toContain('class="katex"')
