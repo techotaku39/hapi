@@ -341,6 +341,61 @@ describe('HappyComposer message history', () => {
         expect(runtime.sentTexts).toEqual(['queued edit'])
     })
 
+    it('keeps the recalled entry selected when newer history is prepended', async () => {
+        const initialHistory: ComposerMessageHistoryEntry[] = [
+            { id: 'a', text: 'message A', attachments: [], createdAt: 2 },
+            { id: 'b', text: 'message B', attachments: [], createdAt: 1 },
+        ]
+        const view = render(<ComposerHarness initialText="" messageHistory={initialHistory} />)
+        const input = screen.getByRole('textbox') as HTMLTextAreaElement
+        input.focus()
+        input.setSelectionRange(0, 0)
+        fireEvent.select(input)
+
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        await waitFor(() => expect(input.value).toBe('message A'))
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        expect(input.value).toBe('message B')
+
+        view.rerender(
+            <ComposerHarness
+                initialText=""
+                messageHistory={[
+                    { id: 'x', text: 'new message', attachments: [], createdAt: 3 },
+                    ...initialHistory,
+                ]}
+            />,
+        )
+
+        const historyAutocomplete = screen.getByTestId('history-autocomplete')
+        expect(within(historyAutocomplete).getByRole('button', { name: 'message B' })).toHaveAttribute('data-selected', 'true')
+        fireEvent.keyDown(input, { key: 'ArrowDown' })
+        expect(input.value).toBe('message A')
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        expect(input.value).toBe('message B')
+    })
+
+    it('restores the saved draft when the recalled entry disappears', async () => {
+        const initialHistory: ComposerMessageHistoryEntry[] = [
+            { id: 'a', text: 'message A', attachments: [], createdAt: 2 },
+            { id: 'b', text: 'message B', attachments: [], createdAt: 1 },
+        ]
+        const view = render(<ComposerHarness initialText="unsent draft" messageHistory={initialHistory} />)
+        const input = screen.getByRole('textbox') as HTMLTextAreaElement
+        input.focus()
+        input.setSelectionRange(0, 0)
+        fireEvent.select(input)
+
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        await waitFor(() => expect(input.value).toBe('message A'))
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        expect(input.value).toBe('message B')
+
+        view.rerender(<ComposerHarness initialText="" messageHistory={[initialHistory[0]!]} />)
+        await waitFor(() => expect(input.value).toBe('unsent draft'))
+        expect(screen.queryByTestId('history-autocomplete')).toBeNull()
+    })
+
     it('keeps prefix history search priority when generic autocomplete also matches', () => {
         const matchingHistory: ComposerMessageHistoryEntry[] = [
             { id: 'new-match', text: 'run /compact after this', attachments: [], createdAt: 2 },

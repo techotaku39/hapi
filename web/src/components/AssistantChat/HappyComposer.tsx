@@ -80,7 +80,7 @@ export interface TextInputState {
 type HistoryNavigationState = {
     draftText: string
     draftSelection: TextInputState['selection']
-    index: number
+    entryId: string
 }
 
 export function getComposerEscapeAction(input: {
@@ -920,7 +920,11 @@ export function HappyComposer(props: {
             : [],
         [historyTrigger, historyTriggerVisible, messageHistory]
     )
-    const visibleHistoryEntries = historyNavigation !== null
+    const historyNavigationIndex = historyNavigation === null
+        ? -1
+        : messageHistory.findIndex((entry) => entry.id === historyNavigation.entryId)
+    const historyNavigationVisible = historyNavigation !== null && historyNavigationIndex >= 0
+    const visibleHistoryEntries = historyNavigationVisible
         ? messageHistory
         : filteredHistoryEntries
     const historySuggestions = useMemo<Suggestion[]>(
@@ -941,14 +945,14 @@ export function HappyComposer(props: {
         [t, visibleHistoryEntries]
     )
     const historySuggestionsVisible = historySuggestions.length > 0
-        && (historyNavigation !== null || historyTriggerVisible)
+        && (historyNavigationVisible || historyTriggerVisible)
     // History navigation owns the visible overlay and keyboard handling after
     // a message is recalled. Generic autocomplete remains eligible before
     // navigation starts, so existing slash/@/$ behavior keeps its priority.
     const genericSuggestionsVisible = historyNavigation === null
         && !historySuggestionsVisible
         && suggestions.length > 0
-    const historySelectedIndex = historyNavigation?.index ?? historySuggestionIndex
+    const historySelectedIndex = historyNavigationVisible ? historyNavigationIndex : historySuggestionIndex
 
     useEffect(() => {
         if (historyNavigation !== null || !historyTriggerVisible) {
@@ -1025,6 +1029,15 @@ export function HappyComposer(props: {
         return { text, selection: nextSelection }
     }, [api, richMentionsEnabled])
 
+    useEffect(() => {
+        if (!historyNavigation || historyNavigationIndex >= 0) return
+        // The recalled entry disappeared from the loaded window. Restore the
+        // saved draft instead of silently switching to a different entry.
+        replaceComposerText(historyNavigation.draftText, historyNavigation.draftSelection)
+        setHistoryNavigation(null)
+        setHistoryDismissedText(null)
+    }, [historyNavigation, historyNavigationIndex, replaceComposerText])
+
     const handleHistorySelect = useCallback((index: number) => {
         const entry = visibleHistoryEntries[index]
         if (!entry) return
@@ -1044,7 +1057,7 @@ export function HappyComposer(props: {
         setHistoryNavigation({
             draftText: composerText,
             draftSelection: inputState.selection,
-            index: 0,
+            entryId: entry.id,
         })
         setHistoryDismissedText(null)
         replaceComposerText(entry.text)
@@ -1052,9 +1065,9 @@ export function HappyComposer(props: {
     }, [composerText, haptic, inputState.selection, messageHistory, replaceComposerText])
 
     const moveHistoryNavigation = useCallback((direction: 'older' | 'newer') => {
-        if (!historyNavigation || messageHistory.length === 0) return
+        if (!historyNavigation || historyNavigationIndex < 0 || messageHistory.length === 0) return
 
-        if (direction === 'newer' && historyNavigation.index === 0) {
+        if (direction === 'newer' && historyNavigationIndex === 0) {
             replaceComposerText(historyNavigation.draftText, historyNavigation.draftSelection)
             setHistoryNavigation(null)
             setHistoryDismissedText(null)
@@ -1063,16 +1076,16 @@ export function HappyComposer(props: {
         }
 
         const nextIndex = direction === 'older'
-            ? Math.min(historyNavigation.index + 1, messageHistory.length - 1)
-            : Math.max(historyNavigation.index - 1, 0)
-        if (nextIndex === historyNavigation.index) return
+            ? Math.min(historyNavigationIndex + 1, messageHistory.length - 1)
+            : Math.max(historyNavigationIndex - 1, 0)
+        if (nextIndex === historyNavigationIndex) return
 
         const entry = messageHistory[nextIndex]
         if (!entry) return
-        setHistoryNavigation((current) => current ? { ...current, index: nextIndex } : current)
+        setHistoryNavigation((current) => current ? { ...current, entryId: entry.id } : current)
         replaceComposerText(entry.text)
         haptic('light')
-    }, [haptic, historyNavigation, messageHistory, replaceComposerText])
+    }, [haptic, historyNavigation, historyNavigationIndex, messageHistory, replaceComposerText])
 
     // Keep focus within the user's click gesture so mobile keyboards can open.
     useImperativeHandle(props.focusInputRef, () => () => {
