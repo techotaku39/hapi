@@ -480,6 +480,16 @@ export function HappyComposer(props: {
     const { composerEnterBehavior } = useComposerEnterBehavior()
     const composerText = useAuiState((s) => s.composer.text)
     const attachments = useAuiState((s) => s.composer.attachments)
+    const [historyNavigation, setHistoryNavigation] = useState<HistoryNavigationState | null>(null)
+    const [historyDismissedText, setHistoryDismissedText] = useState<string | null>(null)
+    const [historySuggestionIndex, setHistorySuggestionIndex] = useState(0)
+    const clearHistoryNavigation = useCallback(() => {
+        setHistoryNavigation(null)
+    }, [])
+    const invalidateProgrammaticUserEdit = useCallback(() => {
+        clearHistoryNavigation()
+        setHistoryDismissedText(null)
+    }, [clearHistoryNavigation])
     const localAttachmentOrderRef = useRef<string[]>([])
     const attachmentOrderRef = externalAttachmentOrderRef ?? localAttachmentOrderRef
     const attachmentIds = useMemo(
@@ -502,7 +512,13 @@ export function HappyComposer(props: {
     const composerTextRef = useRef(composerText)
     composerTextRef.current = composerText
     const getCurrentComposerText = useCallback(() => composerTextRef.current, [])
-    const setComposerText = useCallback((text: string) => api.composer().setText(text), [api])
+    const setComposerText = useCallback((text: string) => {
+        api.composer().setText(text)
+        // Dictation updates the composer programmatically, so it bypasses the
+        // input's onEdit callback. Treat it as a user edit for history state,
+        // while history navigation replacements use replaceComposerText below.
+        invalidateProgrammaticUserEdit()
+    }, [api, invalidateProgrammaticUserEdit])
     const voiceInput = useVoiceInputPreferences(props.voiceTranscriptionApi ?? null)
     const dictationConfig = useMemo(() => ({
         api: props.voiceTranscriptionApi ?? null,
@@ -562,12 +578,6 @@ export function HappyComposer(props: {
         text: '',
         selection: { start: 0, end: 0 }
     })
-    const [historyNavigation, setHistoryNavigation] = useState<HistoryNavigationState | null>(null)
-    const [historyDismissedText, setHistoryDismissedText] = useState<string | null>(null)
-    const [historySuggestionIndex, setHistorySuggestionIndex] = useState(0)
-    const clearHistoryNavigation = useCallback(() => {
-        setHistoryNavigation(null)
-    }, [])
     const [isExpanded, setIsExpanded] = useState(false)
     const lastSendAcceptanceRef = useRef(props.sendAcceptance)
     const pendingSendAttemptIdRef = useRef<string | null>(null)

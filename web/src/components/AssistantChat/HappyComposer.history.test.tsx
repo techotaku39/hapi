@@ -28,6 +28,7 @@ const runtime = vi.hoisted(() => ({
     sentTexts: [] as string[],
     enterBehavior: 'send' as 'send' | 'newline',
     genericSuggestions: [] as Suggestion[],
+    dictationOnTextChange: null as null | ((text: string) => void),
 }))
 
 vi.mock('@assistant-ui/react', async () => {
@@ -101,6 +102,12 @@ vi.mock('@/hooks/useComposerDraft', () => ({
 }))
 vi.mock('@/hooks/useComposerEnterBehavior', () => ({
     useComposerEnterBehavior: () => ({ composerEnterBehavior: runtime.enterBehavior }),
+}))
+vi.mock('@/hooks/useDictation', () => ({
+    useDictation: (config: { onTextChange: (text: string) => void }) => {
+        runtime.dictationOnTextChange = config.onTextChange
+        return { supported: false, status: 'disconnected', error: null, partialTranscript: '', toggle: () => {} }
+    },
 }))
 vi.mock('@/hooks/usePlatform', () => ({
     usePlatform: () => ({ haptic: { impact: () => {}, notification: () => {} }, isTouch: false }),
@@ -195,6 +202,7 @@ describe('HappyComposer message history', () => {
         runtime.sentTexts = []
         runtime.enterBehavior = 'send'
         runtime.genericSuggestions = []
+        runtime.dictationOnTextChange = null
     })
 
     it('opens from # or ＃, searches locally, and strips the trigger on selection', () => {
@@ -287,6 +295,23 @@ describe('HappyComposer message history', () => {
         expect(input.value).toBe('newest task')
         fireEvent.keyDown(input, { key: 'ArrowDown' })
         expect(input.value).toBe('')
+    })
+
+    it('exits history navigation when dictation edits a recalled message', async () => {
+        render(<ComposerHarness initialText="" />)
+        const input = screen.getByRole('textbox') as HTMLTextAreaElement
+        input.focus()
+        input.setSelectionRange(0, 0)
+        fireEvent.select(input)
+
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        await waitFor(() => expect(input.value).toBe('newest task'))
+
+        act(() => runtime.dictationOnTextChange?.('newest task dictated'))
+        expect(input.value).toBe('newest task dictated')
+        fireEvent.keyDown(input, { key: 'Enter' })
+
+        expect(runtime.sentTexts).toEqual(['newest task dictated'])
     })
 
     it('keeps prefix history search priority when generic autocomplete also matches', () => {
