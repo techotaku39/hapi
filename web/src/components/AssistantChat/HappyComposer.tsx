@@ -922,6 +922,10 @@ export function HappyComposer(props: {
     )
     const historySuggestionsVisible = historySuggestions.length > 0
         && (historyNavigation !== null || historyTriggerVisible)
+    // History navigation owns the visible overlay and keyboard handling after
+    // a message is recalled. Generic autocomplete remains eligible before
+    // navigation starts, so existing slash/@/$ behavior keeps its priority.
+    const genericSuggestionsVisible = historyNavigation === null && suggestions.length > 0
     const historySelectedIndex = historyNavigation?.index ?? historySuggestionIndex
 
     useEffect(() => {
@@ -1437,7 +1441,7 @@ export function HappyComposer(props: {
         }
 
         // Enter with suggestions visible: select the suggestion
-        if (key === 'Enter' && suggestions.length > 0) {
+        if (key === 'Enter' && genericSuggestionsVisible) {
             e.preventDefault()
             const indexToSelect = selectedIndex >= 0 ? selectedIndex : 0
             handleSuggestionSelect(indexToSelect)
@@ -1462,7 +1466,7 @@ export function HappyComposer(props: {
             return
         }
 
-        if (suggestions.length > 0) {
+        if (genericSuggestionsVisible) {
             if (key === 'ArrowUp') {
                 e.preventDefault()
                 moveUp()
@@ -1517,7 +1521,7 @@ export function HappyComposer(props: {
         // is unambiguous and useful on keyboards without a history button.
         if (
             key === 'ArrowUp'
-            && suggestions.length === 0
+            && !genericSuggestionsVisible
             && !historySuggestionsVisible
             && messageHistory.length > 0
             && inputState.selection.start === inputState.selection.end
@@ -1538,7 +1542,7 @@ export function HappyComposer(props: {
                 return
             }
             const action = getComposerEscapeAction({
-                hasSuggestions: suggestions.length > 0 || historySuggestionsVisible,
+                hasSuggestions: genericSuggestionsVisible || historySuggestionsVisible,
                 threadIsRunning,
                 isExpanded,
             })
@@ -1566,6 +1570,7 @@ export function HappyComposer(props: {
             haptic('light')
         }
     }, [
+        genericSuggestionsVisible,
         suggestions,
         historySuggestions,
         historySuggestionsVisible,
@@ -2323,7 +2328,7 @@ export function HappyComposer(props: {
             )
         }
 
-        if (suggestions.length > 0) {
+        if (genericSuggestionsVisible) {
             return (
                 <div className={`${overlayPositionClass} w-full`}>
                     <FloatingOverlay>
@@ -2367,6 +2372,7 @@ export function HappyComposer(props: {
         codexReasoningEffortOptions,
         claudeEffortOptions,
         fastModeOptions,
+        genericSuggestionsVisible,
         suggestions,
         historySuggestions,
         historySuggestionsVisible,

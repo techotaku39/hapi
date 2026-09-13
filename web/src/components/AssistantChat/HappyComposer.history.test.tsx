@@ -27,6 +27,7 @@ const runtime = vi.hoisted(() => ({
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
     sentTexts: [] as string[],
     enterBehavior: 'send' as 'send' | 'newline',
+    genericSuggestions: [] as Suggestion[],
 }))
 
 vi.mock('@assistant-ui/react', async () => {
@@ -109,7 +110,7 @@ vi.mock('@/hooks/usePWAInstall', () => ({
 }))
 vi.mock('@/hooks/useActiveWord', () => ({ useActiveWord: () => null }))
 vi.mock('@/hooks/useActiveSuggestions', () => ({
-    useActiveSuggestions: () => [[], -1, () => {}, () => {}, () => {}],
+    useActiveSuggestions: () => [runtime.genericSuggestions, runtime.genericSuggestions.length > 0 ? 0 : -1, () => {}, () => {}, () => {}],
 }))
 vi.mock('@/lib/use-fue', () => ({
     useFue: () => ({ status: 'acknowledged', engage: () => {}, dismiss: () => {} }),
@@ -155,13 +156,16 @@ const history: ComposerMessageHistoryEntry[] = [
     },
 ]
 
-function ComposerHarness(props: { initialText: string; messageHistory?: ComposerMessageHistoryEntry[] }) {
+function ComposerHarness(props: { initialText: string; messageHistory?: ComposerMessageHistoryEntry[]; genericAutocomplete?: boolean }) {
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
         composer: { text: props.initialText, attachments: [] },
         thread: { isRunning: false, isDisabled: false },
     }))
     runtime.snapshot = snapshot
     runtime.setSnapshot = setSnapshot
+    runtime.genericSuggestions = props.genericAutocomplete
+        ? [{ key: 'slash:compact', text: '/compact', label: '/compact' }]
+        : []
 
     return (
         <I18nProvider>
@@ -190,6 +194,7 @@ describe('HappyComposer message history', () => {
         runtime.setSnapshot = null
         runtime.sentTexts = []
         runtime.enterBehavior = 'send'
+        runtime.genericSuggestions = []
     })
 
     it('opens from # or ＃, searches locally, and strips the trigger on selection', () => {
@@ -263,6 +268,25 @@ describe('HappyComposer message history', () => {
         expect(input.value).toBe('newest task')
         fireEvent.keyDown(input, { key: 'ArrowDown' })
         expect(input.value).toBe('unsent draft')
+    })
+
+    it('keeps history navigation keyboard priority after recalling text with generic suggestions enabled', async () => {
+        const view = render(<ComposerHarness initialText="" />)
+        const input = screen.getByRole('textbox') as HTMLTextAreaElement
+        input.focus()
+        input.setSelectionRange(0, 0)
+        fireEvent.select(input)
+
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        await waitFor(() => expect(input.value).toBe('newest task'))
+
+        view.rerender(<ComposerHarness initialText="" genericAutocomplete />)
+        fireEvent.keyDown(input, { key: 'ArrowUp' })
+        expect(input.value).toBe('older task')
+        fireEvent.keyDown(input, { key: 'ArrowDown' })
+        expect(input.value).toBe('newest task')
+        fireEvent.keyDown(input, { key: 'ArrowDown' })
+        expect(input.value).toBe('')
     })
 
     it('keeps native multiline ArrowUp behavior away from absolute offset zero', () => {
