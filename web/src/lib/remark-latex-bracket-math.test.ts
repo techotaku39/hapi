@@ -360,6 +360,19 @@ t_s\approx\frac{4}{0.5\times3}
         expect(html).not.toContain('\uE000')
     })
 
+    it('normalizes nested list and blockquote prefixes in multiline bracket math', () => {
+        const html = render([
+            '- > \\[',
+            '  > x = 1',
+            '  > \\]',
+        ].join('\n'))
+
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+        expect(html).toContain('<annotation encoding="application/x-tex">x = 1</annotation>')
+        expect(html).not.toContain('<annotation encoding="application/x-tex">&gt; x = 1')
+        expect(html).not.toContain('\uE000')
+    })
+
     it('keeps currency prose literal while preserving existing dollar math', () => {
         const currency = render('The plan is $200/mo and the bill is $80.')
         expect(currency).not.toContain('class="katex"')

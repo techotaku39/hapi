@@ -43,7 +43,6 @@ function isUnescapedDelimiter(source: string, offset: number): boolean {
 }
 
 interface BracketMathMatch {
-    blockquotePrefix: string
     continuationPrefix: string
     end: number
     kind: MathKind
@@ -165,15 +164,11 @@ function findNextDelimiter(source: string, delimiter: string, from: number, mask
     return offset
 }
 
-function getMarkdownContainerPrefixes(source: string, offset: number): {
-    blockquotePrefix: string
-    continuationPrefix: string
-} {
+function getMarkdownContainerPrefix(source: string, offset: number): string {
     const lineStart = source.lastIndexOf('\n', offset - 1) + 1
     const beforeDelimiter = source.slice(lineStart, offset)
     let cursor = 0
-    let blockquotePrefix = ''
-    let listContinuationPrefix = ''
+    let continuationPrefix = ''
     let recognizedContainer = false
 
     while (cursor < beforeDelimiter.length) {
@@ -187,14 +182,14 @@ function getMarkdownContainerPrefixes(source: string, offset: number): {
         if (beforeDelimiter[cursor] === '>') {
             cursor++
             if (beforeDelimiter[cursor] === ' ' || beforeDelimiter[cursor] === '\t') cursor++
-            blockquotePrefix = beforeDelimiter.slice(0, cursor)
+            continuationPrefix += beforeDelimiter.slice(containerStart, cursor)
             recognizedContainer = true
             continue
         }
 
         const listMarker = beforeDelimiter.slice(cursor).match(/^(?:[-+*]|\d{1,9}[.)])[ \t]+/u)
         if (listMarker) {
-            listContinuationPrefix = beforeDelimiter.slice(containerStart, cursor) + ' '.repeat(listMarker[0].length)
+            continuationPrefix += ' '.repeat(cursor - containerStart + listMarker[0].length)
             cursor += listMarker[0].length
             recognizedContainer = true
             continue
@@ -205,15 +200,10 @@ function getMarkdownContainerPrefixes(source: string, offset: number): {
     }
 
     if (!recognizedContainer && beforeDelimiter.trim().length > 0) {
-        return { blockquotePrefix: '', continuationPrefix: '' }
+        return ''
     }
 
-    return {
-        blockquotePrefix,
-        continuationPrefix: listContinuationPrefix
-            ? blockquotePrefix + listContinuationPrefix
-            : blockquotePrefix || beforeDelimiter,
-    }
+    return continuationPrefix || beforeDelimiter
 }
 
 function stripLinePrefix(value: string, prefix: string): string {
@@ -251,14 +241,13 @@ function findBracketMathMatches(source: string, mask: ProtectedMask): BracketMat
             continue
         }
 
-        const { blockquotePrefix, continuationPrefix } = getMarkdownContainerPrefixes(source, start)
+        const continuationPrefix = getMarkdownContainerPrefix(source, start)
         const value = stripLinePrefix(
             source.slice(start + openingLength, closingStart),
-            blockquotePrefix
+            continuationPrefix
         ).trim()
         if (value.length > 0) {
             matches.push({
-                blockquotePrefix,
                 continuationPrefix,
                 end: closingStart + closingDelimiter.length,
                 kind,
