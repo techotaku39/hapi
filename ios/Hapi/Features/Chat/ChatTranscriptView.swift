@@ -3,11 +3,11 @@ import HapiProtocol
 import HapiUI
 import SwiftUI
 
-/// Presentation-only flattening; protocol groups and their semantics stay intact.
-private enum TranscriptRow: Identifiable, Equatable {
+/// Tool groups contribute only their displayed summary to transcript diffs.
+enum TranscriptRow: Identifiable, Equatable {
     case history(ChatHistoryPagingState.Phase, Bool)
     case message(VisibleChatBlock)
-    case group(ToolGroupBlock, Bool)
+    case group(ToolGroupPresentation)
 
     static let historyID = "chat-history-control"
     var role: TranscriptRowRole {
@@ -24,8 +24,12 @@ private enum TranscriptRow: Identifiable, Equatable {
         switch self {
         case .history: Self.historyID
         case .message(let block): block.stableId
-        case .group(let group, _): group.id
+        case .group(let group): group.id
         }
+    }
+
+    func spacing(after previous: TranscriptRow?) -> CGFloat {
+        return role.spacing(after: previous?.role)
     }
 }
 
@@ -36,11 +40,7 @@ struct ChatTranscriptView: View {
         var rows: [TranscriptRow] = [.history(model.historyPaging.phase, model.hasMore)]
         for block in model.blocks {
             if case .toolGroup(let group) = block {
-                let expanded = model.expandedToolGroups[group.id] ?? group.defaultOpen
-                rows.append(.group(group, expanded))
-                if expanded {
-                    rows.append(contentsOf: group.tools.map { .message(.block(.toolCall($0))) })
-                }
+                rows.append(.group(ToolGroupPresentation(group)))
             } else {
                 rows.append(.message(block))
             }
@@ -54,17 +54,21 @@ struct ChatTranscriptView: View {
             historyVersion: model.historyVersion,
             jumpToken: model.jumpToLatestToken,
             historyControlID: TranscriptRow.historyID,
+            isInspectionPresented: model.isInspectingContent,
             onViewport: { viewport in
-                model.readingViewportChanged(followsTail: viewport.followsTail, needsOlder: viewport.needsOlder)
+                model.readingViewportChanged(
+                    followsTail: viewport.followsTail, needsOlder: viewport.needsOlder,
+                    isAwayFromBottom: viewport.isAwayFromBottom
+                )
             },
             onLayout: { version, progress in model.historyLaidOut(version: version, madeProgress: progress) },
-            spacingBefore: { previous, row in row.role.spacing(after: previous?.role) }
+            spacingBefore: { previous, row in row.spacing(after: previous) }
         ) { row in
             // The list bridges the current environment into its hosting roots.
             AnyView(rowView(row))
         }
         .overlay(alignment: .bottomTrailing) {
-            if !model.followsTail || model.hasTrimmedTail || model.isJumpingToLatest {
+            if model.showsJumpToLatest {
                 Button(action: model.jumpToLatest) {
                     HStack(spacing: 6) {
                         if model.isJumpingToLatest { ProgressView().controlSize(.small) }
@@ -112,13 +116,8 @@ struct ChatTranscriptView: View {
             .accessibilityIdentifier("chat-history")
         case .message(let block):
             ChatBlockCard(block: block, basePath: model.basePath)
-        case .group(let group, let expanded):
-            ToolGroupBlockView(
-                block: group,
-                basePath: model.basePath,
-                expansion: Binding(get: { expanded }, set: { model.expandedToolGroups[group.id] = $0 }),
-                showsTools: false
-            )
+        case .group(let presentation):
+            ToolGroupBlockView(presentation: presentation)
         }
     }
 }

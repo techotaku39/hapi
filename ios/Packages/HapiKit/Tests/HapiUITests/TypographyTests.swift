@@ -19,7 +19,8 @@ struct TypographyTests {
         #expect(large.headingSize(3) > large.bodySize)
     }
 
-    @Test func markdownMarginsAreBetweenBlocksNotStackedPadding() {
+    @Test @MainActor
+    func markdownMarginsAreBetweenBlocksNotStackedPadding() {
         let paragraph = MarkdownBlockNode.paragraph(AttributedString("Body"))
         let heading = MarkdownBlockNode.heading(level: 2, AttributedString("Heading"))
         #expect(MarkdownBlockListView.spacing(before: heading, after: nil) == 0)

@@ -60,7 +60,17 @@ final class ChatModel {
     private(set) var jumpToLatestToken = 0
     private(set) var isJumpingToLatest = false
     private(set) var hasTrimmedTail = false
-    var expandedToolGroups: [String: Bool] = [:]
+    private var isAwayFromBottom = false
+    var showsJumpToLatest: Bool {
+        isJumpingToLatest || hasTrimmedTail || (!followsTail && isAwayFromBottom)
+    }
+    let toolInspection = ToolInspectionState()
+    private(set) var visibleSurfaces = Set<String>()
+    var isInspectingContent: Bool {
+        toolInspection.owner != nil || visibleSurfaces.contains {
+            $0.hasPrefix("process:") || $0.hasPrefix("message:") || $0.hasPrefix("inspector:")
+        }
+    }
 
     /// Transient toast text (interaction failures/notices); auto-dismissed.
     private(set) var notice: String?
@@ -139,6 +149,40 @@ final class ChatModel {
 
     // MARK: - Lifecycle (paired with the screen's appear/disappear)
 
+    /// Navigation/sheet handoffs keep a single session pipe alive. Deferring
+    /// the final release also absorbs SwiftUI's disappear-before-appear order.
+    func retainSurface(_ id: String) {
+        visibleSurfaces.insert(id)
+        start()
+    }
+
+    func releaseSurface(_ id: String) {
+        visibleSurfaces.remove(id)
+        Task { [weak self] in
+            await Task.yield()
+            guard let self, self.visibleSurfaces.isEmpty else { return }
+            self.stop()
+        }
+    }
+
+    func beginContentInspection() {
+        dictation.cancel()
+        jumpTask?.cancel()
+        jumpTask = nil
+        isJumpingToLatest = false
+        // Pause following/paging without claiming the reader left the bottom.
+        // The latest action still depends on viewport distance or a trimmed tail.
+        readingViewportChanged(followsTail: false, needsOlder: false, isAwayFromBottom: isAwayFromBottom)
+    }
+
+    @discardableResult
+    func inspectToolGroup(_ id: String, owner: String) -> Bool {
+        guard toolInspection.openGroup(id, owner: owner) else { return false }
+        beginContentInspection()
+        retainSurface("inspector:\(owner)")
+        return true
+    }
+
     func start() {
         guard !isActive else { return }
         let preservingHistory = everStarted && (!followsTail || hasTrimmedTail)
@@ -174,6 +218,12 @@ final class ChatModel {
         // (the Android ChatViewModel start/stop pairing).
         hub.scratchlist.open(sessionId)
         let chat = chat
+        chat.onSessionRemoved = { [weak self] in
+            self?.toolInspection.invalidate()
+            self?.blocks = []
+            self?.isInitialLoading = false
+            self?.hasMore = false
+        }
         chat.onStoreActivity = { [weak self] in
             self?.scheduleRecompute()
         }
@@ -230,9 +280,12 @@ final class ChatModel {
 
     // MARK: - Actions
 
-    func readingViewportChanged(followsTail: Bool, needsOlder: Bool) {
+    func readingViewportChanged(followsTail: Bool, needsOlder: Bool, isAwayFromBottom: Bool) {
+        let followsTail = isInspectingContent ? false : followsTail
+        let needsOlder = isInspectingContent ? false : needsOlder
         let changedMode = self.followsTail != followsTail
         self.followsTail = followsTail
+        self.isAwayFromBottom = !followsTail && isAwayFromBottom
         viewportNeedsOlder = needsOlder
         if changedMode, !isJumpingToLatest, let controller = chat.windowController {
             if followsTail && hasTrimmedTail { jumpToLatest(); return }
@@ -285,7 +338,7 @@ final class ChatModel {
     }
 
     private func pumpHistory() {
-        guard isActive, !isJumpingToLatest, viewportNeedsOlder, hasMore,
+        guard isActive, !isInspectingContent, !isJumpingToLatest, viewportNeedsOlder, hasMore,
               !isSyncingTail, !isLoadingOlder, olderTask == nil,
               let controller = chat.windowController,
               let request = historyPaging.begin() else { return }
@@ -361,6 +414,7 @@ final class ChatModel {
             await controller.setViewMode(.tail)
             guard !Task.isCancelled, self.chat === chat else { return }
             self.followsTail = true
+            self.isAwayFromBottom = false
             self.jumpToLatestToken += 1
         }
     }
@@ -418,6 +472,7 @@ final class ChatModel {
                     switch value {
                     case .agentText(let text): return [text.text]
                     case .agentReasoning(let text): return [text.text]
+                    case .toolCall(let block): return planProposalMarkdown(block.tool).map { [$0] } ?? []
                     default: return []
                     }
                 })
@@ -444,15 +499,19 @@ final class ChatModel {
         summary: SessionSummary?,
         machines: [Machine]
     ) {
+        guard !chat.isRemoved else { return }
         if let previousEpoch = lastEpoch, let epoch = window.epoch, previousEpoch != epoch {
             cancelHistory()
             jumpToLatestToken += 1
+            toolInspection.invalidate()
+            toolInspection.update(visible)
         }
         if let epoch = window.epoch { lastEpoch = epoch }
         // Session/machine status events can arrive without new messages.
         // Do not invalidate the entire lazy transcript for identical output.
         if blocks != visible {
             blocks = visible
+            toolInspection.update(visible)
             var liveIDs = Set<String>()
             func collect(_ block: ChatBlock) {
                 liveIDs.insert(block.id)
@@ -470,9 +529,6 @@ final class ChatModel {
                 }
             }
             presentationState.prune(to: liveIDs)
-            for key in expandedToolGroups.keys where !liveIDs.contains(key) {
-                expandedToolGroups.removeValue(forKey: key)
-            }
         }
         header = Self.buildHeader(
             sessionId: sessionId,
@@ -502,7 +558,7 @@ final class ChatModel {
         // is fresher (summary via the global pipe, detail via this one).
         // markSeen is monotonic, so stale inputs cannot rewind it.
         let updatedAt = max(detail?.updatedAt ?? 0, summary?.updatedAt ?? 0)
-        if updatedAt > 0 {
+        if updatedAt > 0 && !isInspectingContent {
             hub.lastSeenStore.markSeen(sessionId: sessionId, seenAt: updatedAt)
         }
     }

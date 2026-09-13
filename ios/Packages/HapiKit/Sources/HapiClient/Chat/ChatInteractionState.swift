@@ -58,6 +58,18 @@ public struct QueuedMessageRow: Equatable, Sendable, Identifiable {
     }
 }
 
+// MARK: - Codex plan client actions
+
+/// A shared Codex proposal's client-action footer, independent of permissions.
+public struct CodexPlanActionState: Equatable, Sendable {
+    public let available: Bool
+    public let pending: Bool
+    public let canAct: Bool
+    public let error: String?
+
+    public var isVisible: Bool { available || pending || error != nil }
+}
+
 // MARK: - Permissions
 
 /// Optimistic-permission UI state layered over the reduced blocks.
@@ -276,9 +288,11 @@ public func buildSessionConfigState(
     return SessionConfigState(
         flavor: flavor,
         active: detail?.active ?? summary?.active ?? false,
-        controlledByUser: detail?.agentState?.controlledByUser == true,
+        controlledByUser: detail?.agentState?.controlledByUser == true && detail?.metadata?.capabilities?.concurrentClients != true,
         permissionMode: detail?.permissionMode,
-        permissionModes: permissionModeOptions(forFlavor: flavor),
+        permissionModes: permissionModeOptions(forFlavor: flavor).filter {
+            detail?.metadata?.capabilities?.concurrentClients != true || $0.mode.rawValue != "safe-yolo"
+        },
         model: model,
         modelOptions: modelOptions,
         modelOptionsLoading: modelOptionsLoading,

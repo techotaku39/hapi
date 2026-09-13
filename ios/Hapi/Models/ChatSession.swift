@@ -37,6 +37,7 @@ final class ChatSession {
     /// From this pipe's latest handshake; needed for `POST /api/visibility`
     /// (M3b) — new on every reconnect.
     private(set) var subscriptionId: String?
+    private(set) var isRemoved = false
     /// Set once `start()` opened the window; the chat model observes its
     /// state stream and calls its `fetchOlder`/`syncTail`.
     private(set) var windowController: MessageWindowController?
@@ -44,6 +45,7 @@ final class ChatSession {
     /// Fired (on the main actor) after SSE events that can update stores so
     /// the chat model can re-run its pipeline over the freshly patched data.
     @ObservationIgnored var onStoreActivity: (@MainActor () -> Void)?
+    @ObservationIgnored var onSessionRemoved: (@MainActor () -> Void)?
 
     private let baseURL: URL
     private let authManager: AuthManager
@@ -124,6 +126,7 @@ final class ChatSession {
         // identity-guarded on the other side against register/stop races.
         unregisterActive(self)
         onStoreActivity = nil
+        onSessionRemoved = nil
         consumeTask?.cancel()
         consumeTask = nil
         reconnectNotice.update(.idle)
@@ -217,8 +220,10 @@ final class ChatSession {
         case .sessionRemoved(_, let removedId):
             router.route(event, scope: .session(sessionId))
             if removedId == sessionId {
+                isRemoved = true
                 // Web `clearMessageWindow` on session-removed.
                 await windows.clear(sessionId: sessionId)
+                onSessionRemoved?()
             }
         default:
             // `session-updated` (detail patch / full session), lifecycle,
