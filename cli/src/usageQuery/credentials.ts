@@ -299,7 +299,7 @@ async function resolveCodexCredentials(env: NodeJS.ProcessEnv): Promise<Resolved
 
     const activeProvider = config.activeProvider
     const selected = activeProvider ? config.providers.get(activeProvider) : undefined
-    const isOpenAiProvider = !activeProvider || activeProvider.toLowerCase() === 'openai'
+    const isOpenAiProvider = !activeProvider || activeProvider === 'openai'
     let baseUrl = ''
     let apiKey = ''
     let baseUrlSource: UsageQueryCredentialStatus['source'] = 'none'
