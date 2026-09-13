@@ -1254,7 +1254,7 @@ describe('SessionList search toggle', () => {
             const api = {
                 searchSessionContent: vi.fn().mockResolvedValue({
                     results: [],
-                    hasTruncatedMessages: true,
+                    hasPotentiallyIncompleteResults: true,
                 }),
             } as unknown as ApiClient
 

@@ -1452,7 +1452,7 @@ export function SessionList(props: {
         setContentSearchResponse(null)
         setContentSearchError(false)
         if (contentSearchSessionIds.length === 0) {
-            setContentSearchResponse({ results: [], hasTruncatedMessages: false })
+            setContentSearchResponse({ results: [], hasPotentiallyIncompleteResults: false })
             setContentSearchLoading(false)
             return
         }
@@ -1473,7 +1473,7 @@ export function SessionList(props: {
                 })
                 .catch(() => {
                     if (controller.signal.aborted) return
-                    setContentSearchResponse({ results: [], hasTruncatedMessages: false })
+                    setContentSearchResponse({ results: [], hasPotentiallyIncompleteResults: false })
                     setContentSearchError(true)
                 })
                 .finally(() => {
@@ -2211,7 +2211,7 @@ export function SessionList(props: {
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {contentSearchActive
                             ? contentSearchReady
-                                ? contentSearchResponse?.hasTruncatedMessages
+                                ? contentSearchResponse?.hasPotentiallyIncompleteResults
                                     ? t('sessions.search.content.noResultsIncomplete')
                                     : t('sessions.search.content.noResults')
                                 : t('sessions.search.content.minQuery')

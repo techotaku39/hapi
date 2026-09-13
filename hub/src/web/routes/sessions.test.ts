@@ -1575,7 +1575,12 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => [session],
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
-            hasTruncatedSessionContent: () => true,
+            hasPotentiallyIncompleteSessionContent: (namespace: string, query: string, sessionIds?: readonly string[]) => {
+                expect(namespace).toBe('default')
+                expect(query).toBe('needle')
+                expect(sessionIds).toEqual([session.id])
+                return true
+            },
             searchSessionContent: (query: string, namespace: string, limit: number, sessionIds?: readonly string[]) => {
                 expect(query).toBe('needle')
                 expect(namespace).toBe('default')
@@ -1610,7 +1615,7 @@ describe('sessions routes', () => {
         })
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
-            hasTruncatedMessages: true,
+            hasPotentiallyIncompleteResults: true,
             results: [{
                 session: expect.objectContaining({ id: session.id }),
                 match: {
@@ -1632,7 +1637,7 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => sessions,
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
-            hasTruncatedSessionContent: () => false,
+            hasPotentiallyIncompleteSessionContent: () => false,
             searchSessionContent: (_query: string, _namespace: string, _limit: number, sessionIds?: readonly string[]) => {
                 receivedSessionIds = sessionIds
                 return []
@@ -1655,7 +1660,7 @@ describe('sessions routes', () => {
         })
 
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({ results: [], hasTruncatedMessages: false })
+        expect(await response.json()).toEqual({ results: [], hasPotentiallyIncompleteResults: false })
         expect(receivedSessionIds).toEqual(sessions.map((session) => session.id))
     })
 
@@ -1759,7 +1764,7 @@ describe('sessions routes', () => {
                             truncated: false
                         }
                     ],
-                    hasTruncatedMessages: false
+                    hasPotentiallyIncompleteResults: false
                 }
             }
         } as unknown as Partial<SyncEngine>
@@ -1792,7 +1797,7 @@ describe('sessions routes', () => {
                 }
             ],
             total: 2,
-            hasTruncatedMessages: false
+            hasPotentiallyIncompleteResults: false
         })
     })
 

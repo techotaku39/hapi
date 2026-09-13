@@ -49,7 +49,10 @@ describe('message content search', () => {
             const columns = db.prepare(
                 'PRAGMA table_info(message_content_search_lookup)'
             ).all() as Array<{ name: string }>
-            expect(columns.map((column) => column.name)).toContain('is_truncated')
+            expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+                'is_truncated',
+                'short_index_truncated'
+            ]))
         } finally {
             db.close()
         }
@@ -276,7 +279,7 @@ describe('message content search', () => {
             'No response requested',
             'default',
             session.id
-        )).toEqual({ matches: [], total: 0, hasTruncatedMessages: false })
+        )).toEqual({ matches: [], total: 0, hasPotentiallyIncompleteResults: false })
     })
 
     it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
@@ -298,7 +301,7 @@ describe('message content search', () => {
             .toEqual([otherSession.id])
         expect(store.messages.searchContent('搜', 'default')).toEqual([])
         expect(store.messages.searchContentInSession('搜', 'default', defaultSession.id))
-            .toEqual({ matches: [], total: 0, hasTruncatedMessages: false })
+            .toEqual({ matches: [], total: 0, hasPotentiallyIncompleteResults: false })
     })
 
     it('bounds per-message short-index work for long high-entropy text', () => {
@@ -335,9 +338,37 @@ describe('message content search', () => {
         expect(Number(count.count)).toBeLessThanOrEqual(MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE)
         expect(store.messages.searchContent('tail-search-needle', 'default'))
             .toMatchObject([{ sessionId: session.id, truncated: true }])
-        expect(store.messages.hasTruncatedContent('default')).toBe(true)
+        expect(store.messages.hasPotentiallyIncompleteContent('default', 'missing-middle')).toBe(true)
         expect(store.messages.searchContentInSession('missing-middle', 'default', session.id))
-            .toMatchObject({ hasTruncatedMessages: true })
+            .toMatchObject({ hasPotentiallyIncompleteResults: true })
+    })
+
+    it('reports incomplete coverage for two-character searches outside the short index', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'short-index-coverage')
+        const middleOnly = `${'head '.repeat(700)}middle-only-qzx ${'tail '.repeat(700)}`
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: middleOnly }
+        })
+
+        // Three-character queries use the complete bounded FTS text, while
+        // the two-character path only sees the short index's head and tail.
+        expect(store.messages.searchContent('qzx', 'default'))
+            .toMatchObject([{ sessionId: session.id, truncated: false }])
+        expect(store.messages.searchContentInSession('qzx', 'default', session.id))
+            .toMatchObject({ hasPotentiallyIncompleteResults: false })
+        expect(store.messages.searchContent('qz', 'default')).toEqual([])
+        expect(store.messages.searchContentInSession('qz', 'default', session.id))
+            .toMatchObject({ matches: [], hasPotentiallyIncompleteResults: true })
+
+        const tailMatch = `${'head '.repeat(700)}middle-only-rty ${'tail '.repeat(700)}zz`
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: tailMatch }
+        })
+        expect(store.messages.searchContent('zz', 'default'))
+            .toMatchObject([{ sessionId: session.id, truncated: true }])
     })
 
     it('defers live stream snapshots until the explicit terminal snapshot', () => {

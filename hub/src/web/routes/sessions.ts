@@ -144,7 +144,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         limit: number,
         sessionIds?: readonly string[]
     ) => {
-        if (!query) return c.json({ results: [], hasTruncatedMessages: false })
+        if (!query) return c.json({ results: [], hasPotentiallyIncompleteResults: false })
         if (Array.from(query).length > MAX_CONTENT_SEARCH_QUERY_CHARACTERS) {
             return c.json({ error: 'Content search query too long' }, 400)
         }
@@ -161,7 +161,11 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'sessionIds too large' }, 400)
         }
         const matches = engine.searchSessionContent(query, namespace, limit, scopedSessionIds)
-        const hasTruncatedMessages = engine.hasTruncatedSessionContent(namespace, scopedSessionIds)
+        const hasPotentiallyIncompleteResults = engine.hasPotentiallyIncompleteSessionContent(
+            namespace,
+            query,
+            scopedSessionIds
+        )
         const matchedSessionIds = matches.map((match) => match.sessionId)
         const scheduledCounts = engine.getFutureScheduledMessageCounts(matchedSessionIds)
         const nextScheduledAt = engine.getNextScheduledAtBySessionIds(matchedSessionIds)
@@ -187,7 +191,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 }]
             })
 
-        return c.json({ results, hasTruncatedMessages })
+        return c.json({ results, hasPotentiallyIncompleteResults })
     }
 
     app.get('/sessions/content-search', (c) => {
@@ -281,7 +285,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const query = c.req.query('query')?.trim() ?? ''
-        if (!query) return c.json({ matches: [], total: 0, hasTruncatedMessages: false })
+        if (!query) return c.json({ matches: [], total: 0, hasPotentiallyIncompleteResults: false })
         if (Array.from(query).length > MAX_CONTENT_SEARCH_QUERY_CHARACTERS) {
             return c.json({ error: 'Content search query too long' }, 400)
         }
@@ -300,7 +304,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({
             matches: result.matches.map(({ sessionId: _sessionId, ...match }) => match),
             total: result.total,
-            hasTruncatedMessages: result.hasTruncatedMessages
+            hasPotentiallyIncompleteResults: result.hasPotentiallyIncompleteResults
         })
     })
 

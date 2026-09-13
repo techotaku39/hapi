@@ -121,13 +121,14 @@ export type SessionContentSearchResponse = {
         session: SessionSummary
         match: SessionContentMatch
     }>
-    /** True when the searched scope contains messages whose indexed text was truncated. */
-    hasTruncatedMessages: boolean
+    /** True when this query may miss content omitted by an indexing optimization. */
+    hasPotentiallyIncompleteResults: boolean
 }
 export type SessionContentMatchesResponse = {
     matches: SessionContentMatch[]
     total: number
-    hasTruncatedMessages: boolean
+    /** True when this query may miss content omitted by an indexing optimization. */
+    hasPotentiallyIncompleteResults: boolean
 }
 export type SessionResponse = { session: Session }
 export type MessagesResponse = {

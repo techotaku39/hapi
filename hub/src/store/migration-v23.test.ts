@@ -209,7 +209,9 @@ describe('schema migrations through v30', () => {
             'UPDATE message_content_search SET searchable_text = ? WHERE message_id = ?'
         ).run(legacyIndexedText, message.id)
         legacy.prepare(
-            'UPDATE message_content_search_lookup SET is_truncated = 0 WHERE target_message_id = ?'
+            `UPDATE message_content_search_lookup
+             SET is_truncated = 0, short_index_truncated = 0
+             WHERE target_message_id = ?`
         ).run(message.id)
         legacy.exec('PRAGMA user_version = 29')
         legacy.close()
@@ -226,15 +228,16 @@ describe('schema migrations through v30', () => {
                 WHERE message_id = ?
             `).get(message.id) as { searchable_text: string } | undefined
             const metadata = internalDb.prepare(`
-                SELECT is_truncated
+                SELECT is_truncated, short_index_truncated
                 FROM message_content_search_lookup
                 WHERE target_message_id = ?
-            `).get(message.id) as { is_truncated: number } | undefined
+            `).get(message.id) as { is_truncated: number; short_index_truncated: number } | undefined
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
 
             expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
             expect(indexed?.searchable_text).toContain('v30-middle-needle')
             expect(metadata?.is_truncated).toBe(1)
+            expect(metadata?.short_index_truncated).toBe(1)
             expect(version.user_version).toBe(30)
         } finally {
             migrated.close()

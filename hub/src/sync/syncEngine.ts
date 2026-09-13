@@ -357,8 +357,12 @@ export class SyncEngine {
         return this.store.messages.searchContentInSession(query, namespace, sessionId, limit)
     }
 
-    hasTruncatedSessionContent(namespace: string, sessionIds?: readonly string[]): boolean {
-        return this.store.messages.hasTruncatedContent(namespace, sessionIds)
+    hasPotentiallyIncompleteSessionContent(
+        namespace: string,
+        query: string,
+        sessionIds?: readonly string[]
+    ): boolean {
+        return this.store.messages.hasPotentiallyIncompleteContent(namespace, query, sessionIds)
     }
 
     setSessionPinned(sessionId: string, pinned: boolean): void {
