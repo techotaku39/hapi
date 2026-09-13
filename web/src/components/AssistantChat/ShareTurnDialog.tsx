@@ -650,7 +650,7 @@ export function ShareTurnDialog(props: ShareTurnDialogProps) {
         const target = event.target
         if (!(target instanceof Element)) return
 
-        const tableAction = target.closest<HTMLButtonElement>('.aui-md-table-actions button')
+        const tableAction = target.closest<HTMLButtonElement>('.aui-md-table-actions button[data-hapi-table-open-fullscreen="true"]')
         if (tableAction) {
             event.preventDefault()
             event.stopPropagation()

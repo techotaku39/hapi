@@ -2,6 +2,44 @@ import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 
 test.describe('markdown table actions', () => {
+    test('keeps inline controls horizontal and adds a backdrop when a header wraps', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 844 })
+        await page.goto('/e2e-fixtures/markdown-table-fixture.html?multiline-header')
+
+        const actions = page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-actions')
+        await expect(actions).toHaveAttribute('data-hapi-table-actions-layout', 'horizontal')
+
+        const controls = await actions.locator('[data-hapi-table-action]').evaluateAll((elements) => elements
+            .map((element) => {
+                const button = element.matches('button') ? element : element.querySelector('button')
+                const style = button ? getComputedStyle(button) : null
+                return {
+                    action: element.getAttribute('data-hapi-table-action'),
+                    top: Math.round(element.getBoundingClientRect().top),
+                    backgroundColor: style?.backgroundColor,
+                    backdropFilter: style?.backdropFilter,
+                    borderWidth: style?.borderTopWidth,
+                    transitionProperty: style?.transitionProperty,
+                }
+            })
+            .sort((left, right) => left.top - right.top))
+
+        expect(controls.map((control) => control.action)).toEqual(['copy', 'download', 'fullscreen'])
+        expect(controls.every((control) => control.backgroundColor !== 'rgba(0, 0, 0, 0)' && control.backdropFilter !== 'none')).toBe(true)
+        expect(controls.every((control) => control.borderWidth === '0px')).toBe(true)
+        expect(controls.every((control) => !(control.transitionProperty ?? '').includes('background'))).toBe(true)
+
+        await page.setViewportSize({ width: 1440, height: 900 })
+        await page.goto('/e2e-fixtures/markdown-table-fixture.html')
+        const singleLineActions = page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-actions')
+        await expect(singleLineActions).toHaveAttribute('data-hapi-table-actions-layout', 'horizontal')
+        const singleLineStyles = await singleLineActions.locator('[data-hapi-table-action] button').evaluateAll((buttons) => buttons.map((button) => {
+            const style = getComputedStyle(button)
+            return { backgroundColor: style.backgroundColor, backdropFilter: style.backdropFilter }
+        }))
+        expect(singleLineStyles.every((style) => /rgba\(0, 0, 0, 0\)|transparent/.test(style.backgroundColor) && style.backdropFilter === 'none')).toBe(true)
+    })
+
     test('opens a viewport-sized PC viewer and downloads the CSV', async ({ page }) => {
         await page.goto('/e2e-fixtures/markdown-table-fixture.html')
 
@@ -12,8 +50,10 @@ test.describe('markdown table actions', () => {
         const tableFrame = page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-frame')
         const actions = tableFrame.locator('.aui-md-table-actions')
         await expect(actions).toBeAttached()
-        await expect(actions.getByRole('button')).toHaveCount(1)
-        const inlineButtonStyles = await actions.getByRole('button').evaluate((element) => {
+        await expect(actions.getByRole('button')).toHaveCount(3)
+        await expect(actions.getByRole('button', { name: 'Copy table' })).toBeAttached()
+        await expect(actions.getByRole('button', { name: 'Download table' })).toBeAttached()
+        const inlineButtonStyles = await actions.getByRole('button', { name: 'Open table full screen' }).evaluate((element) => {
             const style = getComputedStyle(element)
             return { backgroundColor: style.backgroundColor, borderWidth: style.borderTopWidth, backdropFilter: style.backdropFilter }
         })
@@ -259,11 +299,13 @@ test.describe('markdown table actions', () => {
             return {
                 headerHeight: Math.round(rowRect.height),
                 actionHeight: Math.round(actionRect.height),
+                layout: actions.dataset.hapiTableActionsLayout,
                 topOffset: Math.round(actionRect.top - frameRect.top),
                 rightOffset: Math.round(frameRect.right - actionRect.right),
             }
         })
 
+        expect(geometry.layout).toBe('horizontal')
         expect(geometry.headerHeight).toBeGreaterThan(geometry.actionHeight)
         expect(geometry.topOffset).toBe(3)
         expect(geometry.rightOffset).toBe(3)

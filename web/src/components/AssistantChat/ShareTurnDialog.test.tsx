@@ -24,7 +24,7 @@ describe('ShareTurnDialog preview cleanup', () => {
                     <tbody><tr><td>apiUrl</td></tr></tbody>
                 </table>
                 <div class="aui-md-table-actions">
-                    <button type="button">Open table full screen</button>
+                                    <button type="button" data-hapi-table-open-fullscreen="true">Open table full screen</button>
                 </div>
             </div>
         `
@@ -66,7 +66,7 @@ describe('ShareTurnDialog preview cleanup', () => {
                                         <tbody><tr><td>apiUrl</td></tr></tbody>
                                     </table>
                                     <div class="aui-md-table-actions">
-                                        <button type="button" aria-label="Open table full screen">Open table full screen</button>
+                                        <button type="button" data-hapi-table-open-fullscreen="true" aria-label="Open table full screen">Open table full screen</button>
                                     </div>
                                 </div>
                             </div>

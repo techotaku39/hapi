@@ -13,6 +13,18 @@ const TABLE_MARKDOWN = `# Repository activity
 | HAPI, local-first | 42 | TypeScript | 0.27.3 | Community | A deliberately long description for horizontal table scrolling |
 | Example | 7 | Rust | 1.2.0 | Open source | Stable fixture row |`
 
+const MULTILINE_HEADER_TABLE_MARKDOWN = `# Multiline header fixture
+
+| PC desktop behavior | Mobile behavior | Visual inspection points | Download inspection points |
+| --- | --- | --- | --- |
+| Directly enlarge the current viewport | Enter fullscreen and lock landscape | Header stays visible while scrolling | Does not affect downloaded output |`
+
+const EMPTY_ACTION_AREA_TABLE_MARKDOWN = `# Empty action area fixture
+
+| Environment variable |  |  |  |
+| --- | --- | --- | --- |
+| HAPI_SCRATCHLIST_MAX_ATTACHMENTS | 128 | Ready | Default |`
+
 const NEAR_BOTTOM_VERTICAL_TABLE_MARKDOWN = `# Near bottom table
 
 | Item | Status |
@@ -21,7 +33,11 @@ ${Array.from({ length: 14 }, (_, index) => `| Item ${index + 1} | Ready |`).join
 
 function MarkdownTableFixture() {
     const query = new URLSearchParams(window.location.search)
-    const content = query.has('near-bottom-scroll')
+    const content = query.has('empty-action-area')
+        ? EMPTY_ACTION_AREA_TABLE_MARKDOWN
+        : query.has('multiline-header')
+        ? MULTILINE_HEADER_TABLE_MARKDOWN
+        : query.has('near-bottom-scroll')
         ? NEAR_BOTTOM_VERTICAL_TABLE_MARKDOWN
         : TABLE_MARKDOWN
 

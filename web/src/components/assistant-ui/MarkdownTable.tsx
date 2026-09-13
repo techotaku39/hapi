@@ -29,6 +29,8 @@ type TableOrientationApi = {
     unlock?: () => void
 }
 
+type TableActionName = 'copy' | 'download' | 'fullscreen'
+
 function ExpandIcon(props: IconProps) {
     return (
         <svg
@@ -66,24 +68,133 @@ function DownloadIcon(props: IconProps) {
     )
 }
 
+const TABLE_ACTION_NAMES: TableActionName[] = ['copy', 'download', 'fullscreen']
+
+type TableActionElementRefs = {
+    current: Record<TableActionName, HTMLElement | null>
+}
+
+type TableActionSurfaceState = Record<TableActionName, boolean>
+
+function tableRectsOverlap(left: DOMRect, right: DOMRect): boolean {
+    return left.left < right.right
+        && left.right > right.left
+        && left.top < right.bottom
+        && left.bottom > right.top
+}
+
+function getTableHeaderTextRects(table: HTMLTableElement): DOMRect[] {
+    const headerCells = Array.from(table.tHead?.rows ?? []).flatMap((row) => Array.from(row.cells))
+    const textRects: DOMRect[] = []
+
+    for (const cell of headerCells) {
+        const range = table.ownerDocument.createRange()
+        range.selectNodeContents(cell)
+        if (typeof range.getClientRects !== 'function') continue
+        textRects.push(...Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0))
+    }
+
+    return textRects
+}
+
+function measureTableActionSurfaces(
+    table: HTMLTableElement,
+    actionRefs: TableActionElementRefs,
+): TableActionSurfaceState {
+    const textRects = getTableHeaderTextRects(table)
+    return Object.fromEntries(TABLE_ACTION_NAMES.map((action) => {
+        const actionElement = actionRefs.current[action]
+        const actionRect = actionElement?.getBoundingClientRect()
+        return [action, actionRect ? textRects.some((textRect) => tableRectsOverlap(textRect, actionRect)) : false]
+    })) as TableActionSurfaceState
+}
+
+function useTableActionSurfaces(
+    tableRef: RefObject<HTMLTableElement | null>,
+    actionRefs: TableActionElementRefs,
+): TableActionSurfaceState {
+    const [surfaceState, setSurfaceState] = useState<TableActionSurfaceState>(() => ({
+        copy: false,
+        download: false,
+        fullscreen: false,
+    }))
+
+    useLayoutEffect(() => {
+        const table = tableRef.current
+        if (!table) return undefined
+
+        const measure = () => {
+            const nextState = measureTableActionSurfaces(table, actionRefs)
+            setSurfaceState((currentState) => TABLE_ACTION_NAMES.every((action) => currentState[action] === nextState[action])
+                ? currentState
+                : nextState)
+        }
+
+        let animationFrame: number | null = null
+        const scheduleMeasure = () => {
+            if (animationFrame !== null) return
+            animationFrame = window.requestAnimationFrame(() => {
+                animationFrame = null
+                measure()
+            })
+        }
+
+        measure()
+        window.addEventListener('resize', scheduleMeasure)
+        const scrollContainer = table.parentElement
+        scrollContainer?.addEventListener('scroll', scheduleMeasure, { passive: true })
+
+        let resizeObserver: ResizeObserver | undefined
+        if (typeof ResizeObserver !== 'undefined') {
+            resizeObserver = new ResizeObserver(measure)
+            resizeObserver.observe(table)
+            if (table.tHead) resizeObserver.observe(table.tHead)
+        }
+
+        let mutationObserver: MutationObserver | undefined
+        if (typeof MutationObserver !== 'undefined' && table.tHead) {
+            mutationObserver = new MutationObserver(measure)
+            mutationObserver.observe(table.tHead, { childList: true, characterData: true, subtree: true })
+        }
+
+        return () => {
+            if (animationFrame !== null) window.cancelAnimationFrame(animationFrame)
+            resizeObserver?.disconnect()
+            mutationObserver?.disconnect()
+            window.removeEventListener('resize', scheduleMeasure)
+            scrollContainer?.removeEventListener('scroll', scheduleMeasure)
+        }
+    }, [actionRefs, tableRef])
+
+    return surfaceState
+}
+
 function TableActionButton(props: {
     label: string
     onClick: () => void
     children: ReactNode
     variant?: 'surface' | 'ghost'
+    openFullscreen?: boolean
+    action?: TableActionName
+    surface?: boolean
+    actionRef?: (element: HTMLElement | null) => void
 }) {
-    const variantClassName = props.variant === 'ghost'
-        ? 'border-0 bg-transparent text-[var(--app-hint)] shadow-none hover:text-[var(--app-fg)]'
-        : 'border border-[var(--app-border)] bg-[var(--app-md-table-bg)]/90 text-[var(--app-hint)] shadow-sm hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+    const variantClassName = props.surface || props.variant === 'surface'
+        ? 'bg-[var(--app-md-table-head-bg)]/90 text-[var(--app-hint)] shadow-sm backdrop-blur-sm hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+        : 'border-0 bg-transparent text-[var(--app-hint)] shadow-none hover:text-[var(--app-fg)]'
 
     return (
         <button
             type="button"
+            ref={props.actionRef}
+            data-hapi-table-open-fullscreen={props.openFullscreen ? 'true' : undefined}
+            data-hapi-table-action={props.action}
+            data-hapi-table-action-surface={props.surface ? 'true' : undefined}
             aria-label={props.label}
             title={props.label}
             onClick={props.onClick}
             className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                'flex h-7 w-7 items-center justify-center rounded-md transition-[color] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                 variantClassName,
             )}
         >
@@ -108,6 +219,10 @@ function TableActionMenu(props: {
     label: string
     children: ReactNode
     tabIndex?: number
+    compact?: boolean
+    action?: TableActionName
+    surface?: boolean
+    actionRef?: (element: HTMLElement | null) => void
     items: Array<{
         label: string
         onSelect: () => void
@@ -137,7 +252,9 @@ function TableActionMenu(props: {
     return (
         <Popover.Root open={open} onOpenChange={setOpen}>
             <div
+                ref={props.actionRef}
                 className="shrink-0"
+                data-hapi-table-action={props.action}
                 onMouseEnter={clearCloseTimer}
                 onMouseLeave={scheduleClose}
             >
@@ -145,6 +262,7 @@ function TableActionMenu(props: {
                     <button
                         type="button"
                         data-hapi-table-viewer-control="true"
+                        data-hapi-table-action-surface={props.surface ? 'true' : undefined}
                         aria-label={props.label}
                         title={props.label}
                         tabIndex={props.tabIndex}
@@ -164,7 +282,18 @@ function TableActionMenu(props: {
                             event.currentTarget.focus()
                             event.preventDefault()
                         }}
-                        className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        className={cn(
+                            props.compact
+                                ? 'flex h-7 w-7 items-center justify-center rounded-md'
+                                : 'flex h-9 w-9 items-center justify-center rounded-lg',
+                            props.surface
+                                ? 'bg-[var(--app-md-table-head-bg)]/90 shadow-sm backdrop-blur-sm hover:bg-[var(--app-subtle-bg)]'
+                                : 'hover:bg-[var(--app-subtle-bg)]',
+                            props.compact
+                                ? 'text-[var(--app-hint)] transition-[color]'
+                                : 'text-[var(--app-hint)] transition-colors',
+                            'hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                        )}
                     >
                         {props.children}
                     </button>
@@ -1155,6 +1284,140 @@ export function TableViewerFromElement(props: {
     )
 }
 
+function InlineTableActions(props: {
+    tableRef: RefObject<HTMLTableElement | null>
+    imageTitle: string
+    isMobile: boolean
+    onOpenViewer: () => void
+}) {
+    const { t } = useTranslation()
+    const { copied, copy, markCopied } = useCopyToClipboard()
+    const [imageAction, setImageAction] = useState<'copy' | 'download' | null>(null)
+    const [imageError, setImageError] = useState(false)
+    const actionRefs = useRef<Record<TableActionName, HTMLElement | null>>({
+        copy: null,
+        download: null,
+        fullscreen: null,
+    })
+    const surfaceState = useTableActionSurfaces(props.tableRef, actionRefs)
+    const getActionRef = useCallback((action: TableActionName) => (element: HTMLElement | null) => {
+        actionRefs.current[action] = element
+    }, [])
+
+    const handleDownloadCsv = useCallback(() => {
+        const table = props.tableRef.current
+        if (table) downloadTableAsCsv(table, getShareTableFileName(props.imageTitle, 'csv'))
+    }, [props.imageTitle, props.tableRef])
+
+    const handleCopyMarkdown = useCallback(() => {
+        const table = props.tableRef.current
+        if (table) void copy(serializeTableToMarkdown(table))
+    }, [copy, props.tableRef])
+
+    const handleSaveImage = useCallback(() => {
+        const table = props.tableRef.current
+        if (!table || imageAction) return
+
+        setImageError(false)
+        setImageAction('download')
+        void renderTableAsImage(table)
+            .then((blob) => downloadBlob(blob, getShareImageFileName(props.imageTitle, 'table')))
+            .catch(() => setImageError(true))
+            .finally(() => setImageAction(null))
+    }, [imageAction, props.imageTitle, props.tableRef])
+
+    const handleCopyImage = useCallback(() => {
+        const table = props.tableRef.current
+        if (!table || imageAction) return
+
+        setImageError(false)
+        setImageAction('copy')
+        void copyTableImagePromiseToClipboard(renderTableAsImage(table))
+            .then(() => markCopied())
+            .catch(() => setImageError(true))
+            .finally(() => setImageAction(null))
+    }, [imageAction, markCopied, props.tableRef])
+
+    return (
+        <>
+            {imageAction ? (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 flex items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)]/95 px-2 py-1 text-xs text-[var(--app-hint)] shadow-sm"
+                >
+                    <Spinner size="sm" label={null} className="text-current" />
+                    <span>{t(imageAction === 'copy' ? 'table.copyingImage' : 'table.savingImage')}</span>
+                </div>
+            ) : null}
+            {imageError ? (
+                <div
+                    role="alert"
+                    aria-live="assertive"
+                    className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-1 text-xs text-[var(--app-fg)] shadow-sm"
+                >
+                    {t('table.imageActionFailed')}
+                </div>
+            ) : null}
+            <div
+                data-hapi-share-export-exclude="true"
+                data-hapi-table-actions-layout="horizontal"
+                className="aui-md-table-actions flex items-center gap-1"
+            >
+                {props.isMobile ? (
+                    <TableActionButton
+                        label={copied ? t('table.copiedMarkdown') : t('table.copyMarkdownButton')}
+                        onClick={handleCopyMarkdown}
+                        action="copy"
+                        actionRef={getActionRef('copy')}
+                        surface={surfaceState.copy}
+                    >
+                        {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                    </TableActionButton>
+                ) : (
+                    <TableActionMenu
+                        label={t('table.copy')}
+                        compact
+                        action="copy"
+                        actionRef={getActionRef('copy')}
+                        surface={surfaceState.copy}
+                        items={[
+                            { label: t('table.copyImage'), onSelect: handleCopyImage, disabled: imageAction !== null },
+                            { label: t('table.copyMarkdown'), onSelect: handleCopyMarkdown },
+                        ]}
+                    >
+                        {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                    </TableActionMenu>
+                )}
+                <TableActionMenu
+                    label={t('table.download')}
+                    compact
+                    action="download"
+                    actionRef={getActionRef('download')}
+                    surface={surfaceState.download}
+                    items={[
+                        { label: t('table.downloadPng'), onSelect: handleSaveImage, disabled: imageAction !== null },
+                        { label: t('table.downloadCsv'), onSelect: handleDownloadCsv },
+                    ]}
+                >
+                    <DownloadIcon className="h-4 w-4" />
+                </TableActionMenu>
+                <TableActionButton
+                    label={t('table.openFullscreen')}
+                    onClick={props.onOpenViewer}
+                    variant="ghost"
+                    openFullscreen
+                    action="fullscreen"
+                    actionRef={getActionRef('fullscreen')}
+                    surface={surfaceState.fullscreen}
+                >
+                    <ExpandIcon className="h-4 w-4" />
+                </TableActionButton>
+            </div>
+        </>
+    )
+}
+
 export function MarkdownTable(props: TableProps) {
     const { t } = useTranslation()
     const chatContext = useOptionalHappyChatContext()
@@ -1163,11 +1426,13 @@ export function MarkdownTable(props: TableProps) {
     const viewerTableRef = useRef<HTMLTableElement>(null)
     const tableWrapPreferenceKeyRef = useRef<string | undefined>(undefined)
     const [viewerOpen, setViewerOpen] = useState(false)
+    const [mobileActionsVisible, setMobileActionsVisible] = useState(false)
     const openRef = useRef(false)
     const mobileViewerRef = useRef(false)
     const enteredFullscreenRef = useRef(false)
     const imageTitle = chatContext?.sessionTitle?.trim() || t('table.viewerTitle')
     const tableWrapScope = chatContext?.sessionId ?? imageTitle
+    const isMobileInlineTable = isMobileTableViewerViewport()
 
     const closeViewer = useCallback(() => {
         openRef.current = false
@@ -1241,16 +1506,26 @@ export function MarkdownTable(props: TableProps) {
                     <table
                         {...rest}
                         ref={inlineTableRef}
+                        onClick={(event) => {
+                            if (!isMobileInlineTable) return
+                            const target = event.target
+                            if (target instanceof Element && target.closest('thead')) {
+                                setMobileActionsVisible((visible) => !visible)
+                            }
+                        }}
                         className={cn('aui-md-table w-full border-collapse text-sm', className)}
                     >
                         {children}
                     </table>
                 </div>
-                <div data-hapi-share-export-exclude="true" className="aui-md-table-actions flex items-center">
-                    <TableActionButton label={t('table.openFullscreen')} onClick={openViewer} variant="ghost">
-                        <ExpandIcon className="h-4 w-4" />
-                    </TableActionButton>
-                </div>
+                {!isMobileInlineTable || mobileActionsVisible ? (
+                    <InlineTableActions
+                        tableRef={inlineTableRef}
+                        imageTitle={imageTitle}
+                        isMobile={isMobileInlineTable}
+                        onOpenViewer={openViewer}
+                    />
+                ) : null}
             </div>
 
             <TableViewer

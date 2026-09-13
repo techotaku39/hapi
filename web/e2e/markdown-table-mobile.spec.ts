@@ -35,9 +35,28 @@ test('mobile markdown table viewer requests landscape and releases orientation c
         })
     })
 
+    const inlineTable = page.locator('[data-testid="markdown-table-fixture"] table')
     const inlineActions = page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-actions')
+    await expect(inlineActions).not.toBeAttached()
+    const readInlineLayout = () => inlineTable.evaluate((table) => ({
+        width: Math.round(table.getBoundingClientRect().width),
+        columns: Array.from(table.tHead?.rows[0]?.cells ?? []).map((cell) => Math.round(cell.getBoundingClientRect().width)),
+    }))
+    const layoutBeforeReveal = await readInlineLayout()
+    await inlineTable.locator('thead').click()
     await expect(inlineActions).toBeVisible()
-    await expect(inlineActions.getByRole('button')).toHaveCount(1)
+    expect(await readInlineLayout()).toEqual(layoutBeforeReveal)
+    await expect(inlineActions.getByRole('button')).toHaveCount(3)
+    await expect(inlineActions.getByRole('button', { name: 'Copy table as Markdown' })).toBeVisible()
+    await inlineActions.getByRole('button', { name: 'Download table' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Download PNG' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Download CSV' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await inlineTable.locator('thead').click()
+    await expect(inlineActions).not.toBeAttached()
+    expect(await readInlineLayout()).toEqual(layoutBeforeReveal)
+    await inlineTable.locator('thead').click()
+    await expect(inlineActions).toBeVisible()
     await page.getByRole('button', { name: 'Open table full screen' }).click()
     const dialog = page.getByRole('dialog', { name: 'Table filename fixture' })
     await expect(dialog).toBeVisible()
@@ -112,6 +131,8 @@ test('mobile markdown table viewer requests landscape and releases orientation c
 test('mobile markdown table viewer detects a phone that starts in landscape', async ({ page }) => {
     await page.setViewportSize({ width: 915, height: 412 })
     await page.goto('/e2e-fixtures/markdown-table-fixture.html')
+    await expect(page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-actions')).not.toBeAttached()
+    await page.locator('[data-testid="markdown-table-fixture"] table thead').click()
     await expect(page.getByRole('button', { name: 'Open table full screen' })).toBeVisible()
     await page.evaluate(() => {
         const state = { requestFullscreen: 0, locks: [] as string[] }
@@ -141,4 +162,106 @@ test('mobile markdown table viewer detects a phone that starts in landscape', as
         const state = (window as Window & { __hapiTableViewerState?: { requestFullscreen: number; locks: string[] } }).__hapiTableViewerState
         return state ? `${state.requestFullscreen}:${state.locks.join(',')}` : ''
     })).toBe('1:landscape')
+})
+
+test('mobile wrapped headers keep controls horizontal with their backdrop', async ({ page }) => {
+    await page.goto('/e2e-fixtures/markdown-table-fixture.html?multiline-header')
+
+    const table = page.locator('[data-testid="markdown-table-fixture"] table')
+    const actions = page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-actions')
+    await expect(actions).not.toBeAttached()
+    await table.locator('thead').click()
+    await expect(actions).toHaveAttribute('data-hapi-table-actions-layout', 'horizontal')
+
+    const controls = await actions.locator('[data-hapi-table-action]').evaluateAll((elements) => elements
+        .map((element) => {
+            const button = element.matches('button') ? element : element.querySelector('button')
+            const style = button ? getComputedStyle(button) : null
+            return {
+                action: element.getAttribute('data-hapi-table-action'),
+                top: Math.round(element.getBoundingClientRect().top),
+                backgroundColor: style?.backgroundColor,
+                backdropFilter: style?.backdropFilter,
+                borderWidth: style?.borderTopWidth,
+                transitionProperty: style?.transitionProperty,
+            }
+        })
+        .sort((left, right) => left.top - right.top))
+
+    expect(controls.map((control) => control.action)).toEqual(['copy', 'download', 'fullscreen'])
+    expect(controls.every((control) => control.backgroundColor !== 'rgba(0, 0, 0, 0)' && control.backdropFilter !== 'none')).toBe(true)
+    expect(controls.every((control) => control.borderWidth === '0px')).toBe(true)
+    expect(controls.every((control) => !(control.transitionProperty ?? '').includes('background'))).toBe(true)
+    await expect(actions.getByRole('button', { name: 'Copy table as Markdown' })).toBeVisible()
+})
+
+test('mobile controls stay transparent when no header text is underneath', async ({ page }) => {
+    await page.goto('/e2e-fixtures/markdown-table-fixture.html?empty-action-area')
+
+    const table = page.locator('[data-testid="markdown-table-fixture"] table')
+    const actions = page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-actions')
+    await table.locator('thead').click()
+    await expect(actions).toHaveAttribute('data-hapi-table-actions-layout', 'horizontal')
+
+    const controls = await actions.locator('[data-hapi-table-action]').evaluateAll((elements) => elements.map((element) => {
+        const button = element.matches('button') ? element : element.querySelector('button')
+        const style = button ? getComputedStyle(button) : null
+        return {
+            surface: button?.getAttribute('data-hapi-table-action-surface'),
+            backgroundColor: style?.backgroundColor,
+            backdropFilter: style?.backdropFilter,
+        }
+    }))
+
+    expect(controls).toHaveLength(3)
+    expect(controls.every((control) => control.surface === null
+        && /rgba\(0, 0, 0, 0\)|transparent/.test(control.backgroundColor ?? '')
+        && control.backdropFilter === 'none')).toBe(true)
+})
+
+test('refreshes control backdrops when the table scrolls horizontally', async ({ page }) => {
+    await page.goto('/e2e-fixtures/markdown-table-fixture.html')
+
+    const table = page.locator('[data-testid="markdown-table-fixture"] table')
+    const actions = page.locator('[data-testid="markdown-table-fixture"] .aui-md-table-actions')
+    const scrollContainer = table.locator('..')
+    await table.locator('thead').click()
+    await expect.poll(() => scrollContainer.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeGreaterThan(0)
+
+    const readSurfaceState = () => page.evaluate(() => {
+        const table = document.querySelector<HTMLTableElement>('[data-testid="markdown-table-fixture"] table')
+        const actions = document.querySelector<HTMLElement>('[data-testid="markdown-table-fixture"] .aui-md-table-actions')
+        const scrollContainer = table?.parentElement
+        if (!table || !actions || !scrollContainer) throw new Error('Table surface geometry is incomplete')
+
+        const textRects = Array.from(table.tHead?.rows ?? []).flatMap((row) => Array.from(row.cells)).flatMap((cell) => {
+            const range = document.createRange()
+            range.selectNodeContents(cell)
+            return Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
+        })
+        const overlaps = (left: DOMRect, right: DOMRect) => left.left < right.right
+            && left.right > right.left
+            && left.top < right.bottom
+            && left.bottom > right.top
+        const state = Array.from(actions.querySelectorAll<HTMLElement>('[data-hapi-table-action]')).map((element) => {
+            const button = element.matches('button') ? element : element.querySelector('button')
+            const actionRect = element.getBoundingClientRect()
+            return {
+                action: element.dataset.hapiTableAction,
+                actual: button?.dataset.hapiTableActionSurface === 'true',
+                expected: textRects.some((textRect) => overlaps(textRect, actionRect)),
+            }
+        })
+        return { scrollLeft: scrollContainer.scrollLeft, state }
+    })
+
+    await scrollContainer.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+    await expect.poll(async () => {
+        const snapshot = await readSurfaceState()
+        return snapshot.scrollLeft > 0 && snapshot.state.every((item) => item.actual === item.expected)
+    }).toBe(true)
+
+    const snapshot = await readSurfaceState()
+    expect(snapshot.scrollLeft).toBeGreaterThan(0)
+    expect(snapshot.state.every((item) => item.actual === item.expected)).toBe(true)
 })

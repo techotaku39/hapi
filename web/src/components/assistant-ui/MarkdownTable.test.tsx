@@ -97,14 +97,14 @@ describe('MarkdownTable', () => {
         Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
     })
 
-    it('keeps the table header as the first row while exposing only a plain fullscreen action', () => {
+    it('keeps the table header as the first row while exposing inline table actions', () => {
         renderTable()
 
         const table = screen.getByRole('table')
         expect(table.firstElementChild?.tagName).toBe('THEAD')
         expect(table.parentElement?.parentElement).toHaveClass('aui-md-table-shell')
         const actions = table.parentElement?.parentElement?.querySelector('.aui-md-table-actions')
-        expect(actions?.querySelectorAll('button')).toHaveLength(1)
+        expect(actions?.querySelectorAll('button')).toHaveLength(3)
         expect(actions).toHaveAttribute('data-hapi-share-export-exclude', 'true')
         expect(screen.getByRole('button', { name: 'Open table full screen' })).toBeInTheDocument()
     })
@@ -440,6 +440,7 @@ describe('MarkdownTable', () => {
         })
 
         renderTable()
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Project' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
 
         await waitFor(() => {
@@ -479,6 +480,7 @@ describe('MarkdownTable', () => {
         })
 
         renderTable()
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Project' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
         await waitFor(() => {
             expect(requestFullscreen).toHaveBeenCalledTimes(1)
@@ -520,6 +522,7 @@ describe('MarkdownTable', () => {
         })
 
         renderTable()
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Project' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
         await waitFor(() => {
             expect(requestFullscreen).toHaveBeenCalledTimes(1)
@@ -567,6 +570,7 @@ describe('MarkdownTable', () => {
         })
 
         const rendered = renderTable()
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Project' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
         await waitFor(() => expect(requestFullscreen).toHaveBeenCalledTimes(1))
 
@@ -597,6 +601,7 @@ describe('MarkdownTable', () => {
         vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
         renderTable()
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Project' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
         await screen.findByRole('dialog', { name: 'Table' })
         expect(html2canvas).not.toHaveBeenCalled()
@@ -615,6 +620,7 @@ describe('MarkdownTable', () => {
         vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
         renderTable()
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Project' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
         const dialog = await screen.findByRole('dialog', { name: 'Table' })
         fireEvent.click(screen.getByRole('button', { name: 'Download table' }))
@@ -696,6 +702,7 @@ describe('MarkdownTable', () => {
         })
 
         renderTable()
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Project' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open table full screen' }))
         const dialog = await screen.findByRole('dialog', { name: 'Table' })
         const toolbar = dialog.querySelector('[data-hapi-table-viewer-toolbar="true"]')
