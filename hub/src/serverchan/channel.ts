@@ -4,6 +4,7 @@ import type { NotificationChannel, TaskNotification } from '../notifications/not
 import { buildSessionUrl, getAgentName, getSessionName } from '../notifications/sessionInfo'
 import { shouldSuppressBackgroundNotification } from '../notifications/backgroundOnly'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
+import { composeInputRequestNotification, getFirstPendingRequest } from '../notifications/inputRequest'
 
 export class ServerChanChannel implements NotificationChannel {
     constructor(
@@ -30,12 +31,15 @@ export class ServerChanChannel implements NotificationChannel {
         }
 
         const name = getSessionName(session)
-        const request = session.agentState?.requests
-            ? Object.values(session.agentState.requests)[0]
-            : null
+        const pending = getFirstPendingRequest(session)
+        const request = pending?.request
+        const inputNotification = composeInputRequestNotification(session, pending)
         const toolName = request?.tool ? ` (${request.tool})` : ''
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send('HAPI Permission Request', `${name}${toolName}\n\n${url}`)
+        await this.send(
+            inputNotification ? `HAPI ${inputNotification.title}` : 'HAPI Permission Request',
+            `${inputNotification?.body ?? `${name}${toolName}`}\n\n${url}`
+        )
     }
 
     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {

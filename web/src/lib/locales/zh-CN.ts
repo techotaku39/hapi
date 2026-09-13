@@ -560,6 +560,8 @@ export default {
   'tool.rejected': '已拒绝',
   'tool.cancel': '取消',
   'tool.exitPlan': '退出计划模式',
+  'tool.plan.implement': '执行计划',
+  'tool.plan.continue': '继续规划',
   'tool.patch': '补丁',
   'tool.input': '输入',
   'tool.trace': '追踪',
@@ -754,6 +756,7 @@ export default {
   'toast.ready.title': '等待输入',
   'toast.ready.body': '{agent} 正在 {session} 等待你的输入',
   'toast.permission.title': '权限请求',
+  'toast.input.title': '{agent} 需要你回答',
   'toast.task.completed': '任务完成',
   'toast.task.failed': '任务失败',
 
