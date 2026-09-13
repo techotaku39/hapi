@@ -6,6 +6,10 @@ interface MarkdownNode {
     value?: string
     children?: MarkdownNode[]
     data?: unknown
+    position?: {
+        start: { offset?: number }
+        end: { offset?: number }
+    }
 }
 
 interface MarkdownFile {
@@ -53,6 +57,13 @@ interface BracketMathPlaceholder extends BracketMathMatch {
 
 type PlaceholderMap = Map<string, BracketMathPlaceholder>
 
+interface FenceLine {
+    char: '`' | '~'
+    continuationIndent: number
+    length: number
+    rest: string
+}
+
 function markProtectedRange(mask: ProtectedMask, start: number, end: number): void {
     for (let index = start; index < end; index++) mask[index] = true
 }
@@ -62,13 +73,49 @@ function findLineEnd(source: string, start: number): number {
     return newline < 0 ? source.length : newline + 1
 }
 
-function isFenceLine(line: string): { char: '`' | '~'; length: number; rest: string } | null {
-    const match = line.match(/^(?:(?:[ \t]{0,3}>[ \t]?)|(?:[ \t]{0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+))*[ \t]{0,3}(`{3,}|~{3,})(.*)$/)
-    if (!match) return null
+function isFenceLine(line: string, maxIndent = 3): FenceLine | null {
+    let cursor = 0
+    let listContainer = false
+    let continuationIndent = 0
+
+    while (cursor < line.length) {
+        const containerStart = cursor
+        while (cursor < line.length && (line[cursor] === ' ' || line[cursor] === '\t')) cursor++
+        if (cursor - containerStart > 3) {
+            cursor = containerStart
+            break
+        }
+
+        if (line[cursor] === '>') {
+            cursor++
+            if (line[cursor] === ' ' || line[cursor] === '\t') cursor++
+            continue
+        }
+
+        const listMarker = line.slice(cursor).match(/^(?:[-+*]|\d{1,9}[.)])[ \t]+/u)
+        if (listMarker) {
+            cursor += listMarker[0].length
+            listContainer = true
+            continuationIndent = cursor
+            continue
+        }
+
+        cursor = containerStart
+        break
+    }
+
+    const indentationStart = cursor
+    while (cursor < line.length && (line[cursor] === ' ' || line[cursor] === '\t')) cursor++
+    if (cursor - indentationStart > maxIndent) return null
+
+    const fence = line.slice(cursor).match(/^(`{3,}|~{3,})(.*)$/u)
+    if (!fence) return null
+
     return {
-        char: match[1][0] as '`' | '~',
-        length: match[1].length,
-        rest: match[2],
+        char: fence[1][0] as '`' | '~',
+        continuationIndent: listContainer ? continuationIndent : 0,
+        length: fence[1].length,
+        rest: fence[2],
     }
 }
 
@@ -104,10 +151,58 @@ function markInlineCodeSpans(source: string, mask: ProtectedMask): void {
     }
 }
 
-function getProtectedMarkdownRanges(source: string): ProtectedMask {
+function getNodeOffsets(node: MarkdownNode): { end: number; start: number } | null {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    if (typeof start !== 'number' || typeof end !== 'number') return null
+    if (start < 0 || end < start) return null
+    return { end, start }
+}
+
+function findClosingMarkdownBracket(source: string, start: number, end: number): number | null {
+    let depth = 0
+    for (let index = start; index < end; index++) {
+        if (source[index] === '\\') {
+            index++
+            continue
+        }
+        if (source[index] === '[') {
+            depth++
+        } else if (source[index] === ']') {
+            depth--
+            if (depth === 0) return index
+        }
+    }
+    return null
+}
+
+function markMarkdownMetadataRanges(source: string, node: MarkdownNode, mask: ProtectedMask): void {
+    const offsets = getNodeOffsets(node)
+    if (offsets && (node.type === 'link' || node.type === 'image' || node.type === 'definition')) {
+        const labelStart = offsets.start + (node.type === 'image' ? 1 : 0)
+        const labelEnd = findClosingMarkdownBracket(source, labelStart, offsets.end)
+        if (labelEnd !== null) {
+            const separator = source[labelEnd + 1]
+            if (node.type === 'definition' && separator === ':') {
+                markProtectedRange(mask, labelEnd + 1, offsets.end)
+            } else if ((node.type === 'link' || node.type === 'image') && separator === '(') {
+                // Link destinations and titles are metadata, not message text.
+                // Protect them while still allowing math in the link label.
+                markProtectedRange(mask, labelEnd + 1, offsets.end)
+            }
+        }
+    }
+
+    for (const child of node.children ?? []) {
+        markMarkdownMetadataRanges(source, child, mask)
+    }
+}
+
+function getProtectedMarkdownRanges(source: string, tree: MarkdownNode): ProtectedMask {
     const mask = Array<boolean>(source.length).fill(false)
     let fenceChar: '`' | '~' | null = null
     let fenceLength = 0
+    let fenceContinuationIndent = 3
     let lineStart = 0
 
     while (lineStart < source.length) {
@@ -116,18 +211,20 @@ function getProtectedMarkdownRanges(source: string): ProtectedMask {
             ? lineEnd - 1
             : lineEnd
         const line = source.slice(lineStart, contentEnd).replace(/\r$/, '')
-        const fence = isFenceLine(line)
+        const fence = isFenceLine(line, fenceChar === null ? 3 : fenceContinuationIndent)
 
         if (fenceChar !== null) {
             markProtectedRange(mask, lineStart, lineEnd)
             if (fence && fence.char === fenceChar && fence.length >= fenceLength && /^\s*$/.test(fence.rest)) {
                 fenceChar = null
                 fenceLength = 0
+                fenceContinuationIndent = 3
             }
         } else if (fence) {
             markProtectedRange(mask, lineStart, lineEnd)
             fenceChar = fence.char
             fenceLength = fence.length
+            fenceContinuationIndent = Math.max(3, fence.continuationIndent)
         }
 
         lineStart = lineEnd
@@ -136,6 +233,7 @@ function getProtectedMarkdownRanges(source: string): ProtectedMask {
     // Code spans may cross line boundaries. Scan them after fenced ranges are
     // marked so delimiters inside either kind of code remain opaque.
     markInlineCodeSpans(source, mask)
+    markMarkdownMetadataRanges(source, tree, mask)
 
     return mask
 }
@@ -254,13 +352,16 @@ function findUnusedPlaceholderToken(source: string, start: number): string {
     throw new Error('Unable to allocate a LaTeX placeholder token')
 }
 
+function replaceLineContentWithToken(line: string, prefix: string, token: string): string {
+    return prefix + token.repeat(Math.max(1, line.length - prefix.length))
+}
+
 function makePlaceholder(value: string, token: string): string {
-    let placeholder = ''
-    for (let index = 0; index < value.length; index++) {
-        const character = value[index]
-        placeholder += character === '\r' || character === '\n' ? character : token
-    }
-    return placeholder
+    const parts = value.split(/(\r?\n)/)
+    return parts.map((part) => {
+        if (/^\r?\n$/u.test(part)) return part
+        return replaceLineContentWithToken(part, '', token)
+    }).join('')
 }
 
 function makeSourcePlaceholder(source: string, match: BracketMathMatch, token: string): string {
@@ -275,12 +376,12 @@ function makeSourcePlaceholder(source: string, match: BracketMathMatch, token: s
         const prefix = match.blockquotePrefix && part.startsWith(match.blockquotePrefix)
             ? match.blockquotePrefix
             : ''
-        return prefix + token.repeat(part.length - prefix.length)
+        return replaceLineContentWithToken(part, prefix, token)
     }).join('')
 }
 
-function prepareBracketMathSource(source: string): { source: string; placeholders: PlaceholderMap } | null {
-    const matches = findBracketMathMatches(source, getProtectedMarkdownRanges(source))
+function prepareBracketMathSource(source: string, tree: MarkdownNode): { source: string; placeholders: PlaceholderMap } | null {
+    const matches = findBracketMathMatches(source, getProtectedMarkdownRanges(source, tree))
     if (matches.length === 0) return null
 
     const placeholders: PlaceholderMap = new Map()
@@ -444,10 +545,14 @@ export default function remarkLatexBracketMath(this: Processor) {
 
         // Markdown parses `K^*` as emphasis and a line containing only `=` as
         // a setext heading before a normal transformer can inspect the source.
-        // Replace each bracket-delimited formula with an equal-length private
-        // use token, parse the safe source, then restore the formula as an AST
-        // math node. Equal lengths keep positions usable by later plugins.
-        const prepared = prepareBracketMathSource(repairMarkdownTables(file.value))
+        // Replace each bracket-delimited formula with private-use tokens, parse
+        // the safe source, then restore the formula as an AST math node. A
+        // token on empty formula lines keeps Markdown from splitting a match.
+        const source = repairMarkdownTables(file.value)
+        const sourceTree = source === file.value
+            ? tree
+            : processor.parse(source) as MarkdownNode
+        const prepared = prepareBracketMathSource(source, sourceTree)
         if (!prepared) return
 
         const reparsedTree = processor.parse(prepared.source) as MarkdownNode

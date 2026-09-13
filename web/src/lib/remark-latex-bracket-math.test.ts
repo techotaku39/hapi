@@ -237,6 +237,51 @@ t_s\approx\frac{4}{0.5\times3}
         expect(html.match(/class="katex"/g)).toHaveLength(1)
     })
 
+    it('keeps escaped parentheses in link, image, and definition destinations', () => {
+        const linkHtml = render(String.raw`[source](https://example.com/foo\(bar\).ts)`)
+        expect(linkHtml).toContain('href="https://example.com/foo(bar).ts"')
+        expect(linkHtml).not.toContain('class="katex"')
+
+        const imageHtml = render(String.raw`![source](https://example.com/foo\(bar\).png)`)
+        expect(imageHtml).toContain('src="https://example.com/foo(bar).png"')
+        expect(imageHtml).not.toContain('class="katex"')
+
+        const definitionHtml = render([
+            '[source][id]',
+            '',
+            String.raw`[id]: https://example.com/foo\(bar\).ts`,
+        ].join('\n'))
+        expect(definitionHtml).toContain('href="https://example.com/foo(bar).ts"')
+        expect(definitionHtml).not.toContain('class="katex"')
+    })
+
+    it('renders bracket math across an empty TeX line', () => {
+        const html = render([
+            '\\[',
+            'a',
+            '',
+            '+ b',
+            '\\]',
+        ].join('\n'))
+
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+        expect(html).toContain('<annotation encoding="application/x-tex">a\n\n+ b</annotation>')
+        expect(html).not.toContain('\uE000')
+    })
+
+    it('recognizes ordered-list fence indentation before following bracket math', () => {
+        const html = render([
+            '10. ```latex',
+            '    \\[x^2\\]',
+            '    ````',
+            '',
+            String.raw`\(y^2\)`,
+        ].join('\n'))
+
+        expect(html).toContain('<pre><code class="language-latex">\\[x^2\\]\n</code></pre>')
+        expect(html.match(/class="katex"/g)).toHaveLength(1)
+    })
+
     it('keeps currency prose literal while preserving existing dollar math', () => {
         const currency = render('The plan is $200/mo and the bill is $80.')
         expect(currency).not.toContain('class="katex"')
