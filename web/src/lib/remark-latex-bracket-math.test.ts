@@ -269,6 +269,33 @@ t_s\approx\frac{4}{0.5\times3}
         expect(referenceHtml).not.toContain('\uE000')
     })
 
+    it('preserves reference-image alt text and implicit link identifiers', () => {
+        const imageReferenceHtml = render([
+            String.raw`![\(x\)][id]`,
+            '',
+            '[id]: https://example.com/image.png',
+        ].join('\n'))
+        expect(imageReferenceHtml).toContain('alt="(x)"')
+        expect(imageReferenceHtml).toContain('src="https://example.com/image.png"')
+        expect(imageReferenceHtml).not.toContain('\uE000')
+
+        const collapsedLinkHtml = render([
+            String.raw`[\(x\)][]`,
+            '',
+            String.raw`[\(x\)]: https://example.com`,
+        ].join('\n'))
+        expect(collapsedLinkHtml).toContain('href="https://example.com"')
+        expect(collapsedLinkHtml).not.toContain('\uE000')
+
+        const shortcutLinkHtml = render([
+            String.raw`[\(x\)]`,
+            '',
+            String.raw`[\(x\)]: https://example.com`,
+        ].join('\n'))
+        expect(shortcutLinkHtml).toContain('href="https://example.com"')
+        expect(shortcutLinkHtml).not.toContain('\uE000')
+    })
+
     it('renders bracket math across an empty TeX line', () => {
         const html = render([
             '\\[',

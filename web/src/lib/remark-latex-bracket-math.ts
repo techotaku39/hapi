@@ -10,6 +10,7 @@ interface MarkdownNode {
         start: { offset?: number }
         end: { offset?: number }
     }
+    referenceType?: string
 }
 
 interface MarkdownFile {
@@ -119,12 +120,21 @@ function markMarkdownMetadataRanges(source: string, node: MarkdownNode, mask: Pr
         }
     }
 
-    if (offsets && node.type === 'linkReference') {
-        const labelEnd = findClosingMarkdownBracket(source, offsets.start, offsets.end)
-        const referenceStart = labelEnd === null ? null : labelEnd + 1
-        if (referenceStart !== null && source[referenceStart] === '[') {
-            const referenceEnd = findClosingMarkdownBracket(source, referenceStart, offsets.end)
-            if (referenceEnd !== null) markProtectedRange(mask, referenceStart, referenceEnd + 1)
+    if (offsets && (node.type === 'linkReference' || node.type === 'imageReference')) {
+        const labelStart = offsets.start + (node.type === 'imageReference' ? 1 : 0)
+        const labelEnd = findClosingMarkdownBracket(source, labelStart, offsets.end)
+        if (labelEnd !== null) {
+            if (node.type === 'imageReference' || node.referenceType !== 'full') {
+                // Image alt text and shortcut/collapsed link labels are also
+                // reference metadata, so their spelling must remain intact.
+                markProtectedRange(mask, labelStart, labelEnd + 1)
+            }
+
+            const referenceStart = labelEnd + 1
+            if (source[referenceStart] === '[') {
+                const referenceEnd = findClosingMarkdownBracket(source, referenceStart, offsets.end)
+                if (referenceEnd !== null) markProtectedRange(mask, referenceStart, referenceEnd + 1)
+            }
         }
     }
 
