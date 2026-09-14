@@ -196,4 +196,83 @@ describe('shared Codex hub binding', () => {
             f.cleanup()
         }
     })
+
+    it('keeps a historical shared fork boundary after the child reconnects', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('boundary-source')
+            const beforeAttachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'before.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('before fork')
+            })
+            const afterAttachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'after.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('after fork')
+            })
+            const addSourceMessage = (localId: string, text: string, attachmentId: string) => {
+                f.store.messages.addMessage(source.id, {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text,
+                        attachments: [{
+                            id: `${localId}-attachment`,
+                            filename: localId,
+                            mimeType: 'text/plain',
+                            size: 1,
+                            attachmentId
+                        }]
+                    },
+                    meta: { sentFrom: 'webapp' }
+                }, localId)
+                f.store.messages.markMessagesInvoked(source.id, [localId], Date.now())
+            }
+            addSourceMessage('before-fork', 'before', beforeAttachment.id)
+            f.store.messages.addMessage(source.id, {
+                role: 'user',
+                content: { type: 'text', text: 'boundary' },
+                meta: { sentFrom: 'webapp' }
+            }, 'fork-boundary')
+            f.store.messages.markMessagesInvoked(source.id, ['fork-boundary'], Date.now())
+            addSourceMessage('after-fork', 'after', afterAttachment.id)
+
+            const child = f.create('boundary-child', {
+                forkedFrom: source.id,
+                forkedAtMessageLocalId: 'fork-boundary'
+            }, false)
+            f.engine.handleSessionReady({ sid: child.id, time: Date.now() })
+            let clonedId: string | undefined
+            for (let attempt = 0; attempt < 50; attempt += 1) {
+                const message = f.store.messages.getAllMessages(child.id)
+                    .find((candidate) => candidate.localId === 'before-fork')
+                const messageContent = message?.content as {
+                    content?: { attachments?: Array<{ attachmentId?: string }> }
+                } | undefined
+                const candidate = messageContent?.content?.attachments?.[0]?.attachmentId
+                if (candidate && f.store.attachments.getForSession(candidate, 'default', child.id)) {
+                    clonedId = candidate
+                    break
+                }
+                await new Promise((resolve) => setTimeout(resolve, 10))
+            }
+            expect(clonedId).toBeDefined()
+            expect(f.store.messages.getAllMessages(child.id)
+                .some((message) => message.localId === 'after-fork')).toBe(false)
+
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await f.engine.deleteSession(source.id)
+            expect((await f.store.attachments.readForSessionAsync(clonedId!, 'default', child.id))?.data)
+                .toEqual(Buffer.from('before fork'))
+            expect(f.store.attachments.getForSession(afterAttachment.id, 'default', source.id)).toBeNull()
+        } finally {
+            f.cleanup()
+        }
+    })
 })

@@ -1699,6 +1699,7 @@ export class SyncEngine {
 
     private maybeHydrateSharedForkAttachments(session: Session | undefined): void {
         const sourceSessionId = session?.metadata?.forkedFrom
+        const forkMessageLocalId = session?.metadata?.forkedAtMessageLocalId
         if (!session
             || session.metadata?.flavor !== 'codex'
             || session.metadata.capabilities?.concurrentClients !== true
@@ -1706,7 +1707,12 @@ export class SyncEngine {
             || this.historyActionsInFlight.has(sourceSessionId)) {
             return
         }
-        void this.ensureSharedForkAttachments(sourceSessionId, session.namespace, session.id)
+        void this.ensureSharedForkAttachments(
+            sourceSessionId,
+            session.namespace,
+            session.id,
+            forkMessageLocalId
+        )
             .catch((error) => {
                 console.warn('[attachments] Failed to hydrate native shared fork', {
                     sourceSessionId,

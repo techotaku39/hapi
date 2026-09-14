@@ -487,7 +487,8 @@ export class SharedCodexRoot {
             if (messageLocalId && !beforeTurnId) throw new Error('No native history point for this message');
             if (messageLocalId) await this.assertBoundary(messageLocalId, beforeTurnId!);
             const child = await this.host.create('thread/fork', { ...this.freshParams(), threadId: this.threadId,
-                ...(beforeTurnId ? { beforeTurnId } : {}) }, this);
+                ...(beforeTurnId ? { beforeTurnId } : {}),
+                ...(messageLocalId ? { hapiForkMessageLocalId: messageLocalId } : {}) }, this);
             await child.initialSettings({ collaborationMode: this.settings.collaborationMode });
             return { nativeSessionId: child.threadId, sessionId: child.session.sessionId };
         });
