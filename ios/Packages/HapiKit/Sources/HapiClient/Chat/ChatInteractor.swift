@@ -35,7 +35,7 @@ import Observation
 ///   published ``permissionOverrides`` prunes rows whose request left
 ///   `agentState.requests`); hub 404/409 → benign "already handled".
 /// - **Config** (``config``/``setPermissionMode(_:)``/``setModel(_:)``/
-///   ``setEffort(_:)``/``loadModelOptions()``): catalog pickers with
+///   ``setEffort(_:)``/``setCollaborationMode(_:)``/``loadModelOptions()``): catalog pickers with
 ///   optimistic detail updates, rolled forward to server truth on error;
 ///   codex model catalog fetched per session.
 ///
@@ -67,6 +67,13 @@ public final class ChatInteractor {
     /// One config POST at a time (compare-and-set, like the Android
     /// `configOpPending`); exposed so the sheet can render a busy state.
     public private(set) var configOpPending = false
+
+    /// Local focus intent, observed by the composer without changing its draft.
+    public private(set) var composerFocusRequest = 0
+    // Screen-owned, not row-local: recycled plan cards retain operation state.
+    private var pendingCodexPlanId: String?
+    private var implementedCodexPlanIds: Set<String> = []
+    private var codexPlanErrors: [String: String] = [:]
 
     private var queuedOpPending = false
     /// Raw override map; the published view prunes settled requests.
@@ -202,6 +209,19 @@ public final class ChatInteractor {
         Task { [weak self] in
             guard let self else { return }
             self.drafts?.clear(sessionId: self.sessionId)
+            if attachmentMetadata == nil && (text == "/clear" || text == "/new")
+                && self.sessionStore.detail(for: self.sessionId)?.metadata?.capabilities?.concurrentClients == true {
+                defer { self.isSending = false }
+                do {
+                    let result = try await self.api.clearConversation(id: self.sessionId)
+                    self.sessionStore.scheduleRefresh()
+                    self.emit(.sessionSuperseded(sessionId: result.sessionId))
+                } catch {
+                    self.setComposerText(text)
+                    self.emit(.notice(Self.errorMessage(error, fallback: "Failed to create conversation")))
+                }
+                return
+            }
             await self.performSend(
                 text: text,
                 localId: localId,
@@ -671,6 +691,18 @@ public final class ChatInteractor {
         )
     }
 
+    /// Codex `POST /collaboration-mode`; shared terminals can edit too.
+    public func setCollaborationMode(_ mode: CodexCollaborationMode) {
+        let config = config
+        guard config.canChangeCollaborationMode, mode != (config.collaborationMode ?? .default) else { return }
+        let api = api
+        let sessionId = sessionId
+        runConfigChange(
+            optimistic: { $0.collaborationMode = mode },
+            call: { try await api.setCollaborationMode(sessionId: sessionId, mode: mode) }
+        )
+    }
+
     /// `POST /model` — nil clears back to the agent default.
     public func setModel(_ model: String?) {
         let api = api
@@ -755,6 +787,57 @@ public final class ChatInteractor {
                 self.emit(.notice(Self.errorMessage(error, fallback: "Failed to update session")))
             }
         }
+    }
+
+    // MARK: - Codex plan client actions
+
+    public func codexPlanActions(planId: String) -> CodexPlanActionState {
+        let detail = sessionStore.detail(for: sessionId)
+        let available = detail?.active == true
+            && detail?.metadata?.flavor == "codex"
+            && detail?.metadata?.capabilities?.concurrentClients == true
+            && detail?.agentState?.codexPlanProposalId == planId
+            && !implementedCodexPlanIds.contains(planId)
+        return CodexPlanActionState(
+            available: available,
+            pending: pendingCodexPlanId == planId,
+            canAct: available && pendingCodexPlanId == nil && !isSending && !configOpPending
+                && detail?.thinking != true,
+            error: codexPlanErrors[planId]
+        )
+    }
+
+    /// One request at a time, with no optimistic message or mode switch.
+    /// Refresh even on failure: another client may have consumed the proposal.
+    public func implementCodexPlan(planId: String) {
+        guard codexPlanActions(planId: planId).canAct else { return }
+        pendingCodexPlanId = planId
+        codexPlanErrors[planId] = nil
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.pendingCodexPlanId = nil }
+            do {
+                try await self.api.implementCodexPlan(sessionId: self.sessionId, planId: planId)
+                // Do not re-enable an accepted plan if the detail refresh fails
+                // or briefly returns state from before the queue acceptance.
+                self.implementedCodexPlanIds.insert(planId)
+            } catch {
+                let serverMessage = (error as? APIError)?.body.flatMap { body in
+                    (try? HapiJSON.decoder.decode(JSONValue.self, from: Data(body.utf8)))?
+                        .objectValue?["error"]?.stringValue
+                }
+                self.codexPlanErrors[planId] = serverMessage
+                    ?? Self.errorMessage(error, fallback: "Request failed")
+            }
+            _ = try? await self.sessionStore.loadSessionDetail(self.sessionId)
+        }
+    }
+
+    /// Continue planning only focuses the existing composer; it neither sends
+    /// text nor resolves an approval nor changes the collaboration mode.
+    public func continueCodexPlan(planId: String) {
+        guard codexPlanActions(planId: planId).canAct else { return }
+        composerFocusRequest += 1
     }
 
     // MARK: - Internals
