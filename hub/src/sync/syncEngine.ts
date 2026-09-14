@@ -1842,8 +1842,14 @@ export class SyncEngine {
                 })
             }
 
-            this.store.messages.mergeCopiedMessagesToSession(targetSessionId, copiedMessages)
-            if (copiedMessages.length > 0) this.sessionCache.refreshSession(targetSessionId)
+            const changed = this.store.messages.mergeCopiedMessagesToSession(targetSessionId, copiedMessages)
+            if (changed > 0) {
+                this.sessionCache.refreshSession(targetSessionId)
+                this.eventPublisher.emit({
+                    type: 'messages-invalidated',
+                    sessionId: targetSessionId
+                })
+            }
         } catch (error) {
             for (const attachment of clonedAttachments.values()) {
                 await this.store.attachments.deleteForSession(

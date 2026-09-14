@@ -172,6 +172,10 @@ describe('shared Codex hub binding', () => {
             }, 'native-fork-local-id')
             f.store.messages.markMessagesInvoked(child.id, ['native-fork-local-id'], Date.now())
 
+            const events: Array<{ type: string; sessionId?: string }> = []
+            const unsubscribe = f.engine.subscribe((event) => {
+                events.push(event)
+            })
             f.engine.handleSessionReady({ sid: child.id, time: Date.now() })
             let clonedId: string | undefined
             for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -189,6 +193,11 @@ describe('shared Codex hub binding', () => {
             }
             expect(clonedId).toBeDefined()
             expect(clonedId).not.toBe(attachment.id)
+            expect(events).toContainEqual(expect.objectContaining({
+                type: 'messages-invalidated',
+                sessionId: child.id
+            }))
+            unsubscribe()
 
             const cachedSource = f.engine.getSession(source.id)
             if (cachedSource) cachedSource.active = false
