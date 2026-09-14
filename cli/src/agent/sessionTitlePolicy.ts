@@ -3,6 +3,10 @@ import type { Metadata } from '@/api/types'
 
 type SessionTitleClient = Pick<ApiSessionClient, 'updateMetadata'>
 
+export type SessionTitleSummaryOptions = {
+    allowForkSeedReplacement?: boolean
+}
+
 /** A Fork seed is a provisional title until the child agent names itself. */
 export function isForkSeedSummary(metadata: Readonly<Metadata> | null | undefined): boolean {
     const summary = metadata?.summary?.text.trim()
@@ -11,10 +15,14 @@ export function isForkSeedSummary(metadata: Readonly<Metadata> | null | undefine
 
 /**
  * Apply an agent-generated title without replacing a user-owned or settled
- * title. Fork summaries are the one existing title intentionally eligible for
- * replacement.
+ * title. Callers must explicitly opt in before replacing a Fork seed, because
+ * some fallback inputs are ordinary user messages rather than titles.
  */
-export function applySessionTitleSummary(client: SessionTitleClient, title: string): boolean {
+export function applySessionTitleSummary(
+    client: SessionTitleClient,
+    title: string,
+    options: SessionTitleSummaryOptions = {}
+): boolean {
     const normalizedTitle = title.trim()
     if (!normalizedTitle) return false
 
@@ -22,7 +30,8 @@ export function applySessionTitleSummary(client: SessionTitleClient, title: stri
         if (metadata.name?.trim()) return metadata
 
         const summary = metadata.summary?.text.trim()
-        if (summary && !isForkSeedSummary(metadata)) return metadata
+        const canReplaceForkSeed = options.allowForkSeedReplacement === true && isForkSeedSummary(metadata)
+        if (summary && !canReplaceForkSeed) return metadata
 
         return {
             ...metadata,
