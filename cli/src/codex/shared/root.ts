@@ -25,6 +25,7 @@ import { inheritedSandbox, settingsMatch } from './settings';
 import { planImplementationMessageId, planProposalForItem, planProposalForTurn } from './plan';
 
 type RuntimeSettings = NonNullable<Parameters<ApiSessionClient['keepAlive']>[2]>;
+export type NativeForkBoundary = { kind: 'at' | 'through'; localId: string };
 export type RootHost = {
     directory: string; generation: string; endpoint: string; token?: string;
     settingsFor(threadId: string): Record<string, unknown> | undefined;
@@ -206,11 +207,19 @@ export class SharedCodexRoot {
         await this.projection.history(response.thread); await this.refresh(); await this.refreshChildren(true);
     }
     latestMessageLocalId(): string | undefined { return this.projection?.latestMessageLocalId(); }
-    historicalForkBoundaryLocalId(params: Record<string, unknown>): string | undefined {
+    historicalForkBoundary(params: Record<string, unknown>): NativeForkBoundary | undefined {
         const beforeTurnId = string(params.beforeTurnId);
-        if (beforeTurnId) return this.projection.firstMessageLocalIdForTurn(beforeTurnId);
+        if (beforeTurnId) {
+            const localId = this.projection.firstMessageLocalIdForTurn(beforeTurnId);
+            return localId ? { kind: 'at', localId } : undefined;
+        }
         const lastTurnId = string(params.lastTurnId);
-        if (lastTurnId) return this.projection.firstMessageLocalIdAfterTurn(lastTurnId);
+        if (lastTurnId) {
+            const after = this.projection.firstMessageLocalIdAfterTurn(lastTurnId);
+            if (after) return { kind: 'at', localId: after };
+            const latest = this.projection.latestMessageLocalId();
+            return latest ? { kind: 'through', localId: latest } : undefined;
+        }
         return undefined;
     }
     async activate(options: SharedLaunchOptions = {}): Promise<void> {

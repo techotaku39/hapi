@@ -222,12 +222,13 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
     const create = (method: 'thread/start' | 'thread/fork', params: Record<string, unknown>, parent?: SharedCodexRoot, initialOptions?: SharedLaunchOptions): Promise<SharedCodexRoot> => operation(async () => {
         const { hapiForkMessageLocalId, hapiForkThroughMessageLocalId, ...nativeParams } = params;
         const nativeHistoricalBoundary = method === 'thread/fork' && parent
-            ? parent.historicalForkBoundaryLocalId(params)
+            ? parent.historicalForkBoundary(params)
             : undefined;
-        const forkedAtMessageLocalId = string(hapiForkMessageLocalId) ?? nativeHistoricalBoundary;
+        const forkedAtMessageLocalId = string(hapiForkMessageLocalId)
+            ?? (nativeHistoricalBoundary?.kind === 'at' ? nativeHistoricalBoundary.localId : undefined);
         const forkedThroughMessageLocalId = typeof hapiForkThroughMessageLocalId === 'string'
             ? hapiForkThroughMessageLocalId
-            : undefined;
+            : nativeHistoricalBoundary?.kind === 'through' ? nativeHistoricalBoundary.localId : undefined;
         const root = await prepare(
             string(params.cwd) ?? launch.cwd,
             undefined,
@@ -283,17 +284,20 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         const hasNativeHistoricalBoundary = request.method === 'thread/fork'
             && (typeof params.beforeTurnId === 'string' || typeof params.lastTurnId === 'string');
         const nativeHistoricalBoundary = hasNativeHistoricalBoundary && existing
-            ? existing.historicalForkBoundaryLocalId(params)
+            ? existing.historicalForkBoundary(params)
             : undefined;
         if (hasNativeHistoricalBoundary && !string(hapiForkMessageLocalId) && !nativeHistoricalBoundary) {
             throw new Error('Cannot persist native historical fork boundary');
         }
-        const forkedAtMessageLocalId = string(hapiForkMessageLocalId) ?? nativeHistoricalBoundary;
+        const forkedAtMessageLocalId = string(hapiForkMessageLocalId)
+            ?? (nativeHistoricalBoundary?.kind === 'at' ? nativeHistoricalBoundary.localId : undefined);
         const forkedThroughMessageLocalId = typeof hapiForkThroughMessageLocalId === 'string'
             ? hapiForkThroughMessageLocalId
-            : (request.method === 'thread/fork' && !forkedAtMessageLocalId && !hasNativeHistoricalBoundary
-                ? existing?.latestMessageLocalId() ?? ''
-                : undefined);
+            : nativeHistoricalBoundary?.kind === 'through'
+                ? nativeHistoricalBoundary.localId
+                : request.method === 'thread/fork' && !forkedAtMessageLocalId && !hasNativeHistoricalBoundary
+                    ? existing?.latestMessageLocalId() ?? ''
+                    : undefined;
         const root = request.method === 'thread/resume' && threadId
             ? await withThreadOwnership(home, threadId, id, async () => {
                 const root = await prepare(cwd, await findColdBinding(home, threadId));
