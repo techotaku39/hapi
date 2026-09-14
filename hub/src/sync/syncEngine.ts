@@ -16,11 +16,11 @@ import {
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse, UploadFileResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
-import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { AgentFlavor, AttachmentMetadata, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
-import type { Store, CancelQueuedMessageResult, StoredAttachment } from '../store'
+import type { Store, CancelQueuedMessageResult, StoredAttachment, StoredMessage } from '../store'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import { clearAgentTerminalBuffer } from '../socket/agentTerminalBuffer'
@@ -146,6 +146,34 @@ function messageReferencesAttachment(content: unknown, attachmentId: string): bo
         const parsed = AttachmentMetadataSchema.safeParse(attachment)
         return parsed.success && parsed.data.attachmentId === attachmentId
     })
+}
+
+function durableUserAttachments(content: unknown): AttachmentMetadata[] {
+    const message = asRecord(content)
+    if (message?.role !== 'user') return []
+    const messageContent = asRecord(message.content)
+    if (!Array.isArray(messageContent?.attachments)) return []
+    return messageContent.attachments.flatMap((attachment) => {
+        const parsed = AttachmentMetadataSchema.safeParse(attachment)
+        return parsed.success && parsed.data.attachmentId ? [parsed.data] : []
+    })
+}
+
+function mergeProjectedAttachmentContent(projected: unknown, source: unknown): unknown {
+    const projectedMessage = asRecord(projected)
+    const projectedContent = asRecord(projectedMessage?.content)
+    const sourceMessage = asRecord(source)
+    const sourceContent = asRecord(sourceMessage?.content)
+    if (!projectedMessage || !projectedContent || !sourceContent || !Array.isArray(sourceContent.attachments)) {
+        return source
+    }
+    return {
+        ...projectedMessage,
+        content: {
+            ...projectedContent,
+            attachments: sourceContent.attachments
+        }
+    }
 }
 
 function decodeBase64Attachment(value: string): Buffer {
@@ -1474,6 +1502,17 @@ export class SyncEngine {
         if (rpcResult.sessionId) {
             const child = await this.validateSharedChild(source, rpcResult.sessionId, rpcResult.nativeSessionId)
             if (!child || child.metadata?.forkedFrom !== sessionId) return { type: 'error', message: 'Invalid shared-runtime fork binding' }
+            try {
+                await this.hydrateSharedForkAttachments(sessionId, namespace, child.id, messageLocalId)
+            } catch (error) {
+                try {
+                    await this.cleanupFailedForkChild(child.id, machineId, true)
+                } catch (cleanupError) {
+                    const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                    return { type: 'error', message: `Fork failed; child cleanup was not confirmed: ${message}` }
+                }
+                return { type: 'error', message: error instanceof Error ? error.message : String(error) }
+            }
             return { type: 'success', sessionId: child.id }
         }
 
@@ -1648,6 +1687,81 @@ export class SyncEngine {
                 }
             }
             return { type: 'error', message: error instanceof Error ? error.message : String(error) }
+        }
+    }
+
+    /**
+     * Shared Codex forks already have a child HAPI row and project native
+     * history as text. Add durable attachment ownership without copying the
+     * rest of the projected transcript or creating duplicate user turns.
+     */
+    private async hydrateSharedForkAttachments(
+        sourceSessionId: string,
+        namespace: string,
+        targetSessionId: string,
+        messageLocalId?: string
+    ): Promise<void> {
+        const prefix = selectForkTranscriptPrefix(
+            this.store.messages.getAllMessages(sourceSessionId),
+            messageLocalId
+        )
+        const targetByLocalId = new Map(
+            this.store.messages.getAllMessages(targetSessionId)
+                .flatMap((message) => message.localId ? [[message.localId, message] as const] : [])
+        )
+        const clonedAttachments = new Map<string, StoredAttachment>()
+        const copiedMessages: Array<Pick<StoredMessage, 'content' | 'createdAt' | 'localId' | 'invokedAt' | 'scheduledAt' | 'deliveryState'>> = []
+
+        try {
+            for (const message of prefix) {
+                const sourceAttachments = durableUserAttachments(message.content)
+                if (sourceAttachments.length === 0) continue
+
+                const projected = message.localId ? targetByLocalId.get(message.localId) : undefined
+                if (projected) {
+                    const projectedAttachments = durableUserAttachments(projected.content)
+                    if (projectedAttachments.length === sourceAttachments.length
+                        && projectedAttachments.every((attachment, index) => {
+                            const sourceAttachment = sourceAttachments[index]
+                            return sourceAttachment?.filename === attachment.filename
+                                && sourceAttachment.mimeType === attachment.mimeType
+                                && sourceAttachment.size === attachment.size
+                                && Boolean(this.store.attachments.getForSession(
+                                    attachment.attachmentId!, namespace, targetSessionId
+                                ))
+                        })) {
+                        continue
+                    }
+                }
+
+                const rewritten = await this.store.attachments.cloneMessageAttachments(
+                    namespace,
+                    sourceSessionId,
+                    targetSessionId,
+                    message.content,
+                    clonedAttachments
+                )
+                copiedMessages.push({
+                    content: projected ? mergeProjectedAttachmentContent(projected.content, rewritten) : rewritten,
+                    createdAt: message.createdAt,
+                    localId: message.localId,
+                    invokedAt: message.invokedAt,
+                    scheduledAt: message.scheduledAt,
+                    deliveryState: message.deliveryState
+                })
+            }
+
+            this.store.messages.mergeCopiedMessagesToSession(targetSessionId, copiedMessages)
+            if (copiedMessages.length > 0) this.sessionCache.refreshSession(targetSessionId)
+        } catch (error) {
+            for (const attachment of clonedAttachments.values()) {
+                await this.store.attachments.deleteForSession(
+                    attachment.id,
+                    namespace,
+                    targetSessionId
+                ).catch(() => {})
+            }
+            throw error
         }
     }
 

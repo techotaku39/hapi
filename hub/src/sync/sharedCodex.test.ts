@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Metadata } from '@hapi/protocol/types'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
@@ -6,7 +9,8 @@ import { SyncEngine } from './syncEngine'
 import type { RpcGateway } from './rpcGateway'
 
 function fixture() {
-    const store = new Store(':memory:')
+    const attachmentsRoot = mkdtempSync(join(tmpdir(), 'hapi-shared-codex-'))
+    const store = new Store(':memory:', { attachmentsRoot })
     const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
     const metadata: Metadata = { path: '/tmp/work', host: 'test', machineId: 'machine', hostPid: 42, flavor: 'codex',
         capabilities: { concurrentClients: true, conversationHistory: { forkCurrent: true, forkAtMessage: true } } }
@@ -16,44 +20,117 @@ function fixture() {
         engine.handleSessionReady({ sid: session.id, time: Date.now() })
         return session
     }
-    return { store, engine, create, rpc: (engine as unknown as { rpcGateway: RpcGateway }).rpcGateway }
+    return {
+        store,
+        engine,
+        create,
+        rpc: (engine as unknown as { rpcGateway: RpcGateway }).rpcGateway,
+        cleanup: () => {
+            engine.stop()
+            store.close()
+            rmSync(attachmentsRoot, { recursive: true, force: true })
+        }
+    }
 }
 
 describe('shared Codex hub binding', () => {
     it('guards plan actions by namespace and runtime, leaving stale-plan and retry validation to CLI', async () => {
-        const { engine, create, rpc } = fixture()
+        const f = fixture()
         try {
-            const source = create('source')
-            const unsupported = create('other', { flavor: 'claude' })
+            const source = f.create('source')
+            const unsupported = f.create('other', { flavor: 'claude' })
             const calls: string[][] = []
-            rpc.implementCodexPlan = async (...args) => { calls.push(args); return { ok: true } }
-            expect(await engine.implementCodexPlan(source.id, 'other-namespace', 'plan')).toMatchObject({ ok: false })
-            expect(await engine.implementCodexPlan(unsupported.id, 'default', 'plan')).toMatchObject({ ok: false })
+            f.rpc.implementCodexPlan = async (...args) => { calls.push(args); return { ok: true } }
+            expect(await f.engine.implementCodexPlan(source.id, 'other-namespace', 'plan')).toMatchObject({ ok: false })
+            expect(await f.engine.implementCodexPlan(unsupported.id, 'default', 'plan')).toMatchObject({ ok: false })
             expect(calls).toHaveLength(0)
             // The hub can lag the native plan state, including after an accepted action's lost reply.
-            expect(await engine.implementCodexPlan(source.id, 'default', 'plan')).toEqual({ ok: true })
+            expect(await f.engine.implementCodexPlan(source.id, 'default', 'plan')).toEqual({ ok: true })
             expect(calls).toEqual([[source.id, 'plan']])
-        } finally { engine.stop() }
+        } finally { f.cleanup() }
     })
 
     it('uses the already-bound fork child without spawning a second engine', async () => {
-        const { engine, create, rpc } = fixture()
+        const f = fixture()
         try {
-            const source = create('source'); const child = create('child', { forkedFrom: source.id })
-            rpc.forkConversation = async () => ({ nativeSessionId: 'native-child', sessionId: child.id })
-            expect(await engine.forkConversation(source.id, 'default')).toEqual({ type: 'success', sessionId: child.id })
-            expect(engine.getSession(source.id)?.metadata?.codexSessionId).toBe('native-source')
-        } finally { engine.stop() }
+            const source = f.create('source'); const child = f.create('child', { forkedFrom: source.id })
+            f.rpc.forkConversation = async () => ({ nativeSessionId: 'native-child', sessionId: child.id })
+            expect(await f.engine.forkConversation(source.id, 'default')).toEqual({ type: 'success', sessionId: child.id })
+            expect(f.engine.getSession(source.id)?.metadata?.codexSessionId).toBe('native-source')
+        } finally { f.cleanup() }
     })
     it('clear returns a new root without superseding other clients and mode switching is inapplicable', async () => {
-        const { engine, create, rpc } = fixture()
+        const f = fixture()
         try {
-            const source = create('source'); const child = create('child')
-            rpc.clearConversation = async () => ({ sessionId: child.id })
-            expect(await engine.clearConversation(source.id, 'default')).toEqual({ sessionId: child.id })
-            expect(engine.getSession(source.id)?.metadata?.supersededBySessionId).toBeUndefined()
-            await expect(engine.switchSession(source.id, 'remote')).rejects.toThrow('control_mode_not_applicable')
-            await expect(engine.clearConversation(source.id, 'other-namespace')).rejects.toThrow()
-        } finally { engine.stop() }
+            const source = f.create('source'); const child = f.create('child')
+            f.rpc.clearConversation = async () => ({ sessionId: child.id })
+            expect(await f.engine.clearConversation(source.id, 'default')).toEqual({ sessionId: child.id })
+            expect(f.engine.getSession(source.id)?.metadata?.supersededBySessionId).toBeUndefined()
+            await expect(f.engine.switchSession(source.id, 'remote')).rejects.toThrow('control_mode_not_applicable')
+            await expect(f.engine.clearConversation(source.id, 'other-namespace')).rejects.toThrow()
+        } finally { f.cleanup() }
+    })
+
+    it('clones durable attachments into an already-bound shared fork child', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('source')
+            const child = f.create('child', { forkedFrom: source.id })
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'document.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('shared fork original')
+            })
+            const sourceContent = {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'inspect this document',
+                    attachments: [{
+                        id: 'message-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                },
+                meta: { sentFrom: 'webapp' }
+            }
+            f.store.messages.addMessage(source.id, sourceContent, 'shared-attachment-local-id')
+            f.store.messages.markMessagesInvoked(source.id, ['shared-attachment-local-id'], Date.now())
+
+            // SharedCodexProjection may have already emitted the child turn as
+            // text by the time the Hub receives the fork response.
+            f.store.messages.addMessage(child.id, {
+                role: 'user',
+                content: { type: 'text', text: sourceContent.content.text },
+                meta: { sentFrom: 'cli' }
+            }, 'shared-attachment-local-id')
+            f.store.messages.markMessagesInvoked(child.id, ['shared-attachment-local-id'], Date.now())
+            f.rpc.forkConversation = async () => ({ nativeSessionId: 'native-child', sessionId: child.id })
+
+            const result = await f.engine.forkConversation(source.id, 'default')
+            expect(result).toEqual({ type: 'success', sessionId: child.id })
+            const childMessage = f.store.messages.getAllMessages(child.id)
+                .find((message) => message.localId === 'shared-attachment-local-id')
+            const clonedId = ((childMessage?.content as typeof sourceContent).content.attachments?.[0]).attachmentId
+            expect(clonedId).toBeDefined()
+            expect(clonedId).not.toBe(attachment.id)
+            expect((await f.store.attachments.readForSessionAsync(clonedId!, 'default', child.id))?.data)
+                .toEqual(Buffer.from('shared fork original'))
+            expect((await f.store.attachments.readForSessionAsync(attachment.id, 'default', source.id))?.data)
+                .toEqual(Buffer.from('shared fork original'))
+
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await f.engine.deleteSession(source.id)
+            expect(f.store.attachments.getForSession(attachment.id, 'default', source.id)).toBeNull()
+            expect((await f.store.attachments.readForSessionAsync(clonedId!, 'default', child.id))?.data)
+                .toEqual(Buffer.from('shared fork original'))
+        } finally {
+            f.cleanup()
+        }
     })
 })

@@ -39,6 +39,7 @@ import {
     moveUninvokedMessages,
     copyMessageToSession as copyStoredMessageToSession,
     copyMessagesToSession as copyStoredMessagesToSession,
+    mergeCopiedMessagesToSession as mergeCopiedStoredMessagesToSession,
     getAllMessages,
     getMessagesAfterSeq,
     getMessageSeqById,
@@ -85,6 +86,13 @@ export class MessageStore {
         messages: Array<Pick<StoredMessage, 'content' | 'createdAt' | 'localId' | 'invokedAt' | 'scheduledAt' | 'deliveryState'>>
     ): number {
         return copyStoredMessagesToSession(this.db, sessionId, messages)
+    }
+
+    mergeCopiedMessagesToSession(
+        sessionId: string,
+        messages: Array<Pick<StoredMessage, 'content' | 'createdAt' | 'localId' | 'invokedAt' | 'scheduledAt' | 'deliveryState'>>
+    ): number {
+        return mergeCopiedStoredMessagesToSession(this.db, sessionId, messages)
     }
 
     getAllMessages(sessionId: string): StoredMessage[] {
