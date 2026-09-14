@@ -1423,11 +1423,14 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
                 latestActivity = Math.max(latestActivity, message.invokedAt ?? message.createdAt)
             }
 
-            if (engine && [source.sessionId, canonical.sessionId].some((sessionId) => (
-                engine.getSessionByNamespace(sessionId, options.namespace)?.active
-            ))) {
-                throw new Error('Cannot merge a session that became active')
+            const ensureMergeSessionsInactive = () => {
+                if (engine && [source.sessionId, canonical.sessionId].some((sessionId) => (
+                    engine.getSessionByNamespace(sessionId, options.namespace)?.active
+                ))) {
+                    throw new Error('Cannot merge a session that became active')
+                }
             }
+            ensureMergeSessionsInactive()
 
             // Duplicate-session merge deletes the source row inside the
             // commit transaction, so preserve any shared-fork attachment
@@ -1435,6 +1438,7 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
             if (engine && typeof engine.prepareSessionForDeletion === 'function') {
                 await engine.prepareSessionForDeletion(source.sessionId)
             }
+            ensureMergeSessionsInactive()
 
             const copiedMessages = options.store.commitDuplicateSessionMerge({
                 namespace: options.namespace,

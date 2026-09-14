@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -1523,6 +1524,91 @@ describe('Codex Desktop import routes', () => {
             expect(store.attachments.getForSession(attachment.id, 'default', source.id)).toBeNull()
         } finally {
             engine.stop()
+            store.close()
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('rechecks duplicate-session activity after attachment deletion preparation', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-codex-attachment-merge-activity-race-'))
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const canonical = store.sessions.getOrCreateSession(
+            'canonical-activity-race-session',
+            { codexSessionId: 'codex-thread-activity-race' },
+            {},
+            'default'
+        )
+        const source = store.sessions.getOrCreateSession(
+            'source-activity-race-session',
+            { codexSessionId: 'codex-thread-activity-race' },
+            {},
+            'default'
+        )
+        const attachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: source.id,
+            filename: 'activity-race.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('activity-race-original')
+        })
+        store.messages.addMessage(canonical.id, {
+            role: 'user',
+            content: { type: 'text', text: 'activity race prompt' }
+        }, 'canonical-activity-race-1')
+        store.messages.addMessage(source.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'activity race prompt',
+                attachments: [{
+                    id: 'activity-race-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id
+                }]
+            }
+        }, 'source-activity-race-1')
+
+        let sourceActive = false
+        let preparationCalls = 0
+        const engine = {
+            getSessionsByNamespace: () => [],
+            getSessionByNamespace: (sessionId: string) => ({
+                id: sessionId,
+                namespace: 'default',
+                active: sessionId === source.id && sourceActive
+            }),
+            prepareSessionForDeletion: async () => {
+                preparationCalls += 1
+                sourceActive = true
+            }
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => engine }))
+
+        try {
+            const response = await app.request('/api/codex/merge-duplicate-sessions', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ sessionIds: ['codex-thread-activity-race'] })
+            })
+            expect(response.status).toBe(200)
+            const body = await response.json() as { success: false; error: string }
+            expect(body.success).toBe(false)
+            expect(body.error).toContain('became active')
+            expect(preparationCalls).toBe(1)
+            expect(store.sessions.getSessionByNamespace(source.id, 'default')).not.toBeNull()
+            expect(store.attachments.getForSession(attachment.id, 'default', source.id)).not.toBeNull()
+            const db = (store as unknown as { db: Database }).db
+            expect(db.prepare(
+                'SELECT COUNT(*) AS count FROM attachments WHERE session_id = ?'
+            ).get(canonical.id)).toEqual({ count: 0 })
+        } finally {
             store.close()
             rmSync(root, { recursive: true, force: true })
         }
