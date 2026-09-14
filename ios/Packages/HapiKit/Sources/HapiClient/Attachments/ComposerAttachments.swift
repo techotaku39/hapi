@@ -189,7 +189,8 @@ public final class ComposerAttachments {
         // stored lets are touched here.
         let references = uploadedPaths.drain()
         Self.deleteDetached(api: api, sessionId: sessionId, references: references)
-        Self.deleteScratchlistDetached(api: api, sessionId: sessionId, ids: ownedScratchlistIds.drain())
+        Self.deleteScratchlistDetached(api: api, sessionId: sessionId,
+                                       ids: ownedScratchlistIds.drain().compactMap { $0.attachmentId })
     }
 
     // MARK: - Read surface
@@ -366,7 +367,8 @@ public final class ComposerAttachments {
         entries = []
         let references = uploadedPaths.drain()
         Self.deleteDetached(api: api, sessionId: sessionId, references: references)
-        Self.deleteScratchlistDetached(api: api, sessionId: sessionId, ids: ownedScratchlistIds.drain())
+        Self.deleteScratchlistDetached(api: api, sessionId: sessionId,
+                                       ids: ownedScratchlistIds.drain().compactMap { $0.attachmentId })
     }
 
     // MARK: - Internals
