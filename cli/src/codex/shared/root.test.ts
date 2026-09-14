@@ -176,6 +176,17 @@ describe('shared plan actions', () => {
         expect(f.create.mock.calls[0][1]).not.toHaveProperty('hapiForkMessageLocalId');
     });
 
+    it('maps final native lastTurnId forks to an inclusive HAPI boundary', async () => {
+        const f = await fixture();
+        f.native.thread.turns.push({ id: 'turn-1', status: 'completed', items: [
+            { id: 'user-1', type: 'userMessage', clientId: 'local-1', content: [{ type: 'text', text: 'hello' }] }
+        ] });
+        await f.root.refresh();
+        expect(f.root.historicalForkBoundary({ lastTurnId: 'turn-1' })).toEqual({
+            kind: 'through', localId: 'local-1'
+        });
+    });
+
     it('switches mode and submits once across repeated Web actions and lost replies', async () => {
         const f = await fixture();
         await f.root.activate();
