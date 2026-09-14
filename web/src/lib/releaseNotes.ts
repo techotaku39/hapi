@@ -570,7 +570,7 @@ export const RELEASE_NOTES = [
                 change('feature', 'Add a backend voice picker with advanced controls and support pluggable Gemini Live and Qwen Realtime backends.', '增加带高级控制的语音后端选择器，并支持可插拔的 Gemini Live 与 Qwen Realtime 后端。'),
             ]),
             group('Agent and message controls', 'Agent 与消息控制', [
-                change('feature', 'Add inline display_image, chat-image lightboxes, and a close button for mobile dialogs.', '增加内联 display_image、聊天图片灯箱和移动端对话框关闭按钮。'),
+                change('feature', 'Add a close button for mobile dialogs.', '增加移动端对话框关闭按钮。'),
                 change('fix', 'Apply mid-turn Claude permission changes, preserve user prompt line breaks, and keep queued attachments and message roles correct.', '应用回合中的 Claude 权限变更；保留用户提示换行；确保排队附件和消息角色正确。'),
             ]),
             group('Runtime and platform fixes', '运行时与平台修复', [
