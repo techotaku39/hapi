@@ -1510,12 +1510,18 @@ export class SyncEngine {
             const child = await this.validateSharedChild(source, rpcResult.sessionId, rpcResult.nativeSessionId)
             if (!child || child.metadata?.forkedFrom !== sessionId) return { type: 'error', message: 'Invalid shared-runtime fork binding' }
             try {
+                const throughMessageLocalId = messageLocalId
+                    ? undefined
+                    : child.metadata?.forkedThroughMessageLocalId
+                        ?? latestForkTranscriptLocalId(this.store.messages.getAllMessages(sessionId))
+                        ?? ''
+                this.persistSharedForkBoundary(child.id, namespace, messageLocalId, throughMessageLocalId)
                 await this.ensureSharedForkAttachments(
                     sessionId,
                     namespace,
                     child.id,
                     messageLocalId,
-                    child.metadata?.forkedThroughMessageLocalId
+                    throughMessageLocalId
                 )
             } catch (error) {
                 try {
@@ -1732,6 +1738,44 @@ export class SyncEngine {
                     error
                 })
             })
+    }
+
+    /** Persist the fork cut on the Hub row, independently of CLI restart state. */
+    private persistSharedForkBoundary(
+        targetSessionId: string,
+        namespace: string,
+        messageLocalId?: string,
+        throughMessageLocalId?: string
+    ): void {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            const session = this.sessionCache.getSessionByNamespace(targetSessionId, namespace)
+                ?? this.sessionCache.refreshSession(targetSessionId)
+            if (!session?.metadata) return
+            const nextMetadata = {
+                ...session.metadata,
+                ...(messageLocalId
+                    ? { forkedAtMessageLocalId: messageLocalId }
+                    : { forkedThroughMessageLocalId: throughMessageLocalId ?? '' })
+            }
+            if (messageLocalId
+                ? session.metadata.forkedAtMessageLocalId === messageLocalId
+                : session.metadata.forkedThroughMessageLocalId === (throughMessageLocalId ?? '')) {
+                return
+            }
+            const result = this.store.sessions.updateSessionMetadata(
+                targetSessionId,
+                nextMetadata,
+                session.metadataVersion,
+                namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'success') {
+                this.sessionCache.refreshSession(targetSessionId)
+                return
+            }
+            if (result.result === 'error') return
+            this.sessionCache.refreshSession(targetSessionId)
+        }
     }
 
     /**
