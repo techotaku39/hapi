@@ -272,20 +272,25 @@ struct SessionListStoreTests {
     }
 
     @Test func sessionListChangesWaitForInitialServerHydrationBeforeBaseline() async throws {
-        let (performer, store) = try makeStore()
+        let performer = RoutingPerformer()
+        let api = try makeStoreAPIClient(performer: performer)
+        let store = SessionListStore(api: api, refreshBatch: .milliseconds(1))
         let lastSeenStore = LastSeenStore()
         store.onSessionsChanged = { sessions in
             lastSeenStore.initializeBaseline(scopeKey: "hub-a", sessions: sessions)
         }
 
         let early = storeSession("early", updatedAt: 100)
-        store.applySessionEvent(try sessionUpdatedEvent("early", dataJSON: fullSessionJSON(early)))
+        store.applySessionEvent(try sessionAddedEvent("early", dataJSON: fullSessionJSON(early)))
         #expect(lastSeenStore.lastSeenAt("early") == 0)
 
-        await performer.enqueue(json: try sessionsResponseJSON(
-            storeSummary("early", updatedAt: 100),
-            storeSummary("other", updatedAt: 50)
-        ))
+        await performer.setRoutes([(
+            pathPrefix: "/api/sessions",
+            json: try sessionsResponseJSON(
+                storeSummary("early", updatedAt: 100),
+                storeSummary("other", updatedAt: 50)
+            )
+        )])
         try await store.refresh()
 
         #expect(lastSeenStore.lastSeenAt("early") == 100)
