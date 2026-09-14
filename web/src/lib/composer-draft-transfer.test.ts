@@ -448,14 +448,14 @@ describe('handoffComposerDraft', () => {
             'source-a',
             'target-a',
             [],
-            { textOverride: 'submitted hello' },
+            { textOverride: ' submitted hello\n' },
         )
         // assistant-ui cleared the composer while resumeSession awaited.
         updateComposerDraftTextSnapshot('source-a', '')
         releaseDrain()
         await transfer
 
-        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', 'submitted hello')
+        expect(mocks.saveDraft).toHaveBeenCalledWith('target-a', ' submitted hello\n')
         expect(composerDraftWasHandedOff('source-a')).toBe(true)
     })
 

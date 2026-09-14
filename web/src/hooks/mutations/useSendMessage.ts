@@ -112,6 +112,8 @@ export type SessionResolution = {
 export type SessionResolvedContext = {
     text: string
     attachments?: AttachmentMetadata[]
+    /** Composer text before assistant-ui/runtime normalization (e.g. trim). */
+    originalText?: string
 }
 
 type UseSendMessageOptions = {
@@ -361,7 +363,11 @@ export function useSendMessage(
                     // (including same-id PTY/Pi/Cursor resumes).
                     const resolution = await options.onSessionResolved?.(
                         targetSessionId,
-                        { text, attachments },
+                        {
+                            text,
+                            attachments,
+                            ...(originalText !== undefined ? { originalText } : {}),
+                        },
                     )
                     if (resolution?.deferUntilDraftHydrated) {
                         // Target composer still needs to hydrate/re-upload files.

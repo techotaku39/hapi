@@ -113,6 +113,28 @@ describe('useSendMessage', () => {
         })
     })
 
+    it('carries original composer text through inactive-session resume', async () => {
+        const onSessionResolved = vi.fn(async () => {})
+        const api = createMockApi()
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-original', {
+                resolveSessionId: async () => ({ sessionId: 'session-resolved', resumed: true }),
+                onSessionResolved,
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        await act(async () => {
+            await result.current.sendMessage('foo', undefined, null, 'queue', ' foo\n')
+        })
+
+        expect(onSessionResolved).toHaveBeenCalledWith('session-resolved', {
+            text: 'foo',
+            attachments: undefined,
+            originalText: ' foo\n',
+        })
+    })
+
     it('keeps a thinking-session send in flight until the POST confirms it is queued', async () => {
         const request = deferred<void>()
         const api = createMockApi(() => request.promise)
