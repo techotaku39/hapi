@@ -32,6 +32,28 @@ const generatedFileIsLoaded = new URLSearchParams(window.location.search).get('g
 const longInlineError =
     'useClientLookup: Index 0 out of bounds (length: 0); messageStore.getMessagesPage -> useSessionMessageWindow -> SessionChat render -> message epoch mismatch after rewind; requestId=rewind-20260812-162035; source=codex-session-history-replay; retry=0; snapshotHeadSeq=4; nextBeforeSeq=null; invariant=visible-message-window-consistency'
 
+const includeMathFixture = new URLSearchParams(window.location.search).get('inlineWrap') !== '1'
+
+const mathMarkdown = `### LaTeX
+
+Inline formula: \\(E=mc^2\\)
+
+\\[
+\\lim_{x\\to 0}\\frac{\\sin x}{x}=1
+\\]
+
+\\[
+\\prod_{i=1}^{n} x_i
+\\]
+
+\\[
+\\begin{aligned}
+f(x) &= x^2+2x+1 \\\\
+     &= (x+1)^2
+\\end{aligned}
+\\]
+`
+
 const markdown = `## Complex response fixture
 
 ## ✅ AList 的 frp 和 Caddy 配置已彻底移除
@@ -70,6 +92,8 @@ Final paragraph after the divider.
 \`alist.techotaku39.top\` 已失效，5244 端口也不再监听。
 
 请将 \`machine-status-widget/hapi-machine-status.user.js\` 全文覆盖到油猴脚本中，然后强制刷新页面。
+
+${includeMathFixture ? mathMarkdown : ''}
 `
 
 if (new URLSearchParams(window.location.search).get('theme') === 'dark') {

@@ -110,9 +110,13 @@ The app supports multiple hubs with one active selection. See the
 [auth contract](../docs/api/client-contract/auth.md) for the wire rules.
 
 - **Manual entry:** start `hapi hub --relay`, then *Enter Manually* → HTTPS
-  hub origin and access token → *Pair*. For a source-tree `bun run dev` hub,
-  put an HTTPS reverse proxy or tunnel in front of `localhost:3006`; a
-  physical phone must reach that endpoint. The app checks `GET /health`,
+  hub address and access token → *Pair*. The address starts empty, with a
+  separate protocol menu defaulting to HTTPS; type the domain/IP and optional
+  port without a scheme. Pasting a full HTTP(S) URL updates that menu. A full
+  companion or web pairing link pasted into either field fills both values
+  for review — only submitting the form starts a connection. For a source-tree
+  `bun run dev` hub, put an HTTPS reverse proxy or tunnel in front of
+  `localhost:3006`; a physical phone must reach that endpoint. The app checks `GET /health`,
   requires `protocolVersion == ProtocolVersion.supported`, exchanges the
   token with `POST /api/auth` and stores credentials in the Keychain.
 - **QR scan:** the in-app scanner accepts both hub QR forms —
@@ -128,16 +132,21 @@ The app supports multiple hubs with one active selection. See the
   issued JWT rejected again, triggers re-pairing. Temporary network/5xx refresh
   failures retain credentials.
 
-The parser accepts HTTP URLs; manual addresses without a scheme receive an
-`http://` prefix. This is input normalization, not a transport exemption.
+The parser accepts HTTP URLs. Manual entry uses the selected protocol
+(default HTTPS); HTTP must be selected explicitly or supplied in a full URL
+or pairing link. The form warns that HTTP is unencrypted and may be restricted
+by iOS. It never guesses HTTP for a local address or downgrades after a failed
+HTTPS connection. Input acceptance is not a transport exemption.
 `Hapi/Info.plist` and the project build settings declare no ATS exceptions,
-including no `NSAllowsLocalNetworking`. Use explicit HTTPS URLs for a reliable
+including no `NSAllowsLocalNetworking`. Use HTTPS endpoints for a reliable
 pairing setup; HTTP behavior remains subject to system network policy.
 
 Manual app-layer acceptance: pair → kill/relaunch → background/foreground →
 pair a second hub and switch → sign out → scan both QR forms → open a deep
 link for unpaired/paired hubs. Also check that transient hub failures preserve
-pairing, while a rejected rotated token shows the sign-out banner. Pure pairing
+pairing, while a rejected rotated token shows the sign-out banner.
+Manual-entry form and system-paste behavior is covered by app-hosted
+`ManualPairingFormTests` and `ManualEntryPresentationTests`; pure pairing
 and auth behavior is covered by the package tests; this checklist is for the
 app wiring and platform interaction.
 
@@ -246,6 +255,40 @@ uses `AnchoredTranscriptList` (`UICollectionView` with SwiftUI hosting) and
 prepares Markdown off the main thread; see
 [native transcript scrolling](../docs/native-chat-scrolling.md).
 
+## Scratchlist workflow
+
+The composer tray toggles a session-local `chat` / `scratchlist` destination.
+Scratchlist mode shows one recent draft, or just a header while the input is
+focused or when using accessibility text sizes, and an explicitly labelled
+**Save draft** action. Tap the header to open the full list, or × to return to
+chat. Closing the drawer preserves input; taking a draft or accepting a queue
+send returns to chat mode. The queue remains a
+separate, automatically delivered surface.
+
+Text and attachments park as one snapshot. Failed saves retain input and
+retry the same entry ID. Taking a saved attachment creates a borrowed hub
+reference, without resuming the session; an explicit chat send stages it to
+the active/resumed session's upload directory. Queue actions do not consume
+the composer and use a stable local ID for the saved entry version. A failed
+post-acceptance deletion retries removal only. The full inventory uses one
+navigation stack for reading and transactional editing, with discard guards
+and editor identities protecting against late uploads.
+
+Inventory rows show two lines of text, an attachment count, **Take draft** and
+a menu for queueing, editing, copying and deleting. Pull down for search
+(including attachment filenames); full filenames and relative timestamps live
+in the detail view. The editor's + menu offers photos and files. Empty states
+and routine chrome avoid explanatory paragraphs; failures stay inline with
+their recovery action, without a duplicate toast.
+
+Regression suites: package `ScratchlistComposerWorkflowTests`,
+`ScratchlistAttachmentFlowTests`, `ScratchlistStoreTests` and
+`ComposerAttachmentsTests`; app-hosted `ScratchlistScreenModelTests` and
+`ScratchlistPresentationTests` (including transcript-anchor preservation).
+The presentation suite attaches light/dark, compact, accessibility, inventory
+and editor renders. Manually check keyboard/VoiceOver, conflict choices,
+photo/file retry, and inactive-session sending on a connected device.
+
 ## UI development
 
 ### Localization catalog
@@ -338,7 +381,9 @@ inspector; null output does not show a misleading "No output" placeholder.
 Shared Codex proposals expose **Implement plan** and **Continue planning** only
 when the active session's `agentState.codexPlanProposalId` matches the tool-call
 id. Implementation uses the dedicated plan endpoint, not permission approval;
-continue only focuses the composer, preserving its draft. Pending/error state
+continue hides that proposal’s action menu locally and focuses the composer,
+preserving its draft and plan mode without sending a message. The plan document
+remains readable, and a new proposal gets a fresh menu. Pending/error state
 survives row recycling. Withdrawn, historical and child proposals stay read-only
 (an outstanding operation/error can still be shown).
 Plans are prewarmed in the chat Markdown cache and never use the ordinary
