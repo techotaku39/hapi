@@ -129,7 +129,7 @@ class SessionListViewModel(
                 // refresh fails but the stream works, unseeded watermarks
                 // would light every row's unread dot (once-per-scope inside
                 // the store, so repeated calls are no-ops).
-                if (sessions.isNotEmpty()) {
+                if (sessions.isNotEmpty() && hasRefreshedOnce.value) {
                     runCatching { lastSeenStore.initializeBaseline(hubKey, sessions) }
                 }
             }
