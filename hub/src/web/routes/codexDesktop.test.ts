@@ -1614,6 +1614,95 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('does not restore a scheduled message cancelled during attachment cloning', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-codex-attachment-merge-cancel-race-'))
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const canonical = store.sessions.getOrCreateSession(
+            'canonical-cancel-race-session',
+            { codexSessionId: 'codex-thread-cancel-race' },
+            {},
+            'default'
+        )
+        const source = store.sessions.getOrCreateSession(
+            'source-cancel-race-session',
+            { codexSessionId: 'codex-thread-cancel-race' },
+            {},
+            'default'
+        )
+        store.sessions.touchSessionUpdatedAt(canonical.id, Date.now() + 1_000, 'default')
+        const attachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: source.id,
+            filename: 'cancel-race.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('cancel-race-original')
+        })
+        store.messages.addMessage(canonical.id, {
+            role: 'user',
+            content: { type: 'text', text: 'canonical cancel race baseline' }
+        }, 'canonical-cancel-race-1')
+        const scheduled = store.messages.addMessage(source.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'scheduled cancel race',
+                attachments: [{
+                    id: 'cancel-race-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id
+                }]
+            }
+        }, 'cancel-race-local-id', Date.now() + 60_000)
+        const originalClone = store.attachments.cloneMessageAttachments.bind(store.attachments)
+        let signalCloneStarted!: () => void
+        let releaseClone!: () => void
+        const cloneStarted = new Promise<void>((resolve) => { signalCloneStarted = resolve })
+        const cloneGate = new Promise<void>((resolve) => { releaseClone = resolve })
+        const cloneSpy = spyOn(store.attachments, 'cloneMessageAttachments').mockImplementation(async (...args) => {
+            signalCloneStarted()
+            await cloneGate
+            return await originalClone(...args)
+        })
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => null }))
+
+        const merge = app.request('/api/codex/merge-duplicate-sessions', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionIds: ['codex-thread-cancel-race'] })
+        })
+
+        try {
+            await cloneStarted
+            expect(store.messages.cancelQueuedMessage(source.id, scheduled.id).status).toBe('cancelled')
+            releaseClone()
+            const response = await merge
+            expect(response.status).toBe(200)
+            const body = await response.json() as { success: false; error: string }
+            expect(body.success).toBe(false)
+            expect(body.error).toContain('Source messages changed during duplicate merge')
+            expect(store.sessions.getSessionByNamespace(source.id, 'default')).not.toBeNull()
+            expect(store.attachments.getForSession(attachment.id, 'default', source.id)).not.toBeNull()
+            const db = (store as unknown as { db: Database }).db
+            expect(db.prepare(
+                'SELECT COUNT(*) AS count FROM attachments WHERE session_id = ?'
+            ).get(canonical.id)).toEqual({ count: 0 })
+            expect(store.messages.getAllMessages(canonical.id)).toHaveLength(1)
+            expect(store.messages.getAllMessages(canonical.id)[0]?.localId).toBe('canonical-cancel-race-1')
+        } finally {
+            releaseClone()
+            cloneSpy.mockRestore()
+            store.close()
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
     it('matches repeated prompt texts by occurrence when merging attachments', async () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-codex-repeated-attachment-merge-'))
         const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })

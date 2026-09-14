@@ -59,6 +59,7 @@ export type DuplicateSessionMergePlan = {
     namespace: string
     sourceSessionId: string
     targetSessionId: string
+    sourceMessageIds: string[]
     updates: Array<{ messageId: string; content: unknown }>
     inserts: DuplicateSessionMergeMessage[]
 }
@@ -219,6 +220,14 @@ export class Store {
             }
             if (source.active) {
                 throw new Error('Cannot merge an active duplicate session')
+            }
+
+            const currentSourceMessageIds = new Set(
+                (this.db.prepare('SELECT id FROM messages WHERE session_id = ?').all(plan.sourceSessionId) as Array<{ id: string }>)
+                    .map((message) => message.id)
+            )
+            if (!sameMessageIds(currentSourceMessageIds, new Set(plan.sourceMessageIds))) {
+                throw new Error('Source messages changed during duplicate merge; retry')
             }
 
             const targetMessageIds = new Set(

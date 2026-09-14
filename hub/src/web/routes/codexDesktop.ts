@@ -1444,6 +1444,7 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
                 namespace: options.namespace,
                 sourceSessionId: source.sessionId,
                 targetSessionId: canonical.sessionId,
+                sourceMessageIds: source.storedMessages.map((message) => message.id),
                 updates,
                 inserts
             })
