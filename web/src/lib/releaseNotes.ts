@@ -385,7 +385,7 @@ export const RELEASE_NOTES = [
         [
             group('Scratchlist and sharing', 'Scratchlist 与分享', [
                 change('feature', 'Add Scratchlist v2 with typed Hub storage and session-update synchronization, and share conversation turns as images.', '增加使用类型化 Hub 存储和会话更新同步的 Scratchlist v2，并支持将对话回合分享为图片。'),
-                change('feature', 'Add native companion FCM push, device registration, pairing QR, and Android Web Share Target integration.', '增加原生伴侣 FCM 推送、设备注册、配对二维码和 Android Web Share Target 集成。'),
+                change('feature', 'Add native companion FCM push, device registration, and pairing QR.', '增加原生伴侣 FCM 推送、设备注册和配对二维码。'),
             ]),
             group('Session and preview tools', '会话与预览工具', [
                 change('feature', 'Navigate image previews, show timestamps in the conversation outline, and add global word wrapping for code and diffs.', '支持图片预览导航；在对话大纲显示时间戳；为代码和 diff 增加全局换行开关。'),
@@ -469,16 +469,19 @@ export const RELEASE_NOTES = [
             ]),
         ]),
     releaseNote('0.23.0', '2026-07-18',
-        'Add Kimi Code support, richer Pi and Web controls, model-aware tooling, themes, and directory metadata; improve transcript, resume, and message rendering reliability.',
-        '增加 Kimi Code、更多 Pi 与 Web 控制、模型感知工具、主题和目录元数据；改进 transcript、恢复和消息渲染稳定性。',
+        'Improve Kimi Code local-session synchronization and compatibility, add richer Pi and Web controls, model-aware tooling, themes, and directory metadata; improve transcript, resume, and message rendering reliability.',
+        '改进 Kimi Code 本地会话同步和兼容性，增加更多 Pi 与 Web 控制、模型感知工具、主题和目录元数据；改进 transcript、恢复和消息渲染稳定性。',
         [
             group('Agent support and controls', 'Agent 支持与控制', [
-                change('feature', 'Add Kimi Code support, Pi max thinking, skill_lookup for non-native agents, and tool-call duration details.', '增加 Kimi Code 支持、Pi max 思考级别、面向非原生 Agent 的 skill_lookup，以及工具调用耗时详情。'),
+                change('feature', 'Add Pi max thinking, skill_lookup for non-native agents, and tool-call duration details.', '增加 Pi max 思考级别、面向非原生 Agent 的 skill_lookup，以及工具调用耗时详情。'),
                 change('feature', 'Add color-theme presets, show the executed subagent model, and improve the directory browser with metadata and sorting.', '增加颜色主题预设、显示子 Agent 实际使用的模型，并为目录浏览器增加元数据和排序。'),
             ]),
             group('Session and model experience', '会话与模型体验', [
                 change('feature', 'Support OpenCode session aliases, show tool duration, and distinguish worktree sessions in the sidebar.', '支持 OpenCode 会话别名、显示工具耗时，并在侧栏区分 worktree 会话。'),
                 change('fix', 'Use per-model Pi context windows, synchronize browser titles, preserve Codex compaction behavior, and verify Cursor stores before reopening.', '使用 Pi 的模型级上下文窗口；同步浏览器标题；正确处理 Codex 压缩；重新打开前校验 Cursor 存储。'),
+            ]),
+            group('Kimi compatibility', 'Kimi 兼容性', [
+                change('fix', 'Synchronize local Kimi sessions with the Web client and adapt configuration and model handling to the current Kimi Code architecture.', '同步本地 Kimi 会话与 Web 客户端，并适配当前 Kimi Code 架构的配置和模型处理。'),
             ]),
             group('Message and transport reliability', '消息与传输稳定性', [
                 change('fix', 'Keep queued messages consistent after reconnects, preserve OpenCode tool calls and deltas, and handle late or empty tool input safely.', '重连后保持排队消息一致；保留 OpenCode 工具调用和增量内容；安全处理延迟或空工具输入。'),
