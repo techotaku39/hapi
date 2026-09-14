@@ -58,3 +58,20 @@ export function selectForkTranscriptThrough<T extends {
     }
     return ordered.slice(0, cutoff + 1).filter((message) => message.invokedAt != null)
 }
+
+/** Return the latest invoked message localId usable as a restart-safe fork tip. */
+export function latestForkTranscriptLocalId<T extends {
+    localId: string | null
+    invokedAt: number | null
+    createdAt: number
+    seq: number
+}>(messages: T[]): string | undefined {
+    const ordered = messages.slice().sort((a, b) => {
+        const byTime = (a.invokedAt ?? a.createdAt) - (b.invokedAt ?? b.createdAt)
+        return byTime !== 0 ? byTime : a.seq - b.seq
+    })
+    return ordered
+        .reverse()
+        .find((message) => message.invokedAt != null && message.localId != null)
+        ?.localId ?? undefined
+}

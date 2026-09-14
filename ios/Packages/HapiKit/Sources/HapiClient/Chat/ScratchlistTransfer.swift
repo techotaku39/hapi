@@ -151,7 +151,9 @@ enum ScratchlistTransfer {
                 }
                 let metadata = AttachmentMetadata(id: item.ui.id, filename: item.ui.filename, mimeType: item.ui.mimeType,
                     size: item.ui.sizeBytes, path: path, attachmentId: attachmentId,
-                    previewUrl: item.ui.previewBytes.map { AttachmentPolicy.dataUrl(mimeType: "image/jpeg", bytes: $0) })
+                    previewUrl: attachmentId == nil
+                        ? item.ui.previewBytes.map { AttachmentPolicy.dataUrl(mimeType: "image/jpeg", bytes: $0) }
+                        : nil)
                 if createdByPreparation {
                     created.append(metadata)
                 }

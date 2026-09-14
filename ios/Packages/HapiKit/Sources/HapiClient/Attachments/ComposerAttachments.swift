@@ -353,9 +353,9 @@ public final class ComposerAttachments {
                 size: entry.ui.sizeBytes,
                 path: entry.path,
                 attachmentId: entry.attachmentId,
-                previewUrl: entry.ui.previewBytes.map {
+                previewUrl: entry.attachmentId == nil ? entry.ui.previewBytes.map {
                     AttachmentPolicy.dataUrl(mimeType: "image/jpeg", bytes: $0)
-                }
+                } : nil
             )
         }
     }

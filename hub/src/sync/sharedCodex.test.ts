@@ -391,4 +391,27 @@ describe('shared Codex hub binding', () => {
             f.cleanup()
         }
     })
+
+    it('clears failed attachment hydration bookkeeping when a fork child is removed', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('failed-hydration-source')
+            const child = f.create('failed-hydration-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'missing-tip'
+            }, false)
+            await expect((f.engine as any).ensureSharedForkAttachments(
+                source.id, 'default', child.id, undefined, 'missing-tip'
+            )).rejects.toThrow('Fork tip boundary message not found')
+
+            const cachedChild = f.engine.getSession(child.id)
+            if (cachedChild) cachedChild.active = false
+            await f.engine.deleteSession(child.id)
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await expect(f.engine.deleteSession(source.id)).resolves.toBeUndefined()
+        } finally {
+            f.cleanup()
+        }
+    })
 })

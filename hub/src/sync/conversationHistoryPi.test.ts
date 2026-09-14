@@ -152,6 +152,7 @@ describe('Pi conversation-history hub integration', () => {
                 flavor: 'pi',
                 piSessionId: 'pi-clone-native',
                 summary: { text: 'Fork: Pi source title', updatedAt: expect.any(Number) },
+                forkedThroughMessageLocalId: 'local3',
                 conversationHistoryEntryIds: { local1: 'entry-1', local2: 'entry-2', local3: 'entry-3' },
                 conversationHistoryPoints: { local1: true, local2: true, local3: true },
             })
@@ -173,6 +174,92 @@ describe('Pi conversation-history hub integration', () => {
             expect(spawnArgs[9]).toBeUndefined()
             expect(engine.getSession(result.sessionId)?.model).toBeNull()
             expect(engine.getSession(result.sessionId)?.effort).toBeNull()
+        } finally {
+            engine.stop()
+            store.close()
+            rmSync(tempRoot, { recursive: true, force: true })
+        }
+    })
+
+    it('persists the native historical fork boundary for attachment hydration after restart', async () => {
+        const tempRoot = mkdtempSync(join(tmpdir(), 'hapi-historical-fork-attachments-'))
+        const { store, engine } = createEngine(join(tempRoot, 'attachments'))
+        try {
+            const source = engine.getOrCreateSession('pi-historical-source', {
+                path: '/tmp/project',
+                host: 'localhost',
+                machineId: 'machine-1',
+                flavor: 'pi',
+                piSessionId: 'pi-historical-source-native',
+                capabilities: { conversationHistory: { forkCurrent: true, forkAtMessage: true, rewindToMessage: true } },
+            }, null, 'default')
+            engine.handleSessionAlive({ sid: source.id, time: Date.now(), mode: 'remote' })
+            const beforeAttachment = await store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'historical-before.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('historical before')
+            })
+            const afterAttachment = await store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'historical-after.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('historical after')
+            })
+            const addMessage = (localId: string, text: string, attachmentId?: string) => {
+                store.messages.addMessage(source.id, {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text,
+                        ...(attachmentId ? { attachments: [{
+                            id: `${localId}-attachment`,
+                            filename: localId,
+                            mimeType: 'text/plain',
+                            size: 1,
+                            attachmentId
+                        }] } : {})
+                    }
+                }, localId)
+                store.messages.markMessagesInvoked(source.id, [localId], Date.now())
+            }
+            addMessage('historical-before', 'before', beforeAttachment.id)
+            addMessage('historical-boundary', 'boundary')
+            addMessage('historical-after', 'after', afterAttachment.id)
+
+            ;(engine as any).rpcGateway.forkConversation = async () => ({ nativeSessionId: 'pi-historical-child-native' })
+            ;(engine as any).rpcGateway.spawnSession = async (...args: unknown[]) => ({
+                type: 'success', sessionId: args[12]
+            })
+            ;(engine as any).waitForExactNativeForkBound = async () => true
+            let capturedChildMetadata: Record<string, unknown> | undefined
+            const cache = (engine as any).sessionCache
+            const originalCreate = cache.getOrCreateSession.bind(cache)
+            cache.getOrCreateSession = (...args: unknown[]) => {
+                if (typeof args[0] === 'string' && args[0].startsWith('fork:')) {
+                    capturedChildMetadata = args[1] as Record<string, unknown>
+                }
+                return originalCreate(...args)
+            }
+
+            const result = await engine.forkConversation(source.id, 'default', 'historical-boundary')
+            expect(result.type).toBe('success')
+            if (result.type !== 'success') throw new Error(result.message)
+            expect(capturedChildMetadata).toMatchObject({
+                forkedFrom: source.id,
+                forkedAtMessageLocalId: 'historical-boundary'
+            })
+            expect(capturedChildMetadata).not.toHaveProperty('forkedThroughMessageLocalId')
+            expect(store.messages.getAllMessages(result.sessionId)
+                .some((message) => message.localId === 'historical-after')).toBe(false)
+            const copied = store.messages.getAllMessages(result.sessionId)
+                .find((message) => message.localId === 'historical-before')
+            const copiedAttachmentId = ((copied?.content as any)?.content?.attachments?.[0] as any)?.attachmentId
+            expect(copiedAttachmentId).toBeDefined()
+            expect(copiedAttachmentId).not.toBe(beforeAttachment.id)
+            expect(store.attachments.getForSession(afterAttachment.id, 'default', result.sessionId)).toBeNull()
         } finally {
             engine.stop()
             store.close()

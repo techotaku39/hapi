@@ -31,7 +31,7 @@ import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
 import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
 import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
-import { selectForkTranscriptPrefix, selectForkTranscriptThrough } from './forkTranscript'
+import { latestForkTranscriptLocalId, selectForkTranscriptPrefix, selectForkTranscriptThrough } from './forkTranscript'
 import { buildForkSessionSummary } from './forkSessionSummary'
 import {
     RpcGateway,
@@ -1539,9 +1539,10 @@ export class SyncEngine {
 
         const flavor = this.resolveFlavor(source)
         const childId = randomUUID()
+        const sourceMessages = this.store.messages.getAllMessages(sessionId)
         let prefix
         try {
-            prefix = selectForkTranscriptPrefix(this.store.messages.getAllMessages(sessionId), messageLocalId)
+            prefix = selectForkTranscriptPrefix(sourceMessages, messageLocalId)
         } catch (error) {
             return { type: 'error', message: error instanceof Error ? error.message : String(error) }
         }
@@ -1558,6 +1559,9 @@ export class SyncEngine {
             forkedFrom: sessionId,
             startedBy: 'runner',
             capabilities: source.metadata?.capabilities,
+            ...(messageLocalId
+                ? { forkedAtMessageLocalId: messageLocalId }
+                : { forkedThroughMessageLocalId: latestForkTranscriptLocalId(sourceMessages) ?? '' }),
             conversationHistoryPoints: Object.fromEntries(
                 Object.entries(source.metadata?.conversationHistoryPoints ?? {})
                     .filter(([localId]) => copiedLocalIds.has(localId))
@@ -1873,6 +1877,15 @@ export class SyncEngine {
         const after = this.sharedForkAttachmentFailures.get(sourceSessionId)?.values().next().value as Error | undefined
         if (after) {
             throw new Error(`Cannot delete source session before shared fork attachments are preserved: ${after.message}`)
+        }
+    }
+
+    /** Drop retry/error bookkeeping once a failed fork child has been removed. */
+    private clearSharedForkAttachmentTarget(targetSessionId: string): void {
+        this.sharedForkAttachmentsHydrated.delete(targetSessionId)
+        for (const [sourceSessionId, failures] of this.sharedForkAttachmentFailures) {
+            failures.delete(targetSessionId)
+            if (failures.size === 0) this.sharedForkAttachmentFailures.delete(sourceSessionId)
         }
     }
 
@@ -2237,6 +2250,7 @@ export class SyncEngine {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.waitForSharedForkAttachmentHydration(sessionId)
+        this.clearSharedForkAttachmentTarget(sessionId)
         await this.sessionCache.deleteSession(sessionId)
     }
 
