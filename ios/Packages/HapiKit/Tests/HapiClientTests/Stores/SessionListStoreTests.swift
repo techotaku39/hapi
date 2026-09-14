@@ -235,6 +235,42 @@ struct SessionListStoreTests {
         #expect(unreadAt == 6_000)
     }
 
+    @Test func sessionListChangesReconcilePendingLastSeenBaselines() async throws {
+        let (performer, store) = try makeStore()
+        let lastSeenStore = LastSeenStore()
+        store.onSessionsChanged = { sessions in
+            lastSeenStore.initializeBaseline(scopeKey: "hub-a", sessions: sessions)
+        }
+        store.onLiveReplyDuringBackfill = { sessionId, activityAt in
+            lastSeenStore.markUnread(sessionId: sessionId, activityAt: activityAt)
+        }
+
+        var pending = storeSummary(
+            "legacy",
+            updatedAt: 9_000,
+            lastAssistantMessageAt: 5_000,
+            lastAssistantMessageVersion: 10
+        )
+        pending.assistantReplyClockBackfilled = false
+        await performer.enqueue(json: try sessionsResponseJSON(pending))
+        try await store.refresh()
+        #expect(lastSeenStore.lastSeenAt("legacy") == 0)
+
+        store.applySessionEvent(try sessionUpdatedEvent(
+            "legacy",
+            dataJSON: #"{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":11}"#
+        ))
+        #expect(lastSeenStore.lastSeenAt("legacy") == 5_999)
+
+        store.applySessionEvent(try sessionUpdatedEvent(
+            "legacy",
+            dataJSON: #"{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":12,"assistantReplyClockBackfilled":true}"#
+        ))
+        #expect(lastSeenStore.lastSeenAt("legacy") == 5_999)
+        let finalRow = try #require(store.sessions.first)
+        #expect(LastSeenStore.isUnread(finalRow, lastSeenAt: lastSeenStore.lastSeenAt("legacy")))
+    }
+
     @Test func fullSessionEventWithMismatchedIdFallsBackToListRefetch() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1", updatedAt: 100)))

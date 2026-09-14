@@ -85,6 +85,10 @@ public final class SessionListStore: SessionListStoring {
     /// `HubSession` to `ScratchlistStore.handleInvalidation` (the iOS seam
     /// for the Android `SessionStore.scratchlistInvalidations` flow).
     @ObservationIgnored public var onScratchlistInvalidation: (@MainActor (String) -> Void)?
+    /// Fired after the list changes through REST, SSE, or an optimistic
+    /// mutation. Wired by `HubSession` to reconcile pending read baselines
+    /// when a legacy reply-clock backfill completes through SSE.
+    @ObservationIgnored public var onSessionsChanged: (@MainActor ([SessionSummary]) -> Void)?
     /// Wired by the app so live replies cannot be absorbed by a pending baseline.
     @ObservationIgnored public var onLiveReplyDuringBackfill: (@MainActor (String, Int) -> Void)?
 
@@ -410,5 +414,6 @@ public final class SessionListStore: SessionListStoring {
         sessions = next
         listRevision += 1
         snapshot?.scheduleWrite(next)
+        onSessionsChanged?(next)
     }
 }

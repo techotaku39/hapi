@@ -94,6 +94,9 @@ final class HubSession {
         sessionStore.onLiveReplyDuringBackfill = { [weak lastSeenStore] sessionId, activityAt in
             lastSeenStore?.markUnread(sessionId: sessionId, activityAt: activityAt)
         }
+        sessionStore.onSessionsChanged = { [weak lastSeenStore] sessions in
+            lastSeenStore?.initializeBaseline(scopeKey: hubUrl, sessions: sessions)
+        }
         let machineStore = MachineStore(api: api, snapshotDirectory: snapshotDirectory)
         self.sessionStore = sessionStore
         self.machineStore = machineStore
