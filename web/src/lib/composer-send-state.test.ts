@@ -154,6 +154,24 @@ describe('composer send state', () => {
         )
     })
 
+    it('reconciles using the original composer text when provided', () => {
+        recordPendingComposerSend({
+            sessionId: 'session-A',
+            attemptId: 'attempt-A',
+            text: 'foo\n',
+            originalText: 'foo\n',
+            programmaticEditRevision: 0,
+            draftRevision: 0,
+        })
+        publishComposerSendSettlement({
+            ...settlement('session-A', 'attempt-A'),
+            text: 'foo',
+            originalText: 'foo\n',
+        })
+
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-A', null, 'foo\n')
+    })
+
     it('does not reconcile after a newer draft revision', () => {
         recordPendingComposerSend({
             sessionId: 'session-A',

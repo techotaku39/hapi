@@ -415,11 +415,13 @@ export function applyComposerAcceptanceRevision(
     acceptance: SendMessageAcceptance,
     sessionId: string,
     submitted: Pick<SendMessageAcceptance, 'programmaticEditRevision' | 'draftRevision'>,
+    originalText?: string,
 ): SendMessageAcceptance {
     if (acceptance.sessionId !== sessionId) return acceptance
     return {
         ...acceptance,
         ...submitted,
+        ...(originalText !== undefined ? { originalText } : {}),
     }
 }
 
@@ -491,6 +493,7 @@ export function ScratchlistDrawerHost(props: {
         attachments?: AttachmentMetadata[],
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
+        originalText?: string,
     ) => Promise<boolean | SendMessageAcceptance>
     onExitScratchlistMode: () => void
     onProgrammaticEdit?: () => void
@@ -611,6 +614,7 @@ type SessionChatProps = {
         sessionId: string
         programmaticEditRevision: number
         draftRevision: number
+        originalText?: string
     } | null
     programmaticEditRevision?: number
     onSendAccepted?: (acceptance: SendMessageAcceptance, text: string) => void
@@ -632,6 +636,7 @@ type SessionChatProps = {
         attachments?: AttachmentMetadata[],
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
+        originalText?: string,
     ) => Promise<SendMessageAcceptance | false>
     resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
     onUploadSessionResolved?: (sessionId: string) => void
@@ -689,12 +694,13 @@ export function SessionChat(props: SessionChatProps) {
             sessionId: pendingSend.sessionId,
             programmaticEditRevision: pendingSend.programmaticEditRevision,
             draftRevision: pendingSend.draftRevision,
+            originalText: pendingSend.originalText,
         }
         : null, [pendingSend])
     const onSendAccepted = useCallback((acceptance: SendMessageAcceptance, text: string) => {
         recordPendingComposerSend({
             ...acceptance,
-            text,
+            text: acceptance.originalText ?? text,
             programmaticEditRevision: acceptance.programmaticEditRevision,
         })
     }, [sessionId])
@@ -978,6 +984,7 @@ function SessionChatInner(props: SessionChatProps) {
             attachments?: AttachmentMetadata[],
             scheduledAt?: number | null,
             deliveryMode: MessageDeliveryMode = 'queue',
+            originalText?: string,
         ): Promise<SendMessageAcceptance | false> => {
             // assistant-ui has already cleared the live composer by the time
             // this async route runs. Capture the original interaction
@@ -1005,6 +1012,7 @@ function SessionChatInner(props: SessionChatProps) {
                         sessionId: props.session.id,
                         programmaticEditRevision: props.programmaticEditRevision ?? 0,
                         draftRevision: getComposerDraftRevision(props.session.id),
+                        ...(originalText !== undefined ? { originalText } : {}),
                     }, text)
                 }
                 await finalizeMigratedScratchlistParkCleanup(
@@ -1019,6 +1027,7 @@ function SessionChatInner(props: SessionChatProps) {
                         sessionId: props.session.id,
                         programmaticEditRevision: props.programmaticEditRevision ?? 0,
                         draftRevision: getComposerDraftRevision(props.session.id),
+                        ...(originalText !== undefined ? { originalText } : {}),
                     }
                     : false
             }
@@ -1040,12 +1049,14 @@ function SessionChatInner(props: SessionChatProps) {
                         ordered,
                         scheduledAt,
                         deliveryMode,
+                        originalText,
                     ),
                     (accepted) => {
                         const composerAcceptance = applyComposerAcceptanceRevision(
                             accepted,
                             props.session.id,
                             submittedComposerRevision,
+                            originalText,
                         )
                         props.onSendAccepted?.(composerAcceptance, text)
                         return composerAcceptance
@@ -1073,14 +1084,16 @@ function SessionChatInner(props: SessionChatProps) {
                     sessionId: props.session.id,
                     programmaticEditRevision: submittedComposerRevision.programmaticEditRevision,
                     draftRevision: submittedComposerRevision.draftRevision,
+                    ...(originalText !== undefined ? { originalText } : {}),
                 }
             }
-            const accepted = await props.onSend(text, attachments, scheduledAt, deliveryMode)
+            const accepted = await props.onSend(text, attachments, scheduledAt, deliveryMode, originalText)
             if (!accepted) return false
             const composerAcceptance = applyComposerAcceptanceRevision(
                 accepted,
                 props.session.id,
                 submittedComposerRevision,
+                originalText,
             )
             props.onSendAccepted?.(composerAcceptance, text)
             return composerAcceptance
@@ -1884,6 +1897,7 @@ function SessionChatInner(props: SessionChatProps) {
         attachments?: AttachmentMetadata[],
         scheduledAt?: number | null,
         intent: ComposerSendIntent = 'default',
+        originalText?: string,
     ) => {
         // Route through the scratchlist-aware wrapper. When scratchlistMode
         // is on AND the payload is pure text, this turns into
@@ -1906,7 +1920,7 @@ function SessionChatInner(props: SessionChatProps) {
             scheduledAt,
             routesToScratchlist: routedToScratchlist,
         })
-        const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode)
+        const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode, originalText)
         if (!accepted) return
         if (!routedToScratchlist) {
             // Clear pendingSchedule only after the mutation is actually

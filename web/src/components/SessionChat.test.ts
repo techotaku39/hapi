@@ -120,10 +120,11 @@ describe('applyComposerAcceptanceRevision', () => {
         expect(applyComposerAcceptanceRevision(acceptance, 'session-a', {
             programmaticEditRevision: 1,
             draftRevision: 2,
-        })).toEqual({
+        }, ' foo\n')).toEqual({
             ...acceptance,
             programmaticEditRevision: 1,
             draftRevision: 2,
+            originalText: ' foo\n',
         })
     })
 

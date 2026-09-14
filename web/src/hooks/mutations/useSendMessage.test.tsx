@@ -75,6 +75,44 @@ describe('useSendMessage', () => {
         })
     })
 
+    it('carries original composer text separately from normalized send text', async () => {
+        const sendMock = vi.fn(async () => {})
+        const api = createMockApi(sendMock)
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A'),
+            { wrapper: createWrapper() },
+        )
+
+        let accepted: SendMessageAcceptance | false = false
+        await act(async () => {
+            accepted = await result.current.sendMessage('foo', undefined, null, 'queue', ' foo\n')
+        })
+
+        expect(sendMock).toHaveBeenCalledWith(
+            'session-A',
+            'foo',
+            'local-id-1',
+            undefined,
+            null,
+            'queue',
+        )
+        expect(accepted).toEqual({
+            attemptId: 'local-id-1',
+            sessionId: 'session-A',
+            programmaticEditRevision: 0,
+            draftRevision: 0,
+            originalText: ' foo\n',
+        })
+        expect(result.current.sendSettlement).toEqual({
+            attemptId: 'local-id-1',
+            sessionId: 'session-A',
+            text: 'foo',
+            originalText: ' foo\n',
+            status: 'success',
+            source: 'send',
+        })
+    })
+
     it('keeps a thinking-session send in flight until the POST confirms it is queued', async () => {
         const request = deferred<void>()
         const api = createMockApi(() => request.promise)

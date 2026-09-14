@@ -24,6 +24,7 @@ import {
 type SendMessageInput = {
     sessionId: string
     text: string
+    originalText?: string
     localId: string
     createdAt: number
     attachments?: AttachmentMetadata[]
@@ -37,12 +38,16 @@ export type SendMessageAcceptance = {
     sessionId: string
     programmaticEditRevision: number
     draftRevision: number
+    /** Composer text before assistant-ui/runtime normalization (e.g. trim). */
+    originalText?: string
 }
 
 export type SendMessageSettlement = {
     attemptId: string
     sessionId: string
     text: string
+    /** Composer text before assistant-ui/runtime normalization (e.g. trim). */
+    originalText?: string
     status: 'success' | 'error'
     source: 'send' | 'retry'
 }
@@ -214,6 +219,7 @@ export function useSendMessage(
         attachments?: AttachmentMetadata[],
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
+        originalText?: string,
     ) => Promise<SendMessageAcceptance | false>
     retryMessage: (localId: string) => boolean
     isSending: boolean
@@ -259,6 +265,7 @@ export function useSendMessage(
                 attemptId: input.localId,
                 sessionId: input.sessionId,
                 text: input.text,
+                ...(input.originalText !== undefined ? { originalText: input.originalText } : {}),
                 status: 'success',
                 source: input.source,
             })
@@ -275,6 +282,7 @@ export function useSendMessage(
                 attemptId: input.localId,
                 sessionId: input.sessionId,
                 text: input.text,
+                ...(input.originalText !== undefined ? { originalText: input.originalText } : {}),
                 status: 'error',
                 source: input.source,
             })
@@ -301,7 +309,7 @@ export function useSendMessage(
             haptic.notification('error')
             options?.onError?.({
                 sessionId: input.sessionId,
-                text: input.text,
+                text: input.originalText ?? input.text,
                 error,
                 scheduledAt: input.scheduledAt ?? null,
                 deliveryMode: input.deliveryMode,
@@ -315,6 +323,7 @@ export function useSendMessage(
         attachments?: AttachmentMetadata[],
         scheduledAt?: number | null,
         deliveryMode: MessageDeliveryMode = 'queue',
+        originalText?: string,
     ): Promise<SendMessageAcceptance | false> => {
         if (!api) {
             options?.onBlocked?.('no-api')
@@ -377,7 +386,7 @@ export function useSendMessage(
                 // archived session's route.
                 options?.onError?.({
                     sessionId,
-                    text,
+                    text: originalText ?? text,
                     error,
                     scheduledAt: scheduledAt ?? null,
                     deliveryMode,
@@ -392,6 +401,7 @@ export function useSendMessage(
         mutation.mutate({
             sessionId: targetSessionId,
             text,
+            ...(originalText !== undefined ? { originalText } : {}),
             localId,
             createdAt,
             attachments: sendAttachments,
@@ -399,7 +409,13 @@ export function useSendMessage(
             deliveryMode,
             source: 'send',
         })
-        return { attemptId: localId, sessionId: targetSessionId, programmaticEditRevision, draftRevision }
+        return {
+            attemptId: localId,
+            sessionId: targetSessionId,
+            programmaticEditRevision,
+            draftRevision,
+            ...(originalText !== undefined ? { originalText } : {}),
+        }
     }
 
     const retryMessage = (localId: string): boolean => {

@@ -7,6 +7,7 @@ export type PendingComposerSend = {
     text: string
     programmaticEditRevision: number
     draftRevision: number
+    originalText?: string
 }
 
 const pendingComposerSends = new Map<string, PendingComposerSend>()
@@ -103,7 +104,11 @@ function reconcileSuccessfulSend(sessionId: string): void {
     const settlement = composerSendSettlements.get(sessionId)?.get(pending.attemptId)
     if (settlement?.status !== 'success') return
     if (getComposerDraftRevision(sessionId) !== pending.draftRevision) return
-    clearDraftsAfterSend(sessionId, null, settlement.text)
+    clearDraftsAfterSend(
+        sessionId,
+        null,
+        settlement.originalText ?? pending.originalText ?? settlement.text,
+    )
 }
 
 export function consumeComposerSendSettlement(sessionId: string, attemptId: string): void {

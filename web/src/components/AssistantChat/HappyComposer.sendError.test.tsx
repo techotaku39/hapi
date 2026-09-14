@@ -242,11 +242,13 @@ function ComposerHarness(props: {
         sessionId: string
         programmaticEditRevision: number
         draftRevision: number
+        originalText?: string
     } | null>(null)
     const [sendSettlement, setSendSettlement] = useState<{
         attemptId: string
         sessionId: string
         text: string
+        originalText?: string
         status: 'success' | 'error'
         source: 'send' | 'retry'
     } | null>(null)
@@ -332,6 +334,7 @@ function ComposerHarness(props: {
                 sessionId,
                 programmaticEditRevision,
                 draftRevision: getComposerDraftRevision(sessionId),
+                originalText: props.initialText,
             })
         },
         setSending: setIsSending,
@@ -344,7 +347,8 @@ function ComposerHarness(props: {
             setSendSettlement({
                 attemptId: 'attempt-1',
                 sessionId,
-                text: props.initialText,
+                text: props.initialText.trim(),
+                originalText: props.initialText,
                 status: error ? 'error' : 'success',
                 source: 'send',
             })
@@ -354,7 +358,8 @@ function ComposerHarness(props: {
             setSendSettlement({
                 attemptId: 'retry-1',
                 sessionId,
-                text: props.initialText,
+                text: props.initialText.trim(),
+                originalText: props.initialText,
                 status: 'success',
                 source: 'retry',
             })
@@ -364,7 +369,8 @@ function ComposerHarness(props: {
             setSendSettlement({
                 attemptId: 'attempt-1',
                 sessionId,
-                text: props.initialText,
+                text: props.initialText.trim(),
+                originalText: props.initialText,
                 status: 'error',
                 source: 'send',
             })
@@ -577,6 +583,19 @@ describe('HappyComposer send-error atomic restore', () => {
         await waitFor(() => expect(input()).toHaveValue(''))
         fireEvent.change(input(), { target: { value: 'new draft after send' } })
         expect(input()).toHaveValue('new draft after send')
+    })
+
+    it('clears an untouched remounted send draft with surrounding whitespace', async () => {
+        const controls = renderComposer(' foo\n', null)
+        send()
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.remount())
+        act(() => controls.current!.programmaticSetText(' foo\n'))
+
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue(''))
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, ' foo\n')
     })
 
     it('clears a remounted draft from the original user submission after success', async () => {

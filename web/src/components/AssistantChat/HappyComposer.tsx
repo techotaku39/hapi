@@ -380,6 +380,7 @@ export function HappyComposer(props: {
         sessionId?: string
         programmaticEditRevision?: number
         draftRevision?: number
+        originalText?: string
     } | null
     /** Monotonic programmatic Queued Edit revision owned outside this keyed composer. */
     programmaticEditRevision?: number
@@ -824,6 +825,10 @@ export function HappyComposer(props: {
         }
         if (draftHydration.sessionId !== sessionId || !draftHydration.complete) return
 
+        const submittedText = settlement.originalText
+            ?? props.sendAcceptance?.originalText
+            ?? settlement.text
+
         if (
             props.sendAcceptance?.draftRevision !== undefined
             && getComposerDraftRevision(sessionId) > props.sendAcceptance.draftRevision
@@ -844,7 +849,7 @@ export function HappyComposer(props: {
             return
         }
 
-        if (composerText !== settlement.text && composerText !== '') {
+        if (composerText !== submittedText && composerText !== '') {
             consumeSettlement()
             return
         }
@@ -885,7 +890,7 @@ export function HappyComposer(props: {
             return
         }
 
-        if (composerText === settlement.text) {
+        if (composerText === submittedText) {
             api.composer().setText('')
         }
         if (attachments.length > 0) {
@@ -895,7 +900,7 @@ export function HappyComposer(props: {
         clearDraftsAfterSend(
             settlement.sessionId,
             null,
-            settlement.text,
+            submittedText,
         )
         consumeSettlement()
     }, [api, attachments.length, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.onReleaseSentAttachments, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
