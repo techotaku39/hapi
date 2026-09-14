@@ -250,6 +250,11 @@ export class SyncEngine {
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
+    /** Shared native fork children whose projected history is being hydrated. */
+    private readonly sharedForkAttachmentHydrations = new Map<string, Promise<void>>()
+    private readonly sharedForkAttachmentHydrationsBySource = new Map<string, Set<Promise<void>>>()
+    private readonly sharedForkAttachmentsHydrated = new Set<string>()
+    private readonly sharedForkAttachmentFailures = new Map<string, Map<string, Error>>()
     /**
      * Hub owner id for accountable work-graph principals (A2A P1/P3).
      * Defaults to "1" for unit tests; startHub overwrites with getOrCreateOwnerId().
@@ -587,6 +592,7 @@ export class SyncEngine {
         collaborationMode?: CodexCollaborationMode
     }): void {
         this.sessionCache.handleSessionAlive(payload)
+        this.maybeHydrateSharedForkAttachments(this.sessionCache.getSession(payload.sid))
         this.messageService.replayImmediateQueuedMessages(payload.sid)
         this.triggerDedupIfNeeded(payload.sid)
     }
@@ -594,6 +600,7 @@ export class SyncEngine {
     handleSessionReady(payload: { sid: string; time: number }): void {
         this.sessionReadyIds.add(payload.sid)
         const session = this.sessionCache.getSession(payload.sid)
+        this.maybeHydrateSharedForkAttachments(session)
         if (session?.metadata?.piResumeAttempt) {
             void this.writePiResumeAttempt(payload.sid, session.namespace, null)
                 .then(() => {
@@ -1503,7 +1510,7 @@ export class SyncEngine {
             const child = await this.validateSharedChild(source, rpcResult.sessionId, rpcResult.nativeSessionId)
             if (!child || child.metadata?.forkedFrom !== sessionId) return { type: 'error', message: 'Invalid shared-runtime fork binding' }
             try {
-                await this.hydrateSharedForkAttachments(sessionId, namespace, child.id, messageLocalId)
+                await this.ensureSharedForkAttachments(sessionId, namespace, child.id, messageLocalId)
             } catch (error) {
                 try {
                     await this.cleanupFailedForkChild(child.id, machineId, true)
@@ -1690,6 +1697,25 @@ export class SyncEngine {
         }
     }
 
+    private maybeHydrateSharedForkAttachments(session: Session | undefined): void {
+        const sourceSessionId = session?.metadata?.forkedFrom
+        if (!session
+            || session.metadata?.flavor !== 'codex'
+            || session.metadata.capabilities?.concurrentClients !== true
+            || typeof sourceSessionId !== 'string'
+            || this.historyActionsInFlight.has(sourceSessionId)) {
+            return
+        }
+        void this.ensureSharedForkAttachments(sourceSessionId, session.namespace, session.id)
+            .catch((error) => {
+                console.warn('[attachments] Failed to hydrate native shared fork', {
+                    sourceSessionId,
+                    targetSessionId: session.id,
+                    error
+                })
+            })
+    }
+
     /**
      * Shared Codex forks already have a child HAPI row and project native
      * history as text. Add durable attachment ownership without copying the
@@ -1762,6 +1788,72 @@ export class SyncEngine {
                 ).catch(() => {})
             }
             throw error
+        }
+    }
+
+    private ensureSharedForkAttachments(
+        sourceSessionId: string,
+        namespace: string,
+        targetSessionId: string,
+        messageLocalId?: string
+    ): Promise<void> {
+        if (this.sharedForkAttachmentsHydrated.has(targetSessionId)) return Promise.resolve()
+        const existing = this.sharedForkAttachmentHydrations.get(targetSessionId)
+        if (existing) return existing
+
+        const priorFailures = this.sharedForkAttachmentFailures.get(sourceSessionId)
+        priorFailures?.delete(targetSessionId)
+        if (priorFailures?.size === 0) this.sharedForkAttachmentFailures.delete(sourceSessionId)
+        const work = this.hydrateSharedForkAttachments(
+            sourceSessionId,
+            namespace,
+            targetSessionId,
+            messageLocalId
+        ).then(() => {
+            this.sharedForkAttachmentsHydrated.add(targetSessionId)
+        }).catch((error) => {
+            const failure = error instanceof Error ? error : new Error(String(error))
+            const failures = this.sharedForkAttachmentFailures.get(sourceSessionId) ?? new Map<string, Error>()
+            failures.set(targetSessionId, failure)
+            this.sharedForkAttachmentFailures.set(sourceSessionId, failures)
+            throw failure
+        })
+        this.sharedForkAttachmentHydrations.set(targetSessionId, work)
+        const sourceHydrations = this.sharedForkAttachmentHydrationsBySource.get(sourceSessionId) ?? new Set<Promise<void>>()
+        sourceHydrations.add(work)
+        this.sharedForkAttachmentHydrationsBySource.set(sourceSessionId, sourceHydrations)
+        void work.then(
+            () => this.releaseSharedForkHydration(sourceSessionId, targetSessionId, work),
+            () => this.releaseSharedForkHydration(sourceSessionId, targetSessionId, work)
+        )
+        return work
+    }
+
+    private releaseSharedForkHydration(
+        sourceSessionId: string,
+        targetSessionId: string,
+        work: Promise<void>
+    ): void {
+        if (this.sharedForkAttachmentHydrations.get(targetSessionId) === work) {
+            this.sharedForkAttachmentHydrations.delete(targetSessionId)
+        }
+        const sourceHydrations = this.sharedForkAttachmentHydrationsBySource.get(sourceSessionId)
+        sourceHydrations?.delete(work)
+        if (sourceHydrations?.size === 0) {
+            this.sharedForkAttachmentHydrationsBySource.delete(sourceSessionId)
+        }
+    }
+
+    private async waitForSharedForkAttachmentHydration(sourceSessionId: string): Promise<void> {
+        const failure = this.sharedForkAttachmentFailures.get(sourceSessionId)?.values().next().value as Error | undefined
+        if (failure) {
+            throw new Error(`Cannot delete source session before shared fork attachments are preserved: ${failure.message}`)
+        }
+        const pending = this.sharedForkAttachmentHydrationsBySource.get(sourceSessionId)
+        if (pending) await Promise.all([...pending])
+        const after = this.sharedForkAttachmentFailures.get(sourceSessionId)?.values().next().value as Error | undefined
+        if (after) {
+            throw new Error(`Cannot delete source session before shared fork attachments are preserved: ${after.message}`)
         }
     }
 
@@ -2125,6 +2217,7 @@ export class SyncEngine {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
+        await this.waitForSharedForkAttachmentHydration(sessionId)
         await this.sessionCache.deleteSession(sessionId)
     }
 

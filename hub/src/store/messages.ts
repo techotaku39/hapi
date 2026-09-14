@@ -327,7 +327,7 @@ export function mergeCopiedMessagesToSession(
         )
         const update = db.prepare(`
             UPDATE messages
-            SET content = ?, created_at = ?, invoked_at = ?, scheduled_at = ?, delivery_state = ?
+            SET content = ?
             WHERE id = ?
         `)
         const insert = db.prepare(`
@@ -348,10 +348,6 @@ export function mergeCopiedMessagesToSession(
                 if (row) {
                     update.run(
                         encoded,
-                        createdAt,
-                        message.invokedAt ?? null,
-                        message.scheduledAt ?? null,
-                        message.deliveryState ?? 'queued',
                         row.id
                     )
                     changed += 1

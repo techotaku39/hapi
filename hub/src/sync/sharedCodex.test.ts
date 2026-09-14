@@ -14,10 +14,10 @@ function fixture() {
     const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
     const metadata: Metadata = { path: '/tmp/work', host: 'test', machineId: 'machine', hostPid: 42, flavor: 'codex',
         capabilities: { concurrentClients: true, conversationHistory: { forkCurrent: true, forkAtMessage: true } } }
-    const create = (name: string, more: Partial<Metadata> = {}) => {
+    const create = (name: string, more: Partial<Metadata> = {}, ready = true) => {
         const session = engine.getOrCreateSession(name, { ...metadata, codexSessionId: `native-${name}`, ...more }, { controlledByUser: false }, 'default')
         engine.handleSessionAlive({ sid: session.id, time: Date.now() })
-        engine.handleSessionReady({ sid: session.id, time: Date.now() })
+        if (ready) engine.handleSessionReady({ sid: session.id, time: Date.now() })
         return session
     }
     return {
@@ -75,7 +75,6 @@ describe('shared Codex hub binding', () => {
         const f = fixture()
         try {
             const source = f.create('source')
-            const child = f.create('child', { forkedFrom: source.id })
             const attachment = await f.store.attachments.create({
                 namespace: 'default',
                 sessionId: source.id,
@@ -100,6 +99,7 @@ describe('shared Codex hub binding', () => {
             }
             f.store.messages.addMessage(source.id, sourceContent, 'shared-attachment-local-id')
             f.store.messages.markMessagesInvoked(source.id, ['shared-attachment-local-id'], Date.now())
+            const child = f.create('child', { forkedFrom: source.id }, false)
 
             // SharedCodexProjection may have already emitted the child turn as
             // text by the time the Hub receives the fork response.
@@ -129,6 +129,69 @@ describe('shared Codex hub binding', () => {
             expect(f.store.attachments.getForSession(attachment.id, 'default', source.id)).toBeNull()
             expect((await f.store.attachments.readForSessionAsync(clonedId!, 'default', child.id))?.data)
                 .toEqual(Buffer.from('shared fork original'))
+        } finally {
+            f.cleanup()
+        }
+    })
+
+    it('hydrates durable attachments when a native shared fork child becomes ready', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('native-source')
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'native-fork.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('native fork original')
+            })
+            f.store.messages.addMessage(source.id, {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'native fork attachment',
+                    attachments: [{
+                        id: 'native-message-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                },
+                meta: { sentFrom: 'webapp' }
+            }, 'native-fork-local-id')
+            f.store.messages.markMessagesInvoked(source.id, ['native-fork-local-id'], Date.now())
+            const child = f.create('native-child', { forkedFrom: source.id }, false)
+            f.store.messages.addMessage(child.id, {
+                role: 'user',
+                content: { type: 'text', text: 'native fork attachment' },
+                meta: { sentFrom: 'cli' }
+            }, 'native-fork-local-id')
+            f.store.messages.markMessagesInvoked(child.id, ['native-fork-local-id'], Date.now())
+
+            f.engine.handleSessionReady({ sid: child.id, time: Date.now() })
+            let clonedId: string | undefined
+            for (let attempt = 0; attempt < 50; attempt += 1) {
+                const message = f.store.messages.getAllMessages(child.id)
+                    .find((candidate) => candidate.localId === 'native-fork-local-id')
+                const messageContent = message?.content as {
+                    content?: { attachments?: Array<{ attachmentId?: string }> }
+                } | undefined
+                const candidate = messageContent?.content?.attachments?.[0]?.attachmentId
+                if (candidate && f.store.attachments.getForSession(candidate, 'default', child.id)) {
+                    clonedId = candidate
+                    break
+                }
+                await new Promise((resolve) => setTimeout(resolve, 10))
+            }
+            expect(clonedId).toBeDefined()
+            expect(clonedId).not.toBe(attachment.id)
+
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await f.engine.deleteSession(source.id)
+            expect((await f.store.attachments.readForSessionAsync(clonedId!, 'default', child.id))?.data)
+                .toEqual(Buffer.from('native fork original'))
         } finally {
             f.cleanup()
         }
