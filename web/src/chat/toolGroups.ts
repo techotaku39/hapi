@@ -6,7 +6,7 @@ import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInp
 import { getInputStringAny } from '@/lib/toolInputUtils'
 
 export type ToolGroupActionKind = 'read' | 'search' | 'command' | 'mutation' | 'web' | 'other'
-export type ToolGroupingMode = 'grouped' | 'classified'
+export type ToolGroupingMode = 'grouped' | 'classified' | 'legacy'
 
 export type ToolGroupSummary = {
     totalTools: number
@@ -306,12 +306,16 @@ function isInteractiveToolBlock(block: ToolCallBlock): boolean {
         || isRequestUserInputToolName(block.tool.name)
 }
 
-export function isEligibleForToolGrouping(block: ToolCallBlock, groupingMode: ToolGroupingMode = 'classified'): boolean {
+export function isEligibleForToolGrouping(block: ToolCallBlock, groupingMode: ToolGroupingMode = 'legacy'): boolean {
     const normalizedName = normalizeToolIdentifier(block.tool.name)
     if (isSubagentToolName(block.tool.name)) return false
     if (PLAN_TOOL_NAMES.has(normalizedName)) return false
     if (MILESTONE_TOOL_NAMES.has(normalizedName)) return false
     if (isInteractiveToolBlock(block)) return false
+    // User-initiated Codex shell commands are audit boundaries rather than
+    // agent activity; keep them standalone in every display mode.
+    if (block.tool.name === 'CodexBash'
+        && getInputStringAny(block.tool.input, ['command_source', 'commandSource'])?.toLowerCase() === 'usershell') return false
     if (groupingMode === 'classified' && block.tool.name === 'CodexBash' && getCodexCommandActions(block).length > 0) {
         return isCodexExplorationTool(block)
     }
@@ -321,14 +325,18 @@ export function isEligibleForToolGrouping(block: ToolCallBlock, groupingMode: To
 function getGroupingFamily(block: ToolCallBlock, groupingMode: ToolGroupingMode): 'default' | 'codex-exploration' | null {
     if (!isEligibleForToolGrouping(block, groupingMode)) return null
     if (groupingMode === 'grouped') return 'default'
-    return isCodexExplorationTool(block) ? 'codex-exploration' : null
+    if (groupingMode === 'classified') {
+        return isCodexExplorationTool(block) ? 'codex-exploration' : null
+    }
+    return isCodexExplorationTool(block) ? 'codex-exploration' : 'default'
 }
 
 function createToolGroupId(
     tools: ToolCallBlock[],
     needsOlderHistory: boolean,
     previousGroups: ToolGroupBlock[],
-    groupingFamily: 'default' | 'codex-exploration'
+    groupingFamily: 'default' | 'codex-exploration',
+    groupingMode: ToolGroupingMode
 ): string {
     const firstToolId = tools[0]?.id ?? 'unknown'
     const lastToolId = tools[tools.length - 1]?.id ?? firstToolId
@@ -339,7 +347,9 @@ function createToolGroupId(
     }
 
     const boundaryId = needsOlderHistory ? lastToolId : firstToolId
-    return groupingFamily === 'default'
+    return groupingMode === 'legacy'
+        ? `tool-group:${boundaryId}`
+        : groupingFamily === 'default'
         ? `tool-group:${boundaryId}`
         : `tool-group:${groupingFamily}:${boundaryId}`
 }
@@ -352,6 +362,7 @@ function appendToolGroup(
     visibleBlocks: VisibleChatBlock[],
     tools: ToolCallBlock[],
     groupingFamily: 'default' | 'codex-exploration',
+    groupingMode: ToolGroupingMode,
     options: ToolGroupingOptions,
     previousGroups: ToolGroupBlock[]
 ): void {
@@ -365,7 +376,7 @@ function appendToolGroup(
 
     visibleBlocks.push({
         kind: 'tool-group',
-        id: createToolGroupId(tools, needsOlderHistory, previousGroups, groupingFamily),
+        id: createToolGroupId(tools, needsOlderHistory, previousGroups, groupingFamily, groupingMode),
         createdAt: tools[0].createdAt,
         invokedAt: tools[0].invokedAt,
         firstToolId: tools[0].id,
@@ -389,7 +400,7 @@ export function buildVisibleChatBlocks(
     // Preserve the historical aggregate behavior for callers that do not
     // provide a UI presentation mode. Compact/detailed views pass
     // `groupingMode: 'classified'` explicitly from SessionChat.
-    const groupingMode = options.groupingMode ?? 'grouped'
+    const groupingMode = options.groupingMode ?? 'legacy'
     const previousGroups = options.previousGroupingMode == null || options.previousGroupingMode === groupingMode
         ? (options.previousGroups ?? [])
         : []
@@ -423,7 +434,7 @@ export function buildVisibleChatBlocks(
             continue
         }
 
-        appendToolGroup(visibleBlocks, tools, groupingFamily, options, previousGroups)
+        appendToolGroup(visibleBlocks, tools, groupingFamily, groupingMode, options, previousGroups)
         index = cursor - 1
     }
 
