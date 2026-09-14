@@ -76,6 +76,73 @@ function releaseNote(
  * guide and reusable authoring prompt.
  */
 export const RELEASE_NOTES = [
+    releaseNote('0.30.4', '2026-09-13',
+        'Refine native session and chat controls, add Codex plan actions, and stabilize request-user-input and tool inspection behavior across Android and iOS.',
+        '改进 Android 和 iOS 的原生会话与聊天控制，增加 Codex 计划操作，并提升用户输入请求和工具检查的稳定性。',
+        [
+            group('Native session experience', '原生会话体验', [
+                change('feature', 'Simplify iOS home session rows and status indicators so the session list is easier to scan.', '简化 iOS 首页会话行和状态指示器，让会话列表更易于浏览。'),
+                change('feature', 'Redesign the iOS session settings sheet for clearer session configuration.', '重新设计 iOS 会话设置面板，让会话配置更加清晰。'),
+                change('feature', 'Add native Codex plan proposal actions for reviewing and responding to plan changes.', '增加原生 Codex 计划提案操作，用于查看并回应计划变更。'),
+            ]),
+            group('Chat and tool inspection', '聊天与工具检查', [
+                change('fix', 'Keep the iOS latest button hidden after tool inspection reaches the bottom of the transcript.', '工具检查滚动到 transcript 底部后，iOS 不再错误显示“回到最新”按钮。'),
+                change('fix', 'Stabilize Android tool-group inspection on API 36.', '修复 Android API 36 上的工具组检查稳定性问题。'),
+                change('fix', 'Align request-user-input “Other” answers across clients.', '统一各客户端对用户输入请求中“其他”答案的处理。'),
+            ]),
+        ]),
+    releaseNote('0.30.3', '2026-09-13',
+        'Improve queued-message cancellation, shared Codex plan actions, notifications, and native chat navigation.',
+        '改进队列消息取消、共享 Codex 计划操作、通知和原生聊天导航。',
+        [
+            group('Conversation controls', '对话控制', [
+                change('feature', 'Synchronize shared Codex plan proposals with the corresponding Web actions.', '将共享 Codex 计划提案与对应的 Web 操作同步起来。'),
+                change('fix', 'Force-dismiss indeterminate queued rows when a queued message is canceled or edited.', '取消或编辑队列消息时，强制关闭状态不明确的队列消息行。'),
+            ]),
+            group('Notifications and navigation', '通知与导航', [
+                change('fix', 'Distinguish user questions from permission requests in notifications.', '在通知中区分用户问题和权限请求。'),
+                change('fix', 'Reduce the sensitivity of the iOS back-to-latest control during transcript navigation.', '降低 iOS transcript 导航中“回到最新”控件的触发敏感度。'),
+            ]),
+        ]),
+    releaseNote('0.30.2', '2026-09-12',
+        'Restore shared-session and Codex command behavior, and refine Android home and compact code controls.',
+        '恢复共享会话和 Codex 命令行为，并改进 Android 首页与紧凑代码操作控件。',
+        [
+            group('Shared sessions and commands', '共享会话与命令', [
+                change('fix', 'Restore shared sessions correctly after heartbeat updates and archive operations.', '修复心跳更新和归档操作后共享会话无法正确恢复的问题。'),
+                change('fix', 'Restore grouping for shared Codex commands.', '恢复共享 Codex 命令的分组显示。'),
+            ]),
+            group('Android controls', 'Android 控件', [
+                change('fix', 'Align the Android home toolbar and compact code actions.', '调整 Android 首页工具栏和紧凑代码操作的对齐方式。'),
+            ]),
+        ]),
+    releaseNote('0.30.1', '2026-09-12',
+        'Add shared Codex sessions, native tool inspection, Android relay push, CLI agent selection, and richer permission and question handling; improve model switching, previews, and session navigation.',
+        '增加共享 Codex 会话、原生工具检查、Android Relay 推送、CLI Agent 选择以及更完整的权限和问题处理；改进模型切换、预览和会话导航。',
+        [
+            group('Sessions and agent setup', '会话与 Agent 设置', [
+                change('feature', 'Share Codex sessions between the terminal and Web clients.', '支持在终端和 Web 客户端之间共享 Codex 会话。'),
+                change('feature', 'Add a CLI agent picker and stop selecting Claude as the default agent.', '增加 CLI Agent 选择器，不再默认选择 Claude。'),
+                change('feature', 'Let the Web client answer local Claude permission prompts.', '允许 Web 客户端回应本地 Claude 的权限请求。'),
+                change('feature', 'Allow existing sessions to switch to models that become available later.', '允许已有会话切换到之后新增的可用模型。'),
+            ]),
+            group('Native chat and tools', '原生聊天与工具', [
+                change('feature', 'Add a native tool inspector with compact tool groups and tool-group browsing.', '增加原生工具检查器、紧凑工具组和工具组浏览功能。'),
+                change('feature', 'Improve Android native chat reading and navigation, and enable default push through the official relay.', '改进 Android 原生聊天阅读与导航，并通过官方 Relay 默认启用推送。'),
+                change('feature', 'Support inline question answering on iOS with clearer answer details.', '支持 iOS 内联回答问题，并展示更清晰的答案详情。'),
+            ]),
+            group('Files and session context', '文件与会话上下文', [
+                change('feature', 'Add file context-menu actions for copying the path, copying the absolute path, and adding a file to the composer.', '增加文件上下文菜单操作，可复制路径、复制绝对路径或将文件添加到输入框。'),
+            ]),
+            group('Reliability and presentation', '稳定性与呈现', [
+                change('fix', 'Remove the Codex startup warning and banner.', '移除 Codex 启动警告和横幅。'),
+                change('fix', 'Improve native tool input and output previews.', '改进原生工具输入和输出预览。'),
+                change('fix', 'Prevent long user messages from blocking the iOS chat view.', '避免较长的用户消息阻塞 iOS 聊天界面。'),
+                change('fix', 'Hide dictation controls when no transcription provider is configured.', '未配置转录服务商时隐藏听写控件。'),
+                change('fix', 'Improve session-reference eligibility and clarify session-summary and usage labels.', '改进会话引用判定，并明确会话摘要和用量标签。'),
+                change('fix', 'Improve anchored chat scrolling and history loading across native clients.', '改进原生客户端中的锚定聊天滚动和历史加载。'),
+            ]),
+        ]),
     releaseNote('0.29.1', '2026-09-09',
         'Add Cursor Steer, DeepSeek Harness, remote Codex MCP and Luna fallback, richer session controls, and attachment/export tools; improve usage visibility, streaming, rewind, and cross-platform reliability.',
         '增加 Cursor Steer、DeepSeek Harness、远程 Codex MCP 与 Luna 回退、更丰富的会话控制及附件/导出工具；改进用量展示、流式处理、rewind 和跨平台可靠性。',

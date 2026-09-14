@@ -30,7 +30,7 @@ test('renders localized release announcements on the mobile About page', async (
     await expect(releaseSummary.getByText('🌟', { exact: true })).toBeVisible()
     await expect(page.getByText(latestRelease.groups[0].changes[0].text.en)).toBeVisible()
     await expect(page.locator('details').first().getByText(releaseKindLabels[latestReleaseChanges[0].kind].en, { exact: true }).first()).toBeVisible()
-    await expect(page.locator(`time[datetime="${latestRelease.date}"]`)).toBeVisible()
+    await expect(page.locator('details').first().locator(`time[datetime="${latestRelease.date}"]`)).toBeVisible()
     await expect(page.getByRole('link', { name: `Open release page for v${latestRelease.version}` })).toHaveAttribute('href', latestRelease.url)
     await expect(page.getByText('View full release notes', { exact: true })).toHaveCount(0)
 
