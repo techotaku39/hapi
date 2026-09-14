@@ -221,7 +221,10 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
     };
     const create = (method: 'thread/start' | 'thread/fork', params: Record<string, unknown>, parent?: SharedCodexRoot, initialOptions?: SharedLaunchOptions): Promise<SharedCodexRoot> => operation(async () => {
         const { hapiForkMessageLocalId, hapiForkThroughMessageLocalId, ...nativeParams } = params;
-        const forkedAtMessageLocalId = string(hapiForkMessageLocalId);
+        const nativeHistoricalBoundary = method === 'thread/fork' && parent
+            ? parent.historicalForkBoundaryLocalId(params)
+            : undefined;
+        const forkedAtMessageLocalId = string(hapiForkMessageLocalId) ?? nativeHistoricalBoundary;
         const forkedThroughMessageLocalId = typeof hapiForkThroughMessageLocalId === 'string'
             ? hapiForkThroughMessageLocalId
             : undefined;
@@ -277,10 +280,18 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         if (threadId) await withThreadOwnership(home, threadId, id, async () => {});
         const cwd = string(params.cwd) ?? existing?.bootstrap.workingDirectory ?? launch.cwd;
         const { hapiForkMessageLocalId, hapiForkThroughMessageLocalId, ...nativeParams } = params;
-        const forkedAtMessageLocalId = string(hapiForkMessageLocalId);
+        const hasNativeHistoricalBoundary = request.method === 'thread/fork'
+            && (typeof params.beforeTurnId === 'string' || typeof params.lastTurnId === 'string');
+        const nativeHistoricalBoundary = hasNativeHistoricalBoundary && existing
+            ? existing.historicalForkBoundaryLocalId(params)
+            : undefined;
+        if (hasNativeHistoricalBoundary && !string(hapiForkMessageLocalId) && !nativeHistoricalBoundary) {
+            throw new Error('Cannot persist native historical fork boundary');
+        }
+        const forkedAtMessageLocalId = string(hapiForkMessageLocalId) ?? nativeHistoricalBoundary;
         const forkedThroughMessageLocalId = typeof hapiForkThroughMessageLocalId === 'string'
             ? hapiForkThroughMessageLocalId
-            : (request.method === 'thread/fork' && !forkedAtMessageLocalId
+            : (request.method === 'thread/fork' && !forkedAtMessageLocalId && !hasNativeHistoricalBoundary
                 ? existing?.latestMessageLocalId() ?? ''
                 : undefined);
         const root = request.method === 'thread/resume' && threadId

@@ -206,6 +206,13 @@ export class SharedCodexRoot {
         await this.projection.history(response.thread); await this.refresh(); await this.refreshChildren(true);
     }
     latestMessageLocalId(): string | undefined { return this.projection?.latestMessageLocalId(); }
+    historicalForkBoundaryLocalId(params: Record<string, unknown>): string | undefined {
+        const beforeTurnId = string(params.beforeTurnId);
+        if (beforeTurnId) return this.projection.firstMessageLocalIdForTurn(beforeTurnId);
+        const lastTurnId = string(params.lastTurnId);
+        if (lastTurnId) return this.projection.firstMessageLocalIdAfterTurn(lastTurnId);
+        return undefined;
+    }
     async activate(options: SharedLaunchOptions = {}): Promise<void> {
         // Restored input cannot run before the cold-resume settings are applied.
         await this.initialSettings(options);

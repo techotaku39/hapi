@@ -45,6 +45,17 @@ export class SharedCodexProjection {
 
     turnFor(id: string): string | undefined { return this.turns.get(id); }
     latestMessageLocalId(): string | undefined { return this.latestMessageLocalIdValue; }
+    firstMessageLocalIdForTurn(turnId: string): string | undefined {
+        return [...this.turns].find(([, mappedTurnId]) => mappedTurnId === turnId)?.[0];
+    }
+    firstMessageLocalIdAfterTurn(turnId: string): string | undefined {
+        let foundTurn = false;
+        for (const [id, mappedTurnId] of this.turns) {
+            if (foundTurn && mappedTurnId !== turnId) return id;
+            if (mappedTurnId === turnId) foundTurn = true;
+        }
+        return undefined;
+    }
     reset(): void { this.converter = new AppServerEventConverter(); this.emitted.clear(); }
     private send(body: Record<string, unknown>, key: string): void {
         if (this.emitted.has(key)) return;
