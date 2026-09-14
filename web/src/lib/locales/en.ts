@@ -603,6 +603,8 @@ export default {
   'tool.requestUserInput.textPlaceholder': 'Type your answer…',
   'tool.requestUserInput.noteLabel': 'Additional note (optional)',
   'tool.requestUserInput.notePlaceholder': 'Add a note…',
+  'tool.requestUserInput.otherLabel': 'None of the above',
+  'tool.requestUserInput.otherDescription': 'Optionally, add details in notes.',
   'tool.requestUserInput.popupBlocked': 'Could not open the sign-in page. Allow popups and try again.',
   'toolGroup.title': 'Tool activity',
   'toolGroup.friendly.inspectTarget': 'Inspect {target}',
@@ -758,6 +760,7 @@ export default {
   'toast.ready.title': 'Ready for input',
   'toast.ready.body': '{agent} is waiting in {session}',
   'toast.permission.title': 'Permission Request',
+  'toast.input.title': '{agent} needs your input',
   'toast.task.completed': 'Task completed',
   'toast.task.failed': 'Task failed',
 

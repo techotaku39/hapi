@@ -601,6 +601,8 @@ export default {
   'tool.requestUserInput.textPlaceholder': '输入您的答案…',
   'tool.requestUserInput.noteLabel': '补充说明（可选）',
   'tool.requestUserInput.notePlaceholder': '添加备注…',
+  'tool.requestUserInput.otherLabel': '以上都不是',
+  'tool.requestUserInput.otherDescription': '可在备注中补充说明（可选）。',
   'tool.requestUserInput.popupBlocked': '无法打开登录页面。请允许弹出窗口后重试。',
   'toolGroup.title': '工具活动',
   'toolGroup.friendly.inspectTarget': '检查 {target}',
@@ -756,6 +758,7 @@ export default {
   'toast.ready.title': '等待输入',
   'toast.ready.body': '{agent} 正在 {session} 等待你的输入',
   'toast.permission.title': '权限请求',
+  'toast.input.title': '{agent} 需要你回答',
   'toast.task.completed': '任务完成',
   'toast.task.failed': '任务失败',
 
