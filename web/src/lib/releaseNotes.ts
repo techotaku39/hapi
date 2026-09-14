@@ -591,7 +591,6 @@ export const RELEASE_NOTES = [
             ]),
             group('Conversation and media', '对话与媒体', [
                 change('feature', 'Show message timestamps, status indicators, image lightboxes, dynamic voice controls, and inline image display.', '显示消息时间戳、状态指示器、图片灯箱、动态语音控制和内联图片。'),
-                change('feature', 'Add conversation export, session workbench tools, and file/work-directory browsing improvements.', '增加对话导出、会话工作台工具及文件/工作目录浏览改进。'),
             ]),
             group('ACP and session reliability', 'ACP 与会话稳定性', [
                 change('fix', 'Preserve ACP text chunks and context usage, handle Cursor resume IDs and errors, and keep inactive sessions and queued bars consistent.', '保留 ACP 文本分块和上下文用量；正确处理 Cursor 恢复 ID 与错误；保持非活动会话和队列提示一致。'),
