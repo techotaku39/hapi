@@ -271,6 +271,27 @@ struct SessionListStoreTests {
         #expect(LastSeenStore.isUnread(finalRow, lastSeenAt: lastSeenStore.lastSeenAt("legacy")))
     }
 
+    @Test func sessionListChangesWaitForInitialServerHydrationBeforeBaseline() async throws {
+        let (performer, store) = try makeStore()
+        let lastSeenStore = LastSeenStore()
+        store.onSessionsChanged = { sessions in
+            lastSeenStore.initializeBaseline(scopeKey: "hub-a", sessions: sessions)
+        }
+
+        let early = storeSession("early", updatedAt: 100)
+        store.applySessionEvent(try sessionUpdatedEvent("early", dataJSON: fullSessionJSON(early)))
+        #expect(lastSeenStore.lastSeenAt("early") == 0)
+
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("early", updatedAt: 100),
+            storeSummary("other", updatedAt: 50)
+        ))
+        try await store.refresh()
+
+        #expect(lastSeenStore.lastSeenAt("early") == 100)
+        #expect(lastSeenStore.lastSeenAt("other") == 50)
+    }
+
     @Test func fullSessionEventWithMismatchedIdFallsBackToListRefetch() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1", updatedAt: 100)))
