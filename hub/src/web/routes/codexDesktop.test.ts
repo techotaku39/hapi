@@ -1435,6 +1435,99 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('preserves shared-fork attachments before deleting a duplicate source session', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-codex-shared-fork-attachment-merge-'))
+        const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        const canonical = engine.getOrCreateSession(
+            'canonical-shared-fork-attachment-session',
+            { path: 'C:/work/project', host: 'test-host', codexSessionId: 'codex-thread-shared-fork-attachments' },
+            {},
+            'default'
+        )
+        const source = engine.getOrCreateSession(
+            'source-shared-fork-attachment-session',
+            { path: 'C:/work/project', host: 'test-host', codexSessionId: 'codex-thread-shared-fork-attachments' },
+            {},
+            'default'
+        )
+        const child = engine.getOrCreateSession(
+            'shared-fork-child-attachment-session',
+            {
+                path: 'C:/work/project',
+                host: 'test-host',
+                codexSessionId: 'codex-shared-fork-child',
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'source-shared-fork-1',
+                flavor: 'codex',
+                capabilities: { concurrentClients: true }
+            },
+            {},
+            'default'
+        )
+        const attachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: source.id,
+            filename: 'shared-fork-photo.png',
+            mimeType: 'image/png',
+            original: Buffer.from('shared-fork-original')
+        })
+        store.messages.addMessage(canonical.id, {
+            role: 'user',
+            content: { type: 'text', text: 'canonical shared-fork prompt' }
+        }, 'canonical-shared-fork-1')
+        store.messages.addMessage(canonical.id, {
+            role: 'agent',
+            content: { type: 'text', text: 'canonical shared-fork reply' }
+        }, 'canonical-shared-fork-2')
+        store.messages.addMessage(source.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'shared-fork prompt',
+                attachments: [{
+                    id: 'shared-fork-message-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id
+                }]
+            }
+        }, 'source-shared-fork-1')
+        store.messages.markMessagesInvoked(source.id, ['source-shared-fork-1'], Date.now())
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => engine }))
+
+        try {
+            const response = await app.request('/api/codex/merge-duplicate-sessions', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ sessionIds: ['codex-thread-shared-fork-attachments'] })
+            })
+            expect(response.status).toBe(200)
+            const childMessages = store.messages.getAllMessages(child.id)
+            const childAttachmentId = ((childMessages[0]?.content as {
+                content?: { attachments?: Array<{ attachmentId?: string }> }
+            } | undefined)?.content?.attachments?.[0]?.attachmentId)
+            expect(childAttachmentId).toBeDefined()
+            expect(childAttachmentId).not.toBe(attachment.id)
+            expect((await store.attachments.readForSessionAsync(
+                childAttachmentId!,
+                'default',
+                child.id
+            ))?.data).toEqual(Buffer.from('shared-fork-original'))
+            expect(store.attachments.getForSession(attachment.id, 'default', source.id)).toBeNull()
+        } finally {
+            engine.stop()
+            store.close()
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
     it('matches repeated prompt texts by occurrence when merging attachments', async () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-codex-repeated-attachment-merge-'))
         const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })

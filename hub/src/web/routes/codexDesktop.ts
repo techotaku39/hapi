@@ -1429,6 +1429,13 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
                 throw new Error('Cannot merge a session that became active')
             }
 
+            // Duplicate-session merge deletes the source row inside the
+            // commit transaction, so preserve any shared-fork attachment
+            // copies before ownership disappears from the store.
+            if (engine && typeof engine.prepareSessionForDeletion === 'function') {
+                await engine.prepareSessionForDeletion(source.sessionId)
+            }
+
             const copiedMessages = options.store.commitDuplicateSessionMerge({
                 namespace: options.namespace,
                 sourceSessionId: source.sessionId,
