@@ -41,4 +41,29 @@ describe('MarkdownRenderer', () => {
         expect(grid?.style.gridTemplateColumns).toBe('calc(3ch + 1.5rem) max-content')
         expect(document.querySelectorAll('[data-line-number]')).toHaveLength(123)
     })
+
+    it('renders TeX bracket math in standalone mode', () => {
+        const { container } = render(
+            <I18nProvider>
+                <MarkdownRenderer standalone content={String.raw`\[
+E = mc^2
+\]`} />
+            </I18nProvider>
+        )
+
+        expect(container.querySelector('.katex-display')).toBeTruthy()
+        expect(container.querySelector('.katex')).toBeTruthy()
+        expect(container.textContent).not.toContain('\\[')
+    })
+
+    it('renders TeX bracket math through the assistant-ui path', () => {
+        const { container } = render(
+            <I18nProvider>
+                <MarkdownRenderer content={String.raw`Result: \(x^2\)`} />
+            </I18nProvider>
+        )
+
+        expect(container.querySelector('.katex')).toBeTruthy()
+        expect(container.querySelector('.katex-display')).toBeFalsy()
+    })
 })
