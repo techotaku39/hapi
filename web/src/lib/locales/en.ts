@@ -83,6 +83,7 @@ export default {
   'sessions.filter.date': 'Date',
   'sessions.filter.loading': 'Loading scratchlist sessions…',
   'sessions.filter.error': 'Unable to load scratchlist sessions.',
+  'sessions.filter.retry': 'Retry',
   'sessions.unreadFilter.toggle': 'Unread only',
   'sessions.markAllRead.button': 'Mark all as read ({count})',
   'sessions.markAllRead.title': 'Mark all as read?',

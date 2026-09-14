@@ -1079,7 +1079,8 @@ export function SessionList(props: {
     const {
         sessionIds: scratchlistSessionIds,
         isLoading: isScratchlistStatusLoading,
-        error: scratchlistStatusError
+        error: scratchlistStatusError,
+        refetch: refetchScratchlistSessionIds
     } = useScratchlistSessionIds(api, showScratchlistOnly)
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
@@ -1731,9 +1732,13 @@ export function SessionList(props: {
     const [isRefreshing, setIsRefreshing] = useState(false)
     const isRefreshingRef = useRef(false)
     const onRefreshRef = useRef(props.onRefresh)
+    const scratchlistFilterEnabledRef = useRef(showScratchlistOnly)
+    const refetchScratchlistSessionIdsRef = useRef(refetchScratchlistSessionIds)
     useEffect(() => {
         onRefreshRef.current = props.onRefresh
-    }, [props.onRefresh])
+        scratchlistFilterEnabledRef.current = showScratchlistOnly
+        refetchScratchlistSessionIdsRef.current = refetchScratchlistSessionIds
+    }, [props.onRefresh, refetchScratchlistSessionIds, showScratchlistOnly])
 
     useEffect(() => {
         const container = scrollContainerRef.current
@@ -1755,7 +1760,11 @@ export function SessionList(props: {
             }
             isRefreshingRef.current = true
             setIsRefreshing(true)
-            void Promise.resolve(onRefreshRef.current()).finally(() => {
+            const refreshes = [Promise.resolve(onRefreshRef.current())]
+            if (scratchlistFilterEnabledRef.current) {
+                refreshes.push(refetchScratchlistSessionIdsRef.current())
+            }
+            void Promise.all(refreshes).finally(() => {
                 isRefreshingRef.current = false
                 setIsRefreshing(false)
             })
@@ -1940,8 +1949,15 @@ export function SessionList(props: {
                 ) : null}
 
                 {props.sessions.length > 0 && scratchlistStatusError && sessionFilters.scratchlist ? (
-                    <div role="alert" className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                    <div role="alert" className="flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.filter.error')}
+                        <button
+                            type="button"
+                            onClick={() => { void refetchScratchlistSessionIds() }}
+                            className="rounded-md px-2 py-1 text-[var(--app-link)] hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        >
+                            {t('sessions.filter.retry')}
+                        </button>
                     </div>
                 ) : null}
 

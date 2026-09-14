@@ -40,4 +40,21 @@ describe('useScratchlistSessionIds', () => {
         expect(result.current.isLoading).toBe(false)
         expect(getScratchlistSessionIds).not.toHaveBeenCalled()
     })
+
+    it('can recover from a failed request when refetched', async () => {
+        const getScratchlistSessionIds = vi.fn()
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockResolvedValueOnce(['session-recovered'])
+        const api = { getScratchlistSessionIds } as unknown as ApiClient
+
+        const { result } = renderHook(() => useScratchlistSessionIds(api, true), {
+            wrapper: createWrapper()
+        })
+
+        await waitFor(() => expect(result.current.error).toBe('temporary failure'))
+        await result.current.refetch()
+        await waitFor(() => expect(result.current.sessionIds).toEqual(new Set(['session-recovered'])))
+        expect(getScratchlistSessionIds).toHaveBeenCalledTimes(2)
+        expect(result.current.error).toBeNull()
+    })
 })

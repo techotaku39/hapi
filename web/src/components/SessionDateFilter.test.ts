@@ -1,5 +1,22 @@
-import { describe, expect, it } from 'vitest'
-import { getSessionDatePickerPosition } from './SessionDateFilter'
+import { describe, expect, it, vi } from 'vitest'
+import { getSessionDatePickerPosition, measureSessionDatePickerSize } from './SessionDateFilter'
+
+describe('measureSessionDatePickerSize', () => {
+    it('measures natural dimensions and restores the current bounds', () => {
+        const picker = document.createElement('div')
+        picker.style.width = '224px'
+        picker.style.maxHeight = '384px'
+        vi.spyOn(picker, 'getBoundingClientRect').mockImplementation(() => {
+            expect(picker.style.width).toBe('')
+            expect(picker.style.maxHeight).toBe('none')
+            return { width: 288, height: 512 } as DOMRect
+        })
+
+        expect(measureSessionDatePickerSize(picker)).toEqual({ width: 288, height: 512 })
+        expect(picker.style.width).toBe('224px')
+        expect(picker.style.maxHeight).toBe('384px')
+    })
+})
 
 describe('getSessionDatePickerPosition', () => {
     it('keeps the picker inside the viewport and below the menu item when space allows', () => {

@@ -7,6 +7,7 @@ export function useScratchlistSessionIds(api: ApiClient | null, enabled: boolean
     sessionIds: Set<string>
     isLoading: boolean
     error: string | null
+    refetch: () => Promise<unknown>
 } {
     const queryEnabled = Boolean(api && enabled)
     const query = useQuery({
@@ -27,5 +28,6 @@ export function useScratchlistSessionIds(api: ApiClient | null, enabled: boolean
         error: queryEnabled && query.error
             ? query.error instanceof Error ? query.error.message : 'Failed to load scratchlist status'
             : null,
+        refetch: query.refetch,
     }
 }

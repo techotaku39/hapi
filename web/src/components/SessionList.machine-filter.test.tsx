@@ -55,14 +55,18 @@ function renderWithProviders(children: ReactNode) {
     )
 }
 
-function renderSessionList(sessions: SessionSummary[], api: ApiClient | null = null) {
+function renderSessionList(
+    sessions: SessionSummary[],
+    api: ApiClient | null = null,
+    onRefresh: () => Promise<unknown> | void = vi.fn()
+) {
     return renderWithProviders(
         <SessionList
             sessions={sessions}
             selectedSessionId={null}
             onSelect={vi.fn()}
             onNewSession={vi.fn()}
-            onRefresh={vi.fn()}
+            onRefresh={onRefresh}
             isLoading={false}
             renderHeader={false}
             api={api}
@@ -234,6 +238,52 @@ describe('SessionList session filter menu', () => {
         await waitFor(() => {
             expect(screen.getByTitle('/work/draft')).toBeTruthy()
             expect(screen.queryByTitle('/work/empty')).toBeNull()
+        })
+    })
+
+    it('retries scratchlist status after a request failure', async () => {
+        const getScratchlistSessionIds = vi.fn()
+            .mockRejectedValueOnce(new Error('temporary failure'))
+            .mockResolvedValueOnce(['session-with-draft'])
+        const api = { getScratchlistSessionIds } as unknown as ApiClient
+        renderSessionList([
+            makeSession({ id: 'session-with-draft', metadata: { path: '/work/draft', name: 'Draft session' } }),
+            makeSession({ id: 'session-without-draft', metadata: { path: '/work/empty', name: 'Empty session' } })
+        ], api)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Scratchlist' }))
+
+        await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+        await waitFor(() => {
+            expect(getScratchlistSessionIds).toHaveBeenCalledTimes(2)
+            expect(screen.getByTitle('/work/draft')).toBeTruthy()
+            expect(screen.queryByTitle('/work/empty')).toBeNull()
+        })
+    })
+
+    it('refreshes scratchlist status with pull-to-refresh', async () => {
+        const getScratchlistSessionIds = vi.fn().mockResolvedValue(['session-with-draft'])
+        const onRefresh = vi.fn().mockResolvedValue(undefined)
+        const api = { getScratchlistSessionIds } as unknown as ApiClient
+        renderSessionList([
+            makeSession({ id: 'session-with-draft', metadata: { path: '/work/draft', name: 'Draft session' } })
+        ], api, onRefresh)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Scratchlist' }))
+        await waitFor(() => expect(getScratchlistSessionIds).toHaveBeenCalledTimes(1))
+
+        const scrollContainer = document.querySelector('.session-list-scrollbar-left') as HTMLElement
+        fireEvent.touchStart(scrollContainer, { touches: [{ clientY: 100 }] })
+        fireEvent.touchMove(scrollContainer, { touches: [{ clientY: 180 }] })
+        fireEvent.touchEnd(scrollContainer)
+
+        await waitFor(() => {
+            expect(onRefresh).toHaveBeenCalledTimes(1)
+            expect(getScratchlistSessionIds).toHaveBeenCalledTimes(2)
         })
     })
 

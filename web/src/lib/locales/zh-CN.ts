@@ -83,6 +83,7 @@ export default {
   'sessions.filter.date': '日期',
   'sessions.filter.loading': '正在加载草稿夹会话…',
   'sessions.filter.error': '无法加载草稿夹会话。',
+  'sessions.filter.retry': '重试',
   'sessions.unreadFilter.toggle': '仅显示未读',
   'sessions.markAllRead.button': '全部标为已读（{count}）',
   'sessions.markAllRead.title': '全部标为已读？',

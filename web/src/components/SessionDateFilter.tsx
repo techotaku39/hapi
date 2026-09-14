@@ -72,6 +72,20 @@ export type SessionDatePickerPosition = {
     maxHeight: number
 }
 
+export function measureSessionDatePickerSize(picker: HTMLElement): { width: number; height: number } {
+    const previousWidth = picker.style.width
+    const previousMaxHeight = picker.style.maxHeight
+    picker.style.width = ''
+    picker.style.maxHeight = 'none'
+    try {
+        const rect = picker.getBoundingClientRect()
+        return { width: rect.width, height: rect.height }
+    } finally {
+        picker.style.width = previousWidth
+        picker.style.maxHeight = previousMaxHeight
+    }
+}
+
 export function getSessionDatePickerPosition(
     anchor: { top: number; bottom: number; right: number; center?: number },
     picker: { width: number; height: number },
@@ -137,7 +151,7 @@ export function SessionDateRangePicker(props: {
 
         const anchorRect = anchor.getBoundingClientRect()
         const horizontalCenterRect = props.horizontalCenterRef?.current?.getBoundingClientRect()
-        const pickerRect = picker.getBoundingClientRect()
+        const pickerSize = measureSessionDatePickerSize(picker)
         setPosition(getSessionDatePickerPosition(
             {
                 top: anchorRect.top,
@@ -147,10 +161,7 @@ export function SessionDateRangePicker(props: {
                     ? horizontalCenterRect.left + horizontalCenterRect.width / 2
                     : undefined
             },
-            {
-                width: pickerRect.width,
-                height: pickerRect.height
-            },
+            pickerSize,
             {
                 width: window.innerWidth,
                 height: window.innerHeight
