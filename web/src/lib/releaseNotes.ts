@@ -659,7 +659,7 @@ export const RELEASE_NOTES = [
         '增加 Web 对话大纲和子 Agent 轨迹，并在恢复非活动会话时保留选定的权限模式。',
         [
             group('Conversation navigation', '对话导航', [
-                change('feature', 'Show a searchable conversation outline and subagent traces in tool details.', '显示可搜索的对话大纲，并在工具详情中展示子 Agent 轨迹。'),
+                change('feature', 'Show a conversation outline and subagent traces in tool details.', '显示对话大纲，并在工具详情中展示子 Agent 轨迹。'),
             ]),
             group('Session resume', '会话恢复', [
                 change('fix', 'Apply the selected permission mode when resuming an inactive session.', '恢复非活动会话时应用已选择的权限模式。'),
