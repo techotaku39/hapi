@@ -275,4 +275,120 @@ describe('shared Codex hub binding', () => {
             f.cleanup()
         }
     })
+
+    it('keeps a current-tip shared fork boundary after the child reconnects', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('current-tip-source')
+            const beforeAttachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'before-current-tip.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('before current tip')
+            })
+            const afterAttachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'after-current-tip.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('after current tip')
+            })
+            const addSourceMessage = (localId: string, text: string, attachmentId: string) => {
+                f.store.messages.addMessage(source.id, {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text,
+                        attachments: [{
+                            id: `${localId}-attachment`,
+                            filename: localId,
+                            mimeType: 'text/plain',
+                            size: 1,
+                            attachmentId
+                        }]
+                    },
+                    meta: { sentFrom: 'webapp' }
+                }, localId)
+                f.store.messages.markMessagesInvoked(source.id, [localId], Date.now())
+            }
+            addSourceMessage('before-tip', 'before', beforeAttachment.id)
+            addSourceMessage('after-tip', 'after', afterAttachment.id)
+
+            const child = f.create('current-tip-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'before-tip'
+            }, false)
+            f.engine.handleSessionReady({ sid: child.id, time: Date.now() })
+            let clonedId: string | undefined
+            for (let attempt = 0; attempt < 50; attempt += 1) {
+                const message = f.store.messages.getAllMessages(child.id)
+                    .find((candidate) => candidate.localId === 'before-tip')
+                const messageContent = message?.content as {
+                    content?: { attachments?: Array<{ attachmentId?: string }> }
+                } | undefined
+                const candidate = messageContent?.content?.attachments?.[0]?.attachmentId
+                if (candidate && f.store.attachments.getForSession(candidate, 'default', child.id)) {
+                    clonedId = candidate
+                    break
+                }
+                await new Promise((resolve) => setTimeout(resolve, 10))
+            }
+            expect(clonedId).toBeDefined()
+            expect(clonedId).not.toBe(beforeAttachment.id)
+            expect(f.store.messages.getAllMessages(child.id)
+                .some((message) => message.localId === 'after-tip')).toBe(false)
+            expect(f.store.attachments.getForSession(afterAttachment.id, 'default', child.id)).toBeNull()
+
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await f.engine.deleteSession(source.id)
+            expect((await f.store.attachments.readForSessionAsync(clonedId!, 'default', child.id))?.data)
+                .toEqual(Buffer.from('before current tip'))
+        } finally {
+            f.cleanup()
+        }
+    })
+
+    it('keeps an empty current-tip fork bounded before later parent messages', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('empty-current-tip-source')
+            const child = f.create('empty-current-tip-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: ''
+            }, false)
+            f.engine.handleSessionReady({ sid: child.id, time: Date.now() })
+
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'after-empty-tip.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('after empty tip')
+            })
+            f.store.messages.addMessage(source.id, {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'after empty tip',
+                    attachments: [{
+                        id: 'after-empty-tip-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                },
+                meta: { sentFrom: 'webapp' }
+            }, 'after-empty-tip')
+            f.store.messages.markMessagesInvoked(source.id, ['after-empty-tip'], Date.now())
+            await new Promise((resolve) => setTimeout(resolve, 20))
+
+            expect(f.store.messages.getAllMessages(child.id)).toHaveLength(0)
+            expect(f.store.attachments.getForSession(attachment.id, 'default', child.id)).toBeNull()
+        } finally {
+            f.cleanup()
+        }
+    })
 })

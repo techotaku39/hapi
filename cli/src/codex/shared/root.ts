@@ -205,6 +205,7 @@ export class SharedCodexRoot {
         this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {});
         await this.projection.history(response.thread); await this.refresh(); await this.refreshChildren(true);
     }
+    latestMessageLocalId(): string | undefined { return this.projection?.latestMessageLocalId(); }
     async activate(options: SharedLaunchOptions = {}): Promise<void> {
         // Restored input cannot run before the cold-resume settings are applied.
         await this.initialSettings(options);
@@ -488,7 +489,9 @@ export class SharedCodexRoot {
             if (messageLocalId) await this.assertBoundary(messageLocalId, beforeTurnId!);
             const child = await this.host.create('thread/fork', { ...this.freshParams(), threadId: this.threadId,
                 ...(beforeTurnId ? { beforeTurnId } : {}),
-                ...(messageLocalId ? { hapiForkMessageLocalId: messageLocalId } : {}) }, this);
+                ...(messageLocalId
+                    ? { hapiForkMessageLocalId: messageLocalId }
+                    : { hapiForkThroughMessageLocalId: this.projection.latestMessageLocalId() ?? '' }) }, this);
             await child.initialSettings({ collaborationMode: this.settings.collaborationMode });
             return { nativeSessionId: child.threadId, sessionId: child.session.sessionId };
         });

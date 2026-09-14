@@ -171,13 +171,15 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         cwd: string,
         existingSessionId?: string,
         parent?: SharedCodexRoot,
-        forkedAtMessageLocalId?: string
+        forkedAtMessageLocalId?: string,
+        forkedThroughMessageLocalId?: string
     ): Promise<SharedCodexRoot> => {
         assertRunning();
         const shared = { flavor: 'codex', startedBy: options.startedBy ?? 'terminal', workingDirectory: cwd,
             exportSessionEnv: false, reportStarted: false, metadataOverrides: { capabilities: { terminal: true, concurrentClients: true },
                 ...(parent ? { forkedFrom: parent.session.sessionId } : {}),
-                ...(forkedAtMessageLocalId ? { forkedAtMessageLocalId } : {}) } } as const;
+                ...(forkedAtMessageLocalId ? { forkedAtMessageLocalId } : {}),
+                ...(forkedThroughMessageLocalId !== undefined ? { forkedThroughMessageLocalId } : {}) } } as const;
         const bootstrap = existingSessionId
             ? await bootstrapExistingSession({ ...shared, sessionId: existingSessionId })
             : await bootstrapSession({ ...shared, agentState: { controlledByUser: false } });
@@ -218,11 +220,22 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         await notifyRunnerSessionStarted(root.session.sessionId, root.session.getMetadata() ?? root.bootstrap.metadata);
     };
     const create = (method: 'thread/start' | 'thread/fork', params: Record<string, unknown>, parent?: SharedCodexRoot, initialOptions?: SharedLaunchOptions): Promise<SharedCodexRoot> => operation(async () => {
-        const root = await prepare(string(params.cwd) ?? launch.cwd, undefined, parent);
+        const { hapiForkMessageLocalId, hapiForkThroughMessageLocalId, ...nativeParams } = params;
+        const forkedAtMessageLocalId = string(hapiForkMessageLocalId);
+        const forkedThroughMessageLocalId = typeof hapiForkThroughMessageLocalId === 'string'
+            ? hapiForkThroughMessageLocalId
+            : undefined;
+        const root = await prepare(
+            string(params.cwd) ?? launch.cwd,
+            undefined,
+            parent,
+            method === 'thread/fork' ? forkedAtMessageLocalId : undefined,
+            method === 'thread/fork' ? forkedThroughMessageLocalId : undefined
+        );
         let nativeSucceeded = false;
         try {
             runtime.pendingCreations = [...runtime.pendingCreations ?? [], root.session.sessionId]; await persist();
-            const response = record(await root.client.request(method, root.config({ ...params, ...(method === 'thread/fork' ? { deferGoalContinuation: true } : {}) })));
+            const response = record(await root.client.request(method, root.config({ ...nativeParams, ...(method === 'thread/fork' ? { deferGoalContinuation: true } : {}) })));
             nativeSucceeded = true;
             await bind(root, response, true, initialOptions); return root;
         } catch (error) {
@@ -263,8 +276,13 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         if (request.method === 'thread/resume' && existing) return { ...request, params: existing.config(params) };
         if (threadId) await withThreadOwnership(home, threadId, id, async () => {});
         const cwd = string(params.cwd) ?? existing?.bootstrap.workingDirectory ?? launch.cwd;
-        const { hapiForkMessageLocalId, ...nativeParams } = params;
+        const { hapiForkMessageLocalId, hapiForkThroughMessageLocalId, ...nativeParams } = params;
         const forkedAtMessageLocalId = string(hapiForkMessageLocalId);
+        const forkedThroughMessageLocalId = typeof hapiForkThroughMessageLocalId === 'string'
+            ? hapiForkThroughMessageLocalId
+            : (request.method === 'thread/fork' && !forkedAtMessageLocalId
+                ? existing?.latestMessageLocalId() ?? ''
+                : undefined);
         const root = request.method === 'thread/resume' && threadId
             ? await withThreadOwnership(home, threadId, id, async () => {
                 const root = await prepare(cwd, await findColdBinding(home, threadId));
@@ -273,7 +291,8 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 cwd,
                 undefined,
                 request.method === 'thread/fork' ? existing : undefined,
-                request.method === 'thread/fork' ? forkedAtMessageLocalId : undefined
+                request.method === 'thread/fork' ? forkedAtMessageLocalId : undefined,
+                request.method === 'thread/fork' ? forkedThroughMessageLocalId : undefined
             );
         try {
             if (request.method !== 'thread/resume') {

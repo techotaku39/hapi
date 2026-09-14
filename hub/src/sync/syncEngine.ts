@@ -31,7 +31,7 @@ import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
 import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
 import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
-import { selectForkTranscriptPrefix } from './forkTranscript'
+import { selectForkTranscriptPrefix, selectForkTranscriptThrough } from './forkTranscript'
 import { buildForkSessionSummary } from './forkSessionSummary'
 import {
     RpcGateway,
@@ -1510,7 +1510,13 @@ export class SyncEngine {
             const child = await this.validateSharedChild(source, rpcResult.sessionId, rpcResult.nativeSessionId)
             if (!child || child.metadata?.forkedFrom !== sessionId) return { type: 'error', message: 'Invalid shared-runtime fork binding' }
             try {
-                await this.ensureSharedForkAttachments(sessionId, namespace, child.id, messageLocalId)
+                await this.ensureSharedForkAttachments(
+                    sessionId,
+                    namespace,
+                    child.id,
+                    messageLocalId,
+                    child.metadata?.forkedThroughMessageLocalId
+                )
             } catch (error) {
                 try {
                     await this.cleanupFailedForkChild(child.id, machineId, true)
@@ -1700,6 +1706,7 @@ export class SyncEngine {
     private maybeHydrateSharedForkAttachments(session: Session | undefined): void {
         const sourceSessionId = session?.metadata?.forkedFrom
         const forkMessageLocalId = session?.metadata?.forkedAtMessageLocalId
+        const forkThroughMessageLocalId = session?.metadata?.forkedThroughMessageLocalId
         if (!session
             || session.metadata?.flavor !== 'codex'
             || session.metadata.capabilities?.concurrentClients !== true
@@ -1711,7 +1718,8 @@ export class SyncEngine {
             sourceSessionId,
             session.namespace,
             session.id,
-            forkMessageLocalId
+            forkMessageLocalId,
+            forkThroughMessageLocalId
         )
             .catch((error) => {
                 console.warn('[attachments] Failed to hydrate native shared fork', {
@@ -1731,12 +1739,15 @@ export class SyncEngine {
         sourceSessionId: string,
         namespace: string,
         targetSessionId: string,
-        messageLocalId?: string
+        messageLocalId?: string,
+        throughMessageLocalId?: string
     ): Promise<void> {
-        const prefix = selectForkTranscriptPrefix(
-            this.store.messages.getAllMessages(sourceSessionId),
-            messageLocalId
-        )
+        const sourceMessages = this.store.messages.getAllMessages(sourceSessionId)
+        const prefix = messageLocalId !== undefined
+            ? selectForkTranscriptPrefix(sourceMessages, messageLocalId)
+            : throughMessageLocalId !== undefined
+                ? selectForkTranscriptThrough(sourceMessages, throughMessageLocalId)
+                : selectForkTranscriptPrefix(sourceMessages)
         const targetByLocalId = new Map(
             this.store.messages.getAllMessages(targetSessionId)
                 .flatMap((message) => message.localId ? [[message.localId, message] as const] : [])
@@ -1801,7 +1812,8 @@ export class SyncEngine {
         sourceSessionId: string,
         namespace: string,
         targetSessionId: string,
-        messageLocalId?: string
+        messageLocalId?: string,
+        throughMessageLocalId?: string
     ): Promise<void> {
         if (this.sharedForkAttachmentsHydrated.has(targetSessionId)) return Promise.resolve()
         const existing = this.sharedForkAttachmentHydrations.get(targetSessionId)
@@ -1814,7 +1826,8 @@ export class SyncEngine {
             sourceSessionId,
             namespace,
             targetSessionId,
-            messageLocalId
+            messageLocalId,
+            throughMessageLocalId
         ).then(() => {
             this.sharedForkAttachmentsHydrated.add(targetSessionId)
         }).catch((error) => {
