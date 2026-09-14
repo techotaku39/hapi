@@ -1933,6 +1933,29 @@ export class SyncEngine {
         }
     }
 
+    /** Rebuild fork hydration protection from durable child metadata after restart. */
+    private async ensureSharedForkChildrenBeforeDelete(sourceSessionId: string): Promise<void> {
+        const children = this.sessionCache.getSessions().filter((session) =>
+            session.metadata?.forkedFrom === sourceSessionId
+            && session.metadata?.flavor === 'codex'
+            && session.metadata.capabilities?.concurrentClients === true
+        )
+        for (const child of children) {
+            const messageLocalId = child.metadata?.forkedAtMessageLocalId
+            const throughMessageLocalId = child.metadata?.forkedThroughMessageLocalId
+            if (messageLocalId === undefined && throughMessageLocalId === undefined) {
+                throw new Error(`Cannot delete source session before shared fork boundary is known: ${child.id}`)
+            }
+            await this.ensureSharedForkAttachments(
+                sourceSessionId,
+                child.namespace,
+                child.id,
+                messageLocalId,
+                throughMessageLocalId
+            )
+        }
+    }
+
     /** Kill an active fork child (if any) then delete the HAPI row. */
     private async cleanupFailedForkChild(
         childId: string,
@@ -2293,6 +2316,7 @@ export class SyncEngine {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
+        await this.ensureSharedForkChildrenBeforeDelete(sessionId)
         await this.waitForSharedForkAttachmentHydration(sessionId)
         this.clearSharedForkAttachmentTarget(sessionId)
         await this.sessionCache.deleteSession(sessionId)

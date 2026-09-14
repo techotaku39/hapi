@@ -161,7 +161,10 @@ describe('shared Codex hub binding', () => {
                 meta: { sentFrom: 'webapp' }
             }, 'native-fork-local-id')
             f.store.messages.markMessagesInvoked(source.id, ['native-fork-local-id'], Date.now())
-            const child = f.create('native-child', { forkedFrom: source.id }, false)
+            const child = f.create('native-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'native-fork-local-id'
+            }, false)
             f.store.messages.addMessage(child.id, {
                 role: 'user',
                 content: { type: 'text', text: 'native fork attachment' },
@@ -410,6 +413,55 @@ describe('shared Codex hub binding', () => {
             const cachedSource = f.engine.getSession(source.id)
             if (cachedSource) cachedSource.active = false
             await expect(f.engine.deleteSession(source.id)).resolves.toBeUndefined()
+        } finally {
+            f.cleanup()
+        }
+    })
+
+    it('rebuilds restart-safe fork hydration protection before deleting a source', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('restart-protection-source')
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'restart-protection.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('restart-protection')
+            })
+            f.store.messages.addMessage(source.id, {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'restart protection',
+                    attachments: [{
+                        id: 'restart-protection-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                }
+            }, 'restart-protection-tip')
+            f.store.messages.markMessagesInvoked(source.id, ['restart-protection-tip'], Date.now())
+
+            // Simulate a Hub restart: the child row is durable, but no child
+            // alive/ready event has rebuilt the in-memory hydration promise.
+            const child = f.engine.getOrCreateSession('restart-protection-child', {
+                ...((source.metadata ?? {}) as Record<string, unknown>),
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'restart-protection-tip'
+            }, null, 'default')
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await f.engine.deleteSession(source.id)
+
+            const childMessage = f.store.messages.getAllMessages(child.id)
+                .find((message) => message.localId === 'restart-protection-tip')
+            const clonedId = ((childMessage?.content as any)?.content?.attachments?.[0] as any)?.attachmentId
+            expect(clonedId).toBeDefined()
+            expect((await f.store.attachments.readForSessionAsync(clonedId!, 'default', child.id))?.data)
+                .toEqual(Buffer.from('restart-protection'))
         } finally {
             f.cleanup()
         }
