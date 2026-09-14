@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v26 to v28', () => {
+describe('schema migration v26 to v29', () => {
     it('adds the durable attachments table to an existing V26 database', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
         tempDirs.push(dir)
@@ -45,7 +45,7 @@ describe('schema migration v26 to v28', () => {
             'original_path',
             'created_at'
         ])
-        expect(version.user_version).toBe(28)
+        expect(version.user_version).toBe(29)
         migrated.close()
     })
 })

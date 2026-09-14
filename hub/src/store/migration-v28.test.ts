@@ -13,32 +13,30 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v27 to v29', () => {
-    it('adds the attachment deletion journal table', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v27-'))
+describe('schema migration v28 to v29', () => {
+    it('adds the attachment creation journal table', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v28-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
         const attachmentsRoot = join(dir, 'attachments')
 
         new Store(dbPath, { attachmentsRoot }).close()
         const legacy = new Database(dbPath)
-        legacy.exec('PRAGMA user_version = 27;')
+        legacy.exec(`
+            ALTER TABLE attachment_creations RENAME TO attachment_creations_legacy;
+            PRAGMA user_version = 28;
+        `)
         legacy.close()
 
         const migrated = new Store(dbPath, { attachmentsRoot })
         const internalDb = (migrated as unknown as { db: Database }).db
-        const table = internalDb.prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attachment_deletions'"
-        ).get() as { name: string } | null
-        const columns = internalDb.prepare('PRAGMA table_info(attachment_deletions)').all() as Array<{ name: string }>
+        const columns = internalDb.prepare('PRAGMA table_info(attachment_creations)').all() as Array<{ name: string }>
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
 
-        expect(table?.name).toBe('attachment_deletions')
-        expect(columns.map((column) => column.name)).toEqual(['original_path'])
-        const creations = internalDb.prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attachment_creations'"
-        ).get() as { name: string } | null
-        expect(creations?.name).toBe('attachment_creations')
+        expect(columns.map((column) => column.name)).toEqual([
+            'id', 'namespace', 'session_id', 'original_path', 'temp_path',
+            'state', 'created_at', 'resolved_at'
+        ])
         expect(version.user_version).toBe(29)
         migrated.close()
     })

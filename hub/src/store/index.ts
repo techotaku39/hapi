@@ -70,7 +70,7 @@ function sameMessageIds(left: Set<string>, right: Set<string>): boolean {
     }
     return true
 }
-const SCHEMA_VERSION: number = 28
+const SCHEMA_VERSION: number = 29
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -85,7 +85,8 @@ const REQUIRED_TABLES = [
     'events',
     'event_links',
     'attachments',
-    'attachment_deletions'
+    'attachment_deletions',
+    'attachment_creations'
 ] as const
 
 export class Store {
@@ -170,6 +171,11 @@ export class Store {
     async cleanupOrphanedAttachments(): Promise<number> {
         let deleted = 0
         let firstError: unknown
+        try {
+            deleted += await this.attachments.cleanupPendingCreations()
+        } catch (error) {
+            firstError ??= error
+        }
         try {
             deleted += await this.attachments.cleanupPendingDeletions()
         } catch (error) {
@@ -610,6 +616,7 @@ export class Store {
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
             27: () => this.migrateFromV27ToV28(),
+            28: () => this.migrateFromV28ToV29(),
         })
 
         if (currentVersion === 0) {
@@ -878,6 +885,18 @@ export class Store {
             CREATE TABLE IF NOT EXISTS attachment_deletions (
                 original_path TEXT PRIMARY KEY
             );
+            CREATE TABLE IF NOT EXISTS attachment_creations (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                temp_path TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state IN ('pending', 'committed', 'reconciled')),
+                created_at INTEGER NOT NULL,
+                resolved_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachment_creations_state
+                ON attachment_creations(state, created_at);
         `)
     }
 
@@ -1359,6 +1378,24 @@ export class Store {
             CREATE TABLE IF NOT EXISTS attachment_deletions (
                 original_path TEXT PRIMARY KEY
             );
+        `)
+    }
+
+    /** v28→v29: journal attachment creation before filesystem writes. */
+    private migrateFromV28ToV29(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS attachment_creations (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                temp_path TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state IN ('pending', 'committed', 'reconciled')),
+                created_at INTEGER NOT NULL,
+                resolved_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachment_creations_state
+                ON attachment_creations(state, created_at);
         `)
     }
 
