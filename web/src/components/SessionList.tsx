@@ -76,6 +76,9 @@ type SessionGroup = {
     machineId: string | null
     sessions: SessionSummary[]
     latestSortAt: number
+    // The search ranker uses this generic recency field for tie-breaking.
+    // Keep it aligned with the list's last-assistant-reply sort timestamp.
+    latestUpdatedAt: number
     hasActiveSession: boolean
     hasPinnedSession: boolean
 }
@@ -333,6 +336,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
                 machineId: group.machineId,
                 sessions: sortedSessions,
                 latestSortAt,
+                latestUpdatedAt: latestSortAt,
                 hasActiveSession,
                 hasPinnedSession
             }
