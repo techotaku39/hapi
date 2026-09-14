@@ -183,6 +183,8 @@
     <!-- Push notifications (B-M4a) -->
     <string name="channel_permission_requests">权限请求</string>
     <string name="channel_permission_requests_desc">智能体正在等待您允许或拒绝一次工具调用</string>
+    <string name="channel_input_requests">待回答的问题</string>
+    <string name="channel_input_requests_desc">智能体需要您进入会话回答问题</string>
     <string name="channel_ready">代理就绪</string>
     <string name="channel_ready_desc">智能体已完成并正在等待输入</string>
     <string name="channel_task_notifications">任务通知</string>
@@ -363,6 +365,8 @@
     <string name="chat_perm_other">其他…</string>
     <string name="chat_perm_optional_format">%1$s（可选）</string>
     <string name="chat_perm_add_note">添加备注…</string>
+    <string name="chat_perm_none_of_the_above">以上都不是</string>
+    <string name="chat_perm_other_note_optional">可在备注中补充说明（可选）。</string>
 
     <!-- External links (B-M2d) -->
     <string name="chat_link_open_title">打开此链接？</string>
@@ -571,4 +575,6 @@
     <string name="privacy_policy">隐私政策</string>
     <string name="privacy_open_failed">没有可打开此链接的应用。</string>
     <string name="chat_tool_resolved">已处理</string>
+    <string name="chat_plan_implement">执行计划</string>
+    <string name="chat_plan_continue">继续规划</string>
 </resources>

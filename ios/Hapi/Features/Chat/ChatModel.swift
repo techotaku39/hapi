@@ -60,6 +60,10 @@ final class ChatModel {
     private(set) var jumpToLatestToken = 0
     private(set) var isJumpingToLatest = false
     private(set) var hasTrimmedTail = false
+    private var isAwayFromBottom = false
+    var showsJumpToLatest: Bool {
+        isJumpingToLatest || hasTrimmedTail || (!followsTail && isAwayFromBottom)
+    }
     let toolInspection = ToolInspectionState()
     private(set) var visibleSurfaces = Set<String>()
     var isInspectingContent: Bool {
@@ -166,7 +170,9 @@ final class ChatModel {
         jumpTask?.cancel()
         jumpTask = nil
         isJumpingToLatest = false
-        readingViewportChanged(followsTail: false, needsOlder: false)
+        // Pause following/paging without claiming the reader left the bottom.
+        // The latest action still depends on viewport distance or a trimmed tail.
+        readingViewportChanged(followsTail: false, needsOlder: false, isAwayFromBottom: isAwayFromBottom)
     }
 
     @discardableResult
@@ -274,11 +280,12 @@ final class ChatModel {
 
     // MARK: - Actions
 
-    func readingViewportChanged(followsTail: Bool, needsOlder: Bool) {
+    func readingViewportChanged(followsTail: Bool, needsOlder: Bool, isAwayFromBottom: Bool) {
         let followsTail = isInspectingContent ? false : followsTail
         let needsOlder = isInspectingContent ? false : needsOlder
         let changedMode = self.followsTail != followsTail
         self.followsTail = followsTail
+        self.isAwayFromBottom = !followsTail && isAwayFromBottom
         viewportNeedsOlder = needsOlder
         if changedMode, !isJumpingToLatest, let controller = chat.windowController {
             if followsTail && hasTrimmedTail { jumpToLatest(); return }
@@ -407,6 +414,7 @@ final class ChatModel {
             await controller.setViewMode(.tail)
             guard !Task.isCancelled, self.chat === chat else { return }
             self.followsTail = true
+            self.isAwayFromBottom = false
             self.jumpToLatestToken += 1
         }
     }
