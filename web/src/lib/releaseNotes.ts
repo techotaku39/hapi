@@ -388,7 +388,7 @@ export const RELEASE_NOTES = [
                 change('feature', 'Add native companion FCM push, device registration, pairing QR, and Android Web Share Target integration.', '增加原生伴侣 FCM 推送、设备注册、配对二维码和 Android Web Share Target 集成。'),
             ]),
             group('Session and preview tools', '会话与预览工具', [
-                change('feature', 'Navigate image previews, show timestamps in the conversation outline, add global word wrapping for code and diffs, and export conversations.', '支持图片预览导航；在对话大纲显示时间戳；为代码和 diff 增加全局换行开关；支持导出对话。'),
+                change('feature', 'Navigate image previews, show timestamps in the conversation outline, and add global word wrapping for code and diffs.', '支持图片预览导航；在对话大纲显示时间戳；为代码和 diff 增加全局换行开关。'),
                 change('feature', 'Expose Codex Fast and Plan modes on new sessions and add clear labels for terminal cards.', '在新建会话中提供 Codex Fast 和 Plan 模式，并为终端卡片增加清晰的命令标签。'),
             ]),
             group('Agent controls and lookup', 'Agent 控制与查询', [
@@ -942,12 +942,12 @@ export const RELEASE_NOTES = [
             ]),
         ]),
     releaseNote('0.8.2', '2026-01-14',
-        'Add the end-to-end encrypted relay service and fix macOS relay startup and TLS certificate paths.',
-        '增加端到端加密 relay 服务，并修复 macOS relay 启动和 TLS 证书路径。',
+        'Fix relay runtime assets, default path configuration, and macOS TLS certificate paths.',
+        '修复 relay 运行时资源、默认路径配置和 macOS TLS 证书路径。',
         [
-            group('Encrypted relay', '加密 Relay', [
-                change('feature', 'Provide an end-to-end encrypted relay that works without tunnel configuration.', '提供无需配置隧道即可使用的端到端加密 relay。'),
+            group('Relay reliability', 'Relay 稳定性', [
                 change('fix', 'Fix the macOS relay error and use consistent TLS certificate paths.', '修复 macOS relay 错误，并统一 TLS 证书路径。'),
+                change('fix', 'Require relay runtime assets for the server command, set a default TUNWG_PATH, and support ~ in HAPI_HOME.', '服务器命令要求 relay 运行时资源，设置默认 TUNWG_PATH，并支持在 HAPI_HOME 中使用 ~。'),
             ]),
         ]),
     releaseNote('0.8.0', '2026-01-14',
