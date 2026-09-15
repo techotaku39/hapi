@@ -9,7 +9,6 @@ import {
     savePreferredLaunchSettings,
     savePreferredYoloMode
 } from './preferences'
-import { SHOW_UNAVAILABLE_AGENTS_STORAGE_KEY } from '@/hooks/useShowUnavailableAgents'
 
 const mocks = vi.hoisted(() => ({
     spawnSession: vi.fn(),
@@ -341,8 +340,7 @@ describe('NewSession launch preferences', () => {
         expect(screen.queryByDisplayValue('claude')).not.toBeInTheDocument()
     })
 
-    it('shows unavailable Agents when enabled but keeps them disabled', async () => {
-        window.localStorage.setItem(SHOW_UNAVAILABLE_AGENTS_STORAGE_KEY, 'true')
+    it('reveals unavailable Agents on demand and keeps them disabled', async () => {
         mocks.availableAgents.splice(
             0,
             mocks.availableAgents.length,
@@ -362,6 +360,8 @@ describe('NewSession launch preferences', () => {
             />
         )
 
+        expect(screen.queryByDisplayValue('agy')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'newSession.moreAgents' }))
         await waitFor(() => expect(screen.getByDisplayValue('agy')).toBeDisabled())
         expect(screen.getByDisplayValue('agy')).toHaveAccessibleName(/newSession\.agentUnavailableReason\.notFound/)
         expect(screen.getByDisplayValue('claude')).toBeEnabled()

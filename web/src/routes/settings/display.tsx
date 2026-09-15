@@ -7,7 +7,6 @@ import { getTerminalFontSizeOptions, useTerminalFontSize } from '@/hooks/useTerm
 import { getSessionListStatusModeOptions, useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
-import { useShowUnavailableAgents } from '@/hooks/useShowUnavailableAgents'
 import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionPreviewLimit, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { useSessionHeaderMetadata, type SessionHeaderMetadataKey } from '@/hooks/useSessionHeaderMetadata'
@@ -141,7 +140,6 @@ export default function SettingsDisplayPage() {
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
     const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
-    const { showUnavailableAgents, setShowUnavailableAgents } = useShowUnavailableAgents()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
     const sessionHeaderOptions: ReadonlyArray<{ key: SessionHeaderMetadataKey; labelKey: string }> = [
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
@@ -186,15 +184,6 @@ export default function SettingsDisplayPage() {
                     value={sessionListStatusMode}
                     options={getSessionListStatusModeOptions().map((option) => ({ value: option.value, label: t(option.labelKey) }))}
                     onChange={setSessionListStatusMode}
-                />
-            </SettingsSection>
-
-            <SettingsSection title={t('settings.display.newSession')}>
-                <SettingsSwitch
-                    label={t('settings.display.showUnavailableAgents')}
-                    description={t('settings.display.showUnavailableAgents.desc')}
-                    checked={showUnavailableAgents}
-                    onChange={setShowUnavailableAgents}
                 />
             </SettingsSection>
 

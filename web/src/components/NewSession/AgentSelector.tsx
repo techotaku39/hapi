@@ -1,8 +1,26 @@
+import { useState } from 'react'
 import { getFlavorLabel } from '@hapi/protocol'
 import type { AgentAvailabilityEntry } from '@hapi/protocol'
 import type { AgentType } from './types'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { useTranslation } from '@/lib/use-translation'
+
+function ChevronIcon(props: { expanded: boolean }) {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`h-3.5 w-3.5 transition-transform ${props.expanded ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+        >
+            <path d="m6 9 6 6 6-6" />
+        </svg>
+    )
+}
 
 export function AgentSelector(props: {
     agent: AgentType
@@ -11,6 +29,9 @@ export function AgentSelector(props: {
     onAgentChange: (value: AgentType) => void
 }) {
     const { t } = useTranslation()
+    const [showUnavailableAgents, setShowUnavailableAgents] = useState(false)
+    const unavailableAgents = props.agents.filter((entry) => !entry.available)
+    const visibleAgents = props.agents.filter((entry) => entry.available || showUnavailableAgents)
 
     return (
         <div className="flex flex-col gap-1.5 px-3 py-3">
@@ -18,7 +39,7 @@ export function AgentSelector(props: {
                 {t('newSession.agent')}
             </label>
             <div className="flex flex-wrap gap-x-3 gap-y-2">
-                {props.agents.map((entry) => {
+                {visibleAgents.map((entry) => {
                     const unavailableReason = entry.available
                         ? null
                         : entry.reason === 'invalid_configuration'
@@ -50,6 +71,19 @@ export function AgentSelector(props: {
                         </label>
                     )
                 })}
+                {unavailableAgents.length > 0 ? (
+                    <button
+                        type="button"
+                        aria-expanded={showUnavailableAgents}
+                        onClick={() => setShowUnavailableAgents((expanded) => !expanded)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--app-border)] px-2 py-1 text-xs text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)]"
+                    >
+                        <ChevronIcon expanded={showUnavailableAgents} />
+                        {showUnavailableAgents
+                            ? t('newSession.hideOtherAgents')
+                            : t('newSession.moreAgents')}
+                    </button>
+                ) : null}
             </div>
         </div>
     )

@@ -5,7 +5,6 @@ import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol'
 import type { AgentAvailabilityEntry, CodexCollaborationMode, GrokPermissionMode, PermissionMode, CopilotAgentMode } from '@hapi/protocol'
 import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFastMode'
 import { usePlatform } from '@/hooks/usePlatform'
-import { useShowUnavailableAgents } from '@/hooks/useShowUnavailableAgents'
 import { useMachinePathsExists } from '@/hooks/useMachinePathsExists'
 import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
@@ -99,7 +98,6 @@ export function NewSession(props: {
     const { spawnSession, isPending, error: spawnError } = useSpawnSession(props.api)
     const { sessions, refetch: refetchSessions } = useSessions(props.api)
     const { getRecentPaths, addRecentPath, getLastUsedMachineId, setLastUsedMachineId } = useRecentPaths()
-    const { showUnavailableAgents } = useShowUnavailableAgents()
 
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
@@ -305,8 +303,7 @@ export function NewSession(props: {
                 available: false,
                 reason: 'not_found' as const,
             })
-            .filter((entry) => showUnavailableAgents || entry.available)
-    }, [agentAvailability.agents, agentAvailability.error, agentAvailability.isLoading, machineId, showUnavailableAgents])
+    }, [agentAvailability.agents, agentAvailability.error, agentAvailability.isLoading, machineId])
     const availableAgents = useMemo(
         () => agentOptions
             .filter((entry) => entry.available)

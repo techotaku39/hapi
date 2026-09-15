@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol'
 import type { AgentAvailabilityEntry } from '@hapi/protocol'
 
@@ -36,7 +36,7 @@ describe('AgentSelector', () => {
         expect(renderedAgentValues()).toEqual([...CREATABLE_AGENT_FLAVORS])
     })
 
-    it('renders unavailable Agents as disabled with their reason', () => {
+    it('reveals unavailable Agents on demand with their reason', () => {
         render(
             <AgentSelector
                 agent={'claude' as AgentType}
@@ -49,8 +49,18 @@ describe('AgentSelector', () => {
             />
         )
 
+        expect(screen.queryByDisplayValue('codex')).not.toBeInTheDocument()
+        const disclosure = screen.getByRole('button', { name: 'newSession.moreAgents' })
+        expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+
+        fireEvent.click(disclosure)
+
         expect(screen.getByDisplayValue('codex')).toBeDisabled()
         expect(screen.getByTitle('newSession.agentUnavailableReason.invalidConfiguration')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'newSession.hideOtherAgents' })).toHaveAttribute('aria-expanded', 'true')
+
+        fireEvent.click(screen.getByRole('button', { name: 'newSession.hideOtherAgents' }))
+        expect(screen.queryByDisplayValue('codex')).not.toBeInTheDocument()
     })
 
     it('renders only the entries supplied by the machine availability state', () => {
