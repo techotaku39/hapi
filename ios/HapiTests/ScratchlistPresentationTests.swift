@@ -22,6 +22,20 @@ final class ScratchlistPresentationTests: XCTestCase {
                 }
             }
         }
+        let elementCount = view.accessibilityElementCount()
+        if elementCount != NSNotFound {
+            for index in 0..<elementCount {
+                guard let element = view.accessibilityElement(at: index) else { continue }
+                if let identifiable = element as? UIAccessibilityIdentification,
+                   identifiable.accessibilityIdentifier == identifier {
+                    return true
+                }
+                if let child = element as? UIView,
+                   hasAccessibilityIdentifier(identifier, in: child) {
+                    return true
+                }
+            }
+        }
         for child in view.subviews {
             if hasAccessibilityIdentifier(identifier, in: child) { return true }
         }
