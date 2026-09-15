@@ -12,14 +12,20 @@ private struct ScratchlistOfflineHTTP: HTTPPerforming {
 
 @MainActor
 final class ScratchlistPresentationTests: XCTestCase {
-    private func findView(withAccessibilityIdentifier identifier: String, in view: UIView) -> UIView? {
-        if view.accessibilityIdentifier == identifier { return view }
-        for child in view.subviews {
-            if let match = findView(withAccessibilityIdentifier: identifier, in: child) {
-                return match
+    private func hasAccessibilityIdentifier(_ identifier: String, in view: UIView) -> Bool {
+        if view.accessibilityIdentifier == identifier { return true }
+        if let elements = view.accessibilityElements {
+            for element in elements {
+                if let identifiable = element as? UIAccessibilityIdentification,
+                   identifiable.accessibilityIdentifier == identifier {
+                    return true
+                }
             }
         }
-        return nil
+        for child in view.subviews {
+            if hasAccessibilityIdentifier(identifier, in: child) { return true }
+        }
+        return false
     }
 
     private func interactor() -> ChatInteractor {
@@ -166,13 +172,13 @@ final class ScratchlistPresentationTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.endEditing(true); window.isHidden = true }
         try await Task.sleep(for: .milliseconds(250))
-        var preview = findView(withAccessibilityIdentifier: "scratchlist.recent", in: window)
+        var hasPreview = hasAccessibilityIdentifier("scratchlist.recent", in: window)
         for _ in 0..<50 {
-            if preview != nil { break }
+            if hasPreview { break }
             try await Task.sleep(for: .milliseconds(10))
-            preview = findView(withAccessibilityIdentifier: "scratchlist.recent", in: window)
+            hasPreview = hasAccessibilityIdentifier("scratchlist.recent", in: window)
         }
-        XCTAssertNotNil(preview, "The recent Scratchlist preview should be visible before focusing the composer")
+        XCTAssertTrue(hasPreview, "The recent Scratchlist preview should be visible before focusing the composer")
         interactor.focusComposer()
         func hasFirstResponder(_ view: UIView) -> Bool {
             view.isFirstResponder || view.subviews.contains(where: hasFirstResponder)
@@ -182,13 +188,13 @@ final class ScratchlistPresentationTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertTrue(hasFirstResponder(window))
-        preview = findView(withAccessibilityIdentifier: "scratchlist.recent", in: window)
+        hasPreview = hasAccessibilityIdentifier("scratchlist.recent", in: window)
         for _ in 0..<50 {
-            if preview == nil { break }
+            if !hasPreview { break }
             try await Task.sleep(for: .milliseconds(10))
-            preview = findView(withAccessibilityIdentifier: "scratchlist.recent", in: window)
+            hasPreview = hasAccessibilityIdentifier("scratchlist.recent", in: window)
         }
-        XCTAssertNil(preview, "The recent Scratchlist preview should disappear after focusing the composer")
+        XCTAssertFalse(hasPreview, "The recent Scratchlist preview should disappear after focusing the composer")
         XCTAssertEqual(interactor.composerText, "补充一条回归测试")
         XCTAssertEqual(interactor.composerDestination, .scratchlist)
         XCTAssertEqual(interactor.scratchlistCount, 3)
