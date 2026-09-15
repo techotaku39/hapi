@@ -16,7 +16,7 @@ import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { CopyIcon, CheckIcon, MarkAllReadIcon } from '@/components/icons'
+import { CheckIcon, CopyIcon, InfoIcon, MarkAllReadIcon } from '@/components/icons'
 
 function PinnedSectionIcon(props: { className?: string }) {
     return (
@@ -1290,6 +1290,11 @@ export function SessionList(props: {
     const contentSearchActive = searchMode === 'content' && normalizedQuery.length > 0
     const contentSearchReady = contentSearchActive
         && Array.from(normalizedQuery).length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
+    const contentSearchHasIncompleteResults = contentSearchActive
+        && contentSearchReady
+        && !contentSearchLoading
+        && !contentSearchError
+        && contentSearchResponse?.hasPotentiallyIncompleteResults === true
 
     useEffect(() => {
         // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
@@ -2225,7 +2230,22 @@ export function SessionList(props: {
                     </div>
                 ) : null}
 
-                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
+                {props.sessions.length > 0 && contentSearchHasIncompleteResults ? (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        className="mx-2 my-1 flex items-start gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2.5 py-2 text-xs text-[var(--app-hint)]"
+                    >
+                        <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>
+                            {contentSearchResponse?.results.length
+                                ? t('sessions.search.content.incomplete')
+                                : t('sessions.search.content.noResultsIncomplete')}
+                        </span>
+                    </div>
+                ) : null}
+
+                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && !contentSearchHasIncompleteResults && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {contentSearchActive
                             ? contentSearchReady

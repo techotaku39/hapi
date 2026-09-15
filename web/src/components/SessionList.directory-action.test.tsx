@@ -1289,6 +1289,62 @@ describe('SessionList search toggle', () => {
         }
     })
 
+    it('shows incomplete coverage when content results are nonempty', async () => {
+        vi.useFakeTimers()
+        try {
+            const session = makeSession({
+                id: 'content-partial',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Content partial', flavor: 'codex' },
+            })
+            const api = {
+                searchSessionContent: vi.fn().mockResolvedValue({
+                    results: [{
+                        session,
+                        match: {
+                            messageId: 'message-1',
+                            role: 'user' as const,
+                            seq: 1,
+                            createdAt: 1,
+                            snippet: 'partial result',
+                            truncated: false,
+                        },
+                    }],
+                    hasPotentiallyIncompleteResults: true,
+                }),
+            } as unknown as ApiClient
+
+            renderWithProviders(
+                <SessionList
+                    sessions={[session]}
+                    selectedSessionId={null}
+                    onSelect={vi.fn()}
+                    onNewSession={vi.fn()}
+                    onRefresh={vi.fn()}
+                    isLoading={false}
+                    renderHeader={false}
+                    api={api}
+                />
+            )
+
+            fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
+            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'partial' } })
+
+            await act(async () => {
+                vi.advanceTimersByTime(180)
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+
+            expect(screen.getByRole('button', { name: /Content partial/ })).toBeInTheDocument()
+            expect(screen.getByText(/Some long messages were truncated/)).toBeInTheDocument()
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
     it('does not issue a corpus search for a one-character content query', async () => {
         vi.useFakeTimers()
         try {
