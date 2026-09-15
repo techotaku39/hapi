@@ -1132,6 +1132,13 @@ function SessionChatInner(props: SessionChatProps) {
             entry.id,
             entry.updatedAt ?? entry.createdAt,
         )
+        if (scheduledAt == null) {
+            // A successful explicit Send now action leaves scratchlist mode;
+            // otherwise the next ordinary composer message would be parked
+            // instead of sent to the agent. Failed sends keep the mode on so
+            // the draft remains available for retry.
+            setScratchlistMode(false)
+        }
         return true
     }, [props.api, props.onSend, props.onScratchlistSendAccepted, props.session.id])
 

@@ -11,6 +11,7 @@ import { I18nProvider } from '../src/lib/i18n-context'
 import { useScratchlist } from '../src/lib/use-scratchlist'
 import { ScratchlistDrawer } from '../src/components/AssistantChat/ScratchlistPanel'
 import type { ApiClient } from '../src/api/client'
+import type { ScratchlistEntry } from '../src/lib/scratchlist'
 
 declare global {
     interface Window {
@@ -62,6 +63,13 @@ function App() {
         if (added) setDraft('')
     }, [draft, scratchlist])
 
+    const handleSendNow = React.useCallback(async (entry: ScratchlistEntry) => {
+        if (harnessData.current.queueSendMode === 'failure') return false
+        harnessData.current.queuedTexts.push(entry.text)
+        setScratchlistMode(false)
+        return true
+    }, [])
+
     return (
         <I18nProvider>
             <div className="flex flex-col gap-3">
@@ -104,6 +112,7 @@ function App() {
                         onUpdate={scratchlist.update}
                         onReorder={scratchlist.reorder}
                         onDelete={scratchlist.remove}
+                        onSend={handleSendNow}
                         sessionId={sessionId}
                         api={{} as ApiClient}
                     />

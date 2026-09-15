@@ -61,6 +61,44 @@ test.describe('scratchlist drawer inline editing', () => {
         await page.screenshot({ path: SCREENSHOT_PATH, fullPage: false })
     })
 
+    test('successful Send now exits scratchlist mode', async ({ page }) => {
+        await gotoFixture(page, 'scratchlist-send-now-success')
+
+        await page.getByTestId('scratchlist-mode-toggle').click()
+        await page.getByLabel('Add scratchlist entry').fill('Send this draft now')
+        await page.getByRole('button', { name: 'Add', exact: true }).click()
+
+        const row = page.getByTestId('scratchlist-entry')
+        await row.getByRole('button', { name: 'More actions' }).click()
+        await page.getByRole('menuitem', { name: 'Send now' }).click()
+
+        await expect(page.getByTestId('scratchlist-mode-toggle')).toHaveAttribute('aria-pressed', 'false')
+        await expect(page.getByTestId('scratchlist-drawer')).toHaveCount(0)
+        const harness = await page.evaluate(() => window.__scratchlistExitModeE2E)
+        expect(harness?.queuedTexts).toEqual(['Send this draft now'])
+        expect(harness?.scratchlistMode).toBe(false)
+    })
+
+    test('rejected Send now keeps scratchlist mode on', async ({ page }) => {
+        await gotoFixture(page, 'scratchlist-send-now-failure')
+
+        await page.getByTestId('scratchlist-mode-toggle').click()
+        await page.getByLabel('Queue send mode').selectOption('failure')
+        await page.getByLabel('Add scratchlist entry').fill('Keep this draft')
+        await page.getByRole('button', { name: 'Add', exact: true }).click()
+
+        const row = page.getByTestId('scratchlist-entry')
+        await row.getByRole('button', { name: 'More actions' }).click()
+        await page.getByRole('menuitem', { name: 'Send now' }).click()
+
+        await expect(row).toContainText('Keep this draft')
+        await expect(page.getByTestId('scratchlist-mode-toggle')).toHaveAttribute('aria-pressed', 'true')
+        await expect(page.getByTestId('scratchlist-drawer')).toBeVisible()
+        const harness = await page.evaluate(() => window.__scratchlistExitModeE2E)
+        expect(harness?.queuedTexts).toEqual([])
+        expect(harness?.scratchlistMode).toBe(true)
+    })
+
     test('opens row actions from the PC context menu and deletes after confirmation', async ({ page }) => {
         await gotoFixture(page, 'scratchlist-row-actions')
 
