@@ -186,10 +186,14 @@ final class ScratchlistPresentationTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.endEditing(true); window.isHidden = true }
         try await Task.sleep(for: .milliseconds(250))
+        window.layoutIfNeeded()
+        host.view.layoutIfNeeded()
         var hasPreview = hasAccessibilityIdentifier("scratchlist.recent", in: window)
         for _ in 0..<50 {
             if hasPreview { break }
             try await Task.sleep(for: .milliseconds(10))
+            window.layoutIfNeeded()
+            host.view.layoutIfNeeded()
             hasPreview = hasAccessibilityIdentifier("scratchlist.recent", in: window)
         }
         XCTAssertTrue(hasPreview, "The recent Scratchlist preview should be visible before focusing the composer")
@@ -206,6 +210,8 @@ final class ScratchlistPresentationTests: XCTestCase {
         for _ in 0..<50 {
             if !hasPreview { break }
             try await Task.sleep(for: .milliseconds(10))
+            window.layoutIfNeeded()
+            host.view.layoutIfNeeded()
             hasPreview = hasAccessibilityIdentifier("scratchlist.recent", in: window)
         }
         XCTAssertFalse(hasPreview, "The recent Scratchlist preview should disappear after focusing the composer")
