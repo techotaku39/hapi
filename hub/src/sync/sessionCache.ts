@@ -58,6 +58,7 @@ export class SessionCache {
         private readonly publisher: EventPublisher,
         private readonly lifecycleHooks: {
             beforeDeleteSession?: (sessionId: string) => Promise<void> | undefined
+            afterDeleteSession?: (sessionId: string) => void
         } = {}
     ) {
     }
@@ -1308,6 +1309,9 @@ export class SessionCache {
             if (preparation) {
                 await preparation
             }
+            if (this.sessions.get(oldSessionId)?.active) {
+                throw new Error('Cannot merge a session that became active')
+            }
         }
 
         const referencedAttachmentIds = options.deleteOldSession
@@ -1513,7 +1517,15 @@ export class SessionCache {
             // Capture durable attachment uploads that completed during the
             // awaited scratchlist migration above and delete the source in
             // one transaction. This closes the final upload/delete window.
+            const preparation = this.lifecycleHooks.beforeDeleteSession?.(oldSessionId)
+            if (preparation) {
+                await preparation
+            }
+            if (this.sessions.get(oldSessionId)?.active) {
+                throw new Error('Cannot merge a session that became active')
+            }
             this.store.transferAttachmentsAndDeleteSession(namespace, oldSessionId, newSessionId)
+            this.lifecycleHooks.afterDeleteSession?.(oldSessionId)
 
             const existed = this.sessions.delete(oldSessionId)
             if (existed) {

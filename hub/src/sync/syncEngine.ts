@@ -269,7 +269,8 @@ export class SyncEngine {
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher, {
-            beforeDeleteSession: (sessionId) => this.prepareSessionForDeletionIfNeeded(sessionId)
+            beforeDeleteSession: (sessionId) => this.prepareSessionForDeletionIfNeeded(sessionId),
+            afterDeleteSession: (sessionId) => this.clearSharedForkAttachmentTarget(sessionId)
         })
         this.eventPublisher.subscribe((event) => {
             if (event.type === 'message-received') {
@@ -2380,6 +2381,7 @@ export class SyncEngine {
         scratchlistAttachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[] = []
     ): void {
         this.sessionCache.finalizeDeletedSession(sessionId, namespace, scratchlistAttachments)
+        this.clearSharedForkAttachmentTarget(sessionId)
     }
 
     async applySessionConfig(

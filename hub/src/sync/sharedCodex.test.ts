@@ -469,6 +469,28 @@ describe('shared Codex hub binding', () => {
         }
     })
 
+    it('clears hydration failures after external child deletion finalization', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('externally-finalized-source')
+            const child = f.create('externally-finalized-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'missing-tip'
+            }, false)
+            await expect((f.engine as any).ensureSharedForkAttachments(
+                source.id, 'default', child.id, undefined, 'missing-tip'
+            )).rejects.toThrow('Fork tip boundary message not found')
+
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            expect(f.store.sessions.deleteSession(child.id, 'default')).toBe(true)
+            f.engine.finalizeDeletedSession(child.id, 'default')
+            await expect(f.engine.deleteSession(source.id)).resolves.toBeUndefined()
+        } finally {
+            f.cleanup()
+        }
+    })
+
     it('settles child hydration before deleting an inactive shared fork child', async () => {
         const f = fixture()
         let releaseClone: (() => void) | undefined

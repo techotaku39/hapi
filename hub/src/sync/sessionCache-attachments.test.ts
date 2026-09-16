@@ -30,6 +30,21 @@ function setup() {
     return { store, cache, root }
 }
 
+function setupWithDeleteHooks(hooks: {
+    beforeDeleteSession?: (sessionId: string) => Promise<void> | undefined
+    afterDeleteSession?: (sessionId: string) => void
+}) {
+    const root = mkdtempSync(join(tmpdir(), 'hapi-session-attachments-hooks-'))
+    const store = new Store(':memory:', { attachmentsRoot: join(root, 'attachments') })
+    const events: SyncEvent[] = []
+    const publisher: EventPublisher = {
+        emit: (event: SyncEvent) => events.push(event)
+    } as unknown as EventPublisher
+    const cache = new SessionCache(store, publisher, hooks)
+    contexts.push({ store, root })
+    return { store, cache, root, events }
+}
+
 function makeSessions(cache: SessionCache) {
     const oldSession = cache.getOrCreateSession(
         'attachment-merge-old-' + Math.random().toString(36).slice(2, 8),
@@ -132,6 +147,27 @@ describe('durable attachment session lifecycle', () => {
         expect(store.sessions.getSessionByNamespace(oldSession.id, 'default')).not.toBeNull()
         expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
         expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
+    })
+
+    it('rechecks source activity before final automatic consolidation deletion', async () => {
+        let beforeDeleteCalls = 0
+        let cache!: SessionCache
+        const context = setupWithDeleteHooks({
+            beforeDeleteSession: async (sessionId) => {
+                beforeDeleteCalls += 1
+                if (beforeDeleteCalls === 2) {
+                    cache.getSession(sessionId)!.active = true
+                }
+            }
+        })
+        cache = context.cache
+        const { oldSession, newSession } = makeSessions(cache)
+
+        await expect(cache.mergeSessions(oldSession.id, newSession.id, 'default'))
+            .rejects.toThrow('Cannot merge a session that became active')
+        expect(beforeDeleteCalls).toBe(2)
+        expect(context.store.sessions.getSessionByNamespace(oldSession.id, 'default')).not.toBeNull()
+        expect(context.store.sessions.getSessionByNamespace(newSession.id, 'default')).not.toBeNull()
     })
 
     it('keeps unreferenced uploads on a live source during history-only merge', async () => {
