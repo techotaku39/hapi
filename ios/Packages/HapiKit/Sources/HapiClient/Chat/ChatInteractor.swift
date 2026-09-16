@@ -475,8 +475,8 @@ public final class ChatInteractor {
                 attachmentNames: preview.attachmentNames,
                 scheduledAt: row.scheduledAt,
                 canAct: canAct,
-                canEdit: canAct && Self.canEditQueuedRow(row),
                 canSteer: canAct && thinking && row.scheduledAt == nil && row.status != .indeterminate,
+                canEdit: canAct && Self.canEditQueuedRow(row),
                 indeterminate: row.status == .indeterminate
             )
         }
