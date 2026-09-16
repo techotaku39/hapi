@@ -76,6 +76,44 @@ function releaseNote(
  * guide and reusable authoring prompt.
  */
 export const RELEASE_NOTES = [
+    releaseNote('0.30.7', '2026-09-15',
+        'Improve permission and unread-session workflows, add adaptive iPad navigation, and add macOS 27 support.',
+        '改进权限和未读会话流程，增加自适应 iPad 导航，并支持 macOS 27。',
+        [
+            group('Native navigation and platform support', '原生导航与平台支持', [
+                change('feature', 'Add adaptive iPad navigation and simplify the iOS session settings flow.', '增加自适应 iPad 导航，并简化 iOS 会话设置流程。'),
+                change('feature', 'Add compatibility support for macOS 27.', '增加对 macOS 27 的兼容支持。'),
+            ]),
+            group('Permission, pairing, and unread state', '权限、配对与未读状态', [
+                change('fix', 'Preserve AskUserQuestion draft answers across session switches and finalize canceled permission requests without surfacing stale answers.', '在切换会话时保留 AskUserQuestion 草稿答案，并完成已取消的权限请求，避免显示过期答案。'),
+                change('fix', 'Filter the unread badge count through the same sidebar eligibility rules used by the session list.', '让未读徽章数量使用与会话列表相同的侧栏可见性规则进行过滤。'),
+                change('fix', 'Correct the iOS pairing setup guide link.', '修复 iOS 配对设置指南链接。'),
+            ]),
+        ]),
+    releaseNote('0.30.6', '2026-09-14',
+        'Improve relevance-ranked session search, cold-session loading, Markdown math, iOS Scratchlist and pairing, and native controls.',
+        '改进按相关性排序的会话搜索、冷会话加载、Markdown 数学公式、iOS Scratchlist 与配对，以及原生控件。',
+        [
+            group('Session search and loading', '会话搜索与加载', [
+                change('feature', 'Rank session-list search results by field weight and inverse document frequency for more useful matches.', '根据字段权重和逆文档频率对会话列表搜索结果排序，让匹配结果更有用。'),
+            ]),
+            group('Native Scratchlist', '原生 Scratchlist', [
+                change('feature', 'Integrate Scratchlist with the iOS chat composer and simplify its UI and interactions.', '将 Scratchlist 集成到 iOS 聊天输入框，并简化其界面与交互。'),
+            ]),
+            group('Session loading fixes', '会话加载修复', [
+                change('fix', 'Keep pinned-session dividers coherent when search results use relevance ordering.', '搜索结果按相关性排序时，保持置顶会话分隔线的一致性。'),
+                change('fix', 'Render cold sessions from a small initial page instead of loading their full history immediately.', '从较小的初始页面渲染冷会话，不再立即加载完整历史。'),
+            ]),
+            group('Markdown and sharing', 'Markdown 与分享', [
+                change('fix', 'Support bracket-delimited LaTeX in Markdown and conversation share exports.', '在 Markdown 和对话分享导出中支持方括号包裹的 LaTeX。'),
+            ]),
+            group('Native pairing fixes', '原生配对修复', [
+                change('fix', 'Improve manual pairing input and paste handling, and refine approval cards and inline action styling.', '改进手动配对输入和粘贴处理，并优化审批卡片与内联操作样式。'),
+            ]),
+            group('Agent and session controls', 'Agent 与会话控件', [
+                change('fix', 'Dismiss Codex plan actions when continuing planning, align directory browsing and session creation, and restore Codex titles and iOS collaboration controls.', '继续制定计划时关闭 Codex 计划操作；统一目录浏览和会话创建；恢复 Codex 标题和 iOS 协作控件。'),
+            ]),
+        ]),
     releaseNote('0.30.4', '2026-09-13',
         'Refine native session and chat controls, add Codex plan actions, and stabilize request-user-input and tool inspection behavior across Android and iOS.',
         '改进 Android 和 iOS 的原生会话与聊天控制，增加 Codex 计划操作，并提升用户输入请求和工具检查的稳定性。',
