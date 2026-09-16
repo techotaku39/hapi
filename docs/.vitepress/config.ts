@@ -14,7 +14,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Quick Start', link: '/guide/quick-start' },
-      { text: 'App', link: 'https://app.hapi.run', target: '_blank' }
+      { text: 'Web App', link: 'https://app.hapi.run', target: '_blank' }
     ],
 
     sidebar: [
@@ -23,6 +23,7 @@ export default defineConfig({
         items: [
           { text: 'Quick Start', link: '/guide/quick-start' },
           { text: 'Installation', link: '/guide/installation' },
+          { text: 'Native Apps', link: '/guide/native-apps' },
           { text: 'PWA', link: '/guide/pwa' }
         ]
       },
@@ -38,7 +39,8 @@ export default defineConfig({
       {
         text: 'Agents',
         items: [
-          { text: 'Agents', link: '/guide/agents' }
+          { text: 'Agents', link: '/guide/agents' },
+          { text: 'Codex Usage & Limits', link: '/guide/codex-shared-sessions' }
         ]
       },
       {
@@ -52,7 +54,19 @@ export default defineConfig({
       {
         text: 'API',
         items: [
-          { text: 'Native Companion Contract', link: '/api/native-companion-contract' }
+          { text: 'Native Companion Contract', link: '/api/native-companion-contract' },
+          {
+            text: 'Client contract',
+            items: [
+              { text: 'Overview', link: '/api/client-contract/' },
+              { text: 'Auth', link: '/api/client-contract/auth' },
+              { text: 'REST', link: '/api/client-contract/rest' },
+              { text: 'SSE', link: '/api/client-contract/sse' },
+              { text: 'Pagination', link: '/api/client-contract/pagination' },
+              { text: 'Messages', link: '/api/client-contract/messages' },
+              { text: 'Errors', link: '/api/client-contract/errors' }
+            ]
+          }
         ]
       }
     ],
@@ -62,7 +76,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the AGPL-3.0 License.',
+      message: 'Released under the AGPL-3.0 License. · <a href="/docs/privacy.html">Privacy Policy</a>',
       copyright: 'Copyright © 2025-present'
     },
 

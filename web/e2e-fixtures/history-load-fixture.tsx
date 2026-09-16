@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '../src/index.css'
 import type { ApiClient } from '../src/api/client'
 import type { DecryptedMessage, MessagesResponse, Session } from '../src/types/api'
@@ -27,7 +28,9 @@ const BASE_AT = 1_700_000_000_000
 
 type Probe = {
     requests: { direction: string; beforeSeq: number | null; limit: number | undefined; at: number }[]
+    loadMore: () => Promise<unknown>
     refetch: () => Promise<void>
+    releaseLatest: () => void
     windowState: () => { messageCount: number; oldestSeq: number | null; newestSeq: number | null }
 }
 
@@ -37,9 +40,14 @@ declare global {
     }
 }
 
+let releaseLatestResponse = () => {}
+let latestResponseGate: Promise<void> | null = null
+
 window.__probe = {
     requests: [],
+    loadMore: async () => {},
     refetch: async () => {},
+    releaseLatest: () => releaseLatestResponse(),
     windowState: () => {
         const state = getMessageWindowState(SESSION_ID)
         return {
@@ -62,14 +70,28 @@ window.__probe = {
 // - ?epochBump=1 — `before` responses carry a newer epoch than the tail, so
 //   every older-page request hits the store's deliberate epoch-mismatch stop
 //   (reset + tail resync, typed terminal stop).
+// - ?coldInitial=1 — honor the production cold-open latest-page size instead
+//   of returning the legacy full 200-row page used by this fixture by default.
 // - ?slowBefore=1 — delay older-page responses long enough for a normal tail
 //   synchronization to invalidate an in-flight request.
+// - ?cachedReentry=1 — hydrate one cached message before activation, so the
+//   latest-tail refresh path can be tested independently from a cold window.
+// - ?holdLatest=1 — hold the latest response until `window.__probe.releaseLatest`
+//   is called, making the cached first paint observable.
 const fixtureParams = new URLSearchParams(window.location.search)
 const shortPages = fixtureParams.has('shortPages')
 const failBeforeCount = Number(fixtureParams.get('failBefore') ?? '0')
 const filteredOlder = fixtureParams.has('filteredOlder')
 const epochBump = fixtureParams.has('epochBump')
+const coldInitial = fixtureParams.has('coldInitial')
 const slowBefore = fixtureParams.has('slowBefore')
+const cachedReentry = fixtureParams.has('cachedReentry')
+const holdLatest = fixtureParams.has('holdLatest')
+if (holdLatest) {
+    latestResponseGate = new Promise<void>((resolve) => {
+        releaseLatestResponse = resolve
+    })
+}
 let beforeAttempts = 0
 
 const allMessages: DecryptedMessage[] = Array.from({ length: TOTAL_MESSAGES }, (_, index) => {
@@ -86,6 +108,24 @@ const allMessages: DecryptedMessage[] = Array.from({ length: TOTAL_MESSAGES }, (
         invokedAt: BASE_AT + seq
     } as DecryptedMessage
 })
+
+if (cachedReentry) {
+    const cachedMessages = allMessages.slice(-200)
+    const cachedOldest = cachedMessages[0]
+    const cachedNewest = cachedMessages.at(-1)
+    if (!cachedOldest || !cachedNewest) throw new Error('Expected cached fixture messages')
+    const oldestPosition = positionOf(cachedOldest)
+    const newestPosition = positionOf(cachedNewest)
+    sessionStorage.setItem(`hapi:message-window:v2:${SESSION_ID}`, JSON.stringify({
+        messages: cachedMessages,
+        hasMore: true,
+        oldestPositionAt: oldestPosition.at,
+        oldestPositionSeq: oldestPosition.seq,
+        newestPositionAt: newestPosition.at,
+        newestPositionSeq: newestPosition.seq,
+        epoch: 1
+    }))
+}
 
 function positionOf(message: DecryptedMessage): { at: number; seq: number } {
     return { at: message.invokedAt ?? message.createdAt, seq: message.seq ?? 0 }
@@ -111,6 +151,8 @@ function pageFrom(messages: DecryptedMessage[], overrides: Partial<MessagesRespo
 }
 
 const fakeApi = {
+    getHubSettings: async () => ({ sessionSummaryInChat: false }),
+    getMachines: async () => ({ machines: [] }),
     getMessages: async (_sessionId: string, query: {
         limit?: number
         beforeAt?: number | null
@@ -118,10 +160,11 @@ const fakeApi = {
         afterAt?: number | null
         afterSeq?: number | null
     }): Promise<MessagesResponse> => {
-        const limit = query.limit ?? 200
+        const requestedLimit = query.limit ?? 200
         let direction = 'latest'
         if (query.beforeSeq != null || query.beforeAt != null) direction = 'before'
         else if (query.afterSeq != null || query.afterAt != null) direction = 'after'
+        const limit = direction === 'latest' && !coldInitial && !cachedReentry ? 200 : requestedLimit
         window.__probe.requests.push({
             direction,
             beforeSeq: query.beforeSeq ?? null,
@@ -134,6 +177,10 @@ const fakeApi = {
             resolve,
             direction === 'before' && slowBefore ? 500 : 50
         ))
+
+        if (direction === 'latest' && latestResponseGate) {
+            await latestResponseGate
+        }
 
         if (direction === 'before') {
             beforeAttempts += 1
@@ -216,6 +263,7 @@ function FixtureThread() {
         setViewMode
     } = useMessages(fakeApi, SESSION_ID)
 
+    window.__probe.loadMore = loadMore
     window.__probe.refetch = refetch
 
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
@@ -285,8 +333,16 @@ function FixtureThread() {
     )
 }
 
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: { retry: false }
+    }
+})
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
-    <I18nProvider>
-        <FixtureThread />
-    </I18nProvider>
+    <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+            <FixtureThread />
+        </I18nProvider>
+    </QueryClientProvider>
 )
