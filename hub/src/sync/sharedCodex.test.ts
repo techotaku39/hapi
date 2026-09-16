@@ -554,6 +554,75 @@ describe('shared Codex hub binding', () => {
         }
     })
 
+    it('protects shared-fork attachments during automatic session consolidation', async () => {
+        const f = fixture()
+        try {
+            const source = f.create('automatic-merge-source')
+            const target = f.create('automatic-merge-target')
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'automatic-merge.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('automatic merge original')
+            })
+            f.store.messages.addMessage(source.id, {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'automatic merge source',
+                    attachments: [{
+                        id: 'automatic-merge-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                }
+            }, 'automatic-merge-tip')
+            f.store.messages.markMessagesInvoked(source.id, ['automatic-merge-tip'], Date.now())
+            const child = f.create('automatic-merge-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'automatic-merge-tip',
+                capabilities: { concurrentClients: false }
+            }, false)
+            const storedChild = f.store.sessions.getSession(child.id)
+            if (!storedChild?.metadata) throw new Error('Missing child metadata')
+            f.store.sessions.updateSessionMetadata(
+                child.id,
+                { ...storedChild.metadata, capabilities: { concurrentClients: true } },
+                storedChild.metadataVersion,
+                'default',
+                { touchUpdatedAt: false }
+            )
+            ;(f.engine as any).sessionCache.refreshSession(child.id)
+            for (const sessionId of [source.id, target.id, child.id]) {
+                const cached = f.engine.getSession(sessionId)
+                if (cached) cached.active = false
+            }
+
+            const cache = (f.engine as any).sessionCache
+            await cache.mergeSessions(source.id, target.id, 'default')
+
+            const childMessage = f.store.messages.getAllMessages(child.id)
+                .find((message) => message.localId === 'automatic-merge-tip')
+            const childAttachmentId = ((childMessage?.content as {
+                content?: { attachments?: Array<{ attachmentId?: string }> }
+            } | undefined)?.content?.attachments?.[0]?.attachmentId)
+            expect(childAttachmentId).toBeDefined()
+            expect(childAttachmentId).not.toBe(attachment.id)
+            expect((await f.store.attachments.readForSessionAsync(
+                childAttachmentId!,
+                'default',
+                child.id
+            ))?.data).toEqual(Buffer.from('automatic merge original'))
+            expect(f.store.attachments.getForSession(attachment.id, 'default', source.id)).toBeNull()
+            expect(f.store.attachments.getForSession(attachment.id, 'default', target.id)).not.toBeNull()
+        } finally {
+            f.cleanup()
+        }
+    })
+
     it('rebuilds restart-safe fork hydration protection before deleting a source', async () => {
         const f = fixture()
         try {

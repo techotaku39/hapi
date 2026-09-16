@@ -106,6 +106,34 @@ describe('durable attachment session lifecycle', () => {
         expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
     })
 
+    it('rolls back late attachment transfer when source deletion fails', async () => {
+        const { store, cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+        const attachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: oldSession.id,
+            filename: 'late-atomic-finalize.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('late atomic finalize')
+        })
+        const db = (store as unknown as { db: Database }).db
+        db.exec(`
+            CREATE TRIGGER fail_late_atomic_session_delete
+            BEFORE DELETE ON sessions
+            WHEN OLD.id = '${oldSession.id}'
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated final session deletion failure');
+            END;
+        `)
+
+        expect(() => store.transferAttachmentsAndDeleteSession(
+            'default', oldSession.id, newSession.id
+        )).toThrow('simulated final session deletion failure')
+        expect(store.sessions.getSessionByNamespace(oldSession.id, 'default')).not.toBeNull()
+        expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
+        expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
+    })
+
     it('keeps unreferenced uploads on a live source during history-only merge', async () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)

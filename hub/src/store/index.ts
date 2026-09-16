@@ -1429,6 +1429,25 @@ export class Store {
         })()
     }
 
+    /** Transfer uploads that arrived during merge work and delete the source atomically. */
+    transferAttachmentsAndDeleteSession(
+        namespace: string,
+        fromSessionId: string,
+        toSessionId: string
+    ): number {
+        return this.db.transaction(() => {
+            const transferred = this.db.prepare(`
+                UPDATE attachments
+                SET session_id = ?
+                WHERE namespace = ? AND session_id = ?
+            `).run(toSessionId, namespace, fromSessionId)
+            if (!this.sessions.deleteSession(fromSessionId, namespace)) {
+                throw new Error('Failed to delete old session during merge')
+            }
+            return Number(transferred.changes)
+        })()
+    }
+
     /** v28→v29: journal attachment creation before filesystem writes. */
     private migrateFromV28ToV29(): void {
         this.db.exec(`

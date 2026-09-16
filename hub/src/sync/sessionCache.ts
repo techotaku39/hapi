@@ -55,7 +55,10 @@ export class SessionCache {
 
     constructor(
         private readonly store: Store,
-        private readonly publisher: EventPublisher
+        private readonly publisher: EventPublisher,
+        private readonly lifecycleHooks: {
+            beforeDeleteSession?: (sessionId: string) => Promise<void> | undefined
+        } = {}
     ) {
     }
 
@@ -1298,6 +1301,15 @@ export class SessionCache {
             throw new Error('Session not found for merge')
         }
 
+        if (options.deleteOldSession) {
+            // Shared-fork hydration must copy source-owned attachment bytes
+            // before the atomic message/ownership move below.
+            const preparation = this.lifecycleHooks.beforeDeleteSession?.(oldSessionId)
+            if (preparation) {
+                await preparation
+            }
+        }
+
         const referencedAttachmentIds = options.deleteOldSession
             ? null
             : collectDurableAttachmentIds(this.store.messages.getAllMessages(oldSessionId))
@@ -1499,12 +1511,9 @@ export class SessionCache {
 
         if (options.deleteOldSession) {
             // Capture durable attachment uploads that completed during the
-            // awaited scratchlist migration above before deleting the source.
-            this.store.attachments.transferSession(namespace, oldSessionId, newSessionId)
-            const deleted = this.store.sessions.deleteSession(oldSessionId, namespace)
-            if (!deleted) {
-                throw new Error('Failed to delete old session during merge')
-            }
+            // awaited scratchlist migration above and delete the source in
+            // one transaction. This closes the final upload/delete window.
+            this.store.transferAttachmentsAndDeleteSession(namespace, oldSessionId, newSessionId)
 
             const existed = this.sessions.delete(oldSessionId)
             if (existed) {

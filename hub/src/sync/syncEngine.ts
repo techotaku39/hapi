@@ -268,7 +268,9 @@ export class SyncEngine {
         sseManager: SSEManager,
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
-        this.sessionCache = new SessionCache(store, this.eventPublisher)
+        this.sessionCache = new SessionCache(store, this.eventPublisher, {
+            beforeDeleteSession: (sessionId) => this.prepareSessionForDeletionIfNeeded(sessionId)
+        })
         this.eventPublisher.subscribe((event) => {
             if (event.type === 'message-received') {
                 if (!this.sessionCache.getSession(event.sessionId)?.hasConversationContent
@@ -2339,7 +2341,6 @@ export class SyncEngine {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.prepareSessionForDeletion(sessionId)
-        await this.settleSharedForkAttachmentTarget(sessionId)
         await this.sessionCache.deleteSession(sessionId)
         this.clearSharedForkAttachmentTarget(sessionId)
     }
@@ -2348,6 +2349,23 @@ export class SyncEngine {
     async prepareSessionForDeletion(sessionId: string): Promise<void> {
         await this.ensureSharedForkChildrenBeforeDelete(sessionId)
         await this.waitForSharedForkAttachmentHydration(sessionId)
+        await this.settleSharedForkAttachmentTarget(sessionId)
+    }
+
+    /** Avoid yielding on ordinary consolidations that have no shared-fork dependency. */
+    private prepareSessionForDeletionIfNeeded(sessionId: string): Promise<void> | undefined {
+        const hasChild = this.sessionCache.getSessions().some((session) => (
+            session.metadata?.forkedFrom === sessionId
+            && session.metadata?.flavor === 'codex'
+            && session.metadata.capabilities?.concurrentClients === true
+        ))
+        if (!hasChild
+            && !this.sharedForkAttachmentHydrations.has(sessionId)
+            && !this.sharedForkAttachmentHydrationsBySource.has(sessionId)
+            && !this.sharedForkAttachmentFailures.has(sessionId)) {
+            return undefined
+        }
+        return this.prepareSessionForDeletion(sessionId)
     }
 
     /** Wait for a hydration targeting a child before deleting that child. */
