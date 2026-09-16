@@ -725,6 +725,45 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: 'Expand 1' })).toBeInTheDocument()
     })
 
+    it('preserves combined project collapse state when a temporary search hides it', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        localStorage.setItem('hapi-pin-in-progress-sessions-mode', 'combined')
+        const sessions = [
+            makeSession({
+                id: 'collapsed-project-session',
+                updatedAt: 200,
+                metadata: { path: '/work/kept', name: 'Kept project', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'visible-project-session',
+                updatedAt: 100,
+                metadata: { path: '/work/other', name: 'Other project', flavor: 'codex' },
+            }),
+        ]
+
+        render(renderSessionList(sessions, null))
+
+        const keptHeader = screen.getByTitle('/work/kept')
+        const keptPanel = keptHeader.nextElementSibling
+        if (!keptPanel) {
+            throw new Error('Expected kept project panel')
+        }
+        expect(keptPanel).toHaveAttribute('data-open', 'true')
+        fireEvent.click(keptHeader)
+        expect(keptPanel).not.toHaveAttribute('data-open', 'true')
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
+            target: { value: 'other' },
+        })
+        expect(screen.queryByTitle('/work/kept')).toBeNull()
+
+        fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
+            target: { value: '' },
+        })
+        expect(screen.getByTitle('/work/kept').nextElementSibling).not.toHaveAttribute('data-open', 'true')
+    })
+
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const onNewSessionInDirectory = vi.fn()

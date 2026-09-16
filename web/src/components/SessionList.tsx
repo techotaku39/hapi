@@ -1330,6 +1330,10 @@ export function SessionList(props: {
         () => groupSessionsByDirectory(allSessions),
         [allSessions]
     )
+    const unfilteredGroups = useMemo(
+        () => groupSessionsByDirectory(sidebarSessions),
+        [sidebarSessions]
+    )
     const machineFilters = useMemo(
         () => groupByMachine(allGroups, resolveMachineLabel),
         [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
@@ -1833,10 +1837,11 @@ export function SessionList(props: {
                 knownKeys.add(g.key)
                 knownKeys.add(`sessions::${g.key}`)
             }
-            for (const g of combinedActiveGroups) {
+            // Keep both Combined-mode states for projects hidden by search,
+            // machine, unread, or active-only filters. Those filters should not
+            // reset a user's explicit collapse choice.
+            for (const g of unfilteredGroups) {
                 knownKeys.add(`${g.key}::active`)
-            }
-            for (const g of combinedArchivedGroups) {
                 knownKeys.add(`${g.key}::archived`)
             }
             let changed = false
@@ -1848,7 +1853,7 @@ export function SessionList(props: {
             }
             return changed ? next : prev
         })
-    }, [allGroups, combinedActiveGroups, combinedArchivedGroups])
+    }, [allGroups, unfilteredGroups])
 
     // Clean up reveal caps for groups that no longer exist.
     useEffect(() => {
