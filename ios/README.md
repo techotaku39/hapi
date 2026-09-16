@@ -323,6 +323,53 @@ Xcode still synchronizes old extraction results, then rebuild/reopen and inspect
 the diff. Do not hide the file with `.gitignore`, `skip-worktree`, or restore it
 unconditionally: real translation edits must remain visible and committed.
 
+### iPad navigation and resizing
+
+iPad uses a two-column `NavigationSplitView`: sessions in the sidebar and a
+separate detail navigation stack for chat → files/viewer/process pages. The
+sidebar requests 280–360pt (320pt ideal); the system collapses the same view
+hierarchy in compact windows. iPhone keeps its single `NavigationStack`.
+Cold starts and hub switches show **Select a session** until the user chooses
+one; notifications and new sessions can open an ID before its list row arrives.
+Selection and nested navigation are in memory, not restored across launches.
+
+`SessionNavigationState` owns selection, detail path and column visibility;
+neither window geometry nor sidebar filters may clear them. Reopening the
+selected session preserves its file page. A different/superseding session resets
+the entire detail stack, but a late superseding callback cannot replace a chat
+the user has since selected. Only explicit removal events or successful archive
+operations clear the current selection, never optimistic list removal/rollback.
+
+The detail's identity is hub/session-based, so resizing preserves the existing
+chat, draft, attachment tray and transcript anchor. Native menus/sheets remain
+native; the hub sign-out and attachment dialogs are anchored to their buttons.
+The explicit scene manifest disables additional HAPI windows, **not** Split
+View/Stage Manager with other apps. Do not enable scene-manifest generation
+(which generates multiple-scene support) or require full screen. Multiwindow,
+third-column inspectors, keyboard shortcuts and drag/drop are not implemented.
+
+`SessionNavigationTests` covers navigation/removal policy and the built scene
+manifest. `SessionSplitPresentationTests` runs on an actual iPad simulator and
+uses the production split shell/list plus a real, non-networked chat specimen:
+selection, compact programmatic opening, nested Back, filtering, resizing,
+reading anchors, draft/attachment retention and surface/subscription lifetime.
+CI keeps the iPhone suite and adds iPad Air 11-inch (M2). Run it locally with:
+
+```sh
+HAPI_TEST_DEVICE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M2 \
+  ios/scripts/test-transcript.sh \
+    -only-testing:HapiTests/SessionNavigationTests \
+    -only-testing:HapiTests/SessionSplitPresentationTests
+```
+
+Optional specimens: set `TEST_RUNNER_HAPI_IPAD_CAPTURE` to a **new temporary
+directory**; these are synthetic test conversations, not release screenshots.
+Before release, manually verify mini/11/13-inch portrait and landscape,
+one-third/half-screen and Stage Manager resizing, keyboard docking/floating and
+hardware-keyboard transitions, light/dark, Chinese/English, Dynamic Type and
+VoiceOver. Check settings/new-session/Scratchlist/inspection sheets while
+resizing, notification navigation, and background/foreground reconnection.
+
 ### Reading typography
 
 `HapiUI` separates color palettes (`HapiTheme`) from resolved Dynamic Type
@@ -358,6 +405,41 @@ new temporary directory, never over the release gallery:
 TEST_RUNNER_HAPI_TYPOGRAPHY_CAPTURE=/tmp/hapi-typography-review \
   ios/scripts/test-transcript.sh -only-testing:HapiTests/TypographySnapshotTests
 ```
+
+### Session settings
+
+The chat gear presents a single-page model/effort and permission/collaboration
+form. All selections use native menus; permission explanations, high-risk
+indicators, model-loading/retry states and update feedback remain in the form.
+Changes apply immediately; Done only dismisses. On regular-width windows the
+production toolbar button anchors an iPad popover; compact windows adapt that
+same presenter to a medium/large sheet (large for accessibility text).
+
+Run the configuration and real-presentation tests on both phone and tablet:
+
+```sh
+ios/scripts/test-transcript.sh \
+  -only-testing:HapiTests/SessionConfigTests \
+  -only-testing:HapiTests/SessionConfigPresentationTests
+
+# Pick a device type supported by your installed runtime:
+# xcrun simctl list devicetypes
+HAPI_TEST_DEVICE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5-12GB \
+  ios/scripts/test-transcript.sh \
+  -only-testing:HapiTests/SessionConfigTests \
+  -only-testing:HapiTests/SessionConfigPresentationTests
+```
+
+The script creates and deletes an isolated simulator. Set
+`TEST_RUNNER_HAPI_SESSION_CONFIG_CAPTURE` to a new temporary directory for
+non-networked specimens (not App Store screenshots). A widened phone window
+is not a substitute for the native iPad anchor test. For AXe-driven menu and
+Done checks, run only
+`SessionConfigPresentationTests/testNativeDevicePresentationIsAnchoredOnIPadAndAdaptsOnIPhone`
+with `TEST_RUNNER_HAPI_SESSION_CONFIG_INTERACTIVE_SECONDS=180`; leave the panel
+open when the pause ends. Manually check rotation and Split View/window resizing,
+menu checkmarks and risk announcements, and that closing preserves the chat's
+draft and reading position.
 
 ### Tool inspection
 
