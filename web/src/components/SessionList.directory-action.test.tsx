@@ -677,6 +677,54 @@ describe('SessionList collapse behavior', () => {
         expect(screen.queryByRole('button', { name: /Archived task 3/ })).toBeNull()
     })
 
+    it('keeps combined search results ranked within and across project groups', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        localStorage.setItem('hapi-pin-in-progress-sessions-mode', 'combined')
+        localStorage.setItem('hapi-session-preview-limit', '2')
+        const sessions = [
+            makeSession({
+                id: 'home-path-match-1',
+                updatedAt: 300,
+                metadata: { path: '/home/user/project', name: 'Recent path match 1', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'home-path-match-2',
+                updatedAt: 200,
+                metadata: { path: '/home/user/project', name: 'Recent path match 2', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'home-title-match',
+                updatedAt: 100,
+                metadata: { path: '/home/user/project', name: 'Home Assistant', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'home-other-project',
+                updatedAt: 400,
+                metadata: { path: '/home/user/other', name: 'Unrelated project', flavor: 'codex' },
+            }),
+        ]
+
+        render(renderSessionList(sessions, null))
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
+            target: { value: 'home' },
+        })
+
+        const projectHeader = screen.getByTitle('/home/user/project')
+        const otherHeader = screen.getByTitle('/home/user/other')
+        expect(projectHeader).toAppearBefore(otherHeader)
+
+        const projectPanel = projectHeader.nextElementSibling
+        if (!projectPanel) {
+            throw new Error('Expected ranked project panel')
+        }
+        const projectContent = within(projectPanel as HTMLElement)
+        expect(projectContent.getByRole('button', { name: /Home Assistant/ })).toBeInTheDocument()
+        expect(projectContent.getByRole('button', { name: /Recent path match 1/ })).toBeInTheDocument()
+        expect(projectContent.queryByRole('button', { name: /Recent path match 2/ })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Expand 1' })).toBeInTheDocument()
+    })
+
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const onNewSessionInDirectory = vi.fn()

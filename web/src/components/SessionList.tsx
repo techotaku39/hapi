@@ -1412,16 +1412,30 @@ export function SessionList(props: {
         [machineFilteredSessions, pinInProgressSessions, searchScoreIndex, hasTextQuery]
     )
     const combinedActiveGroups = useMemo(
-        () => isCombinedPinLayout
-            ? groupSessionsByDirectory(machineFilteredSessions.filter((session) => !session.globalPinned && session.active))
-            : [],
-        [machineFilteredSessions, isCombinedPinLayout]
+        () => {
+            if (!isCombinedPinLayout) return []
+            const grouped = groupSessionsByDirectory(
+                machineFilteredSessions.filter((session) => !session.globalPinned && session.active)
+            )
+            if (searchScoreIndex && hasTextQuery) {
+                return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
+            }
+            return grouped
+        },
+        [machineFilteredSessions, isCombinedPinLayout, searchScoreIndex, hasTextQuery]
     )
     const combinedArchivedGroups = useMemo(
-        () => isCombinedPinLayout
-            ? groupSessionsByDirectory(machineFilteredSessions.filter((session) => !session.globalPinned && !session.active))
-            : [],
-        [machineFilteredSessions, isCombinedPinLayout]
+        () => {
+            if (!isCombinedPinLayout) return []
+            const grouped = groupSessionsByDirectory(
+                machineFilteredSessions.filter((session) => !session.globalPinned && !session.active)
+            )
+            if (searchScoreIndex && hasTextQuery) {
+                return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
+            }
+            return grouped
+        },
+        [machineFilteredSessions, isCombinedPinLayout, searchScoreIndex, hasTextQuery]
     )
     // Directory groups whose rows all floated to the pinned sections still
     // render an action-only header so copy-path / new-session-in-directory
