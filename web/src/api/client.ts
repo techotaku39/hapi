@@ -581,6 +581,16 @@ export class ApiClient {
         })
     }
 
+    async clearConversation(sessionId: string): Promise<{ sessionId: string }> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/clear`, { method: 'POST' })
+    }
+
+    async implementCodexPlan(sessionId: string, planId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/plan/implement`, {
+            method: 'POST', body: JSON.stringify({ planId })
+        })
+    }
+
     async forkConversation(sessionId: string, messageLocalId?: string): Promise<{ sessionId: string }> {
         return await this.request<{ sessionId: string }>(
             `/api/sessions/${encodeURIComponent(sessionId)}/fork`,

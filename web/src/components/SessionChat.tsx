@@ -691,6 +691,7 @@ function SessionChatInner(props: SessionChatProps) {
     const canViewAgentTerminal =
         props.session.metadata?.startingMode === 'pty' && props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
+    const focusComposerRef = useRef<(() => void) | null>(null)
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [rememberedTailBoundary, setRememberedTailBoundary] = useState<{
@@ -938,9 +939,15 @@ function SessionChatInner(props: SessionChatProps) {
                 }
                 return accepted
             }
+            if (!scratchlistMode && scheduledAt == null && !attachments?.length
+                && props.session.metadata?.capabilities?.concurrentClients && /^\/(clear|new)\s*$/.test(text.trim())) {
+                const result = await props.api.clearConversation(props.session.id)
+                await navigate({ to: '/sessions/$sessionId', params: { sessionId: result.sessionId }, ...PRESERVE_SESSION_SIDEBAR_SCROLL })
+                return { attemptId: null }
+            }
             return props.onSend(text, attachments, scheduledAt, deliveryMode)
         },
-        [props.onSend, props.api, props.session.id, scratchlist, scratchlistMode],
+        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients, navigate, scratchlist, scratchlistMode],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     // The effort-options query is keyed by session only, so a stale option
@@ -959,7 +966,7 @@ function SessionChatInner(props: SessionChatProps) {
         if (!effortInvalidationKey || sessionModel === undefined) return
         void queryClient.resetQueries({ queryKey: effortInvalidationKey, exact: true })
     }, [agentFlavor, sessionId, sessionModel, queryClient])
-    const controlledByUser = props.session.agentState?.controlledByUser === true
+    const controlledByUser = props.session.agentState?.controlledByUser === true && !props.session.metadata?.capabilities?.concurrentClients
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
     const codexModelsState = useCodexModels({
         api: props.api,
@@ -1085,7 +1092,8 @@ function SessionChatInner(props: SessionChatProps) {
             machineModels: machineCursorModelsState.availableModels,
             cliModelSkus: sessionCliModelSkus,
             sessionModel: props.session.model,
-            sessionCurrentModelId: cursorModelsState.currentModelId
+            sessionCurrentModelId: cursorModelsState.currentModelId,
+            autoRestartLabel: t('session.modelChange.cursorAutoRestart')
         })
     }, [
         agentFlavor,
@@ -1093,7 +1101,8 @@ function SessionChatInner(props: SessionChatProps) {
         cursorModelsState.currentModelId,
         machineCursorModelsState.availableModels,
         sessionCliModelSkus,
-        props.session.model
+        props.session.model,
+        t
     ])
     const agyModelsState = useAgyModels({
         api: props.api,
@@ -1920,6 +1929,7 @@ function SessionChatInner(props: SessionChatProps) {
                         disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
+                        onContinuePlan={() => focusComposerRef.current?.()}
                         historyActionPending={historyActionPending}
                         onForkConversation={controlledByUser ? undefined : onForkConversation}
                         onRewindConversation={controlledByUser ? undefined : onRewindConversation}
@@ -2003,6 +2013,7 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
 
                         <HappyComposer
+                        focusInputRef={focusComposerRef}
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
                         canRestoreAttachments={props.session.active}
@@ -2024,6 +2035,7 @@ function SessionChatInner(props: SessionChatProps) {
                         modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
                         effort={props.session.effort}
                         agentFlavor={agentFlavor}
+                        concurrentClients={props.session.metadata?.capabilities?.concurrentClients}
                         availableModelOptions={
                             agentFlavor === 'codex'
                                 ? codexModelOptions
