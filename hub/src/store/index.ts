@@ -4,7 +4,7 @@ import { dirname } from 'node:path'
 
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
-import { addMessage } from './messages'
+import { addMessage, mergeSessionMessagesInTransaction } from './messages'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
@@ -1388,6 +1388,45 @@ export class Store {
                 original_path TEXT PRIMARY KEY
             );
         `)
+    }
+
+    /** Merge messages and attachment ownership atomically for session consolidation. */
+    mergeSessionMessagesAndAttachments(
+        namespace: string,
+        fromSessionId: string,
+        toSessionId: string,
+        attachmentIds: readonly string[] | null
+    ): { moved: number; oldMaxSeq: number; newMaxSeq: number; attachmentsMoved: number } {
+        return this.db.transaction(() => {
+            const movedMessages = mergeSessionMessagesInTransaction(
+                this.db,
+                fromSessionId,
+                toSessionId
+            )
+            let attachmentResult
+            if (attachmentIds === null) {
+                attachmentResult = this.db.prepare(`
+                    UPDATE attachments
+                    SET session_id = ?
+                    WHERE namespace = ? AND session_id = ?
+                `).run(toSessionId, namespace, fromSessionId)
+            } else if (attachmentIds.length > 0) {
+                const placeholders = attachmentIds.map(() => '?').join(', ')
+                attachmentResult = this.db.prepare(`
+                    UPDATE attachments
+                    SET session_id = ?
+                    WHERE namespace = ?
+                      AND session_id = ?
+                      AND id IN (${placeholders})
+                `).run(toSessionId, namespace, fromSessionId, ...attachmentIds)
+            } else {
+                return { ...movedMessages, attachmentsMoved: 0 }
+            }
+            return {
+                ...movedMessages,
+                attachmentsMoved: Number(attachmentResult.changes)
+            }
+        })()
     }
 
     /** v28→v29: journal attachment creation before filesystem writes. */

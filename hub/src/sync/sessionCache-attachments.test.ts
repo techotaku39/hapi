@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
 import { join } from 'node:path'
@@ -62,6 +63,47 @@ describe('durable attachment session lifecycle', () => {
         expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).toBeNull()
         expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).not.toBeNull()
         expect(existsSync(attachment.originalPath)).toBe(true)
+    })
+
+    it('rolls back message movement when attachment ownership transfer fails', async () => {
+        const { store, cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+        const attachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: oldSession.id,
+            filename: 'atomic-merge.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('atomic merge')
+        })
+        const message = store.messages.addMessage(oldSession.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'atomic merge',
+                attachments: [{
+                    id: 'atomic-merge-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id
+                }]
+            }
+        }, 'atomic-merge-message')
+        const db = (store as unknown as { db: Database }).db
+        db.exec(`
+            CREATE TRIGGER fail_atomic_attachment_transfer
+            BEFORE UPDATE OF session_id ON attachments
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated attachment ownership failure');
+            END;
+        `)
+
+        await expect(cache.mergeSessions(oldSession.id, newSession.id, 'default'))
+            .rejects.toThrow('simulated attachment ownership failure')
+        expect(store.messages.getAllMessages(oldSession.id).map((row) => row.id)).toEqual([message.id])
+        expect(store.messages.getAllMessages(newSession.id)).toHaveLength(0)
+        expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
+        expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
     })
 
     it('keeps unreferenced uploads on a live source during history-only merge', async () => {

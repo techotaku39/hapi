@@ -1130,7 +1130,7 @@ export function moveUninvokedMessages(db: Database, fromSessionId: string, toSes
     })()
 }
 
-export function mergeSessionMessages(
+export function mergeSessionMessagesInTransaction(
     db: Database,
     fromSessionId: string,
     toSessionId: string
@@ -1142,53 +1142,57 @@ export function mergeSessionMessages(
     const oldMaxSeq = getMaxSeq(db, fromSessionId)
     const newMaxSeq = getMaxSeq(db, toSessionId)
 
-    try {
-        db.exec('BEGIN')
-
-        if (newMaxSeq > 0 && oldMaxSeq > 0) {
-            prepareCached(db, 
-                'UPDATE messages SET seq = seq + ? WHERE session_id = ?'
-            ).run(oldMaxSeq, toSessionId)
-        }
-
-        const collisions = prepareCached(db, `
-            SELECT local_id FROM messages
-            WHERE session_id = ? AND local_id IS NOT NULL
-            INTERSECT
-            SELECT local_id FROM messages
-            WHERE session_id = ? AND local_id IS NOT NULL
-        `).all(toSessionId, fromSessionId) as Array<{ local_id: string }>
-
-        if (collisions.length > 0) {
-            const localIds = collisions.map((row) => row.local_id)
-            const placeholders = localIds.map(() => '?').join(', ')
-            // Force-invoke the older copy: clearing local_id severs its ack path
-            // (markMessagesInvoked matches by local_id), so leaving invoked_at
-            // NULL would strand the row in the queued floating bar forever.
-            // Use COALESCE so an already-invoked row keeps its server timestamp.
-            prepareCached(db, 
-                `UPDATE messages
-                 SET local_id = NULL,
-                     invoked_at = COALESCE(invoked_at, created_at)
-                 WHERE session_id = ? AND local_id IN (${placeholders})`
-            ).run(fromSessionId, ...localIds)
-        }
-
-        const result = prepareCached(db, 
-            'UPDATE messages SET session_id = ? WHERE session_id = ?'
-        ).run(toSessionId, fromSessionId)
-
-        if (result.changes > 0) {
-            bumpMessageEpoch(db, fromSessionId)
-            bumpMessageEpoch(db, toSessionId)
-        }
-
-        db.exec('COMMIT')
-        return { moved: result.changes, oldMaxSeq, newMaxSeq }
-    } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
+    if (newMaxSeq > 0 && oldMaxSeq > 0) {
+        prepareCached(db,
+            'UPDATE messages SET seq = seq + ? WHERE session_id = ?'
+        ).run(oldMaxSeq, toSessionId)
     }
+
+    const collisions = prepareCached(db, `
+        SELECT local_id FROM messages
+        WHERE session_id = ? AND local_id IS NOT NULL
+        INTERSECT
+        SELECT local_id FROM messages
+        WHERE session_id = ? AND local_id IS NOT NULL
+    `).all(toSessionId, fromSessionId) as Array<{ local_id: string }>
+
+    if (collisions.length > 0) {
+        const localIds = collisions.map((row) => row.local_id)
+        const placeholders = localIds.map(() => '?').join(', ')
+        // Force-invoke the older copy: clearing local_id severs its ack path
+        // (markMessagesInvoked matches by local_id), so leaving invoked_at
+        // NULL would strand the row in the queued floating bar forever.
+        // Use COALESCE so an already-invoked row keeps its server timestamp.
+        prepareCached(db,
+            `UPDATE messages
+             SET local_id = NULL,
+                 invoked_at = COALESCE(invoked_at, created_at)
+             WHERE session_id = ? AND local_id IN (${placeholders})`
+        ).run(fromSessionId, ...localIds)
+    }
+
+    const result = prepareCached(db,
+        'UPDATE messages SET session_id = ? WHERE session_id = ?'
+    ).run(toSessionId, fromSessionId)
+
+    if (result.changes > 0) {
+        bumpMessageEpoch(db, fromSessionId)
+        bumpMessageEpoch(db, toSessionId)
+    }
+
+    return { moved: result.changes, oldMaxSeq, newMaxSeq }
+}
+
+export function mergeSessionMessages(
+    db: Database,
+    fromSessionId: string,
+    toSessionId: string
+): { moved: number; oldMaxSeq: number; newMaxSeq: number } {
+    return db.transaction(() => mergeSessionMessagesInTransaction(
+        db,
+        fromSessionId,
+        toSessionId
+    ))()
 }
 
 /**

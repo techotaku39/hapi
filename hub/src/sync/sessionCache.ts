@@ -1301,17 +1301,12 @@ export class SessionCache {
         const referencedAttachmentIds = options.deleteOldSession
             ? null
             : collectDurableAttachmentIds(this.store.messages.getAllMessages(oldSessionId))
-        const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
-        if (referencedAttachmentIds === null) {
-            this.store.attachments.transferSession(namespace, oldSessionId, newSessionId)
-        } else {
-            this.store.attachments.transferIds(
-                namespace,
-                oldSessionId,
-                newSessionId,
-                referencedAttachmentIds
-            )
-        }
+        const movedMessages = this.store.mergeSessionMessagesAndAttachments(
+            namespace,
+            oldSessionId,
+            newSessionId,
+            referencedAttachmentIds
+        )
         // mergeSessions deletes the source. mergeSessionHistory keeps it alive
         // with the original socket, so its notify chain must stay on that id.
         if (options.deleteOldSession) {

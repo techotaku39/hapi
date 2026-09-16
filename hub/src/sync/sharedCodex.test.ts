@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -423,6 +423,133 @@ describe('shared Codex hub binding', () => {
             if (cachedSource) cachedSource.active = false
             await expect(f.engine.deleteSession(source.id)).resolves.toBeUndefined()
         } finally {
+            f.cleanup()
+        }
+    })
+
+    it('retains failed hydration protection until child deletion succeeds', async () => {
+        const f = fixture()
+        let restoreDelete: (() => void) | undefined
+        try {
+            const source = f.create('failed-deletion-source')
+            const child = f.create('failed-deletion-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'missing-tip'
+            }, false)
+            await expect((f.engine as any).ensureSharedForkAttachments(
+                source.id, 'default', child.id, undefined, 'missing-tip'
+            )).rejects.toThrow('Fork tip boundary message not found')
+
+            const cache = (f.engine as any).sessionCache
+            const originalDelete = cache.deleteSession.bind(cache)
+            let failDeletion = true
+            cache.deleteSession = async (sessionId: string) => {
+                if (failDeletion && sessionId === child.id) {
+                    throw new Error('simulated child deletion failure')
+                }
+                return await originalDelete(sessionId)
+            }
+            restoreDelete = () => { cache.deleteSession = originalDelete }
+
+            const cachedChild = f.engine.getSession(child.id)
+            if (cachedChild) cachedChild.active = false
+            await expect(f.engine.deleteSession(child.id)).rejects.toThrow('simulated child deletion failure')
+            expect(f.engine.getSession(child.id)).toBeDefined()
+
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await expect(f.engine.deleteSession(source.id)).rejects.toThrow('Fork tip boundary message not found')
+
+            failDeletion = false
+            await expect(f.engine.deleteSession(child.id)).resolves.toBeUndefined()
+            await expect(f.engine.deleteSession(source.id)).resolves.toBeUndefined()
+        } finally {
+            restoreDelete?.()
+            f.cleanup()
+        }
+    })
+
+    it('settles child hydration before deleting an inactive shared fork child', async () => {
+        const f = fixture()
+        let releaseClone: (() => void) | undefined
+        let restoreClone: (() => void) | undefined
+        try {
+            const source = f.create('settle-target-source')
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'settle-target.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('settle target original')
+            })
+            f.store.messages.addMessage(source.id, {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'settle target',
+                    attachments: [{
+                        id: 'settle-target-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                }
+            }, 'settle-target-tip')
+            f.store.messages.markMessagesInvoked(source.id, ['settle-target-tip'], Date.now())
+            const child = f.create('settle-target-child', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'settle-target-tip',
+                capabilities: { concurrentClients: false }
+            }, false)
+            const storedChild = f.store.sessions.getSession(child.id)
+            if (!storedChild?.metadata) throw new Error('Missing child metadata')
+            f.store.sessions.updateSessionMetadata(
+                child.id,
+                { ...storedChild.metadata, capabilities: { concurrentClients: true } },
+                storedChild.metadataVersion,
+                'default',
+                { touchUpdatedAt: false }
+            )
+            ;(f.engine as any).sessionCache.refreshSession(child.id)
+            const cachedChild = f.engine.getSession(child.id)
+            if (cachedChild) cachedChild.active = false
+
+            let signalCloneStarted!: () => void
+            const cloneStarted = new Promise<void>((resolve) => { signalCloneStarted = resolve })
+            const cloneGate = new Promise<void>((resolve) => { releaseClone = resolve })
+            const originalClone = f.store.attachments.cloneMessageAttachments.bind(f.store.attachments)
+            const cloneSpy = spyOn(f.store.attachments, 'cloneMessageAttachments').mockImplementation(async (...args) => {
+                signalCloneStarted()
+                await cloneGate
+                return await originalClone(...args)
+            })
+            restoreClone = () => cloneSpy.mockRestore()
+
+            const hydration = (f.engine as any).ensureSharedForkAttachments(
+                source.id,
+                'default',
+                child.id,
+                undefined,
+                'settle-target-tip'
+            ) as Promise<void>
+            await cloneStarted
+            const deletion = f.engine.deleteSession(child.id)
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            expect(f.store.sessions.getSessionByNamespace(child.id, 'default')).not.toBeNull()
+            releaseClone?.()
+            await hydration
+            await deletion
+            restoreClone?.()
+            restoreClone = undefined
+
+            expect(f.store.sessions.getSessionByNamespace(child.id, 'default')).toBeNull()
+            const cachedSource = f.engine.getSession(source.id)
+            if (cachedSource) cachedSource.active = false
+            await expect(f.engine.deleteSession(source.id)).resolves.toBeUndefined()
+        } finally {
+            releaseClone?.()
+            restoreClone?.()
             f.cleanup()
         }
     })

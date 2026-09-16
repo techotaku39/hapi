@@ -2339,14 +2339,21 @@ export class SyncEngine {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.prepareSessionForDeletion(sessionId)
-        this.clearSharedForkAttachmentTarget(sessionId)
+        await this.settleSharedForkAttachmentTarget(sessionId)
         await this.sessionCache.deleteSession(sessionId)
+        this.clearSharedForkAttachmentTarget(sessionId)
     }
 
     /** Preserve shared-fork attachment copies before an external deletion transaction removes the source row. */
     async prepareSessionForDeletion(sessionId: string): Promise<void> {
         await this.ensureSharedForkChildrenBeforeDelete(sessionId)
         await this.waitForSharedForkAttachmentHydration(sessionId)
+    }
+
+    /** Wait for a hydration targeting a child before deleting that child. */
+    private async settleSharedForkAttachmentTarget(targetSessionId: string): Promise<void> {
+        const pending = this.sharedForkAttachmentHydrations.get(targetSessionId)
+        if (pending) await pending.catch(() => {})
     }
 
     finalizeDeletedSession(
