@@ -14,6 +14,42 @@ describe('getModelOptionsForFlavor', () => {
         expect(options.some((option) => option.value === null)).toBe(false)
     })
 
+    it('offers the machine catalog in an AGY session instead of the built-in mirror', () => {
+        const live = [
+            { value: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+            { value: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' }
+        ]
+
+        const options = getModelOptionsForFlavor('agy', 'gemini-3.8-flash-high', live)
+
+        expect(options).toEqual(live)
+        expect(options.some((option) => option.value === null)).toBe(false)
+    })
+
+    it('keeps the running AGY model selectable, and readable, when the machine catalog no longer lists it', () => {
+        const live = [{ value: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' }]
+
+        const options = getModelOptionsForFlavor('agy', 'gemini-3.5-flash-medium', live)
+
+        expect(options[0]).toEqual({ value: 'gemini-3.5-flash-medium', label: 'Gemini 3.5 Flash (Medium)' })
+        expect(options.some((option) => option.value === 'gemini-3.8-flash-high')).toBe(true)
+    })
+
+    it('falls back to the wire id for a running AGY model nobody has a label for', () => {
+        const options = getModelOptionsForFlavor('agy', 'gemini-9.9-experimental', [
+            { value: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' }
+        ])
+
+        expect(options[0]).toEqual({ value: 'gemini-9.9-experimental', label: 'gemini-9.9-experimental' })
+    })
+
+    it('falls back to the built-in AGY mirror until the machine catalog arrives', () => {
+        const withoutCatalog = getModelOptionsForFlavor('agy', null, [])
+
+        expect(withoutCatalog).toEqual(getModelOptionsForFlavor('agy', null))
+        expect(withoutCatalog.length).toBeGreaterThan(0)
+    })
+
     it('returns Gemini model options for gemini flavor', () => {
         const options = getModelOptionsForFlavor('gemini')
         expect(options[0]).toEqual({ value: null, label: 'Default' })
@@ -101,7 +137,7 @@ describe('getModelOptionsForFlavor', () => {
     it('returns only default/current for cursor before models are discovered (no claude fallback)', () => {
         const options = getModelOptionsForFlavor('cursor', 'composer-2.5')
         expect(options).toEqual([
-            { value: null, label: 'Auto' },
+            { value: 'auto', label: 'Auto' },
             { value: 'composer-2.5', label: 'composer-2.5' }
         ])
     })
@@ -120,12 +156,12 @@ describe('getModelOptionsForFlavor', () => {
     it('does not inject raw wire id when dual picker base is already listed', () => {
         const wire = 'claude-opus-4-8[thinking=true,context=300k,effort=high,fast=false]'
         const options = getModelOptionsForFlavor('cursor', wire, [
-            { value: null, label: 'Auto' },
+            { value: 'auto', label: 'Auto' },
             { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
             { value: 'composer-2.5', label: 'Composer 2.5' },
         ])
         expect(options).toEqual([
-            { value: null, label: 'Auto' },
+            { value: 'auto', label: 'Auto' },
             { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
             { value: 'composer-2.5', label: 'Composer 2.5' },
         ])
@@ -134,11 +170,11 @@ describe('getModelOptionsForFlavor', () => {
     it('injects unknown wire id only when catalog lacks base and wire', () => {
         const wire = 'claude-opus-4-9[effort=high,fast=false]'
         const options = getModelOptionsForFlavor('cursor', wire, [
-            { value: null, label: 'Auto' },
+            { value: 'auto', label: 'Auto' },
             { value: 'composer-2.5', label: 'Composer 2.5' },
         ])
         expect(options).toEqual([
-            { value: null, label: 'Auto' },
+            { value: 'auto', label: 'Auto' },
             { value: wire, label: wire },
             { value: 'composer-2.5', label: 'Composer 2.5' },
         ])
@@ -198,6 +234,17 @@ describe('getNextModelForFlavor', () => {
         expect(getNextModelForFlavor('agy', null)).toBe(firstConcrete)
         expect(getNextModelForFlavor('agy', 'auto')).toBe(firstConcrete)
         expect(getNextModelForFlavor('agy', 'agy-custom-model')).toBe(firstConcrete)
+    })
+
+    it('cycles through the machine catalog in an AGY session', () => {
+        const live = [
+            { value: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+            { value: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' }
+        ]
+
+        expect(getNextModelForFlavor('agy', null, live)).toBe('gemini-3.8-flash-high')
+        expect(getNextModelForFlavor('agy', 'gemini-3.8-flash-high', live)).toBe('gemini-3.8-flash-low')
+        expect(getNextModelForFlavor('agy', 'gemini-3.8-flash-low', live)).toBe('gemini-3.8-flash-high')
     })
 
     it('cycles Gemini models', () => {
