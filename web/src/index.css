@@ -351,9 +351,10 @@ html:has(.chat-scroll-y) #root {
 /* Include the reserved scrollbar width in the visible content width so the
  * outer left and right edge spacing remains equal. */
 .file-preview-scroll-content {
+    position: relative;
     width: calc(100% + var(--file-preview-scrollbar-compensation, 0px));
     max-width: calc(var(--content-max-w, 960px) + var(--file-preview-scrollbar-compensation, 0px));
-    transform: translateX(var(--file-preview-scroll-content-offset, 0px));
+    left: var(--file-preview-scroll-content-offset, 0px);
 }
 
 /* Keep only the two primary session surfaces visually quiet while idle.
