@@ -1,4 +1,6 @@
 import type { Database } from 'bun:sqlite'
+import { prepareCached } from './statementCache'
+import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
@@ -202,7 +204,7 @@ export function getOrCreateSession(
     modelReasoningEffort?: string,
     requestedId?: string
 ): StoredSession {
-    const existing = db.prepare(
+    const existing = prepareCached(db,
         'SELECT * FROM sessions WHERE tag = ? AND namespace = ? ORDER BY created_at DESC LIMIT 1'
     ).get(tag, namespace) as DbSessionRow | undefined
 
@@ -229,7 +231,7 @@ export function getOrCreateSession(
     const metadataJson = JSON.stringify(metadata)
     const agentStateJson = agentState === null || agentState === undefined ? null : JSON.stringify(agentState)
 
-    db.prepare(`
+    prepareCached(db, `
         INSERT INTO sessions (
             id, tag, namespace, machine_id, created_at, updated_at,
             metadata, metadata_version,
@@ -292,7 +294,7 @@ export function updateSessionMetadata(
 
     try {
         return db.transaction((): VersionedUpdateResult<unknown | null> => {
-            const priorRow = db.prepare(
+            const priorRow = prepareCached(db,
                 'SELECT metadata FROM sessions WHERE id = ? AND namespace = ?'
             ).get(id, namespace) as { metadata: string | null } | undefined
 
@@ -363,7 +365,7 @@ export function setSessionTodos(
 ): boolean {
     try {
         const json = todos === null || todos === undefined ? null : JSON.stringify(todos)
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET todos = @todos,
                 todos_updated_at = @todos_updated_at,
@@ -407,7 +409,7 @@ export function replaceSessionTodos(
     try {
         const json = todos === null || todos === undefined ? null : JSON.stringify(todos)
         const now = Date.now()
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET todos = @todos,
                 todos_updated_at = CASE
@@ -439,7 +441,7 @@ export function setSessionTeamState(
 ): boolean {
     try {
         const json = teamState === null || teamState === undefined ? null : JSON.stringify(teamState)
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET team_state = @team_state,
                 team_state_updated_at = @team_state_updated_at,
@@ -473,7 +475,7 @@ export function setSessionModel(
     const touchUpdatedAt = options?.touchUpdatedAt === true
 
     try {
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET model = @model,
                 updated_at = CASE WHEN @touch_updated_at = 1 THEN @updated_at ELSE updated_at END,
@@ -506,7 +508,7 @@ export function setSessionModelReasoningEffort(
     const touchUpdatedAt = options?.touchUpdatedAt === true
 
     try {
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET model_reasoning_effort = @model_reasoning_effort,
                 updated_at = CASE WHEN @touch_updated_at = 1 THEN @updated_at ELSE updated_at END,
@@ -539,7 +541,7 @@ export function setSessionServiceTier(
     const touchUpdatedAt = options?.touchUpdatedAt === true
 
     try {
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET service_tier = @service_tier,
                 updated_at = CASE WHEN @touch_updated_at = 1 THEN @updated_at ELSE updated_at END,
@@ -572,7 +574,7 @@ export function setSessionEffort(
     const touchUpdatedAt = options?.touchUpdatedAt === true
 
     try {
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET effort = @effort,
                 updated_at = CASE WHEN @touch_updated_at = 1 THEN @updated_at ELSE updated_at END,
@@ -602,7 +604,7 @@ export function setSessionActive(
     namespace: string
 ): boolean {
     try {
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET active = @active,
                 active_at = CASE
@@ -631,7 +633,7 @@ export type SessionPinMode = 'none' | 'project' | 'global'
 export function setSessionPinMode(db: Database, id: string, mode: SessionPinMode, namespace: string): boolean {
     const pinned = mode === 'project' ? 1 : 0
     const globalPinned = mode === 'global' ? 1 : 0
-    const result = db.prepare(`
+    const result = prepareCached(db, `
         UPDATE sessions
         SET pinned = @pinned,
             global_pinned = @global_pinned
@@ -654,7 +656,7 @@ export function touchSessionUpdatedAt(
     namespace: string
 ): boolean {
     try {
-        const result = db.prepare(`
+        const result = prepareCached(db, `
             UPDATE sessions
             SET updated_at = @updated_at,
                 seq = seq + 1
@@ -674,24 +676,24 @@ export function touchSessionUpdatedAt(
 }
 
 export function getSession(db: Database, id: string): StoredSession | null {
-    const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as DbSessionRow | undefined
+    const row = prepareCached(db, 'SELECT * FROM sessions WHERE id = ?').get(id) as DbSessionRow | undefined
     return row ? toStoredSession(row) : null
 }
 
 export function getSessionByNamespace(db: Database, id: string, namespace: string): StoredSession | null {
-    const row = db.prepare(
+    const row = prepareCached(db,
         'SELECT * FROM sessions WHERE id = ? AND namespace = ?'
     ).get(id, namespace) as DbSessionRow | undefined
     return row ? toStoredSession(row) : null
 }
 
 export function getSessions(db: Database): StoredSession[] {
-    const rows = db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC').all() as DbSessionRow[]
+    const rows = prepareCached(db, 'SELECT * FROM sessions ORDER BY updated_at DESC').all() as DbSessionRow[]
     return rows.map(toStoredSession)
 }
 
 export function getSessionsByNamespace(db: Database, namespace: string): StoredSession[] {
-    const rows = db.prepare(
+    const rows = prepareCached(db,
         'SELECT * FROM sessions WHERE namespace = ? ORDER BY updated_at DESC'
     ).all(namespace) as DbSessionRow[]
     return rows.map(toStoredSession)
@@ -699,14 +701,20 @@ export function getSessionsByNamespace(db: Database, namespace: string): StoredS
 
 export function deleteSession(db: Database, id: string, namespace: string): boolean {
     return runInTransaction(db, () => {
-        const existing = db.prepare(
+        const existing = prepareCached(db,
             'SELECT 1 FROM sessions WHERE id = ? AND namespace = ?'
         ).get(id, namespace)
         if (!existing) return false
         removeMessageContentSearchForSession(db, id)
-        const result = db.prepare(
+        const result = prepareCached(db,
             'DELETE FROM sessions WHERE id = ? AND namespace = ?'
         ).run(id, namespace)
+        if (result.changes > 0) {
+            // Per-socket access memos stamp the epoch they were filled under;
+            // bumping makes their next event re-resolve instead of serving a
+            // grant for a row that no longer exists.
+            bumpSessionDeletionEpoch()
+        }
         return result.changes > 0
     })
 }
