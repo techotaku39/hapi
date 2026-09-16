@@ -139,6 +139,30 @@ describe('workspace file RPC handlers', () => {
         expect(checkedPaths[0]).toBe(workspacePath)
     })
 
+    it('allows valid workspace paths beginning with two dots', async () => {
+        await writeFile(join(rootDir, '..notes.txt'), 'notes\n')
+        await mkdir(join(rootDir, '..assets'))
+        await writeFile(join(rootDir, '..assets', 'file.txt'), 'asset\n')
+
+        const note = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceReadFile, {
+            cwd: rootDir,
+            path: '..notes.txt',
+        })
+        expect(note).toMatchObject({
+            success: true,
+            content: Buffer.from('notes\n').toString('base64'),
+        })
+
+        const asset = await callWorkspaceHandler(rpc, RPC_METHODS.WorkspaceReadFile, {
+            cwd: rootDir,
+            path: '..assets/file.txt',
+        })
+        expect(asset).toMatchObject({
+            success: true,
+            content: Buffer.from('asset\n').toString('base64'),
+        })
+    })
+
     it('rejects workspace roots outside the runner allowlist', async () => {
         const outsideDir = await mkdtemp(join(tmpdir(), 'hapi-workspace-file-outside-'))
         try {

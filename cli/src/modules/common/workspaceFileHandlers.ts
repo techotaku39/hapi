@@ -1,5 +1,5 @@
 import { readdir, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
     CommandResponse,
     DirectoryEntry,
@@ -72,7 +72,7 @@ export const MAX_WORKSPACE_FILE_BYTES = MAX_GENERATED_IMAGE_BYTES
 
 function isWithinRoot(root: string, target: string): boolean {
     const child = relative(root, target)
-    return child === '' || (!child.startsWith('..') && !isAbsolute(child))
+    return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child))
 }
 
 async function resolveWorkspaceCwd(
