@@ -111,7 +111,7 @@ struct QueuedRowView: View {
         perform: @escaping () -> Void
     ) -> some View {
         let isEnabled = row.canAct && enabled
-        Button(action: perform) {
+        return Button(action: perform) {
             Text(title)
                 .font(typography.toolTitleFont)
                 .multilineTextAlignment(.center)
