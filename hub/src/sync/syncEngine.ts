@@ -7,13 +7,14 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { isKnownFlavor, isSteeringSupportedForSession, MACHINE_CAPABILITIES, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, MACHINE_CAPABILITIES, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
 } from '@hapi/protocol/runnerCapabilities'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
+import type { ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
@@ -110,7 +111,7 @@ export type LocalResumeTargetResult =
 
 export type LocalHandoffResult =
     | { type: 'success' }
-    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
+    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' | 'control_mode_not_applicable' }
 
 export type ClearOpencodeSessionResult =
     | { type: 'success'; sessionId: string }
@@ -670,6 +671,16 @@ export class SyncEngine {
     }
 
     /**
+     * tiann/hapi#1820: any message on the wire is agent progress, whichever
+     * side authored it. Separate from `recordSessionActivity`, which also
+     * bumps `updatedAt` and is deliberately restricted to human turns so the
+     * session list keeps ordering by human interaction.
+     */
+    recordAgentProgress(sessionId: string, at: number): void {
+        this.sessionCache.recordAgentProgress(sessionId, at)
+    }
+
+    /**
      * tiann/hapi#893 (scratchlist v2). Read-side: list entries for a
      * session. Auth / namespace check is the route layer's job (via
      * `requireSessionFromParam`); by the time we get here the caller
@@ -997,6 +1008,10 @@ export class SyncEngine {
             this.triggerDedupIfNeeded(session.id)
         }
         this.machineCache.expireInactive?.()
+        // tiann/hapi#1820: `activeAt` expiry above only catches sessions whose
+        // socket went quiet. Keepalive-only zombies keep `activeAt` fresh
+        // forever, so reconcile their agent-health signal separately.
+        this.sessionCache.reconcileKeepaliveIdle()
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         this.messageService.releaseMatureScheduledMessages(Date.now(), this.historyActionsInFlight)
@@ -1116,7 +1131,7 @@ export class SyncEngine {
         if (!isSteeringSupportedForSession(session.metadata)) {
             return { status: 'failed', error: 'Steering is only supported for Pi, Codex, and Cursor ACP sessions', localId: null }
         }
-        if (session.agentState?.controlledByUser === true) {
+        if (session.agentState?.controlledByUser === true && !session.metadata?.capabilities?.concurrentClients) {
             return { status: 'failed', error: 'Steering is only available for remote sessions', localId: null }
         }
 
@@ -1197,7 +1212,7 @@ export class SyncEngine {
         if (!session.active) {
             throw new Error('Session must be active')
         }
-        if (session.agentState?.controlledByUser === true) {
+        if (session.agentState?.controlledByUser === true && !session.metadata?.capabilities?.concurrentClients) {
             throw new Error('Conversation history actions require a remote session')
         }
         if (session.thinking) {
@@ -1460,6 +1475,11 @@ export class SyncEngine {
 
         if (!rpcResult?.nativeSessionId) {
             return { type: 'error', message: 'Native fork did not return a session id' }
+        }
+        if (rpcResult.sessionId) {
+            const child = await this.validateSharedChild(source, rpcResult.sessionId, rpcResult.nativeSessionId)
+            if (!child || child.metadata?.forkedFrom !== sessionId) return { type: 'error', message: 'Invalid shared-runtime fork binding' }
+            return { type: 'success', sessionId: child.id }
         }
 
         // Native fork RPC can race CLI metadata/transcript updates. Construct
@@ -1817,11 +1837,13 @@ export class SyncEngine {
             // running forever and any downstream code that filters by
             // lifecycleState (not the cache active flag) would keep
             // treating archived ACP sessions as live.
+            // tiann/hapi#1820: 'idle' is the same stale-live case as 'running'
+            // once the row is inactive, so clear it the same way.
             const oldLifecycle = typeof latest.metadata.lifecycleState === 'string' ? latest.metadata.lifecycleState : undefined
             const nextMetadata: typeof latest.metadata = {
                 ...latest.metadata,
                 cursorSessionProtocol: 'acp' as const,
-                ...(oldLifecycle === 'running' ? { lifecycleState: 'archived' as const } : {})
+                ...(isLiveLifecycleState(oldLifecycle) ? { lifecycleState: 'archived' as const } : {})
             }
             // Drop the migration-in-progress flag in the same write (see
             // header comment). Safe whether or not it was set.
@@ -1926,7 +1948,46 @@ export class SyncEngine {
         })
     }
 
+    private async validateSharedChild(source: Session, id: string, nativeId?: string): Promise<Session | null> {
+        if (!source.metadata?.capabilities?.concurrentClients || id === source.id) return null
+        const deadline = Date.now() + 5_000
+        do {
+            const child = this.sessionCache.refreshSession(id)
+            if (child && child.namespace === source.namespace
+                && child.metadata?.machineId === source.metadata.machineId
+                && child.metadata?.hostPid === source.metadata.hostPid
+                && child.metadata?.capabilities?.concurrentClients
+                && child.metadata.codexSessionId && (!nativeId || child.metadata.codexSessionId === nativeId)) return child
+            await new Promise(resolve => setTimeout(resolve, 50))
+        } while (Date.now() < deadline)
+        return null
+    }
+
+    async clearConversation(sessionId: string, namespace: string): Promise<{ sessionId: string }> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok || !access.session.active || !access.session.metadata?.capabilities?.concurrentClients) {
+            throw new Error('Clear requires an active shared session')
+        }
+        const result = await this.rpcGateway.clearConversation(access.sessionId)
+        const child = await this.validateSharedChild(access.session, result.sessionId)
+        if (!child) throw new Error('Invalid shared-runtime clear binding')
+        // No superseded-session redirect: only the initiating client navigates.
+        return { sessionId: child.id }
+    }
+
+    async implementCodexPlan(sessionId: string, namespace: string, planId: string): Promise<ImplementCodexPlanResult> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok || !access.session.active || access.session.metadata?.flavor !== 'codex'
+            || !access.session.metadata.capabilities?.concurrentClients) {
+            return { ok: false, code: 'unavailable', error: 'Plan implementation requires an active shared Codex session' }
+        }
+        // CLI validates native history and deduplicates already accepted actions.
+        // A stale Hub plan id must not prevent a safe retry of a lost RPC reply.
+        return await this.rpcGateway.implementCodexPlan(access.sessionId, planId)
+    }
+
     async switchSession(sessionId: string, to: 'remote' | 'local'): Promise<void> {
+        if (this.getSession(sessionId)?.metadata?.capabilities?.concurrentClients) throw new Error('control_mode_not_applicable')
         if (this.historyActionsInFlight.has(sessionId)) {
             throw new Error('Conversation history action already in progress')
         }
@@ -3438,11 +3499,14 @@ export class SyncEngine {
             }
         }
 
+        if (access.session.metadata?.capabilities?.concurrentClients) {
+            return { type: 'error', message: 'Shared sessions attach without handoff', code: 'control_mode_not_applicable' }
+        }
         if (!access.session.active) {
             return { type: 'success' }
         }
 
-        if (access.session.agentState?.controlledByUser === true) {
+        if (access.session.agentState?.controlledByUser === true && !access.session.metadata?.capabilities?.concurrentClients) {
             return {
                 type: 'error',
                 message: 'Session is already controlled by a local terminal',
