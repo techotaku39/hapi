@@ -430,7 +430,7 @@ export function ImagePreview(props: {
                                     })
                                 }
                             }}
-                            className="absolute left-1/2 top-1/2 max-h-[90vh] max-w-[90vw] select-none object-contain"
+                            className="absolute left-1/2 top-1/2 max-h-full max-w-full select-none object-contain"
                             style={{
                                 transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
                                 transformOrigin: 'center center'
