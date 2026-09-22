@@ -1893,13 +1893,14 @@ export class SyncEngine {
         const priorFailures = this.sharedForkAttachmentFailures.get(sourceSessionId)
         priorFailures?.delete(targetSessionId)
         if (priorFailures?.size === 0) this.sharedForkAttachmentFailures.delete(sourceSessionId)
-        const work = this.hydrateSharedForkAttachments(
+        const sourceHydration = this.ensureSharedForkSourceHydrated(sourceSessionId)
+        const work = sourceHydration.then(() => this.hydrateSharedForkAttachments(
             sourceSessionId,
             namespace,
             targetSessionId,
             messageLocalId,
             throughMessageLocalId
-        ).then(() => {
+        )).then(() => {
             this.sharedForkAttachmentsHydrated.add(targetSessionId)
         }).catch((error) => {
             const failure = error instanceof Error ? error : new Error(String(error))
@@ -1917,6 +1918,35 @@ export class SyncEngine {
             () => this.releaseSharedForkHydration(sourceSessionId, targetSessionId, work)
         )
         return work
+    }
+
+    /** Ensure a nested shared fork's source has its own durable attachments first. */
+    private ensureSharedForkSourceHydrated(sourceSessionId: string): Promise<void> {
+        const source = this.sessionCache.getSession(sourceSessionId)
+            ?? this.sessionCache.refreshSession(sourceSessionId)
+        const parentSessionId = source?.metadata?.forkedFrom
+        if (!source
+            || source.metadata?.flavor !== 'codex'
+            || source.metadata.capabilities?.concurrentClients !== true
+            || typeof parentSessionId !== 'string') {
+            return Promise.resolve()
+        }
+
+        const messageLocalId = source.metadata.forkedAtMessageLocalId
+        const throughMessageLocalId = source.metadata.forkedThroughMessageLocalId
+        if (messageLocalId === undefined && throughMessageLocalId === undefined) {
+            return Promise.reject(new Error(
+                `Cannot hydrate nested shared fork before fork boundary is known: ${sourceSessionId}`
+            ))
+        }
+
+        return this.ensureSharedForkAttachments(
+            parentSessionId,
+            source.namespace,
+            source.id,
+            messageLocalId,
+            throughMessageLocalId
+        )
     }
 
     private releaseSharedForkHydration(
