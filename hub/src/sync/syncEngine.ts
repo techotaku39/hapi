@@ -1887,6 +1887,12 @@ export class SyncEngine {
         throughMessageLocalId?: string
     ): Promise<void> {
         if (this.sharedForkAttachmentsHydrated.has(targetSessionId)) return Promise.resolve()
+        const target = this.sessionCache.getSessionByNamespace(targetSessionId, namespace)
+            ?? this.sessionCache.refreshSession(targetSessionId)
+        if (target?.metadata?.sharedForkAttachmentsHydrated === true) {
+            this.sharedForkAttachmentsHydrated.add(targetSessionId)
+            return Promise.resolve()
+        }
         const existing = this.sharedForkAttachmentHydrations.get(targetSessionId)
         if (existing) return existing
 
