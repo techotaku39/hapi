@@ -209,6 +209,94 @@ describe('shared Codex hub binding', () => {
         }
     })
 
+    it('waits for parent shared-fork hydration before hydrating a nested child', async () => {
+        const f = fixture()
+        let releaseClone: (() => void) | undefined
+        let restoreClone: (() => void) | undefined
+        try {
+            const source = f.create('nested-source')
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: source.id,
+                filename: 'nested.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('nested original')
+            })
+            f.store.messages.addMessage(source.id, {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'nested attachment',
+                    attachments: [{
+                        id: 'nested-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                }
+            }, 'nested-tip')
+            f.store.messages.markMessagesInvoked(source.id, ['nested-tip'], Date.now())
+
+            let signalCloneStarted!: () => void
+            const cloneStarted = new Promise<void>((resolve) => { signalCloneStarted = resolve })
+            const cloneGate = new Promise<void>((resolve) => { releaseClone = resolve })
+            const originalClone = f.store.attachments.cloneMessageAttachments.bind(f.store.attachments)
+            const cloneSpy = spyOn(f.store.attachments, 'cloneMessageAttachments').mockImplementation(async (...args) => {
+                signalCloneStarted()
+                await cloneGate
+                return await originalClone(...args)
+            })
+            restoreClone = () => cloneSpy.mockRestore()
+
+            const first = f.create('nested-first', {
+                forkedFrom: source.id,
+                forkedThroughMessageLocalId: 'nested-tip'
+            }, false)
+            const firstHydration = (f.engine as any).ensureSharedForkAttachments(
+                source.id,
+                'default',
+                first.id,
+                undefined,
+                'nested-tip'
+            ) as Promise<void>
+            await cloneStarted
+
+            const second = f.create('nested-second', {
+                forkedFrom: first.id,
+                forkedThroughMessageLocalId: 'nested-tip'
+            }, false)
+            const secondHydration = (f.engine as any).ensureSharedForkAttachments(
+                first.id,
+                'default',
+                second.id,
+                undefined,
+                'nested-tip'
+            ) as Promise<void>
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            expect(cloneSpy).toHaveBeenCalledTimes(1)
+
+            releaseClone?.()
+            await firstHydration
+            await secondHydration
+
+            const firstAttachmentId = ((f.store.messages.getAllMessages(first.id)[0]?.content as any)
+                ?.content?.attachments?.[0]?.attachmentId) as string | undefined
+            const secondAttachmentId = ((f.store.messages.getAllMessages(second.id)[0]?.content as any)
+                ?.content?.attachments?.[0]?.attachmentId) as string | undefined
+            expect(firstAttachmentId).toBeDefined()
+            expect(secondAttachmentId).toBeDefined()
+            expect(secondAttachmentId).not.toBe(firstAttachmentId)
+            expect((await f.store.attachments.readForSessionAsync(
+                secondAttachmentId!, 'default', second.id
+            ))?.data).toEqual(Buffer.from('nested original'))
+        } finally {
+            releaseClone?.()
+            restoreClone?.()
+            f.cleanup()
+        }
+    })
+
     it('keeps a historical shared fork boundary after the child reconnects', async () => {
         const f = fixture()
         try {
