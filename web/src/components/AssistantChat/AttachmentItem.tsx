@@ -1,9 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import {
     AttachmentPrimitive,
-    useComposerRuntime,
-    useThreadComposerAttachment,
-    useThreadComposerAttachmentRuntime,
+    useAui,
+    useAuiState,
 } from '@assistant-ui/react'
 import type { PendingAttachment } from '@assistant-ui/react'
 import type {
@@ -122,9 +121,9 @@ export function AttachmentItem(props: {
     attachmentOrderRef?: MutableRefObject<string[]>
     onRetry?: AttachmentRetryHandler
 } = {}) {
-    const { id, name, file, status, previewUrl, retryable } = useThreadComposerAttachment() as ComposerAttachmentWithPreview
-    const composer = useComposerRuntime()
-    const attachmentRuntime = useThreadComposerAttachmentRuntime()
+    const { id, name, file, status, previewUrl, retryable } = useAuiState((s) => s.attachment) as ComposerAttachmentWithPreview
+    const aui = useAui()
+    const composer = aui.composer()
     const isParking = useComposerParking()
     const { t } = useTranslation()
     const [isRetrying, setIsRetrying] = useState(false)
@@ -171,7 +170,7 @@ export function AttachmentItem(props: {
             })
             let unsubscribe: (() => void) | undefined
             if (props.onRetry) {
-                unsubscribe = composer.subscribe(() => {
+                unsubscribe = aui.subscribe(() => {
                     const retryAttachment = composer.getState().attachments.find(
                         (attachment) => attachment.file === retryFile,
                     )
@@ -182,7 +181,7 @@ export function AttachmentItem(props: {
                 })
             }
             try {
-                await attachmentRuntime.remove()
+                await composer.attachment({ id }).remove()
                 await composer.addAttachment(retryFile)
             } finally {
                 unsubscribe?.()
@@ -192,7 +191,7 @@ export function AttachmentItem(props: {
         } finally {
             setIsRetrying(false)
         }
-    }, [attachmentRuntime, composer, file, id, isParking, isRetrying, props.attachmentOrderRef, props.onRetry])
+    }, [aui, composer, file, id, isParking, isRetrying, props.attachmentOrderRef, props.onRetry])
 
     if (previewUrl && !isError) {
         return (

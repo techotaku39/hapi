@@ -3,26 +3,29 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 
-const mocks = vi.hoisted(() => ({
-    attachment: {
-        name: 'photo.png',
-        status: { type: 'requires-action', reason: 'composer-send' },
-        previewUrl: 'data:image/png;base64,cGhvdG8='
-    } as Record<string, unknown>,
-    composer: {
-        addAttachment: vi.fn(async (_file: File) => {}),
-        getState: vi.fn(() => ({ attachments: [] })),
-        subscribe: vi.fn((_listener: () => void) => () => {}),
-    },
-    attachmentRuntime: {
-        remove: vi.fn(async () => {}),
+const mocks = vi.hoisted(() => {
+    const attachmentRemove = vi.fn(async () => {})
+    const auiSubscribe = vi.fn((_listener: () => void) => () => {})
+    return {
+        attachment: {
+            name: 'photo.png',
+            status: { type: 'requires-action', reason: 'composer-send' },
+            previewUrl: 'data:image/png;base64,cGhvdG8='
+        } as Record<string, unknown>,
+        attachmentRemove,
+        auiSubscribe,
+        composer: {
+            addAttachment: vi.fn(async (_file: File) => {}),
+            attachment: vi.fn(() => ({ remove: attachmentRemove })),
+            getState: vi.fn(() => ({ attachments: [] })),
+        },
     }
-}))
+})
 
 vi.mock('@assistant-ui/react', () => ({
-    useThreadComposerAttachment: () => mocks.attachment,
-    useComposerRuntime: () => mocks.composer,
-    useThreadComposerAttachmentRuntime: () => mocks.attachmentRuntime,
+    useAui: () => ({ composer: () => mocks.composer, subscribe: mocks.auiSubscribe }),
+    useAuiState: (selector: (state: { attachment: typeof mocks.attachment }) => unknown) =>
+        selector({ attachment: mocks.attachment }),
     AttachmentPrimitive: {
         Root: ({ children, ...props }: ComponentProps<'div'>) => <div {...props}>{children}</div>,
         Remove: ({ children, ...props }: ComponentProps<'button'> & { children?: ReactNode }) => (
@@ -42,8 +45,8 @@ beforeEach(() => {
     mocks.composer.addAttachment.mockClear()
     mocks.composer.getState.mockReset()
     mocks.composer.getState.mockReturnValue({ attachments: [] })
-    mocks.composer.subscribe.mockClear()
-    mocks.attachmentRuntime.remove.mockClear()
+    mocks.auiSubscribe.mockClear()
+    mocks.attachmentRemove.mockClear()
 })
 
 function renderAttachment() {
@@ -188,7 +191,7 @@ describe('AttachmentItem', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }))
 
         await waitFor(() => {
-            expect(mocks.attachmentRuntime.remove).toHaveBeenCalledOnce()
+            expect(mocks.attachmentRemove).toHaveBeenCalledOnce()
             expect(mocks.composer.addAttachment).toHaveBeenCalledOnce()
         })
 
@@ -213,7 +216,7 @@ describe('AttachmentItem', () => {
             file,
             status: { type: 'incomplete', reason: 'error' },
         }
-        mocks.composer.subscribe.mockImplementationOnce((listener: () => void) => {
+        mocks.auiSubscribe.mockImplementationOnce((listener: () => void) => {
             mocks.composer.addAttachment.mockImplementationOnce(async (retryFile: File) => {
                 mocks.composer.getState.mockReturnValue({
                     attachments: [{ id: 'retried-attachment', file: retryFile }] as never[],
