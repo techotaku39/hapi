@@ -117,6 +117,8 @@ import { buildCursorEffortPickerOptionsWithDefaultFirst } from '@/lib/cursorMode
 import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
 import { useGrokModels } from '@/hooks/queries/useGrokModels'
 import { useCopilotModels } from '@/hooks/queries/useCopilotModels'
+import { useKimiModelsForSession } from '@/hooks/queries/useKimiModelsForSession'
+import { buildKimiSessionModelOptions } from '@/components/NewSession/grokModels'
 import { useGrokReasoningEffortOptions } from '@/hooks/queries/useGrokReasoningEffortOptions'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
@@ -1232,6 +1234,19 @@ function SessionChatInner(props: SessionChatProps) {
         enabled: agentFlavor === 'cursor' && props.session.active
     })
     const sessionMachineId = props.session.metadata?.machineId ?? null
+    // A running session discovers its models over its own connection (kimi
+    // provider list --json), so this works without a background runner;
+    // switching itself still goes through the existing ACP setModel path.
+    const kimiModelsState = useKimiModelsForSession({
+        api: props.api,
+        sessionId: props.session.id,
+        enabled: agentFlavor === 'kimi' && props.session.active
+    })
+    const kimiModelOptions = useMemo(() => (
+        agentFlavor === 'kimi' && kimiModelsState.availableModels.length > 0
+            ? buildKimiSessionModelOptions(kimiModelsState.availableModels)
+            : undefined
+    ), [agentFlavor, kimiModelsState.availableModels])
     const machineCursorModelsState = useCursorModelsForMachine({
         api: props.api,
         machineId: sessionMachineId,
@@ -1253,7 +1268,8 @@ function SessionChatInner(props: SessionChatProps) {
             machineModels: machineCursorModelsState.availableModels,
             cliModelSkus: sessionCliModelSkus,
             sessionModel: props.session.model,
-            sessionCurrentModelId: cursorModelsState.currentModelId
+            sessionCurrentModelId: cursorModelsState.currentModelId,
+            autoRestartLabel: t('session.modelChange.cursorAutoRestart')
         })
     }, [
         agentFlavor,
@@ -1261,7 +1277,8 @@ function SessionChatInner(props: SessionChatProps) {
         cursorModelsState.currentModelId,
         machineCursorModelsState.availableModels,
         sessionCliModelSkus,
-        props.session.model
+        props.session.model,
+        t
     ])
     const agyModelsState = useAgyModels({
         api: props.api,
@@ -2218,8 +2235,10 @@ function SessionChatInner(props: SessionChatProps) {
                                             ? grokModelOptions
                                         : agentFlavor === 'copilot'
                                             ? copilotModelOptions
-                                        : agentFlavor === 'agy'
-                                            ? agyModelOptions
+                                            : agentFlavor === 'kimi'
+                                                ? kimiModelOptions
+                                            : agentFlavor === 'agy'
+                                                ? agyModelOptions
                                         // Pi gets its provider-qualified model list from the piModels prop;
                                         // feeding piModelOptions here would make the generic Ctrl/Cmd+M
                                         // cycler (getNextModelForFlavor) post a bare modelId string,
