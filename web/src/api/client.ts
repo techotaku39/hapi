@@ -45,6 +45,7 @@ import type {
     FileReadResponse,
     GitCommandResponse,
     GrokModelsResponse,
+    KimiModelsResponse,
     CopilotModelsResponse,
     GrokReasoningEffortResponse,
     ListDirectoryResponse,
@@ -1001,6 +1002,18 @@ export class ApiClient {
     async getMachineCopilotModelsForCwd(machineId: string, cwd: string): Promise<CopilotModelsResponse> {
         return await this.request<CopilotModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/copilot-models?cwd=${encodeURIComponent(cwd)}`
+        )
+    }
+
+    async getMachineKimiModelsForCwd(machineId: string, cwd: string): Promise<KimiModelsResponse> {
+        return await this.request<KimiModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/kimi-models?cwd=${encodeURIComponent(cwd)}`
+        )
+    }
+
+    async getSessionKimiModels(sessionId: string): Promise<KimiModelsResponse> {
+        return await this.request<KimiModelsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/kimi-models`
         )
     }
 
