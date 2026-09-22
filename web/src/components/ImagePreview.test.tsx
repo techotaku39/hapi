@@ -45,6 +45,7 @@ describe('ImagePreview gallery navigation', () => {
         Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 1200 })
         Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 700 })
         fireEvent.load(image)
+        expect(image).toHaveClass('max-h-full', 'max-w-full')
         const desktopInfo = dialog.querySelector('[data-image-preview-info="desktop"]')
         expect(desktopInfo).not.toBeNull()
         expect(desktopInfo).toHaveClass('flex', 'flex-1', 'items-center', 'max-sm:hidden')
