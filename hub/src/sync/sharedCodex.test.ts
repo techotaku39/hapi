@@ -781,4 +781,88 @@ describe('shared Codex hub binding', () => {
             f.cleanup()
         }
     })
+
+    it('preserves completed nested hydration after ancestor deletion and restart', async () => {
+        const f = fixture()
+        let restarted: SyncEngine | undefined
+        try {
+            const ancestor = f.create('restart-ancestor')
+            const attachment = await f.store.attachments.create({
+                namespace: 'default',
+                sessionId: ancestor.id,
+                filename: 'restart-chain.txt',
+                mimeType: 'text/plain',
+                original: Buffer.from('restart chain original')
+            })
+            f.store.messages.addMessage(ancestor.id, {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: 'restart chain',
+                    attachments: [{
+                        id: 'restart-chain-attachment',
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        attachmentId: attachment.id
+                    }]
+                }
+            }, 'restart-chain-tip')
+            f.store.messages.markMessagesInvoked(ancestor.id, ['restart-chain-tip'], Date.now())
+
+            const child = f.create('restart-chain-child', {
+                forkedFrom: ancestor.id,
+                forkedThroughMessageLocalId: 'restart-chain-tip'
+            }, false)
+            await (f.engine as any).ensureSharedForkAttachments(
+                ancestor.id,
+                'default',
+                child.id,
+                undefined,
+                'restart-chain-tip'
+            )
+            expect(((f.store.sessions.getSession(child.id)?.metadata ?? null) as Metadata | null)
+                ?.sharedForkAttachmentsHydrated).toBe(true)
+
+            const cachedAncestor = f.engine.getSession(ancestor.id)
+            if (cachedAncestor) cachedAncestor.active = false
+            await f.engine.deleteSession(ancestor.id)
+            expect(f.store.sessions.getSession(child.id)).toBeDefined()
+
+            f.engine.stop()
+            restarted = new SyncEngine(f.store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+            const grandchild = restarted.getOrCreateSession('restart-chain-grandchild', {
+                ...(restarted.getSession(child.id)?.metadata ?? {}),
+                forkedFrom: child.id,
+                forkedThroughMessageLocalId: 'restart-chain-tip'
+            }, null, 'default')
+            const hydration = (restarted as any).ensureSharedForkAttachments(
+                child.id,
+                'default',
+                grandchild.id,
+                undefined,
+                'restart-chain-tip'
+            ) as Promise<void>
+            await hydration
+
+            const grandchildMessage = f.store.messages.getAllMessages(grandchild.id)
+                .find((message) => message.localId === 'restart-chain-tip')
+            const grandchildAttachmentId = ((grandchildMessage?.content as any)
+                ?.content?.attachments?.[0] as any)?.attachmentId as string | undefined
+            expect(grandchildAttachmentId).toBeDefined()
+            expect((await f.store.attachments.readForSessionAsync(
+                grandchildAttachmentId!, 'default', grandchild.id
+            ))?.data).toEqual(Buffer.from('restart chain original'))
+
+            const cachedChild = restarted.getSession(child.id)
+            if (cachedChild) cachedChild.active = false
+            await restarted.deleteSession(child.id)
+            expect((await f.store.attachments.readForSessionAsync(
+                grandchildAttachmentId!, 'default', grandchild.id
+            ))?.data).toEqual(Buffer.from('restart chain original'))
+        } finally {
+            restarted?.stop()
+            f.cleanup()
+        }
+    })
 })
