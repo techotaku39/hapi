@@ -1901,6 +1901,7 @@ export class SyncEngine {
             messageLocalId,
             throughMessageLocalId
         )).then(() => {
+            this.persistSharedForkHydrationCompletion(targetSessionId, namespace)
             this.sharedForkAttachmentsHydrated.add(targetSessionId)
         }).catch((error) => {
             const failure = error instanceof Error ? error : new Error(String(error))
@@ -1931,6 +1932,9 @@ export class SyncEngine {
             || typeof parentSessionId !== 'string') {
             return Promise.resolve()
         }
+        if (source.metadata.sharedForkAttachmentsHydrated === true) {
+            return Promise.resolve()
+        }
 
         const messageLocalId = source.metadata.forkedAtMessageLocalId
         const throughMessageLocalId = source.metadata.forkedThroughMessageLocalId
@@ -1947,6 +1951,34 @@ export class SyncEngine {
             messageLocalId,
             throughMessageLocalId
         )
+    }
+
+    /** Persist successful hydration so later restarts do not depend on ancestors. */
+    private persistSharedForkHydrationCompletion(targetSessionId: string, namespace: string): void {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            const session = this.sessionCache.getSessionByNamespace(targetSessionId, namespace)
+                ?? this.sessionCache.refreshSession(targetSessionId)
+            if (!session?.metadata) {
+                throw new Error(`Cannot persist shared fork hydration for missing session: ${targetSessionId}`)
+            }
+            if (session.metadata.sharedForkAttachmentsHydrated === true) return
+            const result = this.store.sessions.updateSessionMetadata(
+                targetSessionId,
+                { ...session.metadata, sharedForkAttachmentsHydrated: true },
+                session.metadataVersion,
+                namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'success') {
+                this.sessionCache.refreshSession(targetSessionId)
+                return
+            }
+            if (result.result === 'error') {
+                throw new Error(`Failed to persist shared fork hydration for session: ${targetSessionId}`)
+            }
+            this.sessionCache.refreshSession(targetSessionId)
+        }
+        throw new Error(`Shared fork hydration metadata update kept conflicting: ${targetSessionId}`)
     }
 
     private releaseSharedForkHydration(
