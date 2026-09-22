@@ -831,8 +831,17 @@ describe('shared Codex hub binding', () => {
 
             f.engine.stop()
             restarted = new SyncEngine(f.store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+            await expect((restarted as any).ensureSharedForkAttachments(
+                ancestor.id,
+                'default',
+                child.id,
+                undefined,
+                'restart-chain-tip'
+            )).resolves.toBeUndefined()
+            const childMetadata = { ...(restarted.getSession(child.id)?.metadata ?? {}) }
+            delete (childMetadata as any).sharedForkAttachmentsHydrated
             const grandchild = restarted.getOrCreateSession('restart-chain-grandchild', {
-                ...(restarted.getSession(child.id)?.metadata ?? {}),
+                ...childMetadata,
                 forkedFrom: child.id,
                 forkedThroughMessageLocalId: 'restart-chain-tip'
             }, null, 'default')
