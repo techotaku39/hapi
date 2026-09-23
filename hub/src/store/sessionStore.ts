@@ -63,8 +63,14 @@ export class SessionStore {
         return updateSessionAgentState(this.db, id, agentState, expectedVersion, namespace)
     }
 
-    setSessionTodos(id: string, todos: unknown, source: SessionTodoSource, namespace: string): boolean {
-        return setSessionTodos(this.db, id, todos, source, namespace)
+    setSessionTodos(
+        id: string,
+        todos: unknown,
+        source: SessionTodoSource,
+        namespace: string,
+        options?: { touchUpdatedAt?: boolean }
+    ): boolean {
+        return setSessionTodos(this.db, id, todos, source, namespace, options)
     }
 
     replaceSessionTodos(

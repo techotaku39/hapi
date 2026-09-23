@@ -366,7 +366,8 @@ export function setSessionTodos(
     id: string,
     todos: unknown,
     source: SessionTodoSource,
-    namespace: string
+    namespace: string,
+    options: { touchUpdatedAt?: boolean } = {}
 ): boolean {
     try {
         const json = todos === null || todos === undefined ? null : JSON.stringify(todos)
@@ -380,7 +381,11 @@ export function setSessionTodos(
                 END,
                 todos_source_at = @source_at,
                 todos_source_seq = @source_seq,
-                updated_at = CASE WHEN updated_at > @source_at THEN updated_at ELSE @source_at END,
+                updated_at = CASE
+                    WHEN @touch_updated_at = 1
+                        THEN CASE WHEN updated_at > @source_at THEN updated_at ELSE @source_at END
+                    ELSE updated_at
+                END,
                 seq = seq + 1
             WHERE id = @id
               AND namespace = @namespace
@@ -398,6 +403,7 @@ export function setSessionTodos(
             now,
             source_at: source.at,
             source_seq: source.seq,
+            touch_updated_at: options.touchUpdatedAt === false ? 0 : 1,
             namespace
         })
 
