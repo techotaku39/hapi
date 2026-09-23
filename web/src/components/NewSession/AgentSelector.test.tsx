@@ -67,4 +67,27 @@ describe('AgentSelector', () => {
         expect(renderedAgentValues(availableEntries().filter(({ agent }) => agent === 'claude' || agent === 'codex')))
             .toEqual(['claude', 'codex'])
     })
+
+    it('keeps the disclosure between available and unavailable Agents', () => {
+        render(
+            <AgentSelector
+                agent={'claude' as AgentType}
+                agents={[
+                    { agent: 'agy', available: false, reason: 'not_found' },
+                    { agent: 'claude', available: true },
+                ]}
+                isDisabled={false}
+                onAgentChange={() => {}}
+            />
+        )
+
+        const claude = screen.getByDisplayValue('claude')
+        const disclosure = screen.getByRole('button', { name: 'newSession.moreAgents' })
+        expect(claude.compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+        fireEvent.click(disclosure)
+
+        const agy = screen.getByDisplayValue('agy')
+        expect(disclosure.compareDocumentPosition(agy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
 })

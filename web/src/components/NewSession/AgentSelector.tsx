@@ -30,8 +30,42 @@ export function AgentSelector(props: {
 }) {
     const { t } = useTranslation()
     const [showUnavailableAgents, setShowUnavailableAgents] = useState(false)
+    const availableAgents = props.agents.filter((entry) => entry.available)
     const unavailableAgents = props.agents.filter((entry) => !entry.available)
-    const visibleAgents = props.agents.filter((entry) => entry.available || showUnavailableAgents)
+    const visibleUnavailableAgents = showUnavailableAgents ? unavailableAgents : []
+
+    const renderAgent = (entry: Pick<AgentAvailabilityEntry, 'agent' | 'available' | 'reason'>) => {
+        const unavailableReason = entry.available
+            ? null
+            : entry.reason === 'invalid_configuration'
+                ? t('newSession.agentUnavailableReason.invalidConfiguration')
+                : t('newSession.agentUnavailableReason.notFound')
+        const label = getFlavorLabel(entry.agent)
+
+        return (
+            <label
+                key={entry.agent}
+                className={`flex items-center gap-1.5 ${entry.available ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+                title={unavailableReason ?? undefined}
+            >
+                <input
+                    type="radio"
+                    name="agent"
+                    value={entry.agent}
+                    checked={props.agent === entry.agent}
+                    onChange={() => props.onAgentChange(entry.agent as AgentType)}
+                    disabled={props.isDisabled || !entry.available}
+                    aria-label={unavailableReason ? `${label} (${unavailableReason})` : label}
+                    className="accent-[var(--app-link)]"
+                />
+                <AgentFlavorIcon flavor={entry.agent} className="h-4 w-4 shrink-0" />
+                <span className="text-sm">{label}</span>
+                {unavailableReason ? (
+                    <span className="text-xs text-[var(--app-hint)]">({unavailableReason})</span>
+                ) : null}
+            </label>
+        )
+    }
 
     return (
         <div className="flex flex-col gap-1.5 px-3 py-3">
@@ -39,38 +73,7 @@ export function AgentSelector(props: {
                 {t('newSession.agent')}
             </label>
             <div className="flex flex-wrap gap-x-3 gap-y-2">
-                {visibleAgents.map((entry) => {
-                    const unavailableReason = entry.available
-                        ? null
-                        : entry.reason === 'invalid_configuration'
-                            ? t('newSession.agentUnavailableReason.invalidConfiguration')
-                            : t('newSession.agentUnavailableReason.notFound')
-                    const label = getFlavorLabel(entry.agent)
-
-                    return (
-                        <label
-                            key={entry.agent}
-                            className={`flex items-center gap-1.5 ${entry.available ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
-                            title={unavailableReason ?? undefined}
-                        >
-                            <input
-                                type="radio"
-                                name="agent"
-                                value={entry.agent}
-                                checked={props.agent === entry.agent}
-                                onChange={() => props.onAgentChange(entry.agent as AgentType)}
-                                disabled={props.isDisabled || !entry.available}
-                                aria-label={unavailableReason ? `${label} (${unavailableReason})` : label}
-                                className="accent-[var(--app-link)]"
-                            />
-                            <AgentFlavorIcon flavor={entry.agent} className="h-4 w-4 shrink-0" />
-                            <span className="text-sm">{label}</span>
-                            {unavailableReason ? (
-                                <span className="text-xs text-[var(--app-hint)]">({unavailableReason})</span>
-                            ) : null}
-                        </label>
-                    )
-                })}
+                {availableAgents.map(renderAgent)}
                 {unavailableAgents.length > 0 ? (
                     <button
                         type="button"
@@ -84,6 +87,7 @@ export function AgentSelector(props: {
                             : t('newSession.moreAgents')}
                     </button>
                 ) : null}
+                {visibleUnavailableAgents.map(renderAgent)}
             </div>
         </div>
     )
