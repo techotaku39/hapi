@@ -184,13 +184,19 @@ class SessionStore(
                 val watermark = maxOf(cached?.seq ?: 0L, summaryVersion)
                 stale = session.seq < watermark
                 if (stale) {
-                    if (cached != null) accepted = cached
+                    if (cached != null && cached.seq >= summaryVersion) accepted = cached
                     current
                 } else {
                     current + (sessionId to session)
                 }
             }
-            if (!stale || attempt == 1) return accepted
+            if (!stale) return accepted
+            if (attempt == 1) {
+                if (_details.value[sessionId]?.seq ?: 0L >= (_sessions.value.firstOrNull { it.id == sessionId }?.lastAssistantMessageVersion ?: 0L)) {
+                    return accepted
+                }
+                throw IllegalStateException("Session detail response is older than the cached session list")
+            }
             attempt += 1
             // The rejected snapshot may still contain unrelated fields that
             // arrived before the newer SSE reply-clock patch. Retry once to

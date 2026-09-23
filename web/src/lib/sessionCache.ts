@@ -91,7 +91,11 @@ export function mergeSessionResponse(
     incoming: SessionResponse,
     currentSummary?: SessionSummary
 ): SessionResponse {
-    return current?.session && !shouldAcceptSessionRecord(current.session, incoming.session, currentSummary)
+    const cachedDetailIsAtLeastListWatermark = !current?.session
+        || current.session.seq >= (currentSummary?.lastAssistantMessageVersion ?? 0)
+    return current?.session
+        && cachedDetailIsAtLeastListWatermark
+        && !shouldAcceptSessionRecord(current.session, incoming.session, currentSummary)
         ? current
         : incoming
 }

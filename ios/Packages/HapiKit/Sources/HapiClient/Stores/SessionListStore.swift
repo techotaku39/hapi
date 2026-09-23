@@ -147,7 +147,12 @@ public final class SessionListStore: SessionListStoring {
             session = try await api.session(id: sessionId)
         }
         if session.seq < detailWatermark() {
-            return details[sessionId] ?? session
+            if let cached = details[sessionId], cached.seq >= (sessions.first { $0.id == sessionId }?.lastAssistantMessageVersion ?? 0) {
+                return cached
+            }
+            throw NSError(domain: "HapiClient", code: 409, userInfo: [
+                NSLocalizedDescriptionKey: "Session detail response is older than the cached session list"
+            ])
         }
         details[sessionId] = session
         return session
