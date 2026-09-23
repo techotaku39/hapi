@@ -209,6 +209,7 @@ type HarnessControls = {
     hydrateReorderableAttachments: () => void
     reorderAttachments: () => void
     dictationSetText: (text: string) => void
+    abortRestore: (text: string) => void
     acceptSend: () => void
     setSending: (sending: boolean) => void
     setThreadDisabled: (disabled: boolean) => void
@@ -326,6 +327,10 @@ function ComposerHarness(props: {
         },
         reorderAttachments: () => runtime.attachmentReorder?.('new-attachment', 'second-attachment', 'after'),
         dictationSetText: (text) => runtime.dictationTextChange?.(text),
+        abortRestore: (text) => {
+            setProgrammaticEditRevision((revision) => revision + 1)
+            setSendError(fail(2, text, null, true))
+        },
         acceptSend: () => {
             setIsSending(true)
             setSendSettlement(null)
@@ -583,6 +588,21 @@ describe('HappyComposer send-error atomic restore', () => {
         await waitFor(() => expect(input()).toHaveValue(''))
         fireEvent.change(input(), { target: { value: 'new draft after send' } })
         expect(input()).toHaveValue('new draft after send')
+    })
+
+    it('preserves abort-restored text when a delayed send succeeds', async () => {
+        const controls = renderComposer('foo', null)
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.abortRestore('foo'))
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(input()).toHaveValue('foo'))
+        expect(mockClearDraftsAfterSend).not.toHaveBeenCalled()
     })
 
     it('clears an untouched remounted send draft with surrounding whitespace', async () => {

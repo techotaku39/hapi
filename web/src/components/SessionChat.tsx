@@ -2079,7 +2079,18 @@ function SessionChatInner(props: SessionChatProps) {
                     sessionActive={props.session.active}
                     onProgrammaticEdit={props.onProgrammaticEdit}
                 />
-                <AbortRestoreConsumer messages={normalizedMessages} onAbortRestore={props.onAbortRestore ?? (() => {})} />
+                <AbortRestoreConsumer
+                    messages={normalizedMessages}
+                    onAbortRestore={(text) => {
+                        // Abort restore is a new composer draft, even though
+                        // HappyComposer applies it through the send-error
+                        // recovery path instead of a text input event. Mark it
+                        // before a delayed send settlement can clear matching
+                        // text from the old submission.
+                        props.onProgrammaticEdit?.()
+                        props.onAbortRestore?.(text)
+                    }}
+                />
                 <DragDropZone disabled={(!props.session.active && !inactiveCanResume) || props.isSending || pendingSchedule != null || isScratchlistParking}>
                     <div className="relative flex min-h-0 flex-1 flex-col">
                         {canViewAgentTerminal && (
