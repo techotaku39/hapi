@@ -126,6 +126,7 @@ describe('useSession REST ordering', () => {
         await act(async () => { await result.current.refetch() })
         await waitFor(() => expect(getSession.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 })
         await waitFor(() => expect(result.current.error).toBe('Session detail response is older than the cached session list'), { timeout: 15_000 })
+        expect(result.current.session).toBeNull()
         expect(queryClient.getQueryData<SessionResponse>(queryKeys.session('s1'))?.session.seq).toBe(4)
     })
 })

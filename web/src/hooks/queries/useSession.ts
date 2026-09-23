@@ -68,8 +68,15 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
         },
     })
 
+    const cachedSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+        ?.sessions.find((summary) => summary.id === sessionId)
+    const cachedSession = query.data?.session
+    const isBelowListWatermark = Boolean(
+        cachedSession
+        && cachedSession.seq < (cachedSummary?.lastAssistantMessageVersion ?? 0)
+    )
     return {
-        session: query.data?.session ?? null,
+        session: isBelowListWatermark ? null : cachedSession ?? null,
         isLoading: query.isLoading,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load session' : null,
         notFound: isSessionNotFoundError(query.error) && !query.isFetching,
