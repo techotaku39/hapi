@@ -127,7 +127,9 @@ public final class SessionListStore: SessionListStoring {
     // MARK: - Details
 
     public func detail(for sessionId: String) -> Session? {
-        details[sessionId]
+        guard let detail = details[sessionId] else { return nil }
+        let summaryVersion = sessions.first { $0.id == sessionId }?.lastAssistantMessageVersion ?? 0
+        return detail.seq >= summaryVersion ? detail : nil
     }
 
     /// `GET /api/sessions/:id` into the detail cache (chat open / resync).

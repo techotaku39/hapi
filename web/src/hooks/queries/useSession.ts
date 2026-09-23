@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { Session, SessionResponse, SessionsResponse } from '@/types/api'
@@ -71,10 +72,19 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
     const cachedSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
         ?.sessions.find((summary) => summary.id === sessionId)
     const cachedSession = query.data?.session
+    const listWatermark = cachedSummary?.lastAssistantMessageVersion ?? 0
     const isBelowListWatermark = Boolean(
         cachedSession
-        && cachedSession.seq < (cachedSummary?.lastAssistantMessageVersion ?? 0)
+        && cachedSession.seq < listWatermark
     )
+    const refreshAttemptedForWatermark = useRef<number | null>(null)
+    useEffect(() => {
+        if (!isBelowListWatermark || query.isFetching || refreshAttemptedForWatermark.current === listWatermark) {
+            return
+        }
+        refreshAttemptedForWatermark.current = listWatermark
+        void query.refetch()
+    }, [isBelowListWatermark, listWatermark, query.isFetching, query.refetch])
     return {
         session: isBelowListWatermark ? null : cachedSession ?? null,
         isLoading: query.isLoading,

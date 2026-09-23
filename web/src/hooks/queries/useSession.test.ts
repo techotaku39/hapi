@@ -62,6 +62,27 @@ function queryWrapper(queryClient: QueryClient) {
 }
 
 describe('useSession REST ordering', () => {
+    it('refetches detail when the list watermark advances', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [{ id: 's1', lastAssistantMessageVersion: 4 } as SessionSummary]
+        })
+        const getSession = vi.fn()
+            .mockResolvedValueOnce({ session: makeSession(4, 1_000) })
+            .mockResolvedValueOnce({ session: makeSession(5, 5_000) })
+        const api = { getSession } as unknown as ApiClient
+        const { result } = renderHook(() => useSession(api, 's1'), { wrapper: queryWrapper(queryClient) })
+
+        await waitFor(() => expect(getSession).toHaveBeenCalledTimes(1))
+        act(() => {
+            queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+                sessions: [{ id: 's1', lastAssistantMessageVersion: 5 } as SessionSummary]
+            })
+        })
+        await waitFor(() => expect(getSession).toHaveBeenCalledTimes(2))
+        await waitFor(() => expect(result.current.session?.seq).toBe(5))
+    })
+
     it('does not cache a stale detail when only the list watermark is newer', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {

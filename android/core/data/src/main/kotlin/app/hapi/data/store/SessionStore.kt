@@ -165,9 +165,14 @@ class SessionStore(
     private val refreshQueued = AtomicBoolean(false)
 
     override fun sessionDetail(sessionId: String): Flow<Session?> =
-        _details.map { it[sessionId] }.distinctUntilChanged()
+        _details.map { details -> visibleDetail(sessionId, details[sessionId]) }.distinctUntilChanged()
 
-    override fun currentDetail(sessionId: String): Session? = _details.value[sessionId]
+    override fun currentDetail(sessionId: String): Session? = visibleDetail(sessionId, _details.value[sessionId])
+
+    private fun visibleDetail(sessionId: String, detail: Session?): Session? {
+        val summaryVersion = _sessions.value.firstOrNull { it.id == sessionId }?.lastAssistantMessageVersion ?: 0L
+        return detail?.takeIf { it.seq >= summaryVersion }
+    }
 
     override suspend fun loadSessionDetail(sessionId: String): Session {
         var session = api.getSession(sessionId).session
