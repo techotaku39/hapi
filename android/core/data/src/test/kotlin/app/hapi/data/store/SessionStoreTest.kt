@@ -146,6 +146,25 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `summary watermark advance refetches a cached detail`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(summary("s1", lastAssistantMessageAt = 1_000, lastAssistantMessageVersion = 1))
+        )
+        store.refresh()
+        server.enqueueJson("""{"session":${fullSessionJson(session("s1", seq = 4, lastAssistantMessageAt = 1_000))}}""")
+        store.loadSessionDetail("s1")
+
+        server.enqueueJson(
+            sessionsResponseJson(summary("s1", lastAssistantMessageAt = 5_000, lastAssistantMessageVersion = 5))
+        )
+        server.enqueueJson("""{"session":${fullSessionJson(session("s1", seq = 5, lastAssistantMessageAt = 5_000))}}""")
+        store.refresh()
+
+        store.sessionDetail("s1").first { it?.seq == 5L }
+        assertEquals(5L, store.currentDetail("s1")?.seq)
+    }
+
+    @Test
     fun `delayed detail response cannot overwrite a newer full-session event`() = runStoreTest { store, server ->
         server.enqueueJson("""{"session":${fullSessionJson(session("s1", seq = 5, lastAssistantMessageAt = 9_000))}}""")
         store.loadSessionDetail("s1")

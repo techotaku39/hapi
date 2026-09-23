@@ -102,6 +102,29 @@ struct SessionListStoreTests {
         #expect(row.nextScheduledAt == 42)
     }
 
+    @Test func summaryWatermarkAdvanceRefetchesACachedDetail() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("s1", lastAssistantMessageAt: 1_000, lastAssistantMessageVersion: 1)
+        ))
+        try await store.refresh()
+        await performer.enqueue(json: try sessionResponseJSON(
+            storeSession("s1", seq: 4, lastAssistantMessageAt: 1_000)
+        ))
+        _ = try await store.loadSessionDetail("s1")
+
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("s1", lastAssistantMessageAt: 5_000, lastAssistantMessageVersion: 5)
+        ))
+        await performer.enqueue(json: try sessionResponseJSON(
+            storeSession("s1", seq: 5, lastAssistantMessageAt: 5_000)
+        ))
+        try await store.refresh()
+
+        try await expectEventually { store.detail(for: "s1")?.seq == 5 }
+        #expect(store.detail(for: "s1")?.seq == 5)
+    }
+
     @Test func delayedDetailResponseCannotOverwriteANewerFullSessionEvent() async throws {
         let (performer, store) = try makeStore()
         let current = storeSession("s1", seq: 5, lastAssistantMessageAt: 9_000)

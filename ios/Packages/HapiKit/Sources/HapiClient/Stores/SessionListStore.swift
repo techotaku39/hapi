@@ -101,6 +101,7 @@ public final class SessionListStore: SessionListStoring {
     @ObservationIgnored private let snapshot: DiskCache<[SessionSummary]>?
     @ObservationIgnored private let refreshBatch: Duration
     @ObservationIgnored private var refreshQueued = false
+    @ObservationIgnored private var detailRefreshQueued: Set<String> = []
     /// Snapshot and early SSE rows are not a complete list baseline. This is
     /// set only after the first successful REST response is applied.
     @ObservationIgnored private var hasHydratedFromServer = false
@@ -442,8 +443,21 @@ public final class SessionListStore: SessionListStoring {
         sessions = next
         listRevision += 1
         snapshot?.scheduleWrite(next)
+        scheduleStaleDetailRefreshes(next)
         if hasHydratedFromServer {
             onSessionsChanged?(next)
+        }
+    }
+
+    private func scheduleStaleDetailRefreshes(_ summaries: [SessionSummary]) {
+        for summary in summaries {
+            guard let detail = details[summary.id],
+                  detail.seq < (summary.lastAssistantMessageVersion ?? 0),
+                  detailRefreshQueued.insert(summary.id).inserted else { continue }
+            Task { @MainActor [weak self] in
+                defer { self?.detailRefreshQueued.remove(summary.id) }
+                _ = try? await self?.loadSessionDetail(summary.id)
+            }
         }
     }
 }

@@ -15,6 +15,7 @@ import app.hapi.protocol.wire.SyncEvent
 import app.hapi.protocol.wire.sortSessionSummaries
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -164,6 +165,7 @@ class SessionStore(
 
     private val refreshMutex = Mutex()
     private val refreshQueued = AtomicBoolean(false)
+    private val detailRefreshQueued: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     override fun sessionDetail(sessionId: String): Flow<Session?> =
         combine(_details, _sessions) { details, sessions ->
@@ -605,7 +607,27 @@ class SessionStore(
             if (next === previous) return
             if (_sessions.compareAndSet(previous, next)) {
                 snapshot?.scheduleWrite(next)
+                scheduleStaleDetailRefreshes(next)
                 return
+            }
+        }
+    }
+
+    private fun scheduleStaleDetailRefreshes(summaries: List<SessionSummary>) {
+        for (summary in summaries) {
+            val detail = _details.value[summary.id] ?: continue
+            val watermark = summary.lastAssistantMessageVersion ?: 0L
+            if (detail.seq >= watermark || !detailRefreshQueued.add(summary.id)) continue
+            scope.launch {
+                try {
+                    loadSessionDetail(summary.id)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    // A later SSE event or manual refresh retries the detail.
+                } finally {
+                    detailRefreshQueued.remove(summary.id)
+                }
             }
         }
     }
