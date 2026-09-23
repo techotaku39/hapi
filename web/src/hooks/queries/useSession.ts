@@ -47,6 +47,9 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
                 current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId)) ?? current
                 currentSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
                     ?.sessions.find((summary) => summary.id === sessionId) ?? currentSummary
+                if (!current?.session && needsSessionResponseRetry(undefined, incoming, currentSummary)) {
+                    throw new Error('Session detail response is older than the cached session list')
+                }
             }
             return mergeSessionResponse(current, incoming, currentSummary)
         },

@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
-import type { Session, SessionResponse } from '@/types/api'
+import type { Session, SessionResponse, SessionSummary, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { isSessionNotFoundError, SESSION_DETAIL_STALE_TIME_MS, useSession } from './useSession'
 
@@ -62,6 +62,26 @@ function queryWrapper(queryClient: QueryClient) {
 }
 
 describe('useSession REST ordering', () => {
+    it('does not cache a stale detail when only the list watermark is newer', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [{ id: 's1', lastAssistantMessageVersion: 5 } as SessionSummary]
+        })
+        const api = {
+            getSession: vi.fn(async () => ({ session: makeSession(4, 1_000) }))
+        } as unknown as ApiClient
+        const { result, rerender } = renderHook(
+            ({ sessionId }: { sessionId: string | null }) => useSession(api, sessionId),
+            { initialProps: { sessionId: null }, wrapper: queryWrapper(queryClient) }
+        )
+
+        rerender({ sessionId: 's1' })
+        await waitFor(() => expect(api.getSession).toHaveBeenCalledTimes(2), { timeout: 5_000 })
+        await waitFor(() => expect(result.current.error).toBe('Session detail response is older than the cached session list'), { timeout: 5_000 })
+
+        expect(queryClient.getQueryData<SessionResponse>(queryKeys.session('s1'))).toBeUndefined()
+    })
+
     it('does not let a delayed REST response overwrite a newer SSE detail', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         const key = queryKeys.session('s1')
