@@ -72,7 +72,7 @@ describe('useSession REST ordering', () => {
         } as unknown as ApiClient
         const { result, rerender } = renderHook(
             ({ sessionId }: { sessionId: string | null }) => useSession(api, sessionId),
-            { initialProps: { sessionId: null }, wrapper: queryWrapper(queryClient) }
+            { initialProps: { sessionId: null as string | null }, wrapper: queryWrapper(queryClient) }
         )
 
         rerender({ sessionId: 's1' })
