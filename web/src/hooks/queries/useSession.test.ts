@@ -67,16 +67,15 @@ describe('useSession REST ordering', () => {
         queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
             sessions: [{ id: 's1', lastAssistantMessageVersion: 5 } as SessionSummary]
         })
-        const api = {
-            getSession: vi.fn(async () => ({ session: makeSession(4, 1_000) }))
-        } as unknown as ApiClient
-        const { result, rerender } = renderHook(
+        const getSession = vi.fn(async () => ({ session: makeSession(4, 1_000) }))
+        const api = { getSession } as unknown as ApiClient
+        const { result } = renderHook(
             ({ sessionId }: { sessionId: string | null }) => useSession(api, sessionId),
-            { initialProps: { sessionId: null as string | null }, wrapper: queryWrapper(queryClient) }
+            { initialProps: { sessionId: 's1' as string | null }, wrapper: queryWrapper(queryClient) }
         )
 
-        rerender({ sessionId: 's1' })
-        await waitFor(() => expect(api.getSession).toHaveBeenCalledTimes(2), { timeout: 5_000 })
+        await act(async () => { await result.current.refetch() })
+        await waitFor(() => expect(getSession.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
         await waitFor(() => expect(result.current.error).toBe('Session detail response is older than the cached session list'), { timeout: 5_000 })
 
         expect(queryClient.getQueryData<SessionResponse>(queryKeys.session('s1'))).toBeUndefined()
@@ -109,5 +108,24 @@ describe('useSession REST ordering', () => {
         await act(async () => { await refetch })
 
         expect(queryClient.getQueryData<SessionResponse>(key)?.session).toEqual(makeSession(10, null, 2))
+    })
+
+    it('rejects a cached detail that is older than the list watermark', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [{ id: 's1', lastAssistantMessageVersion: 5 } as SessionSummary]
+        })
+        queryClient.setQueryData<SessionResponse>(queryKeys.session('s1'), { session: makeSession(4, 1_000) })
+        const getSession = vi.fn(async () => ({ session: makeSession(4, 1_000) }))
+        const api = { getSession } as unknown as ApiClient
+        const { result } = renderHook(
+            ({ sessionId }: { sessionId: string | null }) => useSession(api, sessionId),
+            { initialProps: { sessionId: 's1' as string | null }, wrapper: queryWrapper(queryClient) }
+        )
+
+        await act(async () => { await result.current.refetch() })
+        await waitFor(() => expect(getSession.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 })
+        await waitFor(() => expect(result.current.error).toBe('Session detail response is older than the cached session list'), { timeout: 15_000 })
+        expect(queryClient.getQueryData<SessionResponse>(queryKeys.session('s1'))?.session.seq).toBe(4)
     })
 })
