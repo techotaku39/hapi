@@ -819,7 +819,9 @@ export function useSSE(options: {
                     clearMessageWindow(event.sessionId)
                 } else if (isSessionRecord(event.data) && event.data.id === event.sessionId) {
                     const currentDetail = queryClient.getQueryData<SessionResponse>(queryKeys.session(event.sessionId))?.session
-                    if (shouldAcceptSessionRecord(currentDetail, event.data)) {
+                    const currentSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+                        ?.sessions.find((summary) => summary.id === event.sessionId)
+                    if (shouldAcceptSessionRecord(currentDetail, event.data, currentSummary)) {
                         queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), { session: event.data })
                     }
                     const summaryAccepted = upsertSessionSummary(event.data)

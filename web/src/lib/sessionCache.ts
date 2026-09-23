@@ -11,16 +11,24 @@ import type {
  * reply clock. REST responses race the two SSE connections, so an older
  * response must not replace a newer cached record.
  */
-export function shouldAcceptSessionRecord(current: Session | undefined, incoming: Session): boolean {
-    return current === undefined || incoming.seq >= (Number.isFinite(current.seq) ? current.seq : 0)
+export function shouldAcceptSessionRecord(
+    current: Session | undefined,
+    incoming: Session,
+    currentSummary?: SessionSummary
+): boolean {
+    if (current === undefined && currentSummary === undefined) return true
+    const detailVersion = current && Number.isFinite(current.seq) ? current.seq : 0
+    const summaryVersion = currentSummary?.lastAssistantMessageVersion ?? 0
+    return incoming.seq >= Math.max(detailVersion, summaryVersion)
 }
 
 /** A rejected REST detail snapshot needs one bounded recovery fetch. */
 export function needsSessionResponseRetry(
     current: SessionResponse | undefined,
-    incoming: SessionResponse
+    incoming: SessionResponse,
+    currentSummary?: SessionSummary
 ): boolean {
-    return Boolean(current?.session && !shouldAcceptSessionRecord(current.session, incoming.session))
+    return !shouldAcceptSessionRecord(current?.session, incoming.session, currentSummary)
 }
 
 /**
@@ -80,9 +88,10 @@ export function sortSessionSummaries(left: SessionSummary, right: SessionSummary
 /** Keep a newer SSE detail record when a slower REST request returns stale data. */
 export function mergeSessionResponse(
     current: SessionResponse | undefined,
-    incoming: SessionResponse
+    incoming: SessionResponse,
+    currentSummary?: SessionSummary
 ): SessionResponse {
-    return current?.session && !shouldAcceptSessionRecord(current.session, incoming.session)
+    return current?.session && !shouldAcceptSessionRecord(current.session, incoming.session, currentSummary)
         ? current
         : incoming
 }

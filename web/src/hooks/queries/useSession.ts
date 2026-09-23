@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { Session, SessionResponse } from '@/types/api'
+import type { Session, SessionResponse, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { mergeSessionResponse, needsSessionResponseRetry } from '@/lib/sessionCache'
 
@@ -37,14 +37,18 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
             }
             let incoming = await api.getSession(sessionId)
             let current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId))
-            if (needsSessionResponseRetry(current, incoming)) {
+            let currentSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+                ?.sessions.find((summary) => summary.id === sessionId)
+            if (needsSessionResponseRetry(current, incoming, currentSummary)) {
                 // A newer SSE patch may only carry the reply clock. Retry once
                 // so unrelated fields from the discarded REST snapshot are
                 // not left stale indefinitely on an otherwise quiet session.
                 incoming = await api.getSession(sessionId)
                 current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId)) ?? current
+                currentSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+                    ?.sessions.find((summary) => summary.id === sessionId) ?? currentSummary
             }
-            return mergeSessionResponse(current, incoming)
+            return mergeSessionResponse(current, incoming, currentSummary)
         },
         enabled: Boolean(api && sessionId),
         staleTime: SESSION_DETAIL_STALE_TIME_MS,
