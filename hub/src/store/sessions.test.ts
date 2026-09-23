@@ -940,8 +940,9 @@ describe('replaceSessionTodos: watermark ratchet (PR #897 rewind race)', () => {
         expect(store.sessions.setSessionTodos(
             session.id,
             [{ content: 'historical', status: 'pending' }],
-            { at: 1_000, seq: 1 },
-            'default'
+            { at: (before ?? 0) + 60_000, seq: 1 },
+            'default',
+            { touchUpdatedAt: false }
         )).toBe(true)
         expect(store.sessions.getSession(session.id)?.updatedAt).toBe(before)
         store.close()

@@ -265,7 +265,8 @@ export class SessionCache {
             stored.id,
             latest.todos,
             latest.source,
-            stored.namespace
+            stored.namespace,
+            { touchUpdatedAt: false }
         )
         if (!updated) {
             if (this.store.sessions.getSession(stored.id)) {
@@ -1477,7 +1478,8 @@ export class SessionCache {
                     at: oldStored.todosSourceAt ?? oldStored.todosUpdatedAt,
                     seq: oldStored.todosSourceSeq ?? -1
                 },
-                namespace
+                namespace,
+                { touchUpdatedAt: false }
             )
         }
 
