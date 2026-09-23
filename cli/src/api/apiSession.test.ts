@@ -1492,6 +1492,90 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('allows an explicit retry to supersede a canceled materialization attempt', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const firstDownload = deferred<{ data: Buffer; headers: Record<string, string> }>()
+        axiosHarness.get.mockReturnValue(firstDownload.promise)
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const onUserMessage = vi.fn()
+        client.onUserMessage(onUserMessage)
+        const cancelQueuedMessage = vi.fn()
+            .mockReturnValueOnce('indeterminate')
+            .mockReturnValueOnce('indeterminate')
+        client.onCancelQueuedMessage(cancelQueuedMessage)
+        const retryQueuedMessage = vi.fn(() => true)
+        client.onRetryQueuedMessage(retryQueuedMessage)
+        const message = {
+            id: 'retry-after-cancel-message',
+            localId: 'retry-after-cancel-local-id',
+            seq: 1,
+            text: 'retry after cancel',
+            sentFrom: 'webapp' as const,
+            attachments: [{
+                id: 'retry-after-cancel-attachment',
+                filename: 'slow.txt',
+                mimeType: 'text/plain',
+                size: 5,
+                attachmentId: 'retry-after-cancel-file'
+            }]
+        }
+        triggerIncomingUserMessage(socket, message)
+        await vi.waitFor(() => expect(axiosHarness.get).toHaveBeenCalledOnce())
+
+        const cancelAck = vi.fn()
+        socket.trigger('update', {
+            body: {
+                t: 'cancel-queued-message',
+                messageId: message.id,
+                localId: message.localId
+            }
+        }, cancelAck)
+        await vi.waitFor(() => expect(cancelAck).toHaveBeenCalledWith(expect.objectContaining({
+            removed: true,
+            indeterminate: true
+        })))
+
+        const retryAck = vi.fn()
+        socket.trigger('update', {
+            body: {
+                t: 'retry-queued-message',
+                localId: message.localId,
+                message: {
+                    id: message.id,
+                    seq: 1,
+                    localId: message.localId,
+                    content: {
+                        role: 'user',
+                        content: {
+                            type: 'text',
+                            text: message.text,
+                            attachments: message.attachments
+                        },
+                        meta: { sentFrom: 'webapp' }
+                    }
+                }
+            }
+        }, retryAck)
+        await vi.waitFor(() => expect(retryAck).toHaveBeenCalledWith(expect.objectContaining({
+            accepted: true
+        })))
+
+        firstDownload.resolve({
+            data: Buffer.from('hello'),
+            headers: {
+                'content-length': '5',
+                'x-hapi-attachment-size': '5',
+                'x-hapi-attachment-sha256': '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+            }
+        })
+        await vi.waitFor(() => expect(onUserMessage).toHaveBeenCalledOnce())
+        expect(onUserMessage.mock.calls[0]?.[0].content.text).toBe('retry after cancel')
+        client.close()
+    })
+
     it('keeps cancellation active across duplicate deliveries of one local message', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()
