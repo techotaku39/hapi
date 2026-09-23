@@ -134,14 +134,20 @@ public final class SessionListStore: SessionListStoring {
     @discardableResult
     public func loadSessionDetail(_ sessionId: String) async throws -> Session {
         var session = try await api.session(id: sessionId)
-        if let cached = details[sessionId], session.seq < cached.seq {
+        let detailWatermark: () -> Int = {
+            max(
+                self.details[sessionId]?.seq ?? 0,
+                self.sessions.first { $0.id == sessionId }?.lastAssistantMessageVersion ?? 0
+            )
+        }
+        if session.seq < detailWatermark() {
             // The rejected snapshot may still contain unrelated fields that
             // arrived before the newer SSE reply-clock patch. Retry once to
             // recover that complete server state without creating a loop.
             session = try await api.session(id: sessionId)
         }
-        if let cached = details[sessionId], session.seq < cached.seq {
-            return cached
+        if session.seq < detailWatermark() {
+            return details[sessionId] ?? session
         }
         details[sessionId] = session
         return session
@@ -307,7 +313,11 @@ public final class SessionListStore: SessionListStoring {
         // already encodes the session-vs-strict-patch discrimination.
         switch data {
         case .session(let full) where full.id == sessionId:
-            if details[full.id].map({ full.seq >= $0.seq }) ?? true {
+            let watermark = max(
+                details[full.id]?.seq ?? 0,
+                sessions.first { $0.id == full.id }?.lastAssistantMessageVersion ?? 0
+            )
+            if full.seq >= watermark {
                 details[full.id] = full
             }
             upsertSummary(full)

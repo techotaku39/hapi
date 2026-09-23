@@ -177,9 +177,14 @@ class SessionStore(
             var accepted = session
             _details.update { current ->
                 val cached = current[sessionId]
-                stale = cached != null && session.seq < cached.seq
+                val summaryVersion = _sessions.value
+                    .firstOrNull { it.id == sessionId }
+                    ?.lastAssistantMessageVersion
+                    ?: 0L
+                val watermark = maxOf(cached?.seq ?: 0L, summaryVersion)
+                stale = session.seq < watermark
                 if (stale) {
-                    accepted = cached!!
+                    if (cached != null) accepted = cached
                     current
                 } else {
                     current + (sessionId to session)
@@ -428,7 +433,12 @@ class SessionStore(
             // an older full record cannot pass a stale pre-read and write last.
             _details.update { current ->
                 val cached = current[sessionId]
-                if (cached != null && full.seq < cached.seq) {
+                val summaryVersion = _sessions.value
+                    .firstOrNull { it.id == sessionId }
+                    ?.lastAssistantMessageVersion
+                    ?: 0L
+                val watermark = maxOf(cached?.seq ?: 0L, summaryVersion)
+                if (full.seq < watermark) {
                     current
                 } else {
                     current + (sessionId to full)

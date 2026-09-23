@@ -196,6 +196,21 @@ struct SessionListStoreTests {
         #expect(store.sessions.first?.lastAssistantMessageVersion == 1)
     }
 
+    @Test func olderFullSessionEventCannotPopulateDetailBelowSummaryWatermark() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("s1", updatedAt: 9_000, lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 5)
+        ))
+        try await store.refresh()
+
+        let stale = storeSession("s1", seq: 4, updatedAt: 10_000, lastAssistantMessageAt: 1_000)
+        store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: fullSessionJSON(stale)))
+
+        #expect(store.detail(for: "s1") == nil)
+        #expect(store.sessions.first?.lastAssistantMessageAt == 9_000)
+        #expect(store.sessions.first?.lastAssistantMessageVersion == 5)
+    }
+
     @Test func replyPatchUpdatesTimestampAndListOrderingWithoutChangingActivityClock() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(
