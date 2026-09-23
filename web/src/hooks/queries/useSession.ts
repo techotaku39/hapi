@@ -30,6 +30,14 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
 } {
     const resolvedSessionId = sessionId ?? 'unknown'
     const queryClient = useQueryClient()
+    // Subscribe to the list cache so a newer reply-clock watermark triggers
+    // the detail recovery path even when the detail query itself is fresh.
+    const sessionsQuery = useQuery<SessionsResponse>({
+        queryKey: queryKeys.sessions,
+        queryFn: async () => queryClient.getQueryData<SessionsResponse>(queryKeys.sessions) ?? { sessions: [] },
+        enabled: false,
+        staleTime: Infinity,
+    })
     const query = useQuery({
         queryKey: queryKeys.session(resolvedSessionId),
         queryFn: async () => {
@@ -38,7 +46,7 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
             }
             let incoming = await api.getSession(sessionId)
             let current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId))
-            let currentSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+            let currentSummary = sessionsQuery.data
                 ?.sessions.find((summary) => summary.id === sessionId)
             if (needsSessionResponseRetry(current, incoming, currentSummary)) {
                 // A newer SSE patch may only carry the reply clock. Retry once
@@ -69,7 +77,7 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
         },
     })
 
-    const cachedSummary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
+    const cachedSummary = sessionsQuery.data
         ?.sessions.find((summary) => summary.id === sessionId)
     const cachedSession = query.data?.session
     const listWatermark = cachedSummary?.lastAssistantMessageVersion ?? 0
@@ -77,14 +85,15 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
         cachedSession
         && cachedSession.seq < listWatermark
     )
-    const refreshAttemptedForWatermark = useRef<number | null>(null)
+    const refreshAttemptedForWatermark = useRef<string | null>(null)
+    const refreshKey = `${sessionId ?? ''}:${listWatermark}`
     useEffect(() => {
-        if (!isBelowListWatermark || query.isFetching || refreshAttemptedForWatermark.current === listWatermark) {
+        if (!isBelowListWatermark || query.isFetching || refreshAttemptedForWatermark.current === refreshKey) {
             return
         }
-        refreshAttemptedForWatermark.current = listWatermark
+        refreshAttemptedForWatermark.current = refreshKey
         void query.refetch()
-    }, [isBelowListWatermark, listWatermark, query.isFetching, query.refetch])
+    }, [isBelowListWatermark, query.isFetching, query.refetch, refreshKey])
     return {
         session: isBelowListWatermark ? null : cachedSession ?? null,
         isLoading: query.isLoading,

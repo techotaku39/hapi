@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -165,12 +166,19 @@ class SessionStore(
     private val refreshQueued = AtomicBoolean(false)
 
     override fun sessionDetail(sessionId: String): Flow<Session?> =
-        _details.map { details -> visibleDetail(sessionId, details[sessionId]) }.distinctUntilChanged()
+        combine(_details, _sessions) { details, sessions ->
+            visibleDetail(sessionId, details[sessionId], sessions)
+        }.distinctUntilChanged()
 
-    override fun currentDetail(sessionId: String): Session? = visibleDetail(sessionId, _details.value[sessionId])
+    override fun currentDetail(sessionId: String): Session? =
+        visibleDetail(sessionId, _details.value[sessionId], _sessions.value)
 
-    private fun visibleDetail(sessionId: String, detail: Session?): Session? {
-        val summaryVersion = _sessions.value.firstOrNull { it.id == sessionId }?.lastAssistantMessageVersion ?: 0L
+    private fun visibleDetail(
+        sessionId: String,
+        detail: Session?,
+        summaries: List<SessionSummary>,
+    ): Session? {
+        val summaryVersion = summaries.firstOrNull { it.id == sessionId }?.lastAssistantMessageVersion ?: 0L
         return detail?.takeIf { it.seq >= summaryVersion }
     }
 
