@@ -304,6 +304,7 @@ export default {
   'dialog.rename.providerReason.serviceUnavailable': 'provider service unavailable',
   'dialog.rename.providerReason.connectionFailed': 'connection failed',
   'dialog.rename.providerReason.emptyResponse': 'empty response',
+  'dialog.rename.providerReason.invalidResponse': 'invalid response',
   'dialog.rename.generateUnavailable': 'Title generation is not configured on this Hub. Configure titleProvider.baseUrl, titleProvider.apiKey, and titleProvider.model in $HAPI_HOME/settings.json (default ~/.hapi/settings.json), or set HAPI_TITLE_PROVIDER_BASE_URL, HAPI_TITLE_PROVIDER_API_KEY, and HAPI_TITLE_PROVIDER_MODEL in the Hub environment, then restart the Hub.',
   'dialog.archive.title': 'Archive Session',
   'dialog.archive.description': 'Are you sure you want to archive "{name}"? This will disconnect active session.',

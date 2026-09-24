@@ -29,6 +29,7 @@ type TitleSuggestionProviderReason =
     | 'provider-service-unavailable'
     | 'connection-failed'
     | 'empty-response'
+    | 'invalid-response'
 
 type TitleSuggestionErrorDetail = {
     message: string
@@ -46,7 +47,8 @@ function isTitleSuggestionProviderReason(value: unknown): value is TitleSuggesti
         'rate-limited',
         'provider-service-unavailable',
         'connection-failed',
-        'empty-response'
+        'empty-response',
+        'invalid-response'
     ].includes(value)
 }
 
@@ -89,7 +91,8 @@ const titleSuggestionProviderReasonKeys: Record<TitleSuggestionProviderReason, s
     'rate-limited': 'dialog.rename.providerReason.rateLimited',
     'provider-service-unavailable': 'dialog.rename.providerReason.serviceUnavailable',
     'connection-failed': 'dialog.rename.providerReason.connectionFailed',
-    'empty-response': 'dialog.rename.providerReason.emptyResponse'
+    'empty-response': 'dialog.rename.providerReason.emptyResponse',
+    'invalid-response': 'dialog.rename.providerReason.invalidResponse'
 }
 
 function formatTitleSuggestionErrorDetail(
@@ -166,7 +169,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
                     const detail = error instanceof ApiError
                         ? extractTitleSuggestionErrorDetail(error)
                         : null
-                    setError(detail
+                    setError(detail?.reason
                         ? t('dialog.rename.generateErrorWithReason', {
                             reason: formatTitleSuggestionErrorDetail(detail, t)
                         })

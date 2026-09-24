@@ -34,6 +34,7 @@ export type TitleSuggestionProviderReason =
     | 'provider-service-unavailable'
     | 'connection-failed'
     | 'empty-response'
+    | 'invalid-response'
 
 export class TitleSuggestionError extends Error {
     constructor(
@@ -466,7 +467,9 @@ export class TitleSuggestionService {
         try {
             const rawTitle = await this.provider.suggest(buildTitlePrompt(conversation))
             const title = normalizeTitleSuggestion(rawTitle)
-            if (!title) throw new Error('Title provider returned an invalid title')
+            if (!title) {
+                throw new TitleProviderRequestError('Title provider returned an invalid title', 'invalid-response')
+            }
             return title
         } catch (error) {
             if (error instanceof TitleSuggestionError) throw error
@@ -481,7 +484,7 @@ export class TitleSuggestionService {
                 ? error.reason
                 : error instanceof TitleProviderTimeoutError || isAbortError(error)
                     ? 'request-timed-out'
-                    : 'connection-failed'
+                    : undefined
             const providerStatus = error instanceof TitleProviderRequestError
                 ? error.providerStatus
                 : undefined

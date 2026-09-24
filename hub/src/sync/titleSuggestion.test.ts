@@ -423,4 +423,21 @@ describe('TitleSuggestionService', () => {
             message: 'The title suggestion provider failed'
         })
     })
+
+    it('reports an invalid generated title without labeling it as a connection failure', async () => {
+        const { store, sessionId } = makeStore()
+        store.messages.addMessage(sessionId, {
+            role: 'user',
+            content: { type: 'text', text: 'Title this conversation' }
+        })
+
+        const service = new TitleSuggestionService(store, {
+            provider: { suggest: async () => 'Title:' }
+        })
+
+        await expect(service.suggestTitle(sessionId)).rejects.toMatchObject({
+            code: 'provider',
+            reason: 'invalid-response'
+        })
+    })
 })
