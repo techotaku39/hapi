@@ -23,6 +23,7 @@ import type {
     ImplementCodexPlanResult,
     CopilotModelsResponse,
     GrokModelsResponse,
+    KimiModelsResponse,
     GrokReasoningEffortResponse,
     ListDirectoryResponse,
     ListCodexSessionsRpcResponse,
@@ -113,6 +114,7 @@ export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeModelVariantsResponse = OpencodeModelVariantsResponse
 export type RpcListGrokModelsResponse = GrokModelsResponse
 export type RpcListCopilotModelsResponse = CopilotModelsResponse
+export type RpcListKimiModelsResponse = KimiModelsResponse
 export type RpcListGrokReasoningEffortOptionsResponse = GrokReasoningEffortResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
 export type RpcListAgyModelsResponse = AgyModelsResponse
@@ -482,6 +484,28 @@ export class RpcGateway {
             {},
             MODEL_LIST_RPC_TIMEOUT_MS
         ) as RpcListCopilotModelsResponse
+    }
+
+    async listKimiModelsForCwd(machineId: string, cwd: string): Promise<RpcListKimiModelsResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.ListKimiModelsForCwd,
+            { cwd },
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListKimiModelsResponse
+    }
+
+    /**
+     * Active-session Kimi discovery. The probe runs in the CLI that owns the
+     * session, so it works without a background runner on the machine.
+     */
+    async listKimiModelsForSession(sessionId: string): Promise<RpcListKimiModelsResponse> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.ListKimiModels,
+            {},
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListKimiModelsResponse
     }
 
     /** Generic Pi RPC call — routes all Pi-specific session RPCs through

@@ -269,7 +269,7 @@ export function SessionHeader(props: {
     }
 
     const handleSyncCodex = async () => {
-        if (!api || !codexSessionId || isSyncingCodex) return
+        if (!api || !codexSessionId || isSyncingCodex || session.active) return
 
         setIsSyncingCodex(true)
         try {
@@ -524,7 +524,7 @@ export function SessionHeader(props: {
                 onMarkUnread={() => markSessionUnread(session.id, getSessionActivityTimestamp(session))}
                 onSetPinMode={api ? (mode) => void handleSetPinMode(mode) : undefined}
                 onExport={() => setExportOpen(true)}
-                onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
+                onSyncCodex={api && codexSessionId && !session.active ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={props.canReopen === false ? undefined : handleReopen}
