@@ -2,7 +2,9 @@ import {
     CursorMigrateToAcpRequestSchema,
     DeleteUploadRequestSchema,
     ForkConversationRequestSchema,
+    ImplementCodexPlanRequestSchema,
     getPermissionModesForFlavor,
+    isLiveLifecycleState,
     isPermissionModeAllowedForFlavor,
     RenameSessionRequestSchema,
     SetSessionPinnedRequestSchema,
@@ -453,7 +455,10 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ ok: true, alreadyArchived: true })
         }
 
-        if (!sessionResult.session.active && lifecycleState !== 'running') {
+        // tiann/hapi#1820: `idle` is a live lifecycle too — a session the hub
+        // reconciled as keepalive-only must stay archivable once its socket
+        // finally drops, exactly like a stale `running` row.
+        if (!sessionResult.session.active && !isLiveLifecycleState(lifecycleState)) {
             return c.json({ error: 'Session is inactive' }, 409)
         }
 
@@ -507,6 +512,24 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                         : outcome.reason === 'no_legacy_store_on_disk' ? 404
                             : 500
         return c.json(outcome, status)
+    })
+
+    app.post('/sessions/:id/codex/plan/implement', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const access = requireSessionFromParam(c, engine, { requireActive: true })
+        if (access instanceof Response) return access
+        if (access.session.metadata?.flavor !== 'codex' || !access.session.metadata.capabilities?.concurrentClients) {
+            return c.json({ ok: false, code: 'unavailable', error: 'An active shared Codex session is required' }, 409)
+        }
+        const parsed = ImplementCodexPlanRequestSchema.safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) return c.json({ error: 'Invalid body' }, 400)
+        const result = await engine.implementCodexPlan(access.sessionId, c.get('namespace'), parsed.data.planId).catch(() => ({
+            ok: false as const, code: 'indeterminate' as const,
+            error: 'Plan implementation could not be confirmed. Reconnect and check the mode, queue and conversation before retrying.'
+        }))
+        const status = result.ok ? 200 : result.code === 'indeterminate' ? 503 : result.code === 'failed' ? 502 : 409
+        return c.json(result, status)
     })
 
     app.post('/sessions/:id/clear', async (c) => {
@@ -1485,6 +1508,24 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Copilot models'
+            }, 500)
+        }
+    })
+
+    app.get('/sessions/:id/kimi-models', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) return sessionResult
+        if (sessionResult.session.metadata?.flavor !== 'kimi') {
+            return c.json({ success: false, error: 'Kimi models are only available for Kimi sessions' }, 400)
+        }
+        try {
+            return c.json(await engine.listKimiModelsForSession(sessionResult.sessionId))
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Kimi models'
             }, 500)
         }
     })

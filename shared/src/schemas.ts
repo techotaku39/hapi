@@ -112,8 +112,15 @@ export const MetadataSchema = z.object({
     hostPid: z.number().optional(),
     hapiMcpUrl: z.string().url().optional(),
     startedBy: z.enum(['runner', 'terminal']).optional(),
+    // 'running' | 'idle' | 'archived' (see shared/src/sessionLifecycle.ts).
+    // 'idle' is written by the hub's keepalive-idle reconciler (tiann/hapi#1820)
+    // and reverts to 'running' on the next agent progress.
     lifecycleState: z.string().optional(),
     lifecycleStateSince: z.number().optional(),
+    // Opt out of keepalive-idle reconciliation for sessions that are meant to
+    // sit quiet indefinitely (operator holding pens, sessions owning work the
+    // hub cannot see). Never reconciled to 'idle' while true.
+    idleReconcileExempt: z.boolean().optional(),
     archivedBy: z.string().optional(),
     archiveReason: z.string().optional(),
     // Set only after a completed fresh-session clear. The source row remains
@@ -198,6 +205,8 @@ export type AgentStateCompletedRequest = z.infer<typeof AgentStateCompletedReque
 
 export const AgentStateSchema = z.object({
     controlledByUser: z.boolean().nullish(),
+    // Current actionable shared Codex proposal; content remains in the transcript.
+    codexPlanProposalId: z.string().nullish(),
     // True while the CLI is delivering a queued message into the active turn
     // (Steer). Surfaced so the web can reflect the inject in progress.
     steeringActive: z.boolean().nullish(),

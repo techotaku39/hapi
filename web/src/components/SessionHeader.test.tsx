@@ -58,6 +58,18 @@ function renderHeader(session: Session, extra?: { serviceTier?: string | null; t
     )
 }
 
+function renderHeaderWithApi(session: Session, api: ApiClient) {
+    return render(
+        <QueryClientProvider client={new QueryClient()}>
+            <ToastProvider>
+                <I18nProvider>
+                    <SessionHeader session={session} onBack={vi.fn()} api={api} />
+                </I18nProvider>
+            </ToastProvider>
+        </QueryClientProvider>
+    )
+}
+
 describe('resolveSessionHeaderMachineLabel', () => {
     it('prefers cached/display labels, then host, then short machine id', () => {
         expect(resolveSessionHeaderMachineLabel(
@@ -108,6 +120,38 @@ describe('SessionHeader', () => {
         fireEvent.click(screen.getByRole('menuitem', { name: /Rename/ }))
 
         expect(screen.getByRole('button', { name: 'Generate' })).toBeInTheDocument()
+    })
+
+    it('does not offer manual Codex sync while the HAPI session is active', () => {
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            syncCodexSession: vi.fn()
+        } as unknown as ApiClient
+
+        renderHeaderWithApi(baseSession({
+            active: true,
+            metadata: { flavor: 'codex', path: '/repo', host: 'machine', codexSessionId: 'codex-thread-1' }
+        }), api)
+
+        fireEvent.click(screen.getByRole('button', { name: /More/ }))
+        expect(screen.queryByRole('menuitem', { name: /Sync Codex/ })).toBeNull()
+    })
+
+    it('keeps manual Codex sync available for an inactive imported thread', () => {
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            syncCodexSession: vi.fn()
+        } as unknown as ApiClient
+
+        renderHeaderWithApi(baseSession({
+            active: false,
+            metadata: { flavor: 'codex', path: '/repo', host: 'machine', codexSessionId: 'codex-thread-1' }
+        }), api)
+
+        fireEvent.click(screen.getByRole('button', { name: /More/ }))
+        expect(screen.getByRole('menuitem', { name: /Sync Codex/ })).toBeInTheDocument()
     })
 
     it('manually syncs an inactive Pi session through its owning machine', async () => {
