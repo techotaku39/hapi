@@ -15,7 +15,10 @@ function renderWithProviders(content: React.ReactNode) {
     )
 }
 
-afterEach(() => cleanup())
+afterEach(() => {
+    cleanup()
+    localStorage.removeItem('hapi-lang')
+})
 
 function expectCenteredTitle(name: string) {
     const dialog = screen.getByRole('dialog')
@@ -116,7 +119,9 @@ describe('session dialog title alignment', () => {
                         'provider',
                         JSON.stringify({
                             error: 'Title provider request failed (HTTP 404): endpoint or model not found',
-                            code: 'provider'
+                            code: 'provider',
+                            reason: 'endpoint-or-model-not-found',
+                            providerStatus: 404
                         })
                     )
                 }}
@@ -128,6 +133,38 @@ describe('session dialog title alignment', () => {
 
         await waitFor(() => expect(screen.getByText(
             'Failed to generate a title: Title provider request failed (HTTP 404): endpoint or model not found'
+        )).toBeInTheDocument())
+    })
+
+    it('localizes a structured provider failure reason in Chinese', async () => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+        renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={async () => {
+                    throw new ApiError(
+                        'HTTP 502 Bad Gateway',
+                        502,
+                        'provider',
+                        JSON.stringify({
+                            error: 'Title provider request failed (HTTP 401): authentication failed',
+                            code: 'provider',
+                            reason: 'authentication-failed',
+                            providerStatus: 401
+                        })
+                    )
+                }}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: '生成' }))
+
+        await waitFor(() => expect(screen.getByText(
+            '标题生成失败：标题生成服务请求失败（HTTP 401）：身份验证失败'
         )).toBeInTheDocument())
     })
 

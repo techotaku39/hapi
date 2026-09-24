@@ -24,11 +24,24 @@ export const TITLE_SUGGESTION_UNAVAILABLE_MESSAGE =
 
 type TitleSuggestionErrorCode = 'unavailable' | 'empty' | 'rate-limited' | 'provider'
 
+export type TitleSuggestionProviderReason =
+    | 'request-rejected'
+    | 'authentication-failed'
+    | 'access-denied'
+    | 'endpoint-or-model-not-found'
+    | 'request-timed-out'
+    | 'rate-limited'
+    | 'provider-service-unavailable'
+    | 'connection-failed'
+    | 'empty-response'
+
 export class TitleSuggestionError extends Error {
     constructor(
         readonly code: TitleSuggestionErrorCode,
         message: string,
-        readonly status: 422 | 429 | 502 | 503
+        readonly status: 422 | 429 | 502 | 503,
+        readonly reason?: TitleSuggestionProviderReason,
+        readonly providerStatus?: number
     ) {
         super(message)
         this.name = 'TitleSuggestionError'
@@ -262,6 +275,17 @@ const TITLE_PROVIDER_HTTP_REASONS: Record<number, string> = {
     429: 'rate limited'
 }
 
+function titleProviderHttpReason(status: number): TitleSuggestionProviderReason {
+    switch (status) {
+        case 401: return 'authentication-failed'
+        case 403: return 'access-denied'
+        case 404: return 'endpoint-or-model-not-found'
+        case 408: return 'request-timed-out'
+        case 429: return 'rate-limited'
+        default: return status >= 500 ? 'provider-service-unavailable' : 'request-rejected'
+    }
+}
+
 function titleProviderHttpError(status: number): string {
     const reason = TITLE_PROVIDER_HTTP_REASONS[status]
         ?? (status >= 500 ? 'provider service unavailable' : 'request rejected')
@@ -274,7 +298,7 @@ async function readTitleProviderResponseBody(response: Response): Promise<unknow
         text = await response.text()
     } catch (error) {
         if (isAbortError(error)) throw error
-        return null
+        throw new TitleProviderRequestError('Title provider connection failed', 'connection-failed')
     }
     if (!text.trim()) return null
 
@@ -290,7 +314,11 @@ function isAbortError(error: unknown): boolean {
 }
 
 class TitleProviderRequestError extends Error {
-    constructor(message: string) {
+    constructor(
+        message: string,
+        readonly reason: TitleSuggestionProviderReason = 'connection-failed',
+        readonly providerStatus?: number
+    ) {
         super(message)
         this.name = 'TitleProviderRequestError'
     }
@@ -347,12 +375,18 @@ export class OpenAICompatibleTitleProvider {
                 if (response.body) {
                     await response.body.cancel().catch(() => undefined)
                 }
-                throw new TitleProviderRequestError(titleProviderHttpError(response.status))
+                throw new TitleProviderRequestError(
+                    titleProviderHttpError(response.status),
+                    titleProviderHttpReason(response.status),
+                    response.status
+                )
             }
 
             const body = await readTitleProviderResponseBody(response)
             const text = extractProviderText(body)
-            if (!text) throw new TitleProviderRequestError('Title provider returned no text')
+            if (!text) {
+                throw new TitleProviderRequestError('Title provider returned no text', 'empty-response')
+            }
             return text
         } catch (error) {
             if (error instanceof TitleProviderRequestError) throw error
@@ -443,10 +477,20 @@ export class TitleSuggestionService {
                     : isAbortError(error)
                         ? 'Title provider request timed out'
                         : null
+            const reason = error instanceof TitleProviderRequestError
+                ? error.reason
+                : error instanceof TitleProviderTimeoutError || isAbortError(error)
+                    ? 'request-timed-out'
+                    : 'connection-failed'
+            const providerStatus = error instanceof TitleProviderRequestError
+                ? error.providerStatus
+                : undefined
             throw new TitleSuggestionError(
                 'provider',
                 detail ?? 'The title suggestion provider failed',
-                502
+                502,
+                reason,
+                providerStatus
             )
         } finally {
             this.inFlightSessionIds.delete(sessionId)

@@ -128,9 +128,11 @@ describe('OpenAI-compatible title provider', () => {
             }), { status: 401, statusText: 'Unauthorized' })
         )
 
-        await expect(provider.suggest('Recent conversation')).rejects.toThrow(
-            'Title provider request failed (HTTP 401): authentication failed'
-        )
+        await expect(provider.suggest('Recent conversation')).rejects.toMatchObject({
+            message: 'Title provider request failed (HTTP 401): authentication failed',
+            reason: 'authentication-failed',
+            providerStatus: 401
+        })
     })
 
     it('cancels a non-success response body before returning the provider error', async () => {
@@ -181,6 +183,28 @@ describe('OpenAI-compatible title provider', () => {
         await expect(provider.suggest('Recent conversation')).rejects.toThrow(
             'Title provider request timed out after 50 ms'
         )
+    })
+
+    it('reports a safe connection error when the response body disconnects', async () => {
+        const provider = new OpenAICompatibleTitleProvider(
+            {
+                baseUrl: 'https://example.test/v1',
+                apiKey: 'secret',
+                model: 'small-model'
+            },
+            async () => ({
+                ok: true,
+                status: 200,
+                text: async () => {
+                    throw new TypeError('socket closed')
+                }
+            } as unknown as Response)
+        )
+
+        await expect(provider.suggest('Recent conversation')).rejects.toMatchObject({
+            message: 'Title provider connection failed',
+            reason: 'connection-failed'
+        })
     })
 
     it('falls back to settings.json values and lets environment values override them per field', () => {

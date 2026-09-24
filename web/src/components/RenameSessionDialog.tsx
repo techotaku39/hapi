@@ -19,7 +19,38 @@ type RenameSessionDialogProps = {
     isPending: boolean
 }
 
-function extractTitleSuggestionErrorDetail(error: ApiError): string | null {
+type TitleSuggestionProviderReason =
+    | 'request-rejected'
+    | 'authentication-failed'
+    | 'access-denied'
+    | 'endpoint-or-model-not-found'
+    | 'request-timed-out'
+    | 'rate-limited'
+    | 'provider-service-unavailable'
+    | 'connection-failed'
+    | 'empty-response'
+
+type TitleSuggestionErrorDetail = {
+    message: string
+    reason?: TitleSuggestionProviderReason
+    providerStatus?: number
+}
+
+function isTitleSuggestionProviderReason(value: unknown): value is TitleSuggestionProviderReason {
+    return typeof value === 'string' && [
+        'request-rejected',
+        'authentication-failed',
+        'access-denied',
+        'endpoint-or-model-not-found',
+        'request-timed-out',
+        'rate-limited',
+        'provider-service-unavailable',
+        'connection-failed',
+        'empty-response'
+    ].includes(value)
+}
+
+function extractTitleSuggestionErrorDetail(error: ApiError): TitleSuggestionErrorDetail | null {
     if (!error.body) return null
 
     let parsed: unknown
@@ -30,7 +61,8 @@ function extractTitleSuggestionErrorDetail(error: ApiError): string | null {
     }
 
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const message = (parsed as { error?: unknown }).error
+    const value = parsed as { error?: unknown; reason?: unknown; providerStatus?: unknown }
+    const message = value.error
     if (typeof message !== 'string') return null
 
     const detail = message
@@ -41,7 +73,39 @@ function extractTitleSuggestionErrorDetail(error: ApiError): string | null {
         .trim()
 
     if (!detail) return null
-    return detail.length > 240 ? `${detail.slice(0, 239)}…` : detail
+    return {
+        message: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail,
+        ...(isTitleSuggestionProviderReason(value.reason) ? { reason: value.reason } : {}),
+        ...(typeof value.providerStatus === 'number' ? { providerStatus: value.providerStatus } : {})
+    }
+}
+
+const titleSuggestionProviderReasonKeys: Record<TitleSuggestionProviderReason, string> = {
+    'request-rejected': 'dialog.rename.providerReason.requestRejected',
+    'authentication-failed': 'dialog.rename.providerReason.authenticationFailed',
+    'access-denied': 'dialog.rename.providerReason.accessDenied',
+    'endpoint-or-model-not-found': 'dialog.rename.providerReason.endpointOrModelNotFound',
+    'request-timed-out': 'dialog.rename.providerReason.requestTimedOut',
+    'rate-limited': 'dialog.rename.providerReason.rateLimited',
+    'provider-service-unavailable': 'dialog.rename.providerReason.serviceUnavailable',
+    'connection-failed': 'dialog.rename.providerReason.connectionFailed',
+    'empty-response': 'dialog.rename.providerReason.emptyResponse'
+}
+
+function formatTitleSuggestionErrorDetail(
+    detail: TitleSuggestionErrorDetail,
+    t: (key: string, params?: Record<string, string | number>) => string
+): string {
+    if (!detail.reason) return detail.message
+
+    const reason = t(titleSuggestionProviderReasonKeys[detail.reason])
+    if (detail.providerStatus !== undefined) {
+        return t('dialog.rename.generateProviderErrorWithStatus', {
+            status: detail.providerStatus,
+            reason
+        })
+    }
+    return t('dialog.rename.generateProviderError', { reason })
 }
 
 export function RenameSessionDialog(props: RenameSessionDialogProps) {
@@ -103,7 +167,9 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
                         ? extractTitleSuggestionErrorDetail(error)
                         : null
                     setError(detail
-                        ? t('dialog.rename.generateErrorWithReason', { reason: detail })
+                        ? t('dialog.rename.generateErrorWithReason', {
+                            reason: formatTitleSuggestionErrorDetail(detail, t)
+                        })
                         : t('dialog.rename.generateError'))
                 }
             }
