@@ -557,6 +557,32 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('rebuilds imported structured tasks when the sync engine is unavailable', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-plan-no-engine-test-'))
+        const store = new Store(':memory:')
+        const codexSessionId = '14141414-1414-4141-8141-141414141414'
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            createPlanTranscript(codexHome, codexSessionId)
+            const result = await importSelectedCodexSessions({
+                codexSessionIds: [codexSessionId],
+                store,
+                namespace: 'default',
+                getSyncEngine: () => null
+            })
+
+            expect(result.success).toBe(true)
+            const imported = store.sessions.getSessionsByNamespace('default')[0]
+            expect(imported?.todos).toEqual([
+                { content: 'Imported task', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+            ])
+        } finally {
+            store.close()
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('updates an existing forked import when syncing the original Codex session id', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-source-test-'))
         const store = new Store(':memory:')
@@ -1494,6 +1520,51 @@ describe('Codex Desktop import routes', () => {
                 { content: 'Imported duplicate plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }
             ])
             expect(store.sessions.getSession(storedSession.id)?.updatedAt).toBe(canonicalUpdatedAt)
+        } finally {
+            store.close()
+        }
+    })
+
+    it('rebuilds duplicate tasks when the SyncEngine is unavailable', async () => {
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        const store = new Store(':memory:')
+        const canonical = store.sessions.getOrCreateSession('canonical-session', { codexSessionId: 'codex-thread-2' }, {}, 'default')
+        const duplicate = store.sessions.getOrCreateSession('duplicate-session', { codexSessionId: 'codex-thread-2' }, {}, 'default')
+        store.messages.addMessage(canonical.id, { type: 'text', text: 'canonical message' }, 'canonical-1', undefined, 100)
+        store.messages.addMessage(duplicate.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    name: 'update_plan',
+                    input: { plan: [{ step: 'Fallback duplicate plan', status: 'in_progress' }] }
+                }
+            }
+        }, 'duplicate-plan', undefined, 200)
+        app.route('/api', createCodexDesktopRoutes({
+            store,
+            getSyncEngine: () => null
+        }))
+
+        try {
+            const response = await app.request('/api/codex/merge-duplicate-sessions', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ sessionIds: ['codex-thread-2'] })
+            })
+
+            expect(response.status).toBe(200)
+            const body = await response.json() as { success: true; merged: Array<{ canonicalSessionId?: string }> }
+            expect(body.success).toBe(true)
+            expect(body.merged[0]?.canonicalSessionId).toBe(canonical.id)
+            expect(store.sessions.getSession(canonical.id)?.todos).toEqual([
+                { content: 'Fallback duplicate plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }
+            ])
         } finally {
             store.close()
         }

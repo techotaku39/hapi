@@ -1082,6 +1082,10 @@ export class Store {
     /** v27→v28: persist the canonical source position for structured tasks. */
     private migrateFromV27ToV28(): void {
         const columns = this.getSessionColumnNames()
+        // A partially built legacy database may not have the sessions table yet.
+        // createSchema runs after the legacy migration ladder and creates the
+        // current columns in that case.
+        if (columns.size === 0) return
         if (!columns.has('todos_source_at')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN todos_source_at INTEGER')
         }
