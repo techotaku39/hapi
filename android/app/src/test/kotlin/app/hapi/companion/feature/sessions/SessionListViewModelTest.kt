@@ -392,7 +392,7 @@ class SessionListViewModelTest {
         )
         viewModel.refresh()
         viewModel.uiState.first { state ->
-            lastSeenStore.lastSeenAt("legacy") == 5_000
+            lastSeenStore.lastSeenAt("legacy") == 5_000L
                 && state.rows.any { it.id == "legacy" && !it.unread }
         }
 
