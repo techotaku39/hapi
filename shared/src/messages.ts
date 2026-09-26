@@ -350,9 +350,7 @@ function extractClaudeUserPlainText(content: unknown, maxSourceCharacters = Numb
 
     const message = isObject(data.message) ? data.message : null
     const blocks = Array.isArray(message?.content) ? message.content : null
-    if (!blocks || blocks.length === 0 || !blocks.every((block) => (
-        isObject(block) && block.type === 'text' && typeof block.text === 'string'
-    ))) return null
+    if (!blocks || blocks.length === 0) return null
 
     return extractUserPlainTextWithMetadata(blocks, maxSourceCharacters)
 }

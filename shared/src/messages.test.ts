@@ -292,6 +292,23 @@ describe('extractSearchableMessageText', () => {
                 type: 'output',
                 data: {
                     type: 'user',
+                    isSidechain: false,
+                    message: {
+                        content: [
+                            { type: 'text', text: 'Visible mixed prompt.' },
+                            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'ignored' } },
+                            { type: 'tool_result', tool_use_id: 'tool-1', content: 'ignored tool output' }
+                        ]
+                    }
+                }
+            }
+        })).toEqual({ role: 'user', text: 'Visible mixed prompt.' })
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
                     isSidechain: true,
                     message: { content: [{ type: 'text', text: 'Hidden prompt.' }] }
                 }

@@ -389,6 +389,16 @@ export class Store {
         }
 
         const stepMigrations = buildStepMigrations(false)
+        // A v26 database predates all three derived-index refinements. Create
+        // the final schema and rebuild once instead of running the v26→v27
+        // rebuild, v28→v29 short-index backfill, and v29→v30 rebuild in turn.
+        // Keep the individual steps below for databases that resume from an
+        // intermediate schema version after an interrupted upgrade.
+        if (currentVersion === 26) {
+            this.migrateFromV26ToV30()
+            this.setUserVersion(SCHEMA_VERSION)
+            return
+        }
         if (currentVersion < SCHEMA_VERSION && stepMigrations[currentVersion]) {
             for (let v = currentVersion; v < SCHEMA_VERSION; v++) {
                 const step = stepMigrations[v]
@@ -1070,6 +1080,12 @@ export class Store {
 
     /** Derived FTS index for opt-in session message-content search. */
     private migrateFromV26ToV27(): void {
+        createMessageContentSearchTable(this.db)
+        if (this.getMessageColumnNames().size === 0) return
+        rebuildMessageContentSearch(this.db)
+    }
+
+    private migrateFromV26ToV30(): void {
         createMessageContentSearchTable(this.db)
         if (this.getMessageColumnNames().size === 0) return
         rebuildMessageContentSearch(this.db)
