@@ -188,6 +188,7 @@ type PendingOutboundEvent = {
 const MAX_PENDING_DROPPABLE_EVENTS = 256
 const MATERIALIZATION_RETRY_MIN_MS = 1_000
 const MATERIALIZATION_RETRY_MAX_MS = 30_000
+const MATERIALIZATION_MAX_ATTEMPTS = 3
 
 function isTransientMaterializationError(error: unknown): boolean {
     if (!axios.isAxiosError(error)) {
@@ -921,7 +922,9 @@ export class ApiSessionClient extends EventEmitter {
                 for (const attachment of userResult.data.content.attachments) {
                     if (this.isClosed()) return
                     let retryDelayMs = MATERIALIZATION_RETRY_MIN_MS
+                    let attempts = 0
                     for (;;) {
+                        attempts += 1
                         try {
                             materializationResults.push({
                                 attachment: await this.attachmentMaterializer.materialize(attachment),
@@ -934,7 +937,8 @@ export class ApiSessionClient extends EventEmitter {
                                 error
                             })
                             if (this.isClosed()) return
-                            if (!isTransientMaterializationError(error)) {
+                            if (!isTransientMaterializationError(error)
+                                || attempts >= MATERIALIZATION_MAX_ATTEMPTS) {
                                 materializationResults.push({
                                     attachment,
                                     failure: `Attachment unavailable: ${attachment.filename}`

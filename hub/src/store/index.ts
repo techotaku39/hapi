@@ -401,6 +401,14 @@ export class Store {
         )
         try {
             return this.db.transaction(() => {
+                const currentMessageIds = new Set(
+                    this.messages.getAllMessages(fromSessionId)
+                        .filter((message) => message.invokedAt === null)
+                        .map((message) => message.id)
+                )
+                if (!sameMessageIds(currentMessageIds, prepared.messageIds)) {
+                    throw new Error('Queued messages changed while attachment references were being prepared')
+                }
                 for (const [messageId, content] of prepared.rewrittenContents) {
                     if (!this.messages.updateMessageContent(messageId, content)) {
                         throw new Error(`Failed to rewrite queued message ${messageId}`)

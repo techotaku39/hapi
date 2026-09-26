@@ -1336,6 +1336,48 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
+    it('bounds persistent attachment failures and continues with later prompts', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        const persistentError = Object.assign(new Error('hub remains unavailable'), {
+            isAxiosError: true,
+            response: { status: 503 }
+        })
+        axiosHarness.get.mockRejectedValue(persistentError)
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const receivedTexts: string[] = []
+        client.onUserMessage((message) => receivedTexts.push(message.content.text))
+
+        triggerIncomingUserMessage(socket, {
+            id: 'persistent-attachment-message',
+            seq: 1,
+            text: 'unavailable file',
+            sentFrom: 'webapp',
+            attachments: [{
+                id: 'att-1',
+                filename: 'unavailable.txt',
+                mimeType: 'text/plain',
+                size: 5,
+                attachmentId: 'persistent-attachment'
+            }]
+        })
+        triggerIncomingUserMessage(socket, {
+            id: 'message-after-persistent-failure',
+            seq: 2,
+            text: 'later prompt',
+            sentFrom: 'webapp'
+        })
+
+        await vi.waitFor(() => expect(receivedTexts).toEqual([
+            'unavailable file\n\nAttachment unavailable: unavailable.txt',
+            'later prompt'
+        ]), { timeout: 7_000 })
+        expect(axiosHarness.get).toHaveBeenCalledTimes(3)
+        client.close()
+    })
+
     it('deduplicates an explicit retry when the same queued message is replayed', async () => {
         socketHarness.sockets.length = 0
         axiosHarness.get.mockReset()
