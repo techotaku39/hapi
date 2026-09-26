@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import * as fsPromises from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { SyncEvent } from '@hapi/protocol/types'
@@ -149,6 +148,51 @@ describe('durable attachment session lifecycle', () => {
         expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
     })
 
+    it('rolls back message and attachment movement when merge deletion fails', async () => {
+        const { store, cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+        const attachment = await store.attachments.create({
+            namespace: 'default',
+            sessionId: oldSession.id,
+            filename: 'merge-delete-failure.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('merge delete failure')
+        })
+        store.scratchlist.create(oldSession.id, 'merge delete failure note', { entryId: 'merge-delete-failure-note' })
+        const message = store.messages.addMessage(oldSession.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'merge delete failure',
+                attachments: [{
+                    id: 'merge-delete-failure-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id
+                }]
+            }
+        }, 'merge-delete-failure-message')
+        const db = (store as unknown as { db: Database }).db
+        db.exec(`
+            CREATE TRIGGER fail_merge_source_delete
+            BEFORE DELETE ON sessions
+            WHEN OLD.id = '${oldSession.id}'
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated merge source deletion failure');
+            END;
+        `)
+
+        await expect(cache.mergeSessions(oldSession.id, newSession.id, 'default'))
+            .rejects.toThrow('simulated merge source deletion failure')
+        expect(store.messages.getAllMessages(oldSession.id).map((row) => row.id)).toEqual([message.id])
+        expect(store.messages.getAllMessages(newSession.id)).toHaveLength(0)
+        expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
+        expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
+        expect(store.scratchlist.list(oldSession.id).map((entry) => entry.entryId)).toEqual(['merge-delete-failure-note'])
+        expect(store.scratchlist.list(newSession.id)).toHaveLength(0)
+    })
+
     it('rechecks source activity before final automatic consolidation deletion', async () => {
         let beforeDeleteCalls = 0
         let cache!: SessionCache
@@ -169,6 +213,7 @@ describe('durable attachment session lifecycle', () => {
             mimeType: 'text/plain',
             original: Buffer.from('activity-race')
         })
+        context.store.scratchlist.create(oldSession.id, 'activity race note', { entryId: 'activity-race-note' })
         const message = context.store.messages.addMessage(oldSession.id, {
             role: 'user',
             content: {
@@ -193,6 +238,8 @@ describe('durable attachment session lifecycle', () => {
         expect(context.store.messages.getAllMessages(newSession.id)).toHaveLength(0)
         expect(context.store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
         expect(context.store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
+        expect(context.store.scratchlist.list(oldSession.id).map((entry) => entry.entryId)).toEqual(['activity-race-note'])
+        expect(context.store.scratchlist.list(newSession.id)).toHaveLength(0)
     })
 
     it('keeps unreferenced uploads on a live source during history-only merge', async () => {
@@ -236,52 +283,38 @@ describe('durable attachment session lifecycle', () => {
     })
 
     it('transfers uploads completed during awaited merge work before deleting the source', async () => {
-        const { store, cache, root } = setup()
+        let lateUploadPromise: Promise<StoredAttachment> | undefined
+        let store!: Store
+        let cache!: SessionCache
+        const context = setupWithDeleteHooks({
+            beforeDeleteSession: async (sessionId) => {
+                lateUploadPromise = store.attachments.create({
+                    namespace: 'default',
+                    sessionId,
+                    filename: 'late.txt',
+                    mimeType: 'text/plain',
+                    original: Buffer.from('late upload')
+                })
+                await lateUploadPromise
+            }
+        })
+        store = context.store
+        cache = context.cache
+        const root = context.root
         const { oldSession, newSession } = makeSessions(cache)
         const previousHome = process.env.HAPI_HOME
         process.env.HAPI_HOME = root
-        const oldScratchDir = join(root, 'scratchlist-attachments', 'default', oldSession.id)
-        let releaseScratchDelete!: () => void
-        let notifyScratchDeleteStarted!: () => void
-        const scratchDeleteGate = new Promise<void>((resolve) => { releaseScratchDelete = resolve })
-        const scratchDeleteStarted = new Promise<void>((resolve) => { notifyScratchDeleteStarted = resolve })
-        const originalRm = fsPromises.rm.bind(fsPromises)
-        const rmSpy = spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
-            if (String(path) === oldScratchDir) {
-                notifyScratchDeleteStarted()
-                await scratchDeleteGate
-            }
-            return await originalRm(path, options)
-        })
-        let lateUploadPromise: Promise<StoredAttachment> | undefined
-        const originalTransfer = store.scratchlist.transfer.bind(store.scratchlist)
-        const transferSpy = spyOn(store.scratchlist, 'transfer').mockImplementation((fromSessionId, toSessionId) => {
-            const result = originalTransfer(fromSessionId, toSessionId)
-            lateUploadPromise = store.attachments.create({
-                namespace: 'default',
-                sessionId: oldSession.id,
-                filename: 'late.txt',
-                mimeType: 'text/plain',
-                original: Buffer.from('late upload')
-            })
-            return { ...result, moved: Math.max(1, result.moved) }
-        })
         try {
             const merging = cache.mergeSessions(oldSession.id, newSession.id, 'default')
             const lateAttachment = await lateUploadPromise!
-            await scratchDeleteStarted
             expect(store.attachments.getForSession(lateAttachment.id, 'default', oldSession.id)).not.toBeNull()
             expect(store.attachments.getForSession(lateAttachment.id, 'default', newSession.id)).toBeNull()
 
-            releaseScratchDelete()
             await merging
             expect(store.attachments.getForSession(lateAttachment.id, 'default', oldSession.id)).toBeNull()
             expect(store.attachments.getForSession(lateAttachment.id, 'default', newSession.id)).not.toBeNull()
             expect(existsSync(lateAttachment.originalPath)).toBe(true)
         } finally {
-            releaseScratchDelete?.()
-            rmSpy.mockRestore()
-            transferSpy.mockRestore()
             if (previousHome === undefined) delete process.env.HAPI_HOME
             else process.env.HAPI_HOME = previousHome
         }

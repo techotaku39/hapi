@@ -1353,8 +1353,23 @@ export class SessionCache {
         // path (`syncEngine.resumeSession` -> here) silently destroys
         // the operator's per-session notes, contradicting the v2.0
         // promise that scratchlist survives reloads.
-        const movedScratchlist = this.store.scratchlist.transfer(oldSessionId, newSessionId)
-        if (movedScratchlist.moved > 0) {
+        const preparedScratchlistAttachments = new Map<
+            string,
+            import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+        >()
+        let preparedScratchlistFiles: import('@hapi/protocol').ScratchlistAttachmentMetadata[] = []
+        let scratchlistHome: string | undefined
+        const cleanupPreparedScratchlistFiles = async (): Promise<void> => {
+            if (preparedScratchlistFiles.length === 0) return
+            const { deleteScratchlistAttachmentFiles } = await import('../scratchlistAttachments/storage')
+            await deleteScratchlistAttachmentFiles(scratchlistHome ?? '', preparedScratchlistFiles)
+            preparedScratchlistFiles = []
+        }
+
+        const movedScratchlist = !options.deleteOldSession
+            ? this.store.scratchlist.transfer(oldSessionId, newSessionId)
+            : { moved: 0, collided: 0 }
+        if (!options.deleteOldSession && movedScratchlist.moved > 0) {
             // Attachment hub paths embed the old session id. Re-key files +
             // metadata so quota/resolve stay correct on the consolidated id.
             const {
@@ -1381,7 +1396,7 @@ export class SessionCache {
             // Rows landed on the consolidated session - invalidate so
             // any client on the new id refetches.
             this.emitScratchlistChanged(newSessionId)
-        } else if (movedScratchlist.collided > 0) {
+        } else if (!options.deleteOldSession && movedScratchlist.collided > 0) {
             // Every old entry lost the PK race — drop leftover hub blobs.
             const { getHapiHomeDir, deleteScratchlistSessionAttachmentDir } = await import(
                 '../scratchlistAttachments/storage'
@@ -1395,6 +1410,30 @@ export class SessionCache {
             // clients viewing the old id drop stale cache entries that
             // would 404 on edit/delete.
             this.emitScratchlistChanged(oldSessionId)
+        }
+
+        if (options.deleteOldSession) {
+            const oldEntries = this.store.scratchlist.list(oldSessionId)
+            const targetEntryIds = new Set(this.store.scratchlist.list(newSessionId).map((entry) => entry.entryId))
+            if (oldEntries.some((entry) => entry.attachments.length > 0 && !targetEntryIds.has(entry.entryId))) {
+                const {
+                    copyScratchlistAttachmentFilesForSession,
+                    getHapiHomeDir,
+                } = await import('../scratchlistAttachments/storage')
+                scratchlistHome = getHapiHomeDir()
+                for (const entry of oldEntries) {
+                    if (entry.attachments.length === 0 || targetEntryIds.has(entry.entryId)) continue
+                    const prepared = await copyScratchlistAttachmentFilesForSession(
+                        scratchlistHome,
+                        namespace,
+                        oldSessionId,
+                        newSessionId,
+                        entry.attachments,
+                    )
+                    preparedScratchlistAttachments.set(entry.entryId, prepared.attachments)
+                    preparedScratchlistFiles.push(...prepared.createdPaths)
+                }
+            }
         }
 
         const mergedMetadata = this.mergeSessionMetadata(oldStored.metadata, newStored.metadata)
@@ -1524,44 +1563,61 @@ export class SessionCache {
         }
 
         if (options.deleteOldSession) {
-            // Wait for all shared-fork preservation and late uploads, then
-            // recheck activity before moving any source history or ownership.
-            const preparation = this.lifecycleHooks.beforeDeleteSession?.(oldSessionId)
-            if (preparation) {
-                await preparation
-            }
-            if (this.sessions.get(oldSessionId)?.active) {
-                throw new Error('Cannot merge a session that became active')
-            }
-            const movedMessages = this.store.mergeSessionMessagesAndAttachments(
-                namespace,
-                oldSessionId,
-                newSessionId,
-                null
-            )
-            if (movedMessages.moved > 0) {
-                this.store.usage.transferSession(oldSessionId, newSessionId)
-                this.publisher.emit({ type: 'messages-invalidated', sessionId: newSessionId, namespace })
-            }
-            // mergeSessions deletes the source. Keep work-graph events on the
-            // surviving canonical session before the atomic source deletion.
-            this.store.workGraph.reassignNotifySession(namespace, oldSessionId, newSessionId)
-            this.store.transferAttachmentsAndDeleteSession(namespace, oldSessionId, newSessionId)
-            this.lifecycleHooks.afterDeleteSession?.(oldSessionId)
+            let committed = false
+            try {
+                // Wait for all shared-fork preservation and late uploads, then
+                // recheck activity before moving any source history or ownership.
+                const preparation = this.lifecycleHooks.beforeDeleteSession?.(oldSessionId)
+                if (preparation) {
+                    await preparation
+                }
+                if (this.sessions.get(oldSessionId)?.active) {
+                    throw new Error('Cannot merge a session that became active')
+                }
+                const moved = this.store.mergeSessionMessagesAndAttachmentsAndDeleteSession(
+                    namespace,
+                    oldSessionId,
+                    newSessionId,
+                    preparedScratchlistAttachments
+                )
+                committed = true
+                if (moved.moved > 0) {
+                    this.store.usage.transferSession(oldSessionId, newSessionId)
+                    this.publisher.emit({ type: 'messages-invalidated', sessionId: newSessionId, namespace })
+                }
+                if (moved.scratchlistMoved > 0 || moved.scratchlistCollided > 0) {
+                    const { deleteScratchlistSessionAttachmentDir } = await import(
+                        '../scratchlistAttachments/storage'
+                    )
+                    await deleteScratchlistSessionAttachmentDir(
+                        scratchlistHome ?? (await import('../scratchlistAttachments/storage')).getHapiHomeDir(),
+                        namespace,
+                        oldSessionId
+                    )
+                    this.emitScratchlistChanged(newSessionId)
+                }
+                this.lifecycleHooks.afterDeleteSession?.(oldSessionId)
 
-            const existed = this.sessions.delete(oldSessionId)
-            if (existed) {
-                this.publisher.emit({ type: 'session-removed', sessionId: oldSessionId, namespace })
+                const existed = this.sessions.delete(oldSessionId)
+                if (existed) {
+                    this.publisher.emit({ type: 'session-removed', sessionId: oldSessionId, namespace })
+                }
+                this.lastBroadcastAtBySessionId.delete(oldSessionId)
+                this.todoBackfillAttemptedSessionIds.delete(oldSessionId)
+                // The merged history is the new row's progress too — carry the
+                // clock over so a resume-rotated id does not start out stale.
+                const oldProgressAt = this.agentProgressAtBySessionId.get(oldSessionId)
+                if (oldProgressAt !== undefined) {
+                    this.recordAgentProgress(newSessionId, oldProgressAt)
+                }
+                this.agentProgressAtBySessionId.delete(oldSessionId)
+            } finally {
+                if (!committed) {
+                    await cleanupPreparedScratchlistFiles()
+                } else {
+                    preparedScratchlistFiles = []
+                }
             }
-            this.lastBroadcastAtBySessionId.delete(oldSessionId)
-            this.todoBackfillAttemptedSessionIds.delete(oldSessionId)
-            // The merged history is the new row's progress too — carry the
-            // clock over so a resume-rotated id does not start out stale.
-            const oldProgressAt = this.agentProgressAtBySessionId.get(oldSessionId)
-            if (oldProgressAt !== undefined) {
-                this.recordAgentProgress(newSessionId, oldProgressAt)
-            }
-            this.agentProgressAtBySessionId.delete(oldSessionId)
         } else {
             this.refreshSession(oldSessionId)
         }

@@ -15,6 +15,8 @@ import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
 import { AttachmentStore, type StoredAttachment } from './attachments'
 
+type ScratchlistAttachmentMetadata = import('@hapi/protocol').ScratchlistAttachmentMetadata
+
 export type {
     NativeDevicePlatform,
     StoredMachine,
@@ -1425,6 +1427,50 @@ export class Store {
             return {
                 ...movedMessages,
                 attachmentsMoved: Number(attachmentResult.changes)
+            }
+        })()
+    }
+
+    /** Move all merge-owned rows and delete the source in one SQLite transaction. */
+    mergeSessionMessagesAndAttachmentsAndDeleteSession(
+        namespace: string,
+        fromSessionId: string,
+        toSessionId: string,
+        scratchlistAttachments = new Map<string, ScratchlistAttachmentMetadata[]>()
+    ): {
+        moved: number
+        oldMaxSeq: number
+        newMaxSeq: number
+        attachmentsMoved: number
+        scratchlistMoved: number
+        scratchlistCollided: number
+    } {
+        return this.db.transaction(() => {
+            const movedMessages = mergeSessionMessagesInTransaction(
+                this.db,
+                fromSessionId,
+                toSessionId
+            )
+            const attachmentResult = this.db.prepare(`
+                UPDATE attachments
+                SET session_id = ?
+                WHERE namespace = ? AND session_id = ?
+            `).run(toSessionId, namespace, fromSessionId)
+            const movedScratchlist = this.scratchlist.transferInTransaction(fromSessionId, toSessionId)
+            for (const [entryId, attachments] of scratchlistAttachments) {
+                if (!this.scratchlist.update(toSessionId, entryId, { attachments })) {
+                    throw new Error(`Failed to update merged scratchlist entry: ${entryId}`)
+                }
+            }
+            this.workGraph.reassignNotifySession(namespace, fromSessionId, toSessionId)
+            if (!this.sessions.deleteSession(fromSessionId, namespace)) {
+                throw new Error('Failed to delete old session during merge')
+            }
+            return {
+                ...movedMessages,
+                attachmentsMoved: Number(attachmentResult.changes),
+                scratchlistMoved: movedScratchlist.moved,
+                scratchlistCollided: movedScratchlist.collided,
             }
         })()
     }
