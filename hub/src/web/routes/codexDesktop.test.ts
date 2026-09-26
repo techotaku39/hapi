@@ -438,16 +438,10 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('refreshes the live session cache after creating a direct import', async () => {
-        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-cache-test-'))
+    it('refuses a transcript import for an active Codex thread when stored messages do not match its prefix', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-active-sync-test-'))
         const store = new Store(':memory:')
         const codexSessionId = '10101010-1010-4010-8010-101010101010'
-        const engine = new SyncEngineClass(
-            store,
-            {} as never,
-            new RpcRegistry(),
-            { broadcast() {} } as never
-        )
         process.env.CODEX_HOME = codexHome
 
         try {
@@ -478,6 +472,46 @@ describe('Codex Desktop import routes', () => {
             expect(store.sessions.getSessionsByNamespace('default')).toHaveLength(1)
             expect(store.messages.getAllMessages(liveSession.id)).toHaveLength(1)
         } finally {
+            store.close()
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('refreshes the live session cache after creating a direct import', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-cache-test-'))
+        const store = new Store(':memory:')
+        const codexSessionId = '10101010-1010-4010-8010-101010101010'
+        const engine = new SyncEngineClass(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            createTranscript(codexHome, codexSessionId)
+
+            const result = await importSelectedCodexSessions({
+                codexSessionIds: [codexSessionId],
+                store,
+                namespace: 'default',
+                getSyncEngine: () => engine
+            })
+
+            expect(result.success).toBe(true)
+            const importedSessionId = result.success ? result.hapiSessionIds?.[0] : undefined
+            expect(importedSessionId).toBeDefined()
+            if (!importedSessionId) {
+                throw new Error('Imported session id missing')
+            }
+
+            const persisted = store.sessions.getSession(importedSessionId)
+            const cached = engine.getSession(importedSessionId)
+            expect(persisted?.lastAssistantMessageAt).toBeTypeOf('number')
+            expect(cached?.lastAssistantMessageAt).toBe(persisted?.lastAssistantMessageAt)
+        } finally {
+            engine.stop()
             store.close()
             rmSync(codexHome, { recursive: true, force: true })
         }
