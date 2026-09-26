@@ -53,7 +53,7 @@ describe('StatusBar context details dialog', () => {
         localStorage.setItem('hapi-lang', 'en')
         const { rerender } = render(
             <I18nProvider>
-                <StatusBar active thinking={false} agentState={null} />
+                <StatusBar active thinking={false} agentState={null} agentFlavor="claude" />
             </I18nProvider>
         )
 
@@ -61,11 +61,23 @@ describe('StatusBar context details dialog', () => {
 
         rerender(
             <I18nProvider>
-                <StatusBar active={false} thinking={false} agentState={null} />
+                <StatusBar active={false} thinking={false} agentState={null} agentFlavor="claude" />
             </I18nProvider>
         )
 
         expect(screen.getByRole('button', { name: 'Agent context details: offline' })).toBeInTheDocument()
+    })
+
+    it.each(['pi', 'copilot', 'opencode'])('keeps %s connection status static without context details', agentFlavor => {
+        localStorage.setItem('hapi-lang', 'en')
+        render(
+            <I18nProvider>
+                <StatusBar active thinking={false} agentState={null} agentFlavor={agentFlavor} />
+            </I18nProvider>
+        )
+
+        expect(screen.queryByRole('button', { name: /Agent context details/ })).not.toBeInTheDocument()
+        expect(screen.getByRole('status', { name: 'online' })).toBeInTheDocument()
     })
 
     it('uses an effort-only reasoning label on mobile and the full label on desktop', () => {

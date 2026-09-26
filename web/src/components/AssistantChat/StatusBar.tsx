@@ -352,26 +352,38 @@ export function StatusBar(props: {
         ? formatCompactReasoningLabel(reasoningEffort)
         : null
     const codexFastMode = shouldShowCodexFastBadge(props.agentFlavor, props.serviceTier)
+    const supportsContextDetails = props.agentFlavor === 'claude' || props.agentFlavor === 'codex'
+    const contextStatusContent = (
+        <>
+            <span
+                aria-hidden="true"
+                className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
+            />
+            <span className={`whitespace-nowrap text-xs ${connectionStatus.color}`}>
+                {connectionStatus.text}
+            </span>
+        </>
+    )
 
     return (
         <div className="flex min-w-0 items-baseline justify-between gap-2 px-2 pb-1">
             <div className="flex min-w-0 items-baseline gap-2">
-                <ContextDetailsDialog
-                    details={displayContextDetails}
-                    triggerAriaLabel={`${t('misc.contextAgentDetails')}: ${connectionStatus.text}`}
-                    triggerClassName="relative top-px sm:top-0.5 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)]"
-                    triggerContent={(
-                        <>
-                            <span
-                                aria-hidden="true"
-                                className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
-                            />
-                            <span className={`whitespace-nowrap text-xs ${connectionStatus.color}`}>
-                                {connectionStatus.text}
-                            </span>
-                        </>
-                    )}
-                />
+                {supportsContextDetails ? (
+                    <ContextDetailsDialog
+                        details={displayContextDetails}
+                        triggerAriaLabel={`${t('misc.contextAgentDetails')}: ${connectionStatus.text}`}
+                        triggerClassName="relative top-px sm:top-0.5 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-1 focus-visible:ring-[var(--app-link)]"
+                        triggerContent={contextStatusContent}
+                    />
+                ) : (
+                    <span
+                        role="status"
+                        aria-label={connectionStatus.text}
+                        className="relative top-px sm:top-0.5 flex shrink-0 items-center gap-1.5"
+                    >
+                        {contextStatusContent}
+                    </span>
+                )}
                 {contextUsageLabel ? (
                     <Popover.Root>
                         <Popover.Trigger asChild>
