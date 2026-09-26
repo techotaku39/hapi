@@ -24,7 +24,7 @@ Query parameters (`MessagesQuerySchema`; all numbers coerced from strings):
 
 | Param | Type | Constraint |
 |---|---|---|
-| `limit` | int | 1–200. **Default 50** when omitted (the web reference always sends 200). |
+| `limit` | int | 1–200. **Default 50** when omitted; the web reference uses 200 for full latest/reset, after, and before pages, and 20 for the first latest-tail refresh on cached re-entry. |
 | `beforeSeq` + `beforeAt` | int + int | Page strictly older than this position. Pairwise required. |
 | `afterSeq` + `afterAt` | int + int | Page strictly newer than this position. Pairwise required. |
 | `untilSeq` + `untilAt` | int + int | Inclusive snapshot head for a catch-up loop. Pairwise required; **requires an `after` cursor**. |
@@ -98,8 +98,12 @@ Client contract:
 
 Run after connect, after an SSE `resume: 'gap'` handshake, on session open, and when told to (`messages-invalidated`). Reference: `runTailSync` in `web/src/lib/message-window-store.ts`.
 
-1. **No usable state** (no newest cursor, no cached epoch, or a reset is pending): `GET …/messages?limit=200` (latest), replace/merge into the window, store `page.epoch`, `nextBefore*` (older-page cursor) and `snapshotHead*` (newest cursor). Done.
-2. **Have cursor + epoch**: loop
+1. **No usable state** (no newest cursor, no cached epoch, or a reset is pending):
+   - For a genuinely cold window with no cursor and no pending structural reset, request `GET …/messages?limit=20` (latest) so the newest usable conversation content can paint quickly.
+   - For a pending structural reset, request the normal full latest page with `limit=200`.
+   - Replace/merge into the window, store `page.epoch`, `nextBefore*` (older-page cursor) and `snapshotHead*` (newest cursor). Done.
+2. **Cached re-entry with a usable cursor**: `GET …/messages?limit=20` (latest), replace the stale server window while preserving queued/concurrent rows, then expose `nextBefore*` for older-history loading. Done.
+3. **Have cursor + epoch outside activation**: loop
    - `GET …/messages?afterSeq&afterAt&epoch[&untilSeq&untilAt]&limit=200`, where `after` starts at your newest cursor and `until` is the `snapshotHead*` captured from the **first** response of the loop (fixes the target so the loop terminates).
    - `page.reset` or `direction: 'latest'` ⇒ replace the window with this page; stop.
    - Otherwise merge the rows, advance `after = nextAfter*`, update the newest cursor to `max(current, nextAfter)`; stop when `hasMore` is false.
@@ -115,7 +119,9 @@ Constants from the web reference (`web/src/lib/message-window-store.ts`):
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `PAGE_SIZE` | 200 | Request size for every page fetch. |
+| `INITIAL_PAGE_SIZE` | 20 | Request size for the cold latest page used to prioritize first paint. |
+| `PAGE_SIZE` | 200 | Request size for ordinary latest/reset, forward, and older-page fetches. |
+| `CACHED_REENTRY_PAGE_SIZE` | 20 | First latest-tail page for a cached session re-entry. |
 | `VISIBLE_WINDOW_SIZE` | 400 | Max regular rows kept in **tail** mode (following live bottom). |
 | `HISTORY_WINDOW_SIZE` | 600 | Max regular rows kept in **history** mode (user scrolled back). |
 | `OLDER_LOAD_WINDOW_SIZE` | 800 | Temporary cap while an older page is being merged (prepend). |
@@ -126,7 +132,7 @@ Rules:
 - **Tail mode** trims from the top (oldest dropped). Dropping rows ⇒ set `hasMore: true` and recompute the older-page cursor from the oldest kept row.
 - **History mode** trims from the bottom (newest dropped). Dropping newest rows means your window no longer reaches the tail ⇒ flag "latest reset required": on returning to tail mode, discard cursors and fetch a fresh latest page rather than trusting stale ones.
 - **Queued rows are never trimmed** (user messages with `invokedAt === null`, see below) — they are re-merged after every trim.
-- Persist the window (messages + cursors + epoch) per session for instant cold-start rendering; on re-activation with a persisted cursor, still fetch a fresh latest page first (another client may have advanced the session by many pages) and reconcile.
+- Persist the window (messages + cursors + epoch) per session for instant cold-start rendering; a genuinely cold window and cached re-activation request a small latest page for first paint, while structural resets request the ordinary full latest page and reconcile. Another client may have advanced the session by many pages; cached re-activation keeps the returned older cursor available for on-demand history loading.
 
 ---
 
