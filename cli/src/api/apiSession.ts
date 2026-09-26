@@ -976,16 +976,17 @@ export class ApiSessionClient extends EventEmitter {
             this.deliverIncomingMessage(message, materializedUser, force)
         }).finally(() => {
             this.incomingMessagePending -= 1
-            if (message.localId) {
+            const generation = materializationGeneration
+            if (message.localId && generation !== undefined) {
                 const remaining = (this.materializingLocalIdCounts.get(message.localId) ?? 1) - 1
                 if (remaining <= 0) {
                     this.materializingLocalIdCounts.delete(message.localId)
                     const cancelledThrough = this.cancelledMaterializationThroughGeneration.get(message.localId)
-                    if (cancelledThrough === undefined || materializationGeneration > cancelledThrough) {
+                    if (cancelledThrough === undefined || generation > cancelledThrough) {
                         this.materializingGenerationByLocalId.delete(message.localId)
                         this.cancelledMaterializationThroughGeneration.delete(message.localId)
                     } else {
-                        this.materializingGenerationByLocalId.set(message.localId, materializationGeneration)
+                        this.materializingGenerationByLocalId.set(message.localId, generation)
                     }
                 } else {
                     this.materializingLocalIdCounts.set(message.localId, remaining)
