@@ -1823,7 +1823,7 @@ describe('ApiSessionClient incoming user messages', () => {
         const backfill = deferred<{ data: { messages: unknown[] } }>()
         axiosHarness.get.mockImplementation((url: string) => {
             if (url.includes('/messages')) return backfill.promise
-            if (url.includes('/cli/sessions/')) {
+            if (url.includes('/cli/sessions/') && !url.includes('/attachments/')) {
                 return Promise.resolve({ data: { session: { metadataVersion: 0, metadata: null } } })
             }
             return download.promise
