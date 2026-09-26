@@ -8,15 +8,37 @@ public struct LastSeenState: Codable, Equatable, Sendable {
     public var baselines: Set<String>
     /// Rows skipped because their legacy reply clock was not ready yet.
     public var pendingBaselines: [String: Set<String>]
+    /// Replies observed live before the first authoritative list refresh.
+    public var observedUnread: Set<String>
+
+    private enum CodingKeys: String, CodingKey {
+        case lastSeen
+        case baselines
+        case pendingBaselines
+        case observedUnread
+    }
 
     public init(
         lastSeen: [String: Int] = [:],
         baselines: Set<String> = [],
-        pendingBaselines: [String: Set<String>] = [:]
+        pendingBaselines: [String: Set<String>] = [:],
+        observedUnread: Set<String> = []
     ) {
         self.lastSeen = lastSeen
         self.baselines = baselines
         self.pendingBaselines = pendingBaselines
+        self.observedUnread = observedUnread
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.lastSeen = try container.decodeIfPresent([String: Int].self, forKey: .lastSeen) ?? [:]
+        self.baselines = try container.decodeIfPresent(Set<String>.self, forKey: .baselines) ?? []
+        self.pendingBaselines = try container.decodeIfPresent(
+            [String: Set<String>].self,
+            forKey: .pendingBaselines
+        ) ?? [:]
+        self.observedUnread = try container.decodeIfPresent(Set<String>.self, forKey: .observedUnread) ?? []
     }
 }
 
@@ -65,9 +87,10 @@ public final class LastSeenStore {
         let current = state.lastSeen[sessionId] ?? 0
         let next = max(current, seenAt)
         if next == current, state.lastSeen[sessionId] != nil {
-            return
+            if state.observedUnread.remove(sessionId) == nil { return }
         }
         state.lastSeen[sessionId] = next
+        state.observedUnread.remove(sessionId)
         snapshot?.scheduleWrite(state)
     }
 
@@ -76,9 +99,18 @@ public final class LastSeenStore {
         guard !sessionId.isEmpty else { return }
         let unreadBefore = activityAt - 1
         let current = state.lastSeen[sessionId]
-        if let current, current <= unreadBefore { return }
+        if let current, current <= unreadBefore, state.observedUnread.contains(sessionId) { return }
         state.lastSeen[sessionId] = unreadBefore
+        state.observedUnread.insert(sessionId)
         snapshot?.scheduleWrite(state)
+    }
+
+    /// Unread derivation for a list row, gated until this hub has a baseline.
+    public func isUnread(_ summary: SessionSummary, scopeKey: String) -> Bool {
+        guard state.baselines.contains(scopeKey) || state.observedUnread.contains(summary.id) else {
+            return false
+        }
+        return Self.isUnread(summary, lastSeenAt: state.lastSeen[summary.id] ?? 0)
     }
 
     /// `initializeSessionLastSeen`: on the first list load for `scopeKey`

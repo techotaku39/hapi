@@ -46,6 +46,19 @@ class LastSeenStoreTest {
     }
 
     @Test
+    fun `historical rows stay read before baseline but live replies remain unread`() = runTest {
+        val store = LastSeenStore(backgroundScope)
+        val row = summary("live", updatedAt = 9_000, lastAssistantMessageAt = 5_000)
+
+        assertFalse(store.isUnread("hub-a", row))
+        store.markUnread("live", 6_000)
+        assertTrue(store.isUnread("hub-a", row.copy(lastAssistantMessageAt = 6_000)))
+
+        store.markSeen("live", 6_000)
+        assertFalse(store.isUnread("hub-a", row.copy(lastAssistantMessageAt = 6_000)))
+    }
+
+    @Test
     fun `unread compares the latest reply against the watermark`() = runTest {
         val row = summary("s1", updatedAt = 9_000, lastAssistantMessageAt = 1_000)
         assertTrue(LastSeenStore.isUnread(row, lastSeenAt = 0))

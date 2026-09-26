@@ -222,7 +222,6 @@ final class SessionListModel {
     }
 
     var rows: [SessionRowUI] {
-        let lastSeen = lastSeenStore.state.lastSeen
         let activeFilter = activeMachineFilter
         let visible = sessionStore.sessions.filter { summary in
             guard let activeFilter else { return true }
@@ -234,7 +233,7 @@ final class SessionListModel {
                 title: Self.sessionTitle(summary),
                 project: Self.projectLabel(summary),
                 flavor: summary.metadata?.flavor,
-                unread: LastSeenStore.isUnread(summary, lastSeenAt: lastSeen[summary.id] ?? 0)
+                unread: lastSeenStore.isUnread(summary, scopeKey: hubUrl)
             )
         }
     }

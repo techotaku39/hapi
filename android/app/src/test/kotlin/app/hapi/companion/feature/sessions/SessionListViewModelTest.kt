@@ -243,8 +243,9 @@ class SessionListViewModelTest {
         assertTrue(byId.getValue("s2").machine!!.unnamed)
         assertEquals("repo/tail-name", byId.getValue("s3").meta)
 
-        // No baseline seeded (no successful refresh yet) → activity is unread.
-        assertTrue(byId.getValue("s1").unread)
+        // No baseline seeded (no successful refresh yet) → cached history is
+        // not treated as a new reply.
+        assertFalse(byId.getValue("s1").unread)
     }
 
     @Test
@@ -339,6 +340,19 @@ class SessionListViewModelTest {
     }
 
     @Test
+    fun `cached rows stay read when the initial refresh fails`() = runTest {
+        val sessions = FakeSessionStore()
+        sessions.set(summary("cached", updatedAt = 9_000, lastAssistantMessageAt = 5_000))
+        sessions.failRefresh = true
+        val (viewModel, _, _) = buildViewModel(sessions = sessions)
+
+        viewModel.refresh()
+        val state = viewModel.uiState.first { it.isOffline }
+
+        assertFalse(state.rows.single().unread)
+    }
+
+    @Test
     fun `SSE does not baseline cached rows before authoritative refresh`() = runTest {
         val sessions = FakeSessionStore()
         val machines = FakeMachineStore()
@@ -360,7 +374,7 @@ class SessionListViewModelTest {
         )
         runCurrent()
         assertEquals(0, lastSeenStore.lastSeenAt("legacy"))
-        assertTrue(viewModel.uiState.value.rows.associate { it.id to it.unread }.getValue("legacy"))
+        assertFalse(viewModel.uiState.value.rows.associate { it.id to it.unread }.getValue("legacy"))
 
         sessions.rowsOnRefresh = listOf(
             summary(

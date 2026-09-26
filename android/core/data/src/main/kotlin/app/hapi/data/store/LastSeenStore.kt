@@ -16,6 +16,8 @@ data class LastSeenState(
     val baselines: Set<String> = emptySet(),
     /** Rows skipped because their legacy reply clock was not ready yet. */
     val pendingBaselines: Map<String, Set<String>> = emptyMap(),
+    /** Replies observed live before the first authoritative list refresh. */
+    val observedUnread: Set<String> = emptySet(),
 )
 
 /**
@@ -61,8 +63,11 @@ class LastSeenStore(
         updateState { state ->
             val current = state.lastSeen[sessionId] ?: 0
             val next = maxOf(current, seenAt)
-            if (next == current && state.lastSeen.containsKey(sessionId)) state
-            else state.copy(lastSeen = state.lastSeen + (sessionId to next))
+            if (next == current && state.lastSeen.containsKey(sessionId) && sessionId !in state.observedUnread) state
+            else state.copy(
+                lastSeen = state.lastSeen + (sessionId to next),
+                observedUnread = state.observedUnread - sessionId,
+            )
         }
     }
 
@@ -72,9 +77,19 @@ class LastSeenStore(
         val unreadBefore = activityAt - 1
         updateState { state ->
             val current = state.lastSeen[sessionId]
-            if (current != null && current <= unreadBefore) state
-            else state.copy(lastSeen = state.lastSeen + (sessionId to unreadBefore))
+            if (current != null && current <= unreadBefore && sessionId in state.observedUnread) state
+            else state.copy(
+                lastSeen = state.lastSeen + (sessionId to unreadBefore),
+                observedUnread = state.observedUnread + sessionId,
+            )
         }
+    }
+
+    /** Unread derivation for a list row, gated until this hub has a baseline. */
+    fun isUnread(scopeKey: String, summary: SessionSummary): Boolean {
+        val current = _state.value
+        if (scopeKey !in current.baselines && summary.id !in current.observedUnread) return false
+        return isUnread(summary, current.lastSeen[summary.id] ?: 0)
     }
 
     /**

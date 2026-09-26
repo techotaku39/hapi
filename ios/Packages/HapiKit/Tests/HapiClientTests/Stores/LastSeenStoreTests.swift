@@ -39,6 +39,20 @@ struct LastSeenStoreTests {
         #expect(LastSeenStore.isUnread(pending, lastSeenAt: store.lastSeenAt("legacy")))
     }
 
+    @Test func historicalRowsStayReadBeforeBaselineButLiveRepliesRemainUnread() {
+        let store = LastSeenStore()
+        let row = storeSummary("live", updatedAt: 9_000, lastAssistantMessageAt: 5_000)
+
+        #expect(!store.isUnread(row, scopeKey: "hub-a"))
+        store.markUnread(sessionId: "live", activityAt: 6_000)
+        var live = row
+        live.lastAssistantMessageAt = 6_000
+        #expect(store.isUnread(live, scopeKey: "hub-a"))
+
+        store.markSeen(sessionId: "live", seenAt: 6_000)
+        #expect(!store.isUnread(live, scopeKey: "hub-a"))
+    }
+
     @Test func unreadComparesLatestReplyAgainstTheWatermark() {
         let row = storeSummary("s1", updatedAt: 9_000, lastAssistantMessageAt: 1_000)
         #expect(LastSeenStore.isUnread(row, lastSeenAt: 0))
