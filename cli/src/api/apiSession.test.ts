@@ -1737,9 +1737,13 @@ describe('ApiSessionClient incoming user messages', () => {
         axiosHarness.get.mockReset()
         const download = deferred<{ data: Buffer; headers: Record<string, string> }>()
         const backfill = deferred<{ data: { messages: unknown[] } }>()
-        axiosHarness.get.mockImplementation((url: string) => (
-            url.includes('/messages') ? backfill.promise : download.promise
-        ))
+        axiosHarness.get.mockImplementation((url: string) => {
+            if (url.includes('/messages')) return backfill.promise
+            if (url.includes('/cli/sessions/') && !url.includes('/attachments/')) {
+                return Promise.resolve({ data: { session: { metadataVersion: 0, metadata: null } } })
+            }
+            return download.promise
+        })
         const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
         const socket = socketHarness.sockets[0]
         if (!socket) throw new Error('expected socket')
