@@ -1359,6 +1359,10 @@ export class SessionCache {
         >()
         let preparedScratchlistFiles: import('@hapi/protocol').ScratchlistAttachmentMetadata[] = []
         let scratchlistHome: string | undefined
+        let scratchlistSnapshot: {
+            source: ReadonlyMap<string, string>
+            target: ReadonlyMap<string, string>
+        } | undefined
         const cleanupPreparedScratchlistFiles = async (): Promise<void> => {
             if (preparedScratchlistFiles.length === 0) return
             const { deleteScratchlistAttachmentFiles } = await import('../scratchlistAttachments/storage')
@@ -1414,28 +1418,45 @@ export class SessionCache {
 
         if (options.deleteOldSession) {
             const oldEntries = this.store.scratchlist.list(oldSessionId)
-            const targetEntryIds = new Set(this.store.scratchlist.list(newSessionId).map((entry) => entry.entryId))
+            const newEntries = this.store.scratchlist.list(newSessionId)
+            const targetEntryIds = new Set(newEntries.map((entry) => entry.entryId))
+            const snapshotEntry = (entry: typeof oldEntries[number]): string => JSON.stringify({
+                text: entry.text,
+                createdAt: entry.createdAt,
+                updatedAt: entry.updatedAt,
+                attachments: entry.attachments,
+            })
+            scratchlistSnapshot = {
+                source: new Map(oldEntries.map((entry) => [entry.entryId, snapshotEntry(entry)])),
+                target: new Map(newEntries.map((entry) => [entry.entryId, snapshotEntry(entry)])),
+            }
             if (oldEntries.some((entry) => entry.attachments.length > 0 && !targetEntryIds.has(entry.entryId))) {
                 const {
                     copyScratchlistAttachmentFilesForSession,
                     getHapiHomeDir,
                 } = await import('../scratchlistAttachments/storage')
                 scratchlistHome = getHapiHomeDir()
-                for (const entry of oldEntries) {
-                    if (entry.attachments.length === 0 || targetEntryIds.has(entry.entryId)) continue
-                    const prepared = await copyScratchlistAttachmentFilesForSession(
-                        scratchlistHome,
-                        namespace,
-                        oldSessionId,
-                        newSessionId,
-                        entry.attachments,
-                    )
-                    preparedScratchlistAttachments.set(entry.entryId, prepared.attachments)
-                    preparedScratchlistFiles.push(...prepared.createdPaths)
+                try {
+                    for (const entry of oldEntries) {
+                        if (entry.attachments.length === 0 || targetEntryIds.has(entry.entryId)) continue
+                        const prepared = await copyScratchlistAttachmentFilesForSession(
+                            scratchlistHome,
+                            namespace,
+                            oldSessionId,
+                            newSessionId,
+                            entry.attachments,
+                        )
+                        preparedScratchlistAttachments.set(entry.entryId, prepared.attachments)
+                        preparedScratchlistFiles.push(...prepared.createdPaths)
+                    }
+                } catch (error) {
+                    await cleanupPreparedScratchlistFiles()
+                    throw error
                 }
             }
         }
 
+        try {
         const mergedMetadata = this.mergeSessionMetadata(oldStored.metadata, newStored.metadata)
         if (mergedMetadata !== null && mergedMetadata !== newStored.metadata) {
             for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1578,7 +1599,8 @@ export class SessionCache {
                     namespace,
                     oldSessionId,
                     newSessionId,
-                    preparedScratchlistAttachments
+                    preparedScratchlistAttachments,
+                    scratchlistSnapshot
                 )
                 committed = true
                 if (moved.moved > 0) {
@@ -1625,6 +1647,10 @@ export class SessionCache {
         const refreshed = this.refreshSession(newSessionId)
         if (refreshed) {
             this.publisher.emit({ type: 'session-updated', sessionId: newSessionId, data: refreshed })
+        }
+        } catch (error) {
+            await cleanupPreparedScratchlistFiles()
+            throw error
         }
     }
 

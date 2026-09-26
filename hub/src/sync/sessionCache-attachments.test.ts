@@ -242,6 +242,46 @@ describe('durable attachment session lifecycle', () => {
         expect(context.store.scratchlist.list(newSession.id)).toHaveLength(0)
     })
 
+    it('aborts when scratchlist content changes during attachment preparation', async () => {
+        let store!: Store
+        const context = setupWithDeleteHooks({
+            beforeDeleteSession: async (sessionId) => {
+                store.scratchlist.update(sessionId, 'scratchlist-race', { text: 'edited during merge' })
+            }
+        })
+        store = context.store
+        const { oldSession, newSession } = makeSessions(context.cache)
+        const previousHome = process.env.HAPI_HOME
+        process.env.HAPI_HOME = context.root
+        try {
+            const { writeScratchlistAttachmentFile, sumScratchlistAttachmentBytesOnDisk } = await import(
+                '../scratchlistAttachments/storage'
+            )
+            const attachment = await writeScratchlistAttachmentFile(
+                context.root,
+                'default',
+                oldSession.id,
+                'race.txt',
+                'text/plain',
+                Buffer.from('race')
+            )
+            store.scratchlist.create(oldSession.id, 'before merge', {
+                entryId: 'scratchlist-race',
+                attachments: [attachment],
+            })
+
+            await expect(context.cache.mergeSessions(oldSession.id, newSession.id, 'default'))
+                .rejects.toThrow('Scratchlist changed during session merge; retry')
+            expect(store.scratchlist.get(oldSession.id, 'scratchlist-race')?.text).toBe('edited during merge')
+            expect(store.scratchlist.get(newSession.id, 'scratchlist-race')).toBeNull()
+            expect(await sumScratchlistAttachmentBytesOnDisk(context.root, 'default', oldSession.id)).toBe(4)
+            expect(await sumScratchlistAttachmentBytesOnDisk(context.root, 'default', newSession.id)).toBe(0)
+        } finally {
+            if (previousHome === undefined) delete process.env.HAPI_HOME
+            else process.env.HAPI_HOME = previousHome
+        }
+    })
+
     it('keeps unreferenced uploads on a live source during history-only merge', async () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)

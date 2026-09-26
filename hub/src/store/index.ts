@@ -16,6 +16,10 @@ import { WorkGraphStore } from './workGraphStore'
 import { AttachmentStore, type StoredAttachment } from './attachments'
 
 type ScratchlistAttachmentMetadata = import('@hapi/protocol').ScratchlistAttachmentMetadata
+type ScratchlistMergeSnapshot = {
+    source: ReadonlyMap<string, string>
+    target: ReadonlyMap<string, string>
+}
 
 export type {
     NativeDevicePlatform,
@@ -1436,7 +1440,8 @@ export class Store {
         namespace: string,
         fromSessionId: string,
         toSessionId: string,
-        scratchlistAttachments = new Map<string, ScratchlistAttachmentMetadata[]>()
+        scratchlistAttachments = new Map<string, ScratchlistAttachmentMetadata[]>(),
+        scratchlistSnapshot?: ScratchlistMergeSnapshot
     ): {
         moved: number
         oldMaxSeq: number
@@ -1446,6 +1451,27 @@ export class Store {
         scratchlistCollided: number
     } {
         return this.db.transaction(() => {
+            if (scratchlistSnapshot) {
+                const assertScratchlistUnchanged = (sessionId: string, expected: ReadonlyMap<string, string>) => {
+                    const actual = this.scratchlist.list(sessionId)
+                    if (actual.length !== expected.size) {
+                        throw new Error('Scratchlist changed during session merge; retry')
+                    }
+                    for (const entry of actual) {
+                        const snapshot = JSON.stringify({
+                            text: entry.text,
+                            createdAt: entry.createdAt,
+                            updatedAt: entry.updatedAt,
+                            attachments: entry.attachments,
+                        })
+                        if (expected.get(entry.entryId) !== snapshot) {
+                            throw new Error('Scratchlist changed during session merge; retry')
+                        }
+                    }
+                }
+                assertScratchlistUnchanged(fromSessionId, scratchlistSnapshot.source)
+                assertScratchlistUnchanged(toSessionId, scratchlistSnapshot.target)
+            }
             const movedMessages = mergeSessionMessagesInTransaction(
                 this.db,
                 fromSessionId,
