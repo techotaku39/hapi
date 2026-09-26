@@ -193,6 +193,19 @@ export function getSessionLastSeenSnapshot(): Readonly<Record<string, number>> {
     return readStore()
 }
 
+/** Whether the first authoritative list baseline has been persisted for a hub. */
+export function isSessionLastSeenBaselineInitialized(scope: string): boolean {
+    const storage = getLocalStorage()
+    if (!storage) {
+        return false
+    }
+    try {
+        return storage.getItem(`${BASELINE_KEY}:${scope}`) === '1'
+    } catch {
+        return false
+    }
+}
+
 type SessionReadStateInput = Pick<
     SessionSummary,
     'id' | 'updatedAt' | 'lastAssistantMessageAt' | 'assistantReplyClockBackfilled'

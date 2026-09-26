@@ -392,7 +392,8 @@ class SessionListViewModelTest {
         )
         viewModel.refresh()
         viewModel.uiState.first { state ->
-            state.rows.any { it.id == "legacy" && !it.unread }
+            lastSeenStore.lastSeenAt("legacy") == 5_000
+                && state.rows.any { it.id == "legacy" && !it.unread }
         }
 
         assertEquals(5_000, lastSeenStore.lastSeenAt("legacy"))
@@ -430,8 +431,18 @@ class SessionListViewModelTest {
 
     @Test
     fun `onSessionOpened stamps the last-seen watermark and clears unread`() = runTest {
-        val (viewModel, sessions, _) = buildViewModel()
+        val sessions = FakeSessionStore()
+        val lastSeenStore = LastSeenStore(backgroundScope)
+        val viewModel = SessionListViewModel(
+            sessionStore = sessions,
+            machineStore = FakeMachineStore(),
+            lastSeenStore = lastSeenStore,
+            scope = backgroundScope,
+            hubKey = "hub-test",
+        )
         sessions.set(summary("s1", updatedAt = 900))
+        lastSeenStore.initializeBaseline("hub-test", sessions.backing.value)
+        sessions.set(summary("s1", updatedAt = 901))
         assertTrue(viewModel.uiState.first { it.rows.size == 1 }.rows.single().unread)
 
         viewModel.onSessionOpened("s1")

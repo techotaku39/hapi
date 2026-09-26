@@ -162,6 +162,8 @@ class SessionStore(
 
     /** Wired by the app so live replies cannot be absorbed by a pending baseline. */
     var onLiveReplyDuringBackfill: ((String, Long) -> Unit)? = null
+    /** True while the first authoritative unread baseline is still missing. */
+    var shouldPreserveLiveReplyUnread: (() -> Boolean)? = null
 
     private val refreshMutex = Mutex()
     private val refreshQueued = AtomicBoolean(false)
@@ -500,7 +502,8 @@ class SessionStore(
     }
 
     private fun preserveLiveReplyUnreadDuringBackfill(sessionId: String, patch: SessionPatch) {
-        if (patch.assistantReplyClockBackfilled != null) return
+        val baselinePending = shouldPreserveLiveReplyUnread?.invoke() == true
+        if (patch.assistantReplyClockBackfilled != null && !baselinePending) return
         val replyAt = (patch.lastAssistantMessageAt as? OptionalField.Present)?.value ?: return
         val currentSummary = _sessions.value.firstOrNull { it.id == sessionId }
         val currentDetail = _details.value[sessionId]
@@ -508,7 +511,7 @@ class SessionStore(
             onLiveReplyDuringBackfill?.invoke(sessionId, replyAt)
             return
         }
-        if (
+        if (!baselinePending &&
             currentSummary?.assistantReplyClockBackfilled != false
             && currentDetail?.assistantReplyClockBackfilled != false
         ) return

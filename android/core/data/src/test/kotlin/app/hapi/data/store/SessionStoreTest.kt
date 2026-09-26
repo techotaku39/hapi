@@ -351,6 +351,31 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `live reply before the first baseline notifies even after reply clock backfill`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("cached", updatedAt = 9_000, lastAssistantMessageAt = 5_000, lastAssistantMessageVersion = 10),
+            )
+        )
+        store.refresh()
+        var unreadAt: Long? = null
+        store.onLiveReplyDuringBackfill = { _, activityAt -> unreadAt = activityAt }
+        var baselinePending = true
+        store.shouldPreserveLiveReplyUnread = { baselinePending }
+
+        store.applySessionEvent(
+            globalScope,
+            sessionUpdatedEvent(
+                "cached",
+                """{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":11,"assistantReplyClockBackfilled":true}""",
+            ),
+        )
+
+        assertEquals(6_000L, unreadAt)
+        baselinePending = false
+    }
+
+    @Test
     fun `full-session event with mismatched id falls back to list refetch`() = runStoreTest { store, server ->
         server.enqueueJson(sessionsResponseJson(summary("s1", updatedAt = 100)))
         store.refresh()

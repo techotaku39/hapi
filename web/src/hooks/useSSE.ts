@@ -24,7 +24,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { applyAgyCatalogAnnouncement } from '@/lib/agyCatalogAnnouncement'
 import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, markMessagesIndeterminate, markMessagesRequeued, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
 import { applySessionDetailPatch } from '@/lib/sessionPatch'
-import { markSessionUnread } from '@/lib/sessionLastSeen'
+import { isSessionLastSeenBaselineInitialized, markSessionUnread } from '@/lib/sessionLastSeen'
 import {
     shouldAcceptSessionRecord,
     shouldAcceptSessionSummaryRecord,
@@ -677,8 +677,9 @@ export function useSSE(options: {
         }
 
         const preserveLiveReplyUnreadDuringBackfill = (sessionId: string, patch: SessionPatch): void => {
+            const baselinePending = !isSessionLastSeenBaselineInitialized(options.baseUrl)
             if (
-                patch.assistantReplyClockBackfilled !== undefined
+                (patch.assistantReplyClockBackfilled !== undefined && !baselinePending)
                 || patch.lastAssistantMessageAt === undefined
                 || patch.lastAssistantMessageAt === null
             ) {
@@ -696,6 +697,8 @@ export function useSSE(options: {
                 return
             }
             if (
+                !baselinePending
+                &&
                 currentSummary?.assistantReplyClockBackfilled !== false
                 && currentDetail?.assistantReplyClockBackfilled !== false
             ) {

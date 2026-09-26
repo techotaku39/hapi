@@ -84,6 +84,9 @@ class HubGraph(
         store.onLiveReplyDuringBackfill = { sessionId, activityAt ->
             lastSeenStore.markUnread(sessionId, activityAt)
         }
+        store.shouldPreserveLiveReplyUnread = {
+            hubUrl !in lastSeenStore.state.value.baselines
+        }
     }
 
     /**

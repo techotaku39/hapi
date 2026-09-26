@@ -101,6 +101,9 @@ final class HubSession {
         sessionStore.onLiveReplyDuringBackfill = { [weak lastSeenStore] sessionId, activityAt in
             lastSeenStore?.markUnread(sessionId: sessionId, activityAt: activityAt)
         }
+        sessionStore.shouldPreserveLiveReplyUnread = { [weak lastSeenStore] in
+            lastSeenStore?.state.baselines.contains(hubUrl) == false
+        }
         sessionStore.onSessionsChanged = { [weak lastSeenStore] sessions in
             lastSeenStore?.initializeBaseline(scopeKey: hubUrl, sessions: sessions)
         }

@@ -273,6 +273,27 @@ struct SessionListStoreTests {
         #expect(unreadAt == 6_000)
     }
 
+    @Test func liveReplyBeforeInitialBaselineNotifiesEvenAfterReplyClockBackfill() throws {
+        let (_, store) = try makeStore()
+        let lastSeenStore = LastSeenStore()
+        var cached = storeSession("cached", updatedAt: 9_000, lastAssistantMessageAt: 5_000)
+        cached.assistantReplyClockBackfilled = true
+        store.shouldPreserveLiveReplyUnread = {
+            !lastSeenStore.state.baselines.contains("hub-a")
+        }
+        store.onLiveReplyDuringBackfill = { sessionId, activityAt in
+            lastSeenStore.markUnread(sessionId: sessionId, activityAt: activityAt)
+        }
+
+        store.applySessionEvent(try sessionAddedEvent("cached", dataJSON: fullSessionJSON(cached)))
+        store.applySessionEvent(try sessionUpdatedEvent(
+            "cached",
+            dataJSON: #"{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":2,"assistantReplyClockBackfilled":true}"#
+        ))
+
+        #expect(lastSeenStore.lastSeenAt("cached") == 5_999)
+    }
+
     @Test func sessionListChangesReconcilePendingLastSeenBaselines() async throws {
         let (performer, store) = try makeStore()
         let lastSeenStore = LastSeenStore()
