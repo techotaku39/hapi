@@ -352,6 +352,46 @@ describe('ApiClient session content search', () => {
         }
     })
 
+    it('chunks oversized session scopes and merges results before applying the limit', async () => {
+        const requests: string[][] = []
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+            const body = JSON.parse(String(init?.body)) as { sessionIds: string[] }
+            requests.push(body.sessionIds)
+            const resultSessionId = body.sessionIds.at(-1) ?? ''
+            const index = Number(resultSessionId.match(/session-(\d+)/)?.[1] ?? 0)
+            return new Response(JSON.stringify({
+                results: [{
+                    session: { id: resultSessionId, updatedAt: index },
+                    match: { messageId: `message-${index}`, role: 'user', seq: index, createdAt: index, snippet: `hit-${index}`, truncated: false }
+                }],
+                hasPotentiallyIncompleteResults: body.sessionIds.some(id => id.startsWith('session-0-'))
+            }), { status: 200 })
+        })
+
+        try {
+            const sessionIds = Array.from({ length: 7_000 }, (_, index) =>
+                `session-${index}-${'x'.repeat(32)}`
+            )
+            const api = new ApiClient('test-token')
+            const response = await api.searchSessionContent('cache', 2, undefined, sessionIds)
+
+            expect(requests.length).toBeGreaterThan(1)
+            expect(requests.flat()).toHaveLength(sessionIds.length)
+            expect(Math.max(...requests.map(chunk => new TextEncoder().encode(JSON.stringify(chunk)).byteLength)))
+                .toBeLessThan(192 * 1024)
+            const expectedTopIds = requests
+                .map(chunk => Number(chunk.at(-1)?.match(/session-(\d+)/)?.[1] ?? 0))
+                .sort((a, b) => b - a)
+                .slice(0, 2)
+            expect(response.results.map(result => result.match.messageId)).toEqual([
+                ...expectedTopIds.map(index => `message-${index}`)
+            ])
+            expect(response.hasPotentiallyIncompleteResults).toBe(true)
+        } finally {
+            fetchMock.mockRestore()
+        }
+    })
+
     it('requests an encoded message context endpoint', async () => {
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
             new Response(JSON.stringify(null), { status: 200 })
