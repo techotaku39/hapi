@@ -155,19 +155,44 @@ describe('durable attachment session lifecycle', () => {
         const context = setupWithDeleteHooks({
             beforeDeleteSession: async (sessionId) => {
                 beforeDeleteCalls += 1
-                if (beforeDeleteCalls === 2) {
+                if (beforeDeleteCalls === 1) {
                     cache.getSession(sessionId)!.active = true
                 }
             }
         })
         cache = context.cache
         const { oldSession, newSession } = makeSessions(cache)
+        const attachment = await context.store.attachments.create({
+            namespace: 'default',
+            sessionId: oldSession.id,
+            filename: 'activity-race.txt',
+            mimeType: 'text/plain',
+            original: Buffer.from('activity-race')
+        })
+        const message = context.store.messages.addMessage(oldSession.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'activity race',
+                attachments: [{
+                    id: 'activity-race-attachment',
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    attachmentId: attachment.id
+                }]
+            }
+        }, 'activity-race-message')
 
         await expect(cache.mergeSessions(oldSession.id, newSession.id, 'default'))
             .rejects.toThrow('Cannot merge a session that became active')
-        expect(beforeDeleteCalls).toBe(2)
+        expect(beforeDeleteCalls).toBe(1)
         expect(context.store.sessions.getSessionByNamespace(oldSession.id, 'default')).not.toBeNull()
         expect(context.store.sessions.getSessionByNamespace(newSession.id, 'default')).not.toBeNull()
+        expect(context.store.messages.getAllMessages(oldSession.id).map((row) => row.id)).toEqual([message.id])
+        expect(context.store.messages.getAllMessages(newSession.id)).toHaveLength(0)
+        expect(context.store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
+        expect(context.store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
     })
 
     it('keeps unreferenced uploads on a live source during history-only merge', async () => {

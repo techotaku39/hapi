@@ -1326,38 +1326,24 @@ export class SessionCache {
             throw new Error('Session not found for merge')
         }
 
-        if (options.deleteOldSession) {
-            // Shared-fork hydration must copy source-owned attachment bytes
-            // before the atomic message/ownership move below.
-            const preparation = this.lifecycleHooks.beforeDeleteSession?.(oldSessionId)
-            if (preparation) {
-                await preparation
-            }
-            if (this.sessions.get(oldSessionId)?.active) {
-                throw new Error('Cannot merge a session that became active')
-            }
-        }
-
-        const referencedAttachmentIds = options.deleteOldSession
-            ? null
-            : collectDurableAttachmentIds(this.store.messages.getAllMessages(oldSessionId))
-        const movedMessages = this.store.mergeSessionMessagesAndAttachments(
-            namespace,
-            oldSessionId,
-            newSessionId,
-            referencedAttachmentIds
-        )
-        // mergeSessions deletes the source. mergeSessionHistory keeps it alive
-        // with the original socket, so its notify chain must stay on that id.
-        if (options.deleteOldSession) {
-            this.store.workGraph.reassignNotifySession(namespace, oldSessionId, newSessionId)
-        }
-        if (movedMessages.moved > 0) {
-            this.store.usage.transferSession(oldSessionId, newSessionId)
-            if (!options.deleteOldSession) {
+        // Delete-old consolidation defers message/attachment ownership movement
+        // until the final preparation and activity check below. History-only
+        // merges keep the existing immediate transfer semantics.
+        if (!options.deleteOldSession) {
+            const referencedAttachmentIds = collectDurableAttachmentIds(
+                this.store.messages.getAllMessages(oldSessionId)
+            )
+            const movedMessages = this.store.mergeSessionMessagesAndAttachments(
+                namespace,
+                oldSessionId,
+                newSessionId,
+                referencedAttachmentIds
+            )
+            if (movedMessages.moved > 0) {
+                this.store.usage.transferSession(oldSessionId, newSessionId)
                 this.publisher.emit({ type: 'messages-invalidated', sessionId: oldSessionId, namespace })
+                this.publisher.emit({ type: 'messages-invalidated', sessionId: newSessionId, namespace })
             }
-            this.publisher.emit({ type: 'messages-invalidated', sessionId: newSessionId, namespace })
         }
 
         // tiann/hapi#920: transfer scratchlist rows BEFORE the
@@ -1538,9 +1524,8 @@ export class SessionCache {
         }
 
         if (options.deleteOldSession) {
-            // Capture durable attachment uploads that completed during the
-            // awaited scratchlist migration above and delete the source in
-            // one transaction. This closes the final upload/delete window.
+            // Wait for all shared-fork preservation and late uploads, then
+            // recheck activity before moving any source history or ownership.
             const preparation = this.lifecycleHooks.beforeDeleteSession?.(oldSessionId)
             if (preparation) {
                 await preparation
@@ -1548,6 +1533,19 @@ export class SessionCache {
             if (this.sessions.get(oldSessionId)?.active) {
                 throw new Error('Cannot merge a session that became active')
             }
+            const movedMessages = this.store.mergeSessionMessagesAndAttachments(
+                namespace,
+                oldSessionId,
+                newSessionId,
+                null
+            )
+            if (movedMessages.moved > 0) {
+                this.store.usage.transferSession(oldSessionId, newSessionId)
+                this.publisher.emit({ type: 'messages-invalidated', sessionId: newSessionId, namespace })
+            }
+            // mergeSessions deletes the source. Keep work-graph events on the
+            // surviving canonical session before the atomic source deletion.
+            this.store.workGraph.reassignNotifySession(namespace, oldSessionId, newSessionId)
             this.store.transferAttachmentsAndDeleteSession(namespace, oldSessionId, newSessionId)
             this.lifecycleHooks.afterDeleteSession?.(oldSessionId)
 
