@@ -26,6 +26,7 @@ const harness = vi.hoisted(() => ({
         updateMetadata: vi.fn(),
         getMetadata: vi.fn(() => null),
         emitSessionReady: vi.fn(),
+        on: vi.fn(),
         rpcHandlerManager: { registerHandler: vi.fn() },
     },
 }));
