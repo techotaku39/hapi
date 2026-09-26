@@ -141,7 +141,6 @@ const TOP_PULL_TRIGGER_PX = 64
 // Trackpads emit a burst per swipe; one signal is enough to restart a paused
 // run after its bounded retry budget is exhausted.
 const WHEEL_GESTURE_GAP_MS = 250
-const KEYBOARD_SCROLL_INTENT_WINDOW_MS = 750
 const POINTER_CANCEL_INTENT_WINDOW_MS = 750
 const UPWARD_SCROLL_KEYS = new Set(['ArrowUp', 'PageUp', 'Home'])
 
@@ -696,6 +695,9 @@ export function HappyThread(props: {
     useEffect(() => {
         isSyncingTailRef.current = props.isSyncingTail
     }, [props.isSyncingTail])
+    useLayoutEffect(() => {
+        isLoadingMoreRef.current = props.isLoadingMoreMessages
+    }, [props.isLoadingMoreMessages])
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
@@ -791,7 +793,7 @@ export function HappyThread(props: {
         let pointerResumeActive = false
         let pointerResumeUntil = 0
         let pointerResumeLatched = false
-        let keyboardResumeUntil = 0
+        let keyboardResumeActive = false
         let lastWheelAt = 0
         let wheelIntentUntil = 0
         let wheelLatched = false
@@ -800,7 +802,7 @@ export function HappyThread(props: {
             return intent.isScrollingUp && (
                 pointerResumeActive
                 || pointerResumeUntil >= Date.now()
-                || keyboardResumeUntil >= Date.now()
+                || keyboardResumeActive
                 || wheelIntentUntil >= Date.now()
             )
         }
@@ -813,8 +815,8 @@ export function HappyThread(props: {
                 pointerResumeLatched = true
                 return true
             }
-            if (keyboardResumeUntil >= Date.now()) {
-                keyboardResumeUntil = 0
+            if (keyboardResumeActive) {
+                keyboardResumeActive = false
                 return true
             }
             if (wheelIntentUntil >= Date.now() && !wheelLatched) {
@@ -825,6 +827,9 @@ export function HappyThread(props: {
         }
 
         const handleScroll = () => {
+            if (viewport.scrollTop > lastScrollTopRef.current) {
+                keyboardResumeActive = false
+            }
             const intent = getScrollIntent({
                 scrollTop: viewport.scrollTop,
                 scrollHeight: viewport.scrollHeight,
@@ -924,6 +929,9 @@ export function HappyThread(props: {
 
         const handleKeyDown = (event: KeyboardEvent) => {
             if (isNestedScrollEvent(event)) return
+            if (!UPWARD_SCROLL_KEYS.has(event.key)) {
+                keyboardResumeActive = false
+            }
             const target = event.target
             if (
                 event.defaultPrevented
@@ -938,14 +946,17 @@ export function HappyThread(props: {
             ) {
                 return
             }
-            keyboardResumeUntil = Date.now() + KEYBOARD_SCROLL_INTENT_WINDOW_MS
+            // Native keyboard scrolling can outlive a fixed intent timeout.
+            // Keep this gesture armed until consumed, completed, or cancelled.
+            keyboardResumeActive = true
             if (needsViewportCoverageRef.current()) {
-                keyboardResumeUntil = 0
+                keyboardResumeActive = false
                 void requestOlderRef.current('user')
             }
         }
 
         const armPointerIntent = () => {
+            keyboardResumeActive = false
             pointerResumeActive = true
             pointerResumeUntil = 0
             pointerResumeLatched = false
@@ -1006,6 +1017,7 @@ export function HappyThread(props: {
 
         const handleWheel = (event: WheelEvent) => {
             if (isNestedScrollEvent(event)) return
+            keyboardResumeActive = false
             if (event.deltaY >= 0) {
                 wheelIntentUntil = 0
                 return
@@ -1029,6 +1041,7 @@ export function HappyThread(props: {
 
         const handleTouchStart = (event: TouchEvent) => {
             if (isNestedScrollEvent(event)) return
+            keyboardResumeActive = false
             updatePullToLoadState('idle')
             pullStartY = (
                 viewport.scrollTop <= 0
@@ -1075,7 +1088,21 @@ export function HappyThread(props: {
             updatePullToLoadState('idle')
         }
 
+        const clearKeyboardIntent = () => {
+            keyboardResumeActive = false
+        }
+        const handleScrollEnd = (event: Event) => {
+            if (event.target !== viewport) return
+            // Recheck the final geometry before retiring unconsumed demand.
+            if (keyboardResumeActive && needsViewportCoverageRef.current()) {
+                void requestOlderRef.current('user')
+            }
+            clearKeyboardIntent()
+        }
+
         viewport.addEventListener('scroll', handleScroll, { passive: true })
+        viewport.addEventListener('scrollend', handleScrollEnd)
+        viewport.addEventListener('focusout', clearKeyboardIntent)
         viewport.addEventListener('keydown', handleKeyDown)
         viewport.addEventListener('pointerdown', handlePointerDown, { passive: true })
         viewport.addEventListener('wheel', handleWheel, { passive: true })
@@ -1089,8 +1116,11 @@ export function HappyThread(props: {
         window.addEventListener('mouseup', clearPointerIntent, { passive: true })
         window.addEventListener('pointercancel', handlePointerCancel, { passive: true })
         window.addEventListener('blur', clearPointerIntent)
+        window.addEventListener('blur', clearKeyboardIntent)
         return () => {
             viewport.removeEventListener('scroll', handleScroll)
+            viewport.removeEventListener('scrollend', handleScrollEnd)
+            viewport.removeEventListener('focusout', clearKeyboardIntent)
             viewport.removeEventListener('keydown', handleKeyDown)
             viewport.removeEventListener('pointerdown', handlePointerDown)
             viewport.removeEventListener('wheel', handleWheel)
@@ -1104,6 +1134,7 @@ export function HappyThread(props: {
             window.removeEventListener('mouseup', clearPointerIntent)
             window.removeEventListener('pointercancel', handlePointerCancel)
             window.removeEventListener('blur', clearPointerIntent)
+            window.removeEventListener('blur', clearKeyboardIntent)
         }
     }, []) // Stable: no dependencies, reads from refs
 
@@ -1626,10 +1657,6 @@ export function HappyThread(props: {
         settlePendingLoad,
         clearFailureRetryTimer
     ])
-
-    useEffect(() => {
-        isLoadingMoreRef.current = props.isLoadingMoreMessages
-    }, [props.isLoadingMoreMessages])
 
     const showSkeleton = props.isSyncingTail && props.rawMessagesCount === 0
     const handleShareTurn = useCallback((
