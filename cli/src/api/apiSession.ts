@@ -871,6 +871,13 @@ export class ApiSessionClient extends EventEmitter {
         message: { id?: string; seq?: number; localId?: string | null; content: unknown },
         force = false
     ): Promise<void> {
+        if (!force && message.localId
+            && this.isMaterializationCancelled(
+                message.localId,
+                this.materializingGenerationByLocalId.get(message.localId) ?? 1
+            )) {
+            return Promise.resolve()
+        }
         const parsed = UserMessageSchema.safeParse(message.content)
         const needsMaterialization = parsed.success
             && (parsed.data.content.attachments?.some((attachment) => Boolean(attachment.attachmentId && !attachment.path)) ?? false)
@@ -883,7 +890,12 @@ export class ApiSessionClient extends EventEmitter {
         }
 
         const materializationGeneration = message.localId
-            ? (this.materializingGenerationByLocalId.get(message.localId) ?? 0) + 1
+            ? (() => {
+                const previous = this.materializingGenerationByLocalId.get(message.localId)
+                    ?? this.cancelledMaterializationThroughGeneration.get(message.localId)
+                    ?? 0
+                return force ? previous + 1 : previous || 1
+            })()
             : undefined
         if (message.localId && materializationGeneration !== undefined) {
             this.materializingGenerationByLocalId.set(message.localId, materializationGeneration)
@@ -968,8 +980,13 @@ export class ApiSessionClient extends EventEmitter {
                 const remaining = (this.materializingLocalIdCounts.get(message.localId) ?? 1) - 1
                 if (remaining <= 0) {
                     this.materializingLocalIdCounts.delete(message.localId)
-                    this.materializingGenerationByLocalId.delete(message.localId)
-                    this.cancelledMaterializationThroughGeneration.delete(message.localId)
+                    const cancelledThrough = this.cancelledMaterializationThroughGeneration.get(message.localId)
+                    if (cancelledThrough === undefined || materializationGeneration > cancelledThrough) {
+                        this.materializingGenerationByLocalId.delete(message.localId)
+                        this.cancelledMaterializationThroughGeneration.delete(message.localId)
+                    } else {
+                        this.materializingGenerationByLocalId.set(message.localId, materializationGeneration)
+                    }
                 } else {
                     this.materializingLocalIdCounts.set(message.localId, remaining)
                 }
