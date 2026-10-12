@@ -358,7 +358,7 @@ public final class SessionListStore: SessionListStoring {
 
     private func preserveLiveReplyUnreadDuringBackfill(sessionId: String, patch: SessionPatch) {
         let baselinePending = shouldPreserveLiveReplyUnread?() == true
-        guard (patch.assistantReplyClockBackfilled == nil || baselinePending),
+        guard patch.assistantReplyClockBackfilled == nil,
               let field = patch.lastAssistantMessageAt,
               let replyAt = field.wireValue else { return }
         let currentSummary = sessions.first { $0.id == sessionId }

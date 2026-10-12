@@ -503,7 +503,7 @@ class SessionStore(
 
     private fun preserveLiveReplyUnreadDuringBackfill(sessionId: String, patch: SessionPatch) {
         val baselinePending = shouldPreserveLiveReplyUnread?.invoke() == true
-        if (patch.assistantReplyClockBackfilled != null && !baselinePending) return
+        if (patch.assistantReplyClockBackfilled != null) return
         val replyAt = (patch.lastAssistantMessageAt as? OptionalField.Present)?.value ?: return
         val currentSummary = _sessions.value.firstOrNull { it.id == sessionId }
         val currentDetail = _details.value[sessionId]

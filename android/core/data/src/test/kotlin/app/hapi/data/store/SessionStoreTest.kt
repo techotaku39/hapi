@@ -367,7 +367,7 @@ class SessionStoreTest {
             globalScope,
             sessionUpdatedEvent(
                 "cached",
-                """{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":11,"assistantReplyClockBackfilled":true}""",
+                """{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":11}""",
             ),
         )
 

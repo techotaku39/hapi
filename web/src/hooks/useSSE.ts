@@ -679,7 +679,7 @@ export function useSSE(options: {
         const preserveLiveReplyUnreadDuringBackfill = (sessionId: string, patch: SessionPatch): void => {
             const baselinePending = !isSessionLastSeenBaselineInitialized(options.baseUrl)
             if (
-                (patch.assistantReplyClockBackfilled !== undefined && !baselinePending)
+                patch.assistantReplyClockBackfilled !== undefined
                 || patch.lastAssistantMessageAt === undefined
                 || patch.lastAssistantMessageAt === null
             ) {

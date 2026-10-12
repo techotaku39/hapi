@@ -6,6 +6,7 @@ import type { ApiClient } from '@/api/client'
 import type { Session, SessionResponse, SessionSummary, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { isSessionNotFoundError, SESSION_DETAIL_STALE_TIME_MS, useSession } from './useSession'
+import { useSessions } from './useSessions'
 
 describe('isSessionNotFoundError', () => {
     it('matches hub 404 session responses', () => {
@@ -62,6 +63,26 @@ function queryWrapper(queryClient: QueryClient) {
 }
 
 describe('useSession REST ordering', () => {
+    it('does not replace the shared list fetcher when observing the list cache', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        const getSessions = vi.fn().mockResolvedValue({ sessions: [] } satisfies SessionsResponse)
+        const getSession = vi.fn().mockResolvedValue({ session: makeSession(1, 1_000) })
+        const api = { getSessions, getSession } as unknown as ApiClient
+
+        renderHook(() => {
+            // Mount the real list observer first; useSession must not replace
+            // its queryFn with a cache-only observer afterward.
+            useSessions(api)
+            useSession(api, 's1')
+        }, { wrapper: queryWrapper(queryClient) })
+
+        await waitFor(() => expect(getSessions).toHaveBeenCalledTimes(1))
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+        })
+        await waitFor(() => expect(getSessions).toHaveBeenCalledTimes(2))
+    })
+
     it('refetches detail when the list watermark advances', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {

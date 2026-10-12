@@ -288,7 +288,7 @@ struct SessionListStoreTests {
         store.applySessionEvent(try sessionAddedEvent("cached", dataJSON: fullSessionJSON(cached)))
         store.applySessionEvent(try sessionUpdatedEvent(
             "cached",
-            dataJSON: #"{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":2,"assistantReplyClockBackfilled":true}"#
+            dataJSON: #"{"lastAssistantMessageAt":6000,"lastAssistantMessageVersion":2}"#
         ))
 
         #expect(lastSeenStore.lastSeenAt("cached") == 5_999)

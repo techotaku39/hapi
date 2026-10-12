@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { Session, SessionResponse, SessionsResponse } from '@/types/api'
@@ -30,14 +30,26 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
 } {
     const resolvedSessionId = sessionId ?? 'unknown'
     const queryClient = useQueryClient()
-    // Subscribe to the list cache so a newer reply-clock watermark triggers
-    // the detail recovery path even when the detail query itself is fresh.
-    const sessionsQuery = useQuery<SessionsResponse>({
-        queryKey: queryKeys.sessions,
-        queryFn: async () => queryClient.getQueryData<SessionsResponse>(queryKeys.sessions) ?? { sessions: [] },
-        enabled: false,
-        staleTime: Infinity,
-    })
+    // Subscribe to the list cache without registering another observer for
+    // the shared query. A disabled useQuery observer still updates the
+    // shared query options, so its cache-only queryFn could replace the real
+    // REST fetcher used by useSessions during invalidation.
+    const subscribeToSessions = useCallback((listener: () => void) => (
+        queryClient.getQueryCache().subscribe((event) => {
+            if (event.query.queryKey[0] === queryKeys.sessions[0]) {
+                listener()
+            }
+        })
+    ), [queryClient])
+    const getSessionsSnapshot = useCallback(
+        () => queryClient.getQueryData<SessionsResponse>(queryKeys.sessions),
+        [queryClient]
+    )
+    const sessionsData = useSyncExternalStore(
+        subscribeToSessions,
+        getSessionsSnapshot,
+        getSessionsSnapshot
+    )
     const query = useQuery({
         queryKey: queryKeys.session(resolvedSessionId),
         queryFn: async () => {
@@ -46,7 +58,7 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
             }
             let incoming = await api.getSession(sessionId)
             let current = queryClient.getQueryData<SessionResponse>(queryKeys.session(resolvedSessionId))
-            let currentSummary = sessionsQuery.data
+            let currentSummary = sessionsData
                 ?.sessions.find((summary) => summary.id === sessionId)
             if (needsSessionResponseRetry(current, incoming, currentSummary)) {
                 // A newer SSE patch may only carry the reply clock. Retry once
@@ -77,7 +89,7 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
         },
     })
 
-    const cachedSummary = sessionsQuery.data
+    const cachedSummary = sessionsData
         ?.sessions.find((summary) => summary.id === sessionId)
     const cachedSession = query.data?.session
     const listWatermark = cachedSummary?.lastAssistantMessageVersion ?? 0
