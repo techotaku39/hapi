@@ -489,11 +489,12 @@ export function HappyComposer(props: {
         setAttachmentOrderRevision((revision) => revision + 1)
     }, [attachmentIds, attachmentOrderRef])
     const handleAttachmentRetry = useCallback<AttachmentRetryHandler>((originalId, retryId, originalIndex) => {
+        const currentIndex = attachmentOrderRef.current.indexOf(originalId)
         attachmentOrderRef.current = replaceAttachmentId(
             attachmentOrderRef.current,
             originalId,
             retryId,
-            originalIndex,
+            currentIndex >= 0 ? currentIndex : originalIndex,
         )
         setAttachmentOrderRevision((revision) => revision + 1)
     }, [attachmentOrderRef])

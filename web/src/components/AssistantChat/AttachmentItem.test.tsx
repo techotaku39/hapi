@@ -237,6 +237,51 @@ describe('AttachmentItem', () => {
             expect(onRetry).toHaveBeenCalledWith('broken-attachment', 'retried-attachment', 1)
         })
         expect(unsubscribe).toHaveBeenCalledOnce()
+        expect(mocks.attachmentRemove).toHaveBeenCalledOnce()
+    })
+
+    it('keeps the failed attachment until the replacement appears', async () => {
+        const file = new File(['broken'], 'broken.png', { type: 'image/png' })
+        const attachmentOrderRef = { current: ['broken-attachment'] }
+        const onRetry = vi.fn()
+        let notify!: () => void
+        let resolveUpload!: () => void
+        let retryFile: File | undefined
+        mocks.attachment = {
+            id: 'broken-attachment',
+            name: file.name,
+            file,
+            status: { type: 'incomplete', reason: 'error' },
+        }
+        mocks.auiSubscribe.mockImplementationOnce((listener: () => void) => {
+            notify = listener
+            mocks.composer.addAttachment.mockImplementationOnce(async (nextFile: File) => {
+                retryFile = nextFile
+                await new Promise<void>((resolve) => { resolveUpload = resolve })
+            })
+            return vi.fn()
+        })
+
+        render(
+            <I18nProvider>
+                <AttachmentItem attachmentOrderRef={attachmentOrderRef} onRetry={onRetry} />
+            </I18nProvider>,
+        )
+        fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }))
+
+        await waitFor(() => expect(retryFile).toBeInstanceOf(File))
+        expect(mocks.attachmentRemove).not.toHaveBeenCalled()
+
+        mocks.composer.getState.mockReturnValue({
+            attachments: [{ id: 'retried-attachment', file: retryFile! }] as never[],
+        })
+        notify()
+
+        await waitFor(() => {
+            expect(onRetry).toHaveBeenCalledWith('broken-attachment', 'retried-attachment', 0)
+            expect(mocks.attachmentRemove).toHaveBeenCalledOnce()
+        })
+        resolveUpload()
     })
 
     it('keeps an error indicator without retrying non-retryable files', () => {

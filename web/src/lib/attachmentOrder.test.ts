@@ -24,5 +24,11 @@ describe('attachment order helpers', () => {
         expect(replaceAttachmentId(['first', 'last', 'retried'], 'failed', 'retried', 1)).toEqual([
             'first', 'retried', 'last',
         ])
+        expect(replaceAttachmentId(
+            replaceAttachmentId(['a', 'b', 'c'], 'a', 'a-retry'),
+            'b',
+            'b-retry',
+            1,
+        )).toEqual(['a-retry', 'b-retry', 'c'])
     })
 })

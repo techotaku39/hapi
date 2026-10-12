@@ -178,10 +178,15 @@ export function AttachmentItem(props: {
                     unsubscribe?.()
                     unsubscribe = undefined
                     props.onRetry?.(id, retryAttachment.id, originalIndex)
+                    void composer.attachment({ id }).remove().catch((error) => {
+                        console.error('Failed to remove replaced attachment', error)
+                    })
                 })
             }
             try {
-                await composer.attachment({ id }).remove()
+                if (!props.onRetry) {
+                    await composer.attachment({ id }).remove()
+                }
                 await composer.addAttachment(retryFile)
             } finally {
                 unsubscribe?.()
