@@ -474,6 +474,7 @@ export function HappyComposer(props: {
     const attachments = useAuiState((s) => s.composer.attachments)
     const localAttachmentOrderRef = useRef<string[]>([])
     const attachmentOrderRef = externalAttachmentOrderRef ?? localAttachmentOrderRef
+    const retryingAttachmentIdsRef = useRef<Set<string>>(new Set())
     const attachmentIds = useMemo(
         () => attachments.map((attachment) => attachment.id),
         [attachments],
@@ -2302,6 +2303,7 @@ export function HappyComposer(props: {
                                         disabled={controlsDisabled}
                                         onReorder={handleAttachmentReorder}
                                         attachmentOrderRef={attachmentOrderRef}
+                                        retryingAttachmentIdsRef={retryingAttachmentIdsRef}
                                         onRetry={handleAttachmentRetry}
                                     />
                                 </div>

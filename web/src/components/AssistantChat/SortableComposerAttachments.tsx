@@ -34,6 +34,7 @@ type SortableComposerAttachmentProps = {
     onContextMenu: (event: ReactMouseEvent<Element>, id: string) => void
     onClick: (event: ReactMouseEvent<Element>, id: string) => void
     attachmentOrderRef?: MutableRefObject<string[]>
+    retryingAttachmentIdsRef?: MutableRefObject<Set<string>>
     onRetry?: AttachmentRetryHandler
 }
 
@@ -68,6 +69,7 @@ function SortableComposerAttachment(props: SortableComposerAttachmentProps) {
         onContextMenu,
         onClick,
         attachmentOrderRef,
+        retryingAttachmentIdsRef,
         onRetry,
     } = props
     const handlePointerDown = useCallback(
@@ -109,6 +111,7 @@ function SortableComposerAttachment(props: SortableComposerAttachmentProps) {
             <AttachmentItem
                 dragHandleProps={dragHandleProps}
                 attachmentOrderRef={attachmentOrderRef}
+                retryingAttachmentIdsRef={retryingAttachmentIdsRef}
                 onRetry={onRetry}
             />
         ),
@@ -135,9 +138,18 @@ export function SortableComposerAttachments(props: {
     disabled?: boolean
     onReorder: (activeId: string, targetId: string, position: AttachmentDropPosition) => void
     attachmentOrderRef?: MutableRefObject<string[]>
+    retryingAttachmentIdsRef?: MutableRefObject<Set<string>>
     onRetry?: AttachmentRetryHandler
 }) {
-    const { attachments, orderedAttachmentIds, onReorder, disabled = false, attachmentOrderRef, onRetry } = props
+    const {
+        attachments,
+        orderedAttachmentIds,
+        onReorder,
+        disabled = false,
+        attachmentOrderRef,
+        retryingAttachmentIdsRef,
+        onRetry,
+    } = props
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const dragRef = useRef<DragState | null>(null)
     const suppressClickIdRef = useRef<string | null>(null)
@@ -281,6 +293,7 @@ export function SortableComposerAttachments(props: {
                         onContextMenu={handleContextMenu}
                         onClick={handleClick}
                         attachmentOrderRef={attachmentOrderRef}
+                        retryingAttachmentIdsRef={retryingAttachmentIdsRef}
                         onRetry={onRetry}
                     />
                 )

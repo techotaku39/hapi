@@ -219,7 +219,10 @@ describe('AttachmentItem', () => {
         mocks.auiSubscribe.mockImplementationOnce((listener: () => void) => {
             mocks.composer.addAttachment.mockImplementationOnce(async (retryFile: File) => {
                 mocks.composer.getState.mockReturnValue({
-                    attachments: [{ id: 'retried-attachment', file: retryFile }] as never[],
+                    attachments: [
+                        { id: 'broken-attachment', file } as never,
+                        { id: 'retried-attachment', file: retryFile } as never,
+                    ],
                 })
                 listener()
             })
@@ -273,7 +276,10 @@ describe('AttachmentItem', () => {
         expect(mocks.attachmentRemove).not.toHaveBeenCalled()
 
         mocks.composer.getState.mockReturnValue({
-            attachments: [{ id: 'retried-attachment', file: retryFile! }] as never[],
+            attachments: [
+                { id: 'broken-attachment', file } as never,
+                { id: 'retried-attachment', file: retryFile! } as never,
+            ],
         })
         notify()
 
@@ -281,6 +287,41 @@ describe('AttachmentItem', () => {
             expect(onRetry).toHaveBeenCalledWith('broken-attachment', 'retried-attachment', 0)
             expect(mocks.attachmentRemove).toHaveBeenCalledOnce()
         })
+        resolveUpload()
+    })
+
+    it('keeps retry disabled across an attachment component remount', async () => {
+        const file = new File(['broken'], 'broken.png', { type: 'image/png' })
+        const retryingAttachmentIdsRef = { current: new Set<string>() }
+        let resolveUpload!: () => void
+        mocks.attachment = {
+            id: 'broken-attachment',
+            name: file.name,
+            file,
+            status: { type: 'incomplete', reason: 'error' },
+        }
+        mocks.composer.addAttachment.mockImplementationOnce(async () => {
+            await new Promise<void>((resolve) => { resolveUpload = resolve })
+        })
+
+        const view = render(
+            <I18nProvider>
+                <AttachmentItem key="first" retryingAttachmentIdsRef={retryingAttachmentIdsRef} />
+            </I18nProvider>,
+        )
+        fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }))
+        await waitFor(() => expect(mocks.composer.addAttachment).toHaveBeenCalledOnce())
+
+        view.rerender(
+            <I18nProvider>
+                <AttachmentItem key="remounted" retryingAttachmentIdsRef={retryingAttachmentIdsRef} />
+            </I18nProvider>,
+        )
+        const retryButton = screen.getByRole('button', { name: 'Retry upload' })
+        expect(retryButton).toBeDisabled()
+        fireEvent.click(retryButton)
+        expect(mocks.composer.addAttachment).toHaveBeenCalledOnce()
+
         resolveUpload()
     })
 

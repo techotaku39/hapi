@@ -119,6 +119,7 @@ function DragHandle(props: AttachmentDragHandleProps & { isFile?: boolean }) {
 export function AttachmentItem(props: {
     dragHandleProps?: AttachmentDragHandleProps
     attachmentOrderRef?: MutableRefObject<string[]>
+    retryingAttachmentIdsRef?: MutableRefObject<Set<string>>
     onRetry?: AttachmentRetryHandler
 } = {}) {
     const { id, name, file, status, previewUrl, retryable } = useAuiState((s) => s.attachment) as ComposerAttachmentWithPreview
@@ -132,6 +133,7 @@ export function AttachmentItem(props: {
     const isUploading = status.type === 'running'
     const isError = status.type === 'incomplete'
     const showRetry = isError && retryable !== false && !isParking
+    const isRetryPending = isRetrying || props.retryingAttachmentIdsRef?.current.has(id) === true
 
     useLayoutEffect(() => {
         const element = filenameRef.current
@@ -159,8 +161,9 @@ export function AttachmentItem(props: {
         : undefined
 
     const retryUpload = useCallback(async () => {
-        if (isRetrying || isParking) return
+        if (isRetryPending || isParking) return
 
+        props.retryingAttachmentIdsRef?.current.add(id)
         setIsRetrying(true)
         try {
             const originalIndex = props.attachmentOrderRef?.current.indexOf(id) ?? -1
@@ -177,6 +180,12 @@ export function AttachmentItem(props: {
                     if (!retryAttachment) return
                     unsubscribe?.()
                     unsubscribe = undefined
+                    if (!composer.getState().attachments.some((attachment) => attachment.id === id)) {
+                        void composer.attachment({ id: retryAttachment.id }).remove().catch((error) => {
+                            console.error('Failed to cancel replacement attachment', error)
+                        })
+                        return
+                    }
                     props.onRetry?.(id, retryAttachment.id, originalIndex)
                     void composer.attachment({ id }).remove().catch((error) => {
                         console.error('Failed to remove replaced attachment', error)
@@ -194,9 +203,10 @@ export function AttachmentItem(props: {
         } catch (error) {
             console.error('Failed to retry attachment upload', error)
         } finally {
+            props.retryingAttachmentIdsRef?.current.delete(id)
             setIsRetrying(false)
         }
-    }, [aui, composer, file, id, isParking, isRetrying, props.attachmentOrderRef, props.onRetry])
+    }, [aui, composer, file, id, isParking, isRetryPending, props.attachmentOrderRef, props.onRetry, props.retryingAttachmentIdsRef])
 
     if (previewUrl && !isError) {
         return (
@@ -256,7 +266,7 @@ export function AttachmentItem(props: {
                     className="hapi-composer-attachment-control hapi-composer-attachment-file-control -mx-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-transparent text-red-500 transition-colors hover:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--app-link)] disabled:cursor-wait disabled:opacity-60"
                     aria-label={t('attachment.retryUpload')}
                     title={t('attachment.retryUpload')}
-                    disabled={isRetrying}
+                    disabled={isRetryPending}
                     onClick={() => { void retryUpload() }}
                 >
                     <RefreshIcon className="h-[18px] w-[18px]" />
