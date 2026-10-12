@@ -693,6 +693,23 @@ export function DictationButton(props: {
     )
 }
 
+/**
+ * Start every selected file immediately so inactive-session attachment handoff
+ * can coalesce one multi-file selection into a single transfer.
+ */
+export async function addSelectedAttachments(
+    addAttachment: (file: File) => Promise<void>,
+    files: readonly File[],
+): Promise<void> {
+    await Promise.all(files.map(async (file) => {
+        try {
+            await addAttachment(file)
+        } catch (error) {
+            console.error('Error adding selected attachment:', error)
+        }
+    }))
+}
+
 export function ComposerButtons(props: {
     canSend: boolean
     controlsDisabled: boolean
@@ -781,13 +798,8 @@ export function ComposerButtons(props: {
     const toolbarJustifyContent = getComposerToolbarJustifyContent(layout.mode)
     const api = useAui()
     const handleAttachmentFiles = useCallback(async (files: readonly File[]) => {
-        for (const file of files) {
-            try {
-                await api.composer().addAttachment(file)
-            } catch (error) {
-                console.error('Error adding selected attachment:', error)
-            }
-        }
+        const composer = api.composer()
+        await addSelectedAttachments((file) => composer.addAttachment(file), files)
     }, [api])
 
     return (

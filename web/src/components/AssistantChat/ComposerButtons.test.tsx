@@ -11,6 +11,7 @@ import {
     ComposerButtons,
     ComposerExpandButton,
     DictationButton,
+    addSelectedAttachments,
     getComposerToolbarJustifyContent,
     isComposerPrimaryFillHeight,
     isLargeEmptyVoicePrimary,
@@ -497,5 +498,26 @@ describe('ComposerButtons attachment entrypoint', () => {
         renderAttachmentToolbar({ attachmentsEnabled: false })
 
         expect(screen.getByTestId('composer-attachment-picker-trigger')).toBeDisabled()
+    })
+
+    it('starts all selected attachments before the first handoff resolves', async () => {
+        const first = new File(['first'], 'first.txt', { type: 'text/plain' })
+        const second = new File(['second'], 'second.txt', { type: 'text/plain' })
+        const started: string[] = []
+        let resolveFirst!: () => void
+        const firstPending = new Promise<void>((resolve) => {
+            resolveFirst = resolve
+        })
+        const addAttachment = vi.fn((file: File) => {
+            started.push(file.name)
+            return file === first ? firstPending : Promise.resolve()
+        })
+
+        const pending = addSelectedAttachments(addAttachment, [first, second])
+
+        expect(started).toEqual(['first.txt', 'second.txt'])
+        resolveFirst()
+        await pending
+        expect(addAttachment).toHaveBeenCalledTimes(2)
     })
 })
