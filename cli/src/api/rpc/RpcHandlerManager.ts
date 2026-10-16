@@ -61,6 +61,16 @@ export class RpcHandlerManager {
         }
     }
 
+    async waitForRegistration(method: string, timeoutMs = 5_000): Promise<void> {
+        if (!this.socket?.connected || !this.hasHandler(method)) {
+            throw new Error('RPC registration requires a connected handler')
+        }
+        const response = await this.socket.timeout(timeoutMs).emitWithAck('rpc-register', {
+            method: this.getPrefixedMethod(method)
+        })
+        if (response?.ok !== true) throw new Error('Hub rejected RPC registration')
+    }
+
     onSocketConnect(socket: Socket): void {
         this.socket = socket
         for (const [prefixedMethod] of this.handlers) {

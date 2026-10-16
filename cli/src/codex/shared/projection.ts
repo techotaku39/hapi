@@ -43,7 +43,8 @@ export class SharedCodexProjection {
     private readonly completedTitles = new Set<string>();
     private titleRevision = 0;
     constructor(private readonly session: ApiSessionClient, readonly threadId: string,
-        private readonly committed: (id: string) => Promise<void>, private readonly parentThreadId?: string) {
+        private readonly committed: (id: string) => Promise<void>, private readonly parentThreadId?: string,
+        private readonly committedHistory?: (ids: string[]) => Promise<void>) {
         if (!parentThreadId) for (const [id, turn] of Object.entries(session.getMetadata()?.conversationHistoryTurns ?? {})) this.turns.set(id, turn);
     }
 
@@ -56,7 +57,7 @@ export class SharedCodexProjection {
         this.session.sendAgentMessage(this.parentThreadId && !String(body.type).startsWith('agent-run-') ? {
             type: 'agent-run-trace', agentId: this.threadId, cardId: `codex-agent:${this.threadId}`, message: { ...body, id }, id,
             scope: { role: 'child', threadId: this.threadId, parentThreadId: this.parentThreadId }, scope_role: 'child'
-        } : { ...body, id }, id);
+        } : { ...body, id }, id, { acknowledgeConsumption: false });
     }
 
     private applyDisplayRename(title: string, revision: number): void {
@@ -107,12 +108,17 @@ export class SharedCodexProjection {
         if (!this.parentThreadId && (method === 'item/started' || method === 'item/completed') && item.type === 'userMessage') {
             const id = string(item.clientId ?? item.clientUserMessageId) ?? (itemId ? `codex:${this.threadId}:user:${itemId}` : undefined);
             if (id) {
+                const previousTurn = this.turns.get(id);
                 const firstInTurn = turnId ? [...this.turns].find(([, value]) => value === turnId)?.[0] : undefined;
                 if (turnId) this.turns.set(id, turnId);
-                await this.committed(id);
+                if (!fromHistory || !this.committedHistory) await this.committed(id);
                 const text = inputText(item.content);
-                if (text) this.session.sendUserMessage(text, undefined, id);
-                this.session.updateMetadata(metadata => ({ ...metadata, conversationHistoryTurns: Object.fromEntries(this.turns),
+                // The queue owns durable user consumption (batched for history).
+                // Sending the transcript must not generate another implicit ACK.
+                if (text) this.session.sendUserMessage(text, undefined, id, { acknowledgeConsumption: false });
+                const needsPoint = turnId && (!firstInTurn || firstInTurn === id)
+                    && !this.session.getMetadata()?.conversationHistoryPoints?.[id];
+                if (previousTurn !== turnId || needsPoint) this.session.updateMetadata(metadata => ({ ...metadata, conversationHistoryTurns: Object.fromEntries(this.turns),
                     ...(turnId && (!firstInTurn || firstInTurn === id) ? { conversationHistoryPoints: { ...metadata.conversationHistoryPoints, [id]: true } } : {})
                 }));
             }
@@ -193,6 +199,19 @@ export class SharedCodexProjection {
     async history(thread: unknown): Promise<void> {
         const turns = record(thread).turns;
         if (!Array.isArray(turns)) return;
+        if (!this.parentThreadId && this.committedHistory) {
+            const ids = turns.flatMap(value => {
+                const items = record(value).items;
+                return (Array.isArray(items) ? items : []).flatMap(value => {
+                    const item = record(value);
+                    if (item.type !== 'userMessage') return [];
+                    const id = string(item.clientId ?? item.clientUserMessageId)
+                        ?? (string(item.id) ? `codex:${this.threadId}:user:${item.id}` : undefined);
+                    return id ? [id] : [];
+                });
+            });
+            await this.committedHistory(ids);
+        }
         const titleRevision = this.titleRevision;
         let latestTitle: string | undefined;
         for (const value of turns) {

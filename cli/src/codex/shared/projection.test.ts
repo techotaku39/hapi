@@ -4,6 +4,43 @@ import { SharedCodexProjection, inputText } from './projection';
 import { codexPlanProposalId } from './plan';
 
 describe('shared history projection', () => {
+    it('commits historical user IDs as a batch before emitting any history', async () => {
+        const order: string[] = [];
+        const session = { getMetadata: () => ({}), updateMetadata: vi.fn(),
+            sendUserMessage: () => order.push('user'), sendAgentMessage: vi.fn() } as unknown as ApiSessionClient;
+        const batch = vi.fn(async () => { order.push('batch'); });
+        const projection = new SharedCodexProjection(session, 'thread', async () => { order.push('commit'); }, undefined, batch);
+        await projection.history({ turns: [{ id: 'turn', status: 'completed', items: [
+            { id: 'native', type: 'userMessage', content: [{ type: 'text', text: 'first' }] },
+            { id: 'remote', clientId: 'local', type: 'userMessage', content: [{ type: 'text', text: 'second' }] }
+        ] }] });
+        expect(batch).toHaveBeenCalledWith(['codex:thread:user:native', 'local']);
+        expect(order[0]).toBe('batch');
+        expect(order).toContain('user');
+        expect(order).not.toContain('commit');
+    });
+    it('replays known user history without rewriting its persisted turn mapping', async () => {
+        let metadata = { conversationHistoryTurns: { local: 'turn' }, conversationHistoryPoints: { local: true } };
+        const updateMetadata = vi.fn((handler: (value: typeof metadata) => typeof metadata) => { metadata = handler(metadata); });
+        const committed = vi.fn(async () => {});
+        const session = { getMetadata: () => metadata, updateMetadata, sendUserMessage: vi.fn(), sendAgentMessage: vi.fn() } as unknown as ApiSessionClient;
+        const projection = new SharedCodexProjection(session, 'thread', committed);
+        const history = { turns: [{ id: 'turn', status: 'completed', items: [
+            { id: 'user', clientId: 'local', type: 'userMessage', content: [{ type: 'text', text: 'existing prompt' }] }
+        ] }] };
+        await projection.history(history);
+        projection.reset();
+        await projection.history(history);
+        expect(committed).toHaveBeenCalledWith('local');
+        expect(session.sendUserMessage).toHaveBeenCalledWith('existing prompt', undefined, 'local', { acknowledgeConsumption: false });
+        expect(updateMetadata).not.toHaveBeenCalled();
+        await projection.notification('item/started', { threadId: 'thread', turnId: 'next', item: {
+            id: 'new-user', clientId: 'new-local', type: 'userMessage', content: [{ type: 'text', text: 'new prompt' }]
+        } });
+        expect(updateMetadata).toHaveBeenCalledTimes(1);
+        expect(metadata.conversationHistoryTurns).toMatchObject({ local: 'turn', 'new-local': 'next' });
+        expect(metadata.conversationHistoryPoints).toMatchObject({ local: true, 'new-local': true });
+    });
     it.each([undefined, 'root'])('persists proposals without approval and replays the same IDs (parent: %s)', async parentThreadId => {
         const send = vi.fn();
         const session = { getMetadata: () => ({}), sendAgentMessage: send } as unknown as ApiSessionClient;
@@ -95,14 +132,14 @@ describe('shared history projection', () => {
         await projection.history({ turns: [{ id: 'turn', status: 'inProgress', items: [{ id: 'item', type: 'agentMessage', text: 'partial' }] }] });
         expect(send).not.toHaveBeenCalled();
         await projection.notification('item/completed', { threadId: 'thread', turnId: 'turn', item: { id: 'item', type: 'agentMessage', text: 'complete' } });
-        expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'message', message: 'complete' }), expect.any(String));
+        expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'message', message: 'complete' }), expect.any(String), { acknowledgeConsumption: false });
     });
     it('routes descendant answers into a scoped agent trace, not a root message', async () => {
         const send = vi.fn(); const user = vi.fn(); const committed = vi.fn(async () => {});
         const session = { getMetadata: () => ({}), sendAgentMessage: send, sendUserMessage: user } as unknown as ApiSessionClient;
         const projection = new SharedCodexProjection(session, 'child', committed, 'root');
         await projection.notification('item/completed', { threadId: 'child', turnId: 'turn', item: { id: 'item', type: 'agentMessage', text: 'child answer' } });
-        expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'agent-run-trace', agentId: 'child', message: expect.objectContaining({ message: 'child answer' }) }), expect.any(String));
+        expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'agent-run-trace', agentId: 'child', message: expect.objectContaining({ message: 'child answer' }) }), expect.any(String), { acknowledgeConsumption: false });
         await projection.notification('item/completed', { threadId: 'child', turnId: 'turn', item: { id: 'prompt', type: 'userMessage', content: [{ type: 'text', text: 'child prompt' }], clientId: 'cid' } });
         expect(user).not.toHaveBeenCalled(); expect(committed).not.toHaveBeenCalled();
     });
