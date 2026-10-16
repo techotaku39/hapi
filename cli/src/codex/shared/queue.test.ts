@@ -17,6 +17,19 @@ async function fixture() {
     return { queue, rpc, consumed, uncertain, client, dir };
 }
 describe('shared native queue', () => {
+    it('can persist consumption without acknowledging rows that projection has not inserted yet', async () => {
+        const { queue, client, dir, consumed, uncertain, rpc } = await fixture();
+        await queue.committedHistory(['historical'], false);
+        await queue.committed('live', false);
+        expect(consumed).not.toHaveBeenCalled();
+        const restored = new SharedCodexQueue(client, 'thread', join(dir, 'ledger.json'), consumed, uncertain);
+        await restored.load();
+        expect(restored.state('historical')).toBe('consumed');
+        expect(restored.state('live')).toBe('consumed');
+        await restored.enqueue('historical', input);
+        await restored.enqueue('live', input);
+        expect(rpc).not.toHaveBeenCalled();
+    });
     it('persists all history consumption before acknowledging its batch and survives restart', async () => {
         const { queue, client, dir, consumed, uncertain, rpc } = await fixture();
         await queue.committedHistory(['old-1', 'old-2', 'old-1']);

@@ -194,8 +194,8 @@ export class SharedCodexRoot {
             (id, input) => this.session.syncNativeQueuedMessage(id, input === null ? null : inputText(input)),
             ids => this.session.setSteerDeliveryState(ids, 'queued'));
         await this.queue.load();
-        this.projection = new SharedCodexProjection(this.session, threadId, id => this.queue.committed(id), undefined,
-            ids => this.queue.committedHistory(ids));
+        this.projection = new SharedCodexProjection(this.session, threadId, id => this.queue.committed(id, false), undefined,
+            ids => this.queue.committedHistory(ids, false));
         this.session.updateMetadata(metadata => ({ ...metadata, codexSessionId: threadId, capabilities: {
             ...metadata.capabilities, concurrentClients: true, terminal: true,
             // In-place rewind needs a native + hub commit barrier. Do not

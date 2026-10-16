@@ -604,7 +604,7 @@ describe('ApiSessionClient lazy materialization', () => {
 })
 
 describe('shared Codex projection consumption acknowledgements', () => {
-    it('replays content with one durable user batch and no per-item implicit acknowledgements', async () => {
+    it('acknowledges user and output IDs in one batch after replay without per-item implicit acknowledgements', async () => {
         socketHarness.sockets.length = 0
         const turns = Array.from({ length: 200 }, (_, index) => ({
             id: `turn-${index}`, status: 'completed', items: [
@@ -618,13 +618,15 @@ describe('shared Codex projection consumption acknowledgements', () => {
         }
         const client = new ApiSessionClient('token', createSession({ namespace: 'default', metadata: metadata as never }))
         const socket = socketHarness.sockets[0]!
-        const projection = new SharedCodexProjection(client, 'thread', async id => client.emitMessagesConsumed([id]), undefined,
-            async ids => client.emitMessagesConsumed(ids))
+        const projection = new SharedCodexProjection(client, 'thread', async () => {}, undefined, async () => {})
         try {
             await projection.history({ turns })
             const acknowledgements = socket.emitted.filter(entry => entry.event === 'messages-consumed')
             expect(acknowledgements).toHaveLength(1)
-            expect((acknowledgements[0]!.args[0] as {localIds: string[]}).localIds).toEqual(turns.map((_, index) => `local-${index}`))
+            const consumedIds = (acknowledgements[0]!.args[0] as {localIds: string[]}).localIds
+            expect(consumedIds).toEqual(expect.arrayContaining(turns.map((_, index) => `local-${index}`)))
+            expect(consumedIds).toEqual(expect.arrayContaining(turns.map((_, index) => `codex:thread:turn-${index}:agent-${index}:agent_message`)))
+            expect(socket.emitted.at(-1)?.event).toBe('messages-consumed')
             const messages = socket.emitted.filter(entry => entry.event === 'message')
             expect(messages.some(entry => JSON.stringify(entry.args).includes('reply 199'))).toBe(true)
             socket.emitted.length = 0

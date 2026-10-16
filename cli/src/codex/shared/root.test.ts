@@ -6,6 +6,8 @@ import type { SessionBootstrapResult } from '@/agent/sessionFactory';
 import { SharedCodexRoot, type RootHost } from './root';
 import { codexPlanProposalId } from './plan';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager';
+import type { Socket } from 'socket.io-client';
 
 type NativeTurn = { id: string; status: string; items: unknown[] };
 
@@ -53,13 +55,19 @@ afterEach(async () => {
     finally { vi.useRealTimers(); }
 });
 
-async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end'] }) {
+async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; rpcManager?: RpcHandlerManager }) {
     const directory = await mkdtemp('/tmp/hapi-shared-root-');
     let state: AgentState = { steeringActive: true };
     let metadata: Metadata = { path: directory, host: 'test', flavor: 'codex' };
     let reconnect: (() => void) | null = null;
     const updateState = vi.fn((fn: (value: AgentState) => AgentState) => { state = fn(state); });
     const rpc = new Map<string, (raw: unknown) => Promise<unknown>>();
+    if (opts?.rpcManager) {
+        const register = opts.rpcManager.registerHandler.bind(opts.rpcManager);
+        vi.spyOn(opts.rpcManager, 'registerHandler').mockImplementation((name, handler) => {
+            rpc.set(name, async raw => handler(raw)); register(name, handler);
+        });
+    }
     const send = vi.fn();
     const hubArchivedListeners: Array<() => void> = [];
     const session = {
@@ -72,7 +80,7 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end'] }) 
         on(event: string, listener: () => void) {
             if (event === 'hub-archived') hubArchivedListeners.push(listener);
         },
-        rpcHandlerManager: { registerHandler: (name: string, handler: (raw: unknown) => Promise<unknown>) => rpc.set(name, handler), waitForRegistration: vi.fn(async () => {}) },
+        rpcHandlerManager: opts?.rpcManager ?? { registerHandler: (name: string, handler: (raw: unknown) => Promise<unknown>) => rpc.set(name, handler), waitForRegistration: vi.fn(async () => {}) },
         sendSessionEvent() {}, sendAgentMessage: send, emitSessionReady: vi.fn(),
         sendUserMessage() {}, emitMessagesConsumed() {}, emitSteerIndeterminate() {}, syncNativeQueuedMessage() {},
         sendSessionDeath() {}, async flush() {}, close() {}
@@ -117,6 +125,19 @@ async function completePlan(f: Awaited<ReturnType<typeof fixture>>, status = 'co
 }
 
 describe('shared activation registration', () => {
+    it('binds successfully when the initial Hub socket connects after native startup', async () => {
+        const manager = new RpcHandlerManager({ scopePrefix: 'sid', logger() {} });
+        const result = fixture({ rpcManager: manager }).then(value => ({ value, error: undefined }), error => ({ value: undefined, error }));
+        await vi.waitFor(() => expect(manager.hasHandler(RPC_METHODS.SetSessionConfig)).toBe(true));
+        const emitWithAck = vi.fn(async () => ({ ok: true }));
+        manager.onSocketConnect({ connected: true, emit() {}, timeout: () => ({ emitWithAck }) } as unknown as Socket);
+        const { value, error } = await result;
+        expect(error).toBeUndefined();
+        expect(value).toBeDefined();
+        await value!.root.activate();
+        expect(value!.session.emitSessionReady).toHaveBeenCalledOnce();
+        expect(emitWithAck).toHaveBeenCalledOnce();
+    });
     it('can cancel startup before the ready barrier releases configuration RPCs', async () => {
         const end = vi.fn<RootHost['end']>(async root => { root.stopAccepting(); });
         const f = await fixture({ end });
