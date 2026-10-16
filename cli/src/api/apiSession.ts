@@ -1334,7 +1334,12 @@ export class ApiSessionClient extends EventEmitter {
         if (options?.steered) {
             payload.steered = true
         }
-        this.emitOrQueue(() => this.socket.emit('messages-consumed', payload))
+        // Bound both socket packets and the Hub's SQLite bind parameters. Keep
+        // input order: each chunk receives a server invocation timestamp.
+        for (let offset = 0; offset < localIds.length; offset += 500) {
+            const batch = { ...payload, localIds: localIds.slice(offset, offset + 500) }
+            this.emitOrQueue(() => this.socket.emit('messages-consumed', batch))
+        }
     }
 
     /** Persist the durable pre-dispatch/restore state with a hub ACK. */

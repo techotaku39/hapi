@@ -219,7 +219,8 @@ export class SharedCodexProjection {
             // Persist consumption first, but acknowledge only after transcript
             // packets: the Hub cannot mark an ID that has not been inserted yet.
             await this.committedHistory(ids);
-            for (const id of ids) consumed.add(id);
+            // Collect ACK IDs below in transcript order, so separate bounded
+            // packets cannot place every historical prompt ahead of its reply.
         }
         const titleRevision = this.titleRevision;
         let latestTitle: string | undefined;
