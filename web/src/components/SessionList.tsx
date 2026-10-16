@@ -824,7 +824,7 @@ export function SessionListSearch(props: {
                     title={searchLabel}
                     className="min-w-0 flex-1 appearance-none bg-transparent px-2 py-1.5 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
                 />
-                {renderDateButton('embedded')}
+                {showDateFilter ? renderDateButton('embedded') : null}
                 {props.value ? (
                     <button
                         type="button"

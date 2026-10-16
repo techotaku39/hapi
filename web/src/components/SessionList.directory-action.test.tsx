@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
-import { SessionList } from './SessionList'
+import { SessionList, SessionListSearch } from './SessionList'
 
 const SEARCH_LABEL = 'Search sessions (title, path, Agent, machine name, ID, and more)'
 const SEARCH_PLACEHOLDER = 'Search title/path/Agent/machine/ID…'
@@ -1095,7 +1095,7 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: /Other task/ })).toBeInTheDocument()
     })
 
-    it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {
+    it('hides the expanded-search calendar when the unified filter owns date filtering', () => {
         renderWithProviders(
             <SessionList
                 sessions={[makeSession({
@@ -1122,9 +1122,27 @@ describe('SessionList search toggle', () => {
         expect(clearButton.className).toMatch(/min-h-\[48px\]/)
         expect(clearButton.className).toMatch(/min-w-\[48px\]/)
 
+        expect(screen.queryByTestId('session-list-search-date-embedded')).toBeNull()
+    })
+
+    it('keeps the embedded calendar when expanded search enables date filtering', () => {
+        renderWithProviders(
+            <SessionListSearch
+                value="DJ"
+                onChange={vi.fn()}
+                customStart=""
+                customEnd=""
+                sessionActivityDates={new Set()}
+                onDateRangeChange={vi.fn()}
+                expanded={true}
+                onExpandedChange={vi.fn()}
+            />
+        )
+
         const dateButton = screen.getByTestId('session-list-search-date-embedded')
         expect(dateButton.className).toMatch(/min-h-\[48px\]/)
         expect(dateButton.className).toMatch(/min-w-\[48px\]/)
+        const clearButton = screen.getByRole('button', { name: 'Clear search' })
         expect(clearButton.parentElement?.contains(dateButton)).toBe(true)
 
         const fieldChildren = Array.from(clearButton.parentElement?.children ?? [])
