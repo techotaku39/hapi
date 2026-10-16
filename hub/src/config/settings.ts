@@ -63,6 +63,11 @@ export interface Settings {
      * Environment variables still take precedence per field.
      */
     titleProvider?: TitleProviderSettings
+    /**
+     * Cap (seconds) on one ElevenLabs ConvAI conversation. Env
+     * ELEVENLABS_MAX_DURATION_SECONDS still wins when set at process start.
+     */
+    elevenLabsMaxDurationSeconds?: number
 }
 
 export function getSettingsFile(dataDir: string): string {
