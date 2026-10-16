@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionSummary } from '@/types/api'
+import { SESSION_LIFECYCLE_IDLE } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import {
     buildSessionSearchScoreIndex,
@@ -54,6 +55,7 @@ import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
+import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useScratchlistSessionIds } from '@/hooks/queries/useScratchlistSessionIds'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
@@ -85,9 +87,55 @@ const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
     { key: 'active', labelKey: 'session.item.active', colorClass: 'text-[var(--app-hint)]', pulse: false },
+    // tiann/hapi#1820: connected, but the hub has seen nothing except
+    // keepalives for the configured window. Split out so a fleet of zombies
+    // does not read as a fleet of ready sessions.
+    { key: 'idle', labelKey: 'session.item.idle', colorClass: 'text-[var(--app-hint)]', pulse: false },
 ] as const
 
 type RunningBucketKey = (typeof RUNNING_BUCKETS)[number]['key']
+
+export function emptyRunningBuckets(): Record<RunningBucketKey, SessionSummary[]> {
+    return { working: [], pending: [], active: [], idle: [] }
+}
+
+/**
+ * Split the connected sessions into the in-progress / active sub-buckets the
+ * pinned sections render. Pure so the bucketing rules stay testable.
+ */
+export function bucketRunningSessions(
+    sessions: SessionSummary[],
+    pinInProgressSessions: boolean,
+    compare: (a: SessionSummary, b: SessionSummary) => number = (a, b) => b.updatedAt - a.updatedAt
+): Record<RunningBucketKey, SessionSummary[]> {
+    const buckets = emptyRunningBuckets()
+    if (!pinInProgressSessions) {
+        return buckets
+    }
+    for (const session of sessions) {
+        if (session.globalPinned || session.pinned) {
+            continue
+        }
+        if (!session.active) {
+            continue
+        }
+        if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
+            buckets.working.push(session)
+        } else if ((session.pendingRequestsCount ?? 0) > 0) {
+            buckets.pending.push(session)
+        } else if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) {
+            // Keepalive-only: socket up, no agent progress for hours.
+            buckets.idle.push(session)
+        } else {
+            // Quiet but connected: finished executing, operator will continue.
+            buckets.active.push(session)
+        }
+    }
+    for (const key of Object.keys(buckets) as RunningBucketKey[]) {
+        buckets[key].sort(compare)
+    }
+    return buckets
+}
 
 /**
  * Sessions that warrant the optional pinned top sections.
@@ -600,71 +648,95 @@ export function SessionListSearch(props: {
         }
     }, [props.expanded])
 
-    const renderDateFilter = (variant: 'standalone' | 'embedded') => {
-        const returnFocus = () => {
-            (variant === 'embedded' ? inputRef.current : dateButtonRef.current)?.focus()
+    const returnDateFocus = () => {
+        if (props.expanded) {
+            inputRef.current?.focus()
+            return
         }
-
-        return (
-            <>
-                <button
-                    ref={dateButtonRef}
-                    type="button"
-                    onClick={() => setDatePickerOpen(open => !open)}
-                    className={cn(
-                        'relative shrink-0 transition-colors hover:bg-[var(--app-subtle-bg)]',
-                        variant === 'standalone'
-                            ? 'rounded-full p-1.5 hover:text-[var(--app-fg)]'
-                            : 'flex items-center rounded-r-lg rounded-l-md px-1',
-                        hasDateRange ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'
-                    )}
-                    title={hasDateRange ? `${props.customStart} – ${props.customEnd}` : t('sessions.timeFilter.label')}
-                    aria-label={hasDateRange
-                        ? `${t('sessions.timeFilter.label')}: ${props.customStart} – ${props.customEnd}`
-                        : t('sessions.timeFilter.label')}
-                    aria-expanded={datePickerOpen}
-                >
-                    <CalendarIcon className="h-5 w-5" />
-                    {hasDateRange ? (
-                        <span className={cn(
-                            'absolute h-1.5 w-1.5 rounded-full bg-[var(--app-link)]',
-                            variant === 'standalone' ? 'right-0.5 top-0.5' : 'right-1 top-1'
-                        )} />
-                    ) : null}
-                </button>
-                {datePickerOpen ? (
-                    <>
-                        <button
-                            type="button"
-                            aria-label={t('sessions.timeFilter.close')}
-                            className="fixed inset-0 z-20 cursor-default"
-                            onClick={() => {
-                                setDatePickerOpen(false)
-                                returnFocus()
-                            }}
-                        />
-                        <SessionDateRangePicker
-                            start={props.customStart}
-                            end={props.customEnd}
-                            sessionActivityDates={props.sessionActivityDates}
-                            onChange={props.onDateRangeChange}
-                            onClear={() => {
-                                props.onDateRangeChange('', '')
-                                // The footer Clear button unmounts once the range is
-                                // empty; return focus so it does not drop to <body>.
-                                returnFocus()
-                            }}
-                            onClose={() => {
-                                setDatePickerOpen(false)
-                                returnFocus()
-                            }}
-                            align={variant === 'standalone' ? 'left' : 'right'}
-                        />
-                    </>
-                ) : null}
-            </>
-        )
+        dateButtonRef.current?.focus()
     }
+
+    // Layout A (#2019 / Quest): calendar sits INSIDE the expanded field,
+    // immediately left of the furthest-right 48px clear end-cap. Both hit
+    // targets are min 48x48 so the clear is no longer a ~14px absolute X.
+    // Date button only — picker mounts on the search-group container so
+    // left-0 / right-0 stay viewport-safe (not a 48px button containing block).
+    const renderDateButton = (variant: 'standalone' | 'embedded') => (
+        <div className={cn('shrink-0', variant === 'embedded' && 'flex items-stretch')}>
+            <button
+                ref={dateButtonRef}
+                type="button"
+                data-testid={variant === 'embedded'
+                    ? 'session-list-search-date-embedded'
+                    : 'session-list-search-date-standalone'}
+                onClick={() => setDatePickerOpen(open => !open)}
+                className={cn(
+                    'relative flex shrink-0 items-center justify-center transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset',
+                    variant === 'standalone'
+                        ? cn(
+                            'min-h-[48px] min-w-[48px] rounded-full p-2',
+                            'hover:bg-[var(--app-subtle-bg)]',
+                            hasDateRange ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        )
+                        : cn(
+                            'session-list-search-date-embedded min-h-[48px] min-w-[48px] border-l border-[var(--app-border)]',
+                            'hover:bg-[var(--app-subtle-bg)]',
+                            hasDateRange ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        )
+                )}
+                title={hasDateRange
+                    ? `${props.customStart} - ${props.customEnd}`
+                    : t('sessions.timeFilter.label')}
+                aria-label={hasDateRange
+                    ? `${t('sessions.timeFilter.label')}: ${props.customStart} - ${props.customEnd}`
+                    : t('sessions.timeFilter.label')}
+                aria-expanded={datePickerOpen}
+            >
+                <CalendarIcon className="h-5 w-5 shrink-0" />
+                {hasDateRange ? (
+                    <span
+                        className={cn(
+                            'absolute h-1.5 w-1.5 rounded-full bg-[var(--app-link)]',
+                            variant === 'standalone' ? 'right-1 top-1' : 'right-1.5 top-1.5'
+                        )}
+                        aria-hidden="true"
+                    />
+                ) : null}
+            </button>
+        </div>
+    )
+
+    const datePicker = datePickerOpen ? (
+        <>
+            <button
+                type="button"
+                aria-label={t('sessions.timeFilter.close')}
+                className="fixed inset-0 z-20 cursor-default"
+                onClick={() => {
+                    setDatePickerOpen(false)
+                    returnDateFocus()
+                }}
+            />
+            <SessionDateRangePicker
+                start={props.customStart}
+                end={props.customEnd}
+                sessionActivityDates={props.sessionActivityDates}
+                onChange={props.onDateRangeChange}
+                onClear={() => {
+                    props.onDateRangeChange('', '')
+                    // The footer Clear button unmounts once the range is
+                    // empty; return focus so it does not drop to <body>.
+                    returnDateFocus()
+                }}
+                onClose={() => {
+                    setDatePickerOpen(false)
+                    returnDateFocus()
+                }}
+                align={props.expanded ? 'right' : 'left'}
+            />
+        </>
+    ) : null
 
     const searchLabel = t('sessions.search.open')
 
@@ -672,7 +744,13 @@ export function SessionListSearch(props: {
         const hasTextQuery = props.value.length > 0
         const collapsedLabel = hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
         return (
-            <div className="relative flex items-center gap-1">
+            // min-w-0 (no shrink-0): group can yield space to neighboring toolbar
+            // controls; calendar + clear stay shrink-0; query text truncates.
+            <div
+                data-testid="session-list-search"
+                data-expanded="false"
+                className="relative flex min-w-0 flex-nowrap items-center gap-1"
+            >
                 <div className={cn(
                     'relative flex min-w-0 items-center rounded-full transition-colors',
                     hasTextQuery
@@ -685,10 +763,10 @@ export function SessionListSearch(props: {
                         type="button"
                         onClick={() => props.onExpandedChange(true)}
                         className={cn(
-                            'relative flex min-w-0 items-center gap-1 transition-colors',
+                            'relative flex min-h-[40px] items-center gap-1 transition-colors',
                             hasTextQuery
-                                ? 'flex-1 rounded-l-full bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
-                                : 'shrink-0 rounded-full p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                                ? 'min-w-0 flex-1 rounded-l-full bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
+                                : 'min-w-[40px] shrink-0 rounded-full p-2 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                         )}
                         title={collapsedLabel}
                         aria-label={collapsedLabel}
@@ -707,21 +785,24 @@ export function SessionListSearch(props: {
                                 // the collapsed search trigger instead of dropping to body.
                                 collapsedButtonRef.current?.focus()
                             }}
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-r-full bg-[var(--app-chat-user-chip-action-bg)] text-[var(--app-chat-user-chip-action-fg)] transition-colors hover:text-[var(--app-chat-user-chip-action-hover-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset"
+                            className="flex h-10 w-10 min-h-[40px] min-w-[40px] shrink-0 items-center justify-center rounded-r-full bg-[var(--app-chat-user-chip-action-bg)] text-[var(--app-chat-user-chip-action-fg)] transition-colors hover:text-[var(--app-chat-user-chip-action-hover-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset"
                             title={t('sessions.search.clear')}
                             aria-label={t('sessions.search.clear')}
                         >
-                            <XIcon className="h-3.5 w-3.5" />
+                            <XIcon className="h-4 w-4" />
                         </button>
                     ) : null}
                 </div>
-                {showDateFilter ? renderDateFilter('standalone') : null}
+                {showDateFilter ? renderDateButton('standalone') : null}
+                {showDateFilter ? datePicker : null}
             </div>
         )
     }
 
     return (
         <div
+            data-testid="session-list-search"
+            data-expanded="true"
             className="relative min-w-0 flex-1"
             onBlur={(event) => {
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -729,40 +810,39 @@ export function SessionListSearch(props: {
                 }
             }}
         >
-            <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
-                <SearchIcon className="h-3.5 w-3.5" />
+            <div className="relative flex min-h-12 min-w-0 items-stretch rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] transition-colors focus-within:border-[var(--app-link)]">
+                <div className="pointer-events-none flex shrink-0 items-center pl-2.5 text-[var(--app-hint)]">
+                    <SearchIcon className="h-3.5 w-3.5" />
+                </div>
+                <input
+                    ref={inputRef}
+                    type="search"
+                    value={props.value}
+                    onChange={(event) => props.onChange(event.target.value)}
+                    placeholder={t('sessions.search.placeholder')}
+                    aria-label={searchLabel}
+                    title={searchLabel}
+                    className="min-w-0 flex-1 appearance-none bg-transparent px-2 py-1.5 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+                />
+                {renderDateButton('embedded')}
+                {props.value ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            props.onChange('')
+                            // The clear button unmounts with the query; keep focus off <body>
+                            // so a later outside click still routes blur through the wrapper.
+                            inputRef.current?.focus()
+                        }}
+                        className="session-list-search-clear-endcap flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center border-l border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset"
+                        title={t('sessions.search.clear')}
+                        aria-label={t('sessions.search.clear')}
+                    >
+                        <XIcon className="h-5 w-5" />
+                    </button>
+                ) : null}
             </div>
-            <input
-                ref={inputRef}
-                type="search"
-                value={props.value}
-                onChange={(event) => props.onChange(event.target.value)}
-                placeholder={t('sessions.search.placeholder')}
-                aria-label={searchLabel}
-                title={searchLabel}
-                className={cn(
-                    'w-full appearance-none rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] py-1.5 pl-8 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] focus:border-[var(--app-link)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden',
-                    props.value ? 'pr-16' : 'pr-7'
-                )}
-            />
-            {props.value ? (
-                <button
-                    type="button"
-                    onClick={() => {
-                        props.onChange('')
-                        // The clear button unmounts with the query; keep focus off <body>
-                        // so a later outside click still routes blur through the wrapper.
-                        inputRef.current?.focus()
-                    }}
-                    className="absolute inset-y-0 right-9 flex items-center rounded p-0.5 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
-                    title={t('sessions.search.clear')}
-                >
-                    <XIcon className="h-3.5 w-3.5" />
-                </button>
-            ) : null}
-            <div className="absolute inset-y-0 right-0 flex items-stretch">
-                {showDateFilter ? renderDateFilter('embedded') : null}
-            </div>
+            {showDateFilter ? datePicker : null}
         </div>
     )
 }
@@ -1247,45 +1327,17 @@ export function SessionList(props: {
         return [...pinned].sort((a, b) => b.updatedAt - a.updatedAt)
     }, [machineFilteredSessions, searchScoreIndex, hasTextQuery])
     const runningSessions = useMemo(() => {
-        const buckets: Record<RunningBucketKey, SessionSummary[]> = {
-            working: [],
-            pending: [],
-            active: [],
-        }
-        if (!pinInProgressSessions) {
-            return buckets
-        }
-        for (const session of machineFilteredSessions) {
-            if (session.globalPinned || session.pinned) {
-                continue
-            }
-            if (!session.active) {
-                continue
-            }
-            if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
-                buckets.working.push(session)
-            } else if ((session.pendingRequestsCount ?? 0) > 0) {
-                buckets.pending.push(session)
-            } else {
-                // Quiet but connected: finished executing, operator will continue.
-                buckets.active.push(session)
-            }
-        }
-        const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
         const byRelevanceOrRecent = (a: SessionSummary, b: SessionSummary) => {
             if (searchScoreIndex && hasTextQuery) {
                 return compareSessionsBySearchRelevance(a, b, searchScoreIndex)
             }
-            return byRecent(a, b)
+            return b.updatedAt - a.updatedAt
         }
-        for (const key of Object.keys(buckets) as RunningBucketKey[]) {
-            buckets[key].sort(byRelevanceOrRecent)
-        }
-        return buckets
+        return bucketRunningSessions(machineFilteredSessions, pinInProgressSessions, byRelevanceOrRecent)
     }, [machineFilteredSessions, pinInProgressSessions, searchScoreIndex, hasTextQuery])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
-    const activeSessionTotal = runningSessions.active.length
+    const activeSessionTotal = runningSessions.active.length + runningSessions.idle.length
     const groups = useMemo(
         () => {
             const grouped = groupSessionsByDirectory(
@@ -1727,6 +1779,7 @@ export function SessionList(props: {
     // pull-to-load-older pattern in HappyThread; desktop has no overscroll
     // bounce to make a wheel pull feel right, so it stays on live updates.
     const scrollContainerRef = useRef<HTMLDivElement>(null)
+    useTransientScrollbar(scrollContainerRef, 'left')
     const [pullState, setPullState] = useState<PullToRefreshState>('idle')
     const pullStateRef = useRef<PullToRefreshState>('idle')
     const [isRefreshing, setIsRefreshing] = useState(false)
@@ -1933,7 +1986,7 @@ export function SessionList(props: {
                     </span>
                 </div>
             ) : null}
-            <div ref={scrollContainerRef} className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
+            <div ref={scrollContainerRef} className="app-scroll-y session-list-scrollbar-left scrollbar-auto-hide min-h-0 flex-1">
             <SessionListScrollAnchor sessions={props.sessions} className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pb-2">
                 {props.sessions.length === 0 && !props.isLoading ? (
                     <SessionsEmptyState
@@ -2036,7 +2089,7 @@ export function SessionList(props: {
                     onToggle: () => setActiveSectionCollapsed((value) => !value),
                     pulse: false,
                     count: activeSessionTotal,
-                    bucketKeys: ['active'],
+                    bucketKeys: ['active', 'idle'],
                 })}
                 {groups.map(renderDirectoryGroup)}
                 {actionOnlyGroups.map(renderActionOnlyGroupHeader)}

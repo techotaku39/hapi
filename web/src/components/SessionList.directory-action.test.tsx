@@ -129,7 +129,8 @@ describe('SessionList directory action', () => {
 
         fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
         const searchInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
-        const headerRow = searchInput.parentElement?.parentElement
+        // input → field row → session-list-search → header actions row
+        const headerRow = searchInput.parentElement?.parentElement?.parentElement
         expect(headerRow).toHaveClass('px-2')
         expect(headerRow).toHaveClass('py-1')
     })
@@ -194,7 +195,8 @@ describe('SessionList time filter', () => {
         const searchButton = screen.getByRole('button', { name: SEARCH_LABEL })
         const filterButton = screen.getByRole('button', { name: 'Filter sessions' })
         const searchControl = searchButton.parentElement
-        expect(searchControl?.parentElement).toHaveClass('relative', 'gap-1')
+        expect(searchControl?.parentElement).toHaveClass('relative', 'gap-1', 'min-w-0')
+        expect(searchControl?.parentElement?.className.split(/\s+/)).not.toContain('shrink-0')
         expect(screen.queryByRole('button', { name: 'Filter sessions by last activity' })).toBeNull()
         expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
 
@@ -1091,6 +1093,45 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: SEARCH_LABEL })).toHaveFocus()
         expect(screen.getByRole('button', { name: /Matching task/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Other task/ })).toBeInTheDocument()
+    })
+
+    it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {
+        renderWithProviders(
+            <SessionList
+                sessions={[makeSession({
+                    id: 'session-1',
+                    updatedAt: 100,
+                    metadata: { path: '/work/hapi', name: 'Task', flavor: 'codex' },
+                })]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(input, { target: { value: 'DJ' } })
+
+        const clearButton = screen.getByRole('button', { name: 'Clear search' })
+        expect(clearButton.className).toMatch(/session-list-search-clear-endcap/)
+        expect(clearButton.className).toMatch(/min-h-\[48px\]/)
+        expect(clearButton.className).toMatch(/min-w-\[48px\]/)
+
+        const dateButton = screen.getByTestId('session-list-search-date-embedded')
+        expect(dateButton.className).toMatch(/min-h-\[48px\]/)
+        expect(dateButton.className).toMatch(/min-w-\[48px\]/)
+        expect(clearButton.parentElement?.contains(dateButton)).toBe(true)
+
+        const fieldChildren = Array.from(clearButton.parentElement?.children ?? [])
+        const dateIndex = fieldChildren.findIndex((node) => node === dateButton.parentElement || node.contains(dateButton))
+        const clearIndex = fieldChildren.indexOf(clearButton)
+        expect(dateIndex).toBeGreaterThanOrEqual(0)
+        expect(clearIndex).toBeGreaterThan(dateIndex)
     })
 
     it('stays expanded with focus on the input after clearing the query', () => {

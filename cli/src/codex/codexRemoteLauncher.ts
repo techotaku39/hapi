@@ -8,6 +8,7 @@ import { DiffProcessor } from './utils/diffProcessor';
 import { logger } from '@/ui/logger';
 import { CodexDisplay } from '@/ui/ink/CodexDisplay';
 import { buildHapiMcpBridge } from './utils/buildHapiMcpBridge';
+import { applySessionDisplayRename } from '@/agent/sessionDisplayRename';
 import { emitReadyIfIdle } from './utils/emitReadyIfIdle';
 import type { CodexSession } from './session';
 import type { EnhancedMode } from './loop';
@@ -473,11 +474,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         };
 
         const sendTitleSummary = (title: string): void => {
-            session.client.sendClaudeSessionMessage({
-                type: 'summary',
-                summary: title,
-                leafUuid: randomUUID()
-            });
+            // Matches MCP change_title / web rename: set metadata.name so a
+            // prior spawn --name does not hide the agent rename.
+            applySessionDisplayRename(session.client, title);
         };
 
         const formatOutputPreview = (value: unknown): string => {
@@ -751,6 +750,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const isScopeSensitiveCodexEvent = (type: string): boolean => {
             return type === 'token_count'
                 || type === 'context_compacted'
+                || type === 'compaction_started'
                 || type === 'thread_goal_updated'
                 || type === 'thread_goal_cleared';
         };
@@ -1517,6 +1517,16 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     id: randomUUID()
                 });
                 updateActivity('Context compacted', 'compact');
+                return;
+            }
+
+            if (msgType === 'compaction_started') {
+                emitAgentRunTraceMessage(agentId, {
+                    type: 'compaction_started',
+                    statusText: '📦 Compaction started',
+                    id: randomUUID()
+                });
+                updateActivity('Compacting context', 'compact');
                 return;
             }
 
@@ -3256,6 +3266,17 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     id: randomUUID()
                 });
             }
+            if (msgType === 'compaction_started') {
+                const threadId = eventThreadId ?? this.currentThreadId;
+                const manualInFlight = manualCompact
+                    && (!threadId || manualCompact.threadId === threadId)
+                    && (!manualCompact.turnId || !eventTurnId || manualCompact.turnId === eventTurnId);
+                if (!manualInFlight) {
+                    const message = '📦 Compaction started';
+                    messageBuffer.addMessage(message, 'status');
+                    session.sendSessionEvent({ type: 'message', message });
+                }
+            }
             if (msgType === 'plan_update') {
                 session.sendAgentMessage({
                     type: 'tool-call',
@@ -4023,7 +4044,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 return true;
             }
 
-            sendVisibleStatus('Compaction started');
+            sendVisibleStatus('📦 Compaction started');
             const compactCompletion = beginManualCompact(threadId);
             void compactCompletion.catch(() => {});
             try {
@@ -4031,10 +4052,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     signal: this.abortController.signal
                 });
                 await compactCompletion;
-                sendVisibleStatus('Compaction completed');
+                sendVisibleStatus('📦 Compaction completed');
             } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
-                sendVisibleStatus(`Compaction failed: ${detail}`);
+                sendVisibleStatus(`📦 Compaction failed: ${detail}`);
             } finally {
                 if (manualCompact?.threadId === threadId) {
                     const compact = manualCompact;

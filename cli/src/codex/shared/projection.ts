@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ApiSessionClient } from '@/api/apiSession';
+import { normalizeSessionDisplayTitle } from '@/agent/sessionDisplayRename';
 import { registerGeneratedImageFromPath } from '@/modules/common/generatedImages';
 import { AppServerEventConverter } from '../utils/appServerEventConverter';
 import { record, string } from './gateway';
@@ -16,7 +17,7 @@ export function inputText(input: unknown): string {
 
 function requestedTitle(item: Record<string, unknown>): string | undefined {
     if (item.type !== 'mcpToolCall' || item.server !== 'hapi' || item.tool !== 'change_title') return;
-    return string(record(item.arguments).title)?.trim() || undefined;
+    return normalizeSessionDisplayTitle(string(record(item.arguments).title)) ?? undefined;
 }
 
 function successfulTitle(item: Record<string, unknown>, pending?: string): string | undefined {
@@ -25,6 +26,10 @@ function successfulTitle(item: Record<string, unknown>, pending?: string): strin
     const result = record(item.result);
     if ('Err' in result || result.isError === true || record(result.Ok).isError === true) return;
     return requestedTitle(item) ?? pending;
+}
+
+function metadataHasDisplayTitle(metadata: { name?: string; summary?: { text: string } } | null | undefined): boolean {
+    return Boolean(metadata?.name?.trim() || metadata?.summary?.text?.trim());
 }
 
 /** Canonical V2 stream only. Stable message IDs also deduplicate snapshot replay at the hub. */
@@ -54,6 +59,15 @@ export class SharedCodexProjection {
         } : { ...body, id }, id);
     }
 
+    private applyDisplayRename(title: string, revision: number): void {
+        this.session.updateMetadata(metadata => {
+            if (revision !== this.titleRevision) return metadata;
+            const normalized = normalizeSessionDisplayTitle(title);
+            if (!normalized || metadata.name?.trim() === normalized) return metadata;
+            return { ...metadata, name: normalized };
+        });
+    }
+
     async notification(method: string, params: unknown, modelAtReceipt?: string): Promise<void> {
         const p = record(params);
         const item = record(p.item);
@@ -68,9 +82,7 @@ export class SharedCodexProjection {
                     if (completedTitle) {
                         this.completedTitles.add(key);
                         const revision = ++this.titleRevision;
-                        this.session.updateMetadata(metadata => revision !== this.titleRevision ? metadata : {
-                            ...metadata, summary: { text: completedTitle, updatedAt: Date.now() }
-                        });
+                        this.applyDisplayRename(completedTitle, revision);
                     }
                 }
             }
@@ -78,7 +90,7 @@ export class SharedCodexProjection {
         await this.project(method, params, modelAtReceipt);
     }
 
-    private async project(method: string, params: unknown, modelAtReceipt?: string): Promise<void> {
+    private async project(method: string, params: unknown, modelAtReceipt?: string, fromHistory = false): Promise<void> {
         if (method.startsWith('codex/event/')) return;
         const p = record(params);
         const item = record(p.item);
@@ -134,6 +146,20 @@ export class SharedCodexProjection {
                 this.send({ type: 'tool-call', name: event.name, callId, input: event.input ?? event.arguments }, key);
             } else if (event.type === 'codex_tool_call_end' && callId) {
                 this.send({ type: 'tool-call-result', callId, output: event.output, is_error: event.is_error }, key);
+            } else if (event.type === 'compaction_started') {
+                // History replay re-projects every completed item's start;
+                // a finished compaction must not announce a live status.
+                if (fromHistory) continue;
+                if (this.parentThreadId) {
+                    this.send({ type: 'compaction_started', statusText: '📦 Compaction started' }, key);
+                } else {
+                    // Status UI listens on session events; an agent message
+                    // would render as a normal assistant bubble instead.
+                    // Dedup is in-memory only (this.emitted set).
+                    if (this.emitted.has(key)) continue;
+                    this.emitted.add(key);
+                    this.session.sendSessionEvent({ type: 'message', message: '📦 Compaction started' });
+                }
             } else if (event.type === 'token_count' || event.type === 'context_compacted' || event.type.startsWith('thread_goal_')) {
                 const model = event.type === 'token_count' && turnId ? this.turnModels.get(turnId) : undefined;
                 this.send({ ...event, ...(model ? { model } : {}), flavor: 'codex', scope: { role: 'parent', threadId: this.threadId }, scope_role: 'parent', thread_id: this.threadId }, key);
@@ -179,7 +205,7 @@ export class SharedCodexProjection {
                 if (!this.parentThreadId && string(record(item).id) && pendingTitle && !this.completedTitles.has(titleKey)) {
                     this.pendingTitles.set(titleKey, pendingTitle);
                 }
-                await this.project('item/started', params);
+                await this.project('item/started', params, undefined, true);
                 // Active snapshots can contain partial assistant text. Do not
                 // settle it under the final stable id and suppress completion.
                 if (turn.status !== 'inProgress' || record(item).status === 'completed' || record(item).type === 'userMessage') {
@@ -191,17 +217,23 @@ export class SharedCodexProjection {
                         }
                         this.pendingTitles.delete(titleKey);
                     }
-                    await this.project('item/completed', params);
+                    await this.project('item/completed', params, undefined, true);
                 }
             }
         }
         // Repair sessions created while remote title projection was missing.
         // Recheck inside the metadata lock: live updates may still be queued,
-        // and a replay must never replace an existing or newer title.
-        if (latestTitle && titleRevision === this.titleRevision && !this.session.getMetadata()?.summary?.text?.trim()) {
+        // and a replay must never replace an existing or newer display title.
+        if (latestTitle && titleRevision === this.titleRevision && !metadataHasDisplayTitle(this.session.getMetadata())) {
             const title = latestTitle;
-            this.session.updateMetadata(metadata => titleRevision !== this.titleRevision || metadata.summary?.text?.trim()
-                ? metadata : { ...metadata, summary: { text: title, updatedAt: Date.now() } });
+            this.session.updateMetadata(metadata => {
+                if (titleRevision !== this.titleRevision || metadataHasDisplayTitle(metadata)) {
+                    return metadata;
+                }
+                const normalized = normalizeSessionDisplayTitle(title);
+                if (!normalized) return metadata;
+                return { ...metadata, name: normalized };
+            });
         }
     }
 }
