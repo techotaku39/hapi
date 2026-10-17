@@ -276,7 +276,7 @@ struct SessionListStoreTests {
     @Test func liveReplyBeforeInitialBaselineNotifiesEvenAfterReplyClockBackfill() throws {
         let (_, store) = try makeStore()
         let lastSeenStore = LastSeenStore()
-        var cached = storeSession("cached", updatedAt: 9_000, lastAssistantMessageAt: 6_000)
+        var cached = storeSession("cached", seq: 12, updatedAt: 9_000, lastAssistantMessageAt: 6_000)
         cached.assistantReplyClockBackfilled = true
         store.shouldPreserveLiveReplyUnread = { _ in
             !lastSeenStore.state.baselines.contains("hub-a")

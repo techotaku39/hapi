@@ -379,7 +379,9 @@ public final class SessionListStore: SessionListStoring {
             currentSummary?.lastAssistantMessageVersion ?? 0,
             currentDetail?.seq ?? 0
         )
-        if let replyVersion = patch.lastAssistantMessageVersion, replyVersion < currentReplyVersion {
+        if let replyVersion = patch.lastAssistantMessageVersion,
+           replyVersion < currentReplyVersion,
+           !(baselinePending && replyAt >= currentReplyAt) {
             return
         }
         if replyAt > currentReplyAt

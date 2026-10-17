@@ -525,7 +525,10 @@ class SessionStore(
             currentDetail?.seq ?: 0L,
         )
         val replyVersion = patch.lastAssistantMessageVersion
-        if (replyVersion != null && replyVersion < currentReplyVersion) return
+        if (replyVersion != null
+            && replyVersion < currentReplyVersion
+            && !(baselinePending && replyAt >= currentReplyAt)
+        ) return
         if (replyAt > currentReplyAt
             || (baselinePending && replyAt == currentReplyAt)
         ) {

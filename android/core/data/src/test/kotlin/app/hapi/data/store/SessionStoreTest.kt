@@ -354,7 +354,7 @@ class SessionStoreTest {
     fun `live reply before the first baseline notifies even after reply clock backfill`() = runStoreTest { store, server ->
         server.enqueueJson(
             sessionsResponseJson(
-                summary("cached", updatedAt = 9_000, lastAssistantMessageAt = 6_000, lastAssistantMessageVersion = 10),
+                summary("cached", updatedAt = 9_000, lastAssistantMessageAt = 6_000, lastAssistantMessageVersion = 12),
             )
         )
         store.refresh()

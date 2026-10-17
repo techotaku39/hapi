@@ -721,6 +721,7 @@ export function useSSE(options: {
             if (
                 patch.lastAssistantMessageVersion !== undefined
                 && patch.lastAssistantMessageVersion < currentReplyVersion
+                && !(baselinePending && patch.lastAssistantMessageAt >= currentReplyAt)
             ) {
                 return
             }
