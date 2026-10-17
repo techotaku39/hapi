@@ -4,7 +4,11 @@ import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session, SessionResponse, SessionSummary, SessionsResponse } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
-import { getSessionLastSeenAt, getUnreadSessionCount } from '@/lib/sessionLastSeen'
+import {
+    getSessionLastSeenAt,
+    getUnreadSessionCount,
+    initializeSessionLastSeen,
+} from '@/lib/sessionLastSeen'
 import {
     applySessionDetailPatch,
     canApplyVersionedSummaryPatch,
@@ -546,6 +550,43 @@ describe('reply-clock full-record cache ordering', () => {
                 data: {
                     lastAssistantMessageAt: 6_000,
                     lastAssistantMessageVersion: 11
+                }
+            })
+        })
+
+        expect(getSessionLastSeenAt(sessionId)).toBe(5_999)
+        unmount()
+    })
+
+    it('preserves an equal-clock live reply after pending baseline registration', () => {
+        const sessionId = 'pending-baseline-equal-clock'
+        window.localStorage.removeItem('hapi.sessionLastSeen.v2')
+        window.localStorage.removeItem('hapi.sessionManualUnread.v2')
+        window.localStorage.removeItem('hapi.sessionLastSeenBaseline.v2:http://hub.test')
+        const { queryClient, unmount } = renderUseSSE()
+        const hydrated = {
+            id: sessionId,
+            updatedAt: 9_000,
+            lastAssistantMessageAt: 6_000,
+            assistantReplyClockBackfilled: false,
+        }
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSummary({
+                ...hydrated,
+                lastAssistantMessageVersion: 11,
+            })]
+        })
+
+        initializeSessionLastSeen('http://hub.test', [hydrated])
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId,
+                namespace: 'default',
+                data: {
+                    lastAssistantMessageAt: 6_000,
+                    lastAssistantMessageVersion: 11,
                 }
             })
         })

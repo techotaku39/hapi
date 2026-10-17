@@ -92,7 +92,7 @@ public final class SessionListStore: SessionListStoring {
     /// Wired by the app so live replies cannot be absorbed by a pending baseline.
     @ObservationIgnored public var onLiveReplyDuringBackfill: (@MainActor (String, Int) -> Void)?
     /// True while the first authoritative unread baseline is still missing.
-    @ObservationIgnored public var shouldPreserveLiveReplyUnread: (@MainActor () -> Bool)?
+    @ObservationIgnored public var shouldPreserveLiveReplyUnread: (@MainActor (String) -> Bool)?
 
     /// Authoritative removal only: SSE from either pipe, or a successful
     /// archive. Optimistic list removal/rollback, filters and failed refreshes
@@ -357,7 +357,7 @@ public final class SessionListStore: SessionListStoring {
     }
 
     private func preserveLiveReplyUnreadDuringBackfill(sessionId: String, patch: SessionPatch) {
-        let baselinePending = shouldPreserveLiveReplyUnread?() == true
+        let baselinePending = shouldPreserveLiveReplyUnread?(sessionId) == true
         guard patch.assistantReplyClockBackfilled == nil,
               let field = patch.lastAssistantMessageAt,
               let replyAt = field.wireValue else { return }

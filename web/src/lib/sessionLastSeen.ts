@@ -206,6 +206,12 @@ export function isSessionLastSeenBaselineInitialized(scope: string): boolean {
     }
 }
 
+/** Whether a legacy session is still waiting for its reply-clock baseline. */
+export function isSessionLastSeenBaselinePending(scope: string, sessionId: string): boolean {
+    if (!sessionId) return false
+    return readPendingBaseline(scope).has(sessionId)
+}
+
 type SessionReadStateInput = Pick<
     SessionSummary,
     'id' | 'updatedAt' | 'lastAssistantMessageAt' | 'assistantReplyClockBackfilled'

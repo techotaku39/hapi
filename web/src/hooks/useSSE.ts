@@ -26,6 +26,7 @@ import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, mark
 import { applySessionDetailPatch } from '@/lib/sessionPatch'
 import {
     isSessionLastSeenBaselineInitialized,
+    isSessionLastSeenBaselinePending,
     markSessionUnreadIfUnseen,
 } from '@/lib/sessionLastSeen'
 import {
@@ -681,6 +682,7 @@ export function useSSE(options: {
 
         const preserveLiveReplyUnreadDuringBackfill = (sessionId: string, patch: SessionPatch): void => {
             const baselinePending = !isSessionLastSeenBaselineInitialized(options.baseUrl)
+                || isSessionLastSeenBaselinePending(options.baseUrl, sessionId)
             if (
                 patch.assistantReplyClockBackfilled !== undefined
                 || patch.lastAssistantMessageAt === undefined

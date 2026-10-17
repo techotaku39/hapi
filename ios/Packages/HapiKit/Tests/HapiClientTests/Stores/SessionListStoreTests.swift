@@ -278,7 +278,7 @@ struct SessionListStoreTests {
         let lastSeenStore = LastSeenStore()
         var cached = storeSession("cached", updatedAt: 9_000, lastAssistantMessageAt: 6_000)
         cached.assistantReplyClockBackfilled = true
-        store.shouldPreserveLiveReplyUnread = {
+        store.shouldPreserveLiveReplyUnread = { _ in
             !lastSeenStore.state.baselines.contains("hub-a")
         }
         store.onLiveReplyDuringBackfill = { sessionId, activityAt in

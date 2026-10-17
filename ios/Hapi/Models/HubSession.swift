@@ -101,8 +101,10 @@ final class HubSession {
         sessionStore.onLiveReplyDuringBackfill = { [weak lastSeenStore] sessionId, activityAt in
             lastSeenStore?.markUnread(sessionId: sessionId, activityAt: activityAt)
         }
-        sessionStore.shouldPreserveLiveReplyUnread = { [weak lastSeenStore] in
-            lastSeenStore?.state.baselines.contains(hubUrl) == false
+        sessionStore.shouldPreserveLiveReplyUnread = { [weak lastSeenStore] sessionId in
+            guard let lastSeenStore else { return false }
+            return !lastSeenStore.state.baselines.contains(hubUrl)
+                || lastSeenStore.state.pendingBaselines[hubUrl]?.contains(sessionId) == true
         }
         sessionStore.onSessionsChanged = { [weak lastSeenStore] sessions in
             lastSeenStore?.initializeBaseline(scopeKey: hubUrl, sessions: sessions)

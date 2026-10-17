@@ -361,7 +361,7 @@ class SessionStoreTest {
         var unreadAt: Long? = null
         store.onLiveReplyDuringBackfill = { _, activityAt -> unreadAt = activityAt }
         var baselinePending = true
-        store.shouldPreserveLiveReplyUnread = { baselinePending }
+        store.shouldPreserveLiveReplyUnread = { _ -> baselinePending }
 
         store.applySessionEvent(
             globalScope,
