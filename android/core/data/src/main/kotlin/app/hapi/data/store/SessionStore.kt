@@ -526,7 +526,9 @@ class SessionStore(
         )
         val replyVersion = patch.lastAssistantMessageVersion
         if (replyVersion != null && replyVersion < currentReplyVersion) return
-        if (replyAt > currentReplyAt) {
+        if (replyAt > currentReplyAt
+            || (baselinePending && replyAt == currentReplyAt)
+        ) {
             onLiveReplyDuringBackfill?.invoke(sessionId, replyAt)
         }
     }

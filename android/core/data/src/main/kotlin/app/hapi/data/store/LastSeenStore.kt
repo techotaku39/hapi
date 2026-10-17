@@ -77,6 +77,7 @@ class LastSeenStore(
         val unreadBefore = activityAt - 1
         updateState { state ->
             val current = state.lastSeen[sessionId]
+            if (current != null && current >= activityAt) return@updateState state
             if (current != null && current <= unreadBefore && sessionId in state.observedUnread) state
             else state.copy(
                 lastSeen = state.lastSeen + (sessionId to unreadBefore),

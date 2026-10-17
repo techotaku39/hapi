@@ -19,6 +19,8 @@ struct LastSeenStoreTests {
         store.markSeen(sessionId: "s1", seenAt: 2_000)
         #expect(store.lastSeenAt("s1") == 2_000)
         #expect(store.lastSeenAt("unknown") == 0)
+        store.markUnread(sessionId: "s1", activityAt: 2_000)
+        #expect(store.lastSeenAt("s1") == 2_000)
     }
 
     @Test func markUnreadLowersTheWatermarkAndBaselineCompletionPreservesIt() {

@@ -522,6 +522,37 @@ describe('reply-clock full-record cache ordering', () => {
         expect(getSessionLastSeenAt(sessionId)).toBe(0)
         unmount()
     })
+
+    it('preserves a live reply when REST hydration arrives first', () => {
+        const sessionId = 'rest-before-live-reply'
+        window.localStorage.removeItem('hapi.sessionLastSeen.v2')
+        window.localStorage.removeItem('hapi.sessionManualUnread.v2')
+        window.localStorage.removeItem('hapi.sessionLastSeenBaseline.v2:http://hub.test')
+        const { queryClient, unmount } = renderUseSSE()
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSummary({
+                id: sessionId,
+                lastAssistantMessageAt: 6_000,
+                lastAssistantMessageVersion: 11,
+                assistantReplyClockBackfilled: false
+            })]
+        })
+
+        act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated',
+                sessionId,
+                namespace: 'default',
+                data: {
+                    lastAssistantMessageAt: 6_000,
+                    lastAssistantMessageVersion: 11
+                }
+            })
+        })
+
+        expect(getSessionLastSeenAt(sessionId)).toBe(5_999)
+        unmount()
+    })
 })
 
 describe('canApplyVersionedSummaryPatch (PR #897 review, HAPI Bot 2026-07-23 Major)', () => {

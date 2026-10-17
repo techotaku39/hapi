@@ -24,7 +24,10 @@ import { queryKeys } from '@/lib/query-keys'
 import { applyAgyCatalogAnnouncement } from '@/lib/agyCatalogAnnouncement'
 import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, markMessagesIndeterminate, markMessagesRequeued, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
 import { applySessionDetailPatch } from '@/lib/sessionPatch'
-import { isSessionLastSeenBaselineInitialized, markSessionUnread } from '@/lib/sessionLastSeen'
+import {
+    isSessionLastSeenBaselineInitialized,
+    markSessionUnreadIfUnseen,
+} from '@/lib/sessionLastSeen'
 import {
     shouldAcceptSessionRecord,
     shouldAcceptSessionSummaryRecord,
@@ -693,7 +696,7 @@ export function useSSE(options: {
                 // The first live reply can arrive before the initial list or
                 // detail hydration. Preserve it so a later incomplete
                 // baseline cannot seed that reply as already seen.
-                markSessionUnread(sessionId, patch.lastAssistantMessageAt)
+                markSessionUnreadIfUnseen(sessionId, patch.lastAssistantMessageAt)
                 return
             }
             if (
@@ -719,11 +722,14 @@ export function useSSE(options: {
             ) {
                 return
             }
-            if (patch.lastAssistantMessageAt > currentReplyAt) {
-                // The later completion patch must preserve this lower
-                // watermark; otherwise it would seed the live reply itself
-                // and silently swallow the unread transition.
-                markSessionUnread(sessionId, patch.lastAssistantMessageAt)
+            if (
+                patch.lastAssistantMessageAt > currentReplyAt
+                || (baselinePending && patch.lastAssistantMessageAt === currentReplyAt)
+            ) {
+                // A live reply may have arrived after REST already hydrated
+                // the same reply clock. Preserve it unless the operator has
+                // already marked that timestamp as seen.
+                markSessionUnreadIfUnseen(sessionId, patch.lastAssistantMessageAt)
             }
         }
 

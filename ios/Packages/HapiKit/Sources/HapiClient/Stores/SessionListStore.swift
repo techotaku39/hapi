@@ -382,7 +382,8 @@ public final class SessionListStore: SessionListStoring {
         if let replyVersion = patch.lastAssistantMessageVersion, replyVersion < currentReplyVersion {
             return
         }
-        if replyAt > currentReplyAt {
+        if replyAt > currentReplyAt
+            || (baselinePending && replyAt == currentReplyAt) {
             onLiveReplyDuringBackfill?(sessionId, replyAt)
         }
     }

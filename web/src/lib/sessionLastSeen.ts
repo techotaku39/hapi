@@ -436,3 +436,17 @@ export function markSessionUnread(sessionId: string, activityAt: number): void {
         notifyStoreChanged()
     }
 }
+
+/** Preserve a live reply only when the operator has not already seen it. */
+export function markSessionUnreadIfUnseen(sessionId: string, activityAt: number): void {
+    if (!sessionId || !Number.isFinite(activityAt)) {
+        return
+    }
+
+    const store = readStore()
+    const currentSeenAt = store[sessionId]
+    if (typeof currentSeenAt === 'number' && Number.isFinite(currentSeenAt) && currentSeenAt >= activityAt) {
+        return
+    }
+    markSessionUnread(sessionId, activityAt)
+}

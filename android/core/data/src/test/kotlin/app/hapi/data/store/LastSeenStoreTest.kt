@@ -19,6 +19,8 @@ class LastSeenStoreTest {
         store.markSeen("s1", 2_000)
         assertEquals(2_000, store.lastSeenAt("s1"))
         assertEquals(0, store.lastSeenAt("unknown"))
+        store.markUnread("s1", 2_000)
+        assertEquals(2_000, store.lastSeenAt("s1"))
     }
 
     @Test

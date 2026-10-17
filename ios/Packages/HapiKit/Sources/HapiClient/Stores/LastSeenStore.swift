@@ -99,6 +99,7 @@ public final class LastSeenStore {
         guard !sessionId.isEmpty else { return }
         let unreadBefore = activityAt - 1
         let current = state.lastSeen[sessionId]
+        if let current, current >= activityAt { return }
         if let current, current <= unreadBefore, state.observedUnread.contains(sessionId) { return }
         state.lastSeen[sessionId] = unreadBefore
         state.observedUnread.insert(sessionId)
