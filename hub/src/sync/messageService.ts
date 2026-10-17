@@ -924,6 +924,15 @@ export class MessageService {
         )
         const actualSessionId = inserted.sessionId
         const msg = inserted.message
+        if (msg.deliveryState === 'abandoned') {
+            // Idempotent retries must reconcile the pending chip without
+            // exposing the retained, uninvoked correlation row as new input.
+            this.publisher.emit({
+                type: 'message-cancelled', sessionId: actualSessionId,
+                messageId: msg.id, ...(msg.localId ? { localId: msg.localId } : {})
+            })
+            return { actualSessionId, createdAt: msg.createdAt }
+        }
         // A duplicate localId is an idempotent retry, not proof that the
         // original Pi turn still exists. Its stored row may retain steer
         // provenance from a POST whose response was lost, so deliver the
@@ -931,7 +940,7 @@ export class MessageService {
         const cliContent = inserted.inserted
             ? msg.content
             : contentForDeferredDelivery(msg.content)
-        const shouldEmitToCli = msg.deliveryState !== 'indeterminate' && msg.deliveryState !== 'abandoned'
+        const shouldEmitToCli = msg.deliveryState !== 'indeterminate'
         this.onSessionActivity?.(actualSessionId, msg.createdAt)
 
         // Only emit to CLI if the message is not scheduled for the future.

@@ -6,6 +6,7 @@ import { RpcRegistry } from '../socket/rpcRegistry'
 function fixture(options: { ack?: object; sockets?: number; shared?: boolean; thinking?: boolean; timeout?: boolean } = {}) {
     const store = new Store(':memory:')
     const requests: any[] = []
+    const events: any[] = []
     const io = { of: () => ({
         adapter: { rooms: { get: () => new Set(Array.from({ length: options.sockets ?? 1 }, (_, i) => String(i))) } },
         to: () => ({ timeout: () => ({ emit: (_: string, data: any, callback: any) => {
@@ -13,7 +14,7 @@ function fixture(options: { ack?: object; sockets?: number; shared?: boolean; th
             callback(options.timeout ? new Error('lost reply') : null, options.timeout ? [] : [options.ack ?? { removed: false, abandoned: true }])
         } }) })
     }) }
-    const engine = new SyncEngine(store, io as never, new RpcRegistry(), { broadcast() {} } as never)
+    const engine = new SyncEngine(store, io as never, new RpcRegistry(), { broadcast(event: unknown) { events.push(event) } } as never)
     const metadata = { path: '/fixture', host: 'fixture', hostPid: 42, machineId: 'test-machine', flavor: 'codex',
         codexSessionId: 'native', capabilities: { concurrentClients: options.shared ?? true, conversationHistory: { forkCurrent: true, forkAtMessage: true } } }
     const source = engine.getOrCreateSession('source', metadata, null, 'default')
@@ -29,11 +30,24 @@ function fixture(options: { ack?: object; sockets?: number; shared?: boolean; th
         const child = engine.getOrCreateSession('child', { ...metadata, codexSessionId: 'child-native', forkedFrom: source.id }, null, 'default')
         return { sessionId: child.id, nativeSessionId: 'child-native' }
     }
-    return { store, engine, source, original, row, requests, nativeForks: () => nativeForks,
+    return { store, engine, source, original, row, requests, events, nativeForks: () => nativeForks,
         close() { engine.stop(); store.close() } }
 }
 
 describe('explicit abandonment of unknown delivery', () => {
+    it('reconciles an abandoned duplicate send without broadcasting a pending row or replaying input', async () => {
+        const f = fixture()
+        try {
+            await f.engine.abandonIndeterminateMessage(f.source.id, f.row.id)
+            f.events.length = 0
+            await f.engine.sendMessage(f.source.id, { text: 'idempotent retry must not replace the original', localId: 'unknown' })
+            expect(f.events.some(event => event.type === 'message-received')).toBe(false)
+            expect(f.events).toContainEqual(expect.objectContaining({ type: 'message-cancelled', sessionId: f.source.id, messageId: f.row.id, localId: 'unknown' }))
+            expect(f.requests).toHaveLength(1)
+            expect(f.store.messages.getAllMessages(f.source.id).find(row => row.localId === 'unknown')).toMatchObject({ invokedAt: null, deliveryState: 'abandoned', content: f.original })
+            expect(f.store.messages.getAllMessages(f.source.id).filter(row => (row.content as any).meta?.abandonedDelivery)).toHaveLength(1)
+        } finally { f.close() }
+    })
     it('archives the input truthfully and unlocks both current and historical Fork without faking consumption', async () => {
         const f = fixture()
         try {
