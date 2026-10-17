@@ -52,6 +52,18 @@ function makeSnapshot(overrides: Partial<DecryptedMessage> = {}): DecryptedMessa
 }
 
 describe('useCancelQueuedMessage', () => {
+    it('keeps unresolved shared input visible instead of locally dismissing its backend blocker', async () => {
+        const api = {
+            cancelMessage: vi.fn().mockResolvedValue({ status: 'busy', localId: 'local-1' }),
+            getQueuedState: vi.fn().mockResolvedValue({ invokedLocalMessages: [], queuedLocalIds: [], indeterminateLocalIds: ['local-1'] }),
+        } as unknown as ApiClient
+        const snapshot = makeSnapshot({ deliveryState: 'indeterminate', queueDismissed: true })
+        const { result } = renderHook(() => useCancelQueuedMessage(api), { wrapper: createWrapper() })
+        await act(async () => { await result.current.mutateAsync({ sessionId: 'session-1', messageId: snapshot.id, localId: 'local-1', snapshot, preserveUnknown: true }) })
+        expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({ deliveryState: 'indeterminate', queueDismissed: false }))
+        expect(storeMocks.markMessagesConsumed).not.toHaveBeenCalled()
+    })
+
     beforeEach(() => {
         vi.clearAllMocks()
     })
