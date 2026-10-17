@@ -1,5 +1,4 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
-import { toString } from 'mdast-util-to-string'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import { isObject } from './utils'
 
@@ -295,9 +294,48 @@ function collectJoinedHeadTail(
 }
 
 function normalizeSearchableMarkdownChunks(chunks: readonly string[]): string | null {
+    const markdownBlockTypes = new Set([
+        'blockquote',
+        'code',
+        'heading',
+        'html',
+        'list',
+        'listItem',
+        'paragraph',
+        'root',
+        'table',
+        'tableCell',
+        'tableRow'
+    ])
+    const renderMarkdownNode = (node: {
+        type?: string
+        value?: string
+        children?: readonly unknown[]
+    }): string => {
+        if (node.type === 'break') return ' '
+        if (typeof node.value === 'string') return node.value
+
+        let rendered = ''
+        let previousType: string | undefined
+        for (const child of node.children ?? []) {
+            if (!isObject(child)) continue
+            const childText = renderMarkdownNode(child)
+            if (!childText) continue
+            if (
+                rendered
+                && (markdownBlockTypes.has(child.type as string) || markdownBlockTypes.has(previousType ?? ''))
+            ) {
+                rendered += ' '
+            }
+            rendered += childText
+            previousType = child.type as string | undefined
+        }
+        return rendered
+    }
+
     const rendered = chunks.map((chunk) => {
         try {
-            return toString(fromMarkdown(chunk))
+            return renderMarkdownNode(fromMarkdown(chunk))
         } catch {
             // Keep indexing malformed/incomplete streamed Markdown rather than
             // dropping otherwise visible assistant text.

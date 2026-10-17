@@ -324,6 +324,15 @@ describe('extractSearchableMessageText', () => {
                 data: { type: 'message', message: 'Use **KV Cache** and [the docs](https://example.com).' }
             }
         })).toEqual({ role: 'assistant', text: 'Use KV Cache and the docs.' })
+        expect(extractUserPlainText('## Deploy\n\nRun migrations')).toBe('Deploy Run migrations')
+        expect(extractUserPlainText('cache  \nkey')).toBe('cache key')
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', message: 'cache  \nkey' }
+            }
+        })).toEqual({ role: 'assistant', text: 'cache key' })
     })
 
     test('keeps the stream identity even when a snapshot has no searchable text', () => {
