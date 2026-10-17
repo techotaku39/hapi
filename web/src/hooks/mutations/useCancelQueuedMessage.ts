@@ -117,6 +117,11 @@ export function useCancelQueuedMessage(api: ApiClient | null) {
                         const invoked = state.invokedLocalMessages.find((item) => item.localId === input.localId)
                         if (invoked) {
                             markMessagesConsumed(input.sessionId, [input.localId], invoked.invokedAt)
+                        } else if (!state.queuedLocalIds.includes(input.localId)
+                            && !state.indeterminateLocalIds?.includes(input.localId)) {
+                            // Another client may have abandoned/deleted the row
+                            // before this busy response restored its stale snapshot.
+                            removeOptimisticMessage(input.sessionId, input.localId)
                         }
                     } catch {
                         // SSE / the next reconnect will reconcile the held row.
