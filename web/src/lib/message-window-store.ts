@@ -1297,6 +1297,9 @@ function markMessageWindowForLatestReset(sessionId: string, messages: DecryptedM
     const previous = states.get(sessionId)
     if (!previous) return
 
+    // A rewind/invalidation is authoritative and must refresh even when a
+    // historical search target previously paused background tail sync.
+    messageWindowTargetLocks.delete(sessionId)
     tailSyncControllers.delete(sessionId)
     clearPersistedState(sessionId)
     setState(sessionId, buildState(previous, {

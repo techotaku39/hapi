@@ -378,6 +378,32 @@ describe('message tail synchronization', () => {
         expect(getMessageWindowState(id).isSyncingTail).toBe(true)
     })
 
+    it('lets an authoritative rewind refresh through a historical target lock', async () => {
+        const id = sessionId('rewind-target-lock')
+        const prefix = makeAgentMessage({ id: 'prefix', seq: 1, at: 1_000 })
+        const target = makeUserMessage({
+            id: 'target',
+            seq: 2,
+            localId: 'rewind-target-lock-local-id',
+            createdAt: 2_000,
+            invokedAt: 2_000
+        })
+        const suffix = makeAgentMessage({ id: 'suffix', seq: 3, at: 3_000 })
+        const getMessages = vi.fn()
+            .mockResolvedValueOnce(latestResponse([prefix, target, suffix], { epoch: 1 }))
+            .mockResolvedValueOnce(latestResponse([prefix], { epoch: 2 }))
+        const api = createApi(getMessages)
+
+        await syncTailMessages(api, id)
+        setMessageWindowTargetLock(id, true)
+        rewindMessageWindow(id, 'rewind-target-lock-local-id')
+        await syncTailMessages(api, id)
+
+        expect(getMessages).toHaveBeenCalledTimes(2)
+        expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['prefix'])
+        expect(getMessageWindowState(id).isSyncingTail).toBe(false)
+    })
+
     it('clears the window when the rewind boundary is outside the loaded page', async () => {
         const id = sessionId('rewind-boundary-not-loaded')
         const current = makeAgentMessage({ id: 'current', seq: 40, at: 40_000 })
