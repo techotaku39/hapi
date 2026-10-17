@@ -1027,16 +1027,11 @@ export async function fetchOlderMessages(
         }
 
         if (initial.epoch !== null && response.page.epoch !== initial.epoch) {
-            updateState(sessionId, (previous) => {
-                if (previous.olderGeneration !== generation) return previous
-                return buildState(previous, {
-                    isLoadingMore: false,
-                    epoch: null,
-                    newestPositionAt: null,
-                    newestPositionSeq: null,
-                    requiresLatestReset: true
-                })
-            })
+            const current = getState(sessionId)
+            if (current.olderGeneration !== generation) {
+                return { kind: 'stopped', reason: 'invalidated' }
+            }
+            markMessageWindowForLatestReset(sessionId, current.messages)
             await syncTailMessages(api, sessionId, { ensureAfterCurrent: true })
             return { kind: 'stopped', reason: 'epoch-reset' }
         }
