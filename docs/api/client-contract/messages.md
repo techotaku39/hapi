@@ -23,7 +23,7 @@ type DecryptedMessage = {
 
 An uninvoked message with `deliveryState: 'abandoned'` is not pending and must
 not be rendered as delivered user input or automatically resent. The Hub hides
-this retained correlation row from history pages and emits a separate note. A
+this retained correlation row from history pages without creating a separate note. A
 later authoritative consumption acknowledgement can still reconcile its localId.
 
 `content` is deliberately `unknown` on the wire. **Decoding must be total**:
