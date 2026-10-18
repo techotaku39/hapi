@@ -197,9 +197,9 @@ with one connected worker. The worker refreshes native history, verifies that th
 input is no longer queued, and durably records abandonment before the Hub retires
 the unresolved row. Its localId is retained for late consumption acknowledgements;
 the row remains uninvoked and is excluded from pending delivery and visible history. This does not claim native cancellation or consumption and
-never resubmits the input. Its original content is retained in a conversation note
-(`meta.abandonedDelivery`). Other clients receive `message-cancelled` and the note
-as `message-received`; the message epoch advances.
+never resubmits the input. The original row is retained internally for correlation;
+no new chat message or conversation note is created. Other clients receive
+`message-cancelled`; the message epoch advances.
 
 - `abandoned {localId}`: stop showing the unresolved row.
 - `invoked {message}`: consumption won the race; ingest the authoritative message.

@@ -45,10 +45,10 @@ describe('explicit abandonment of unknown delivery', () => {
             expect(f.events).toContainEqual(expect.objectContaining({ type: 'message-cancelled', sessionId: f.source.id, messageId: f.row.id, localId: 'unknown' }))
             expect(f.requests).toHaveLength(1)
             expect(f.store.messages.getAllMessages(f.source.id).find(row => row.localId === 'unknown')).toMatchObject({ invokedAt: null, deliveryState: 'abandoned', content: f.original })
-            expect(f.store.messages.getAllMessages(f.source.id).filter(row => (row.content as any).meta?.abandonedDelivery)).toHaveLength(1)
+            expect(f.store.messages.getAllMessages(f.source.id)).toHaveLength(2)
         } finally { f.close() }
     })
-    it('archives the input truthfully and unlocks both current and historical Fork without faking consumption', async () => {
+    it('removes unknown input without adding a chat notice and unlocks both Fork modes without faking consumption', async () => {
         const f = fixture()
         try {
             expect((await f.engine.forkConversation(f.source.id, 'default')).type).toBe('error')
@@ -59,9 +59,11 @@ describe('explicit abandonment of unknown delivery', () => {
             const all = f.store.messages.getAllMessages(f.source.id)
             expect(all.find(row => row.localId === 'unknown')).toMatchObject({ invokedAt: null, deliveryState: 'abandoned' })
             expect(f.engine.getQueuedState(f.source.id, ['unknown'])).toEqual({ queuedLocalIds: [], indeterminateLocalIds: [], invokedLocalMessages: [] })
-            const notice = all.find(row => (row.content as any).meta?.abandonedDelivery)
-            expect((notice?.content as any).meta.abandonedDelivery.content).toEqual(f.original)
-            expect((notice?.content as any).content.data.message).toContain('does not undo execution or resend')
+            expect(all).toHaveLength(2)
+            expect(all.find(row => row.localId === 'unknown')?.content).toEqual(f.original)
+            expect(f.engine.getMessagesPage(f.source.id, { limit: 200 }).messages.map(row => row.localId)).toEqual(['boundary'])
+            expect(f.events.some(event => event.type === 'message-received')).toBe(false)
+            expect(f.events).toContainEqual(expect.objectContaining({ type: 'message-cancelled', messageId: f.row.id, localId: 'unknown' }))
             expect(await f.engine.abandonIndeterminateMessage(f.source.id, f.row.id)).toEqual({ status: 'not-found' })
             expect(f.store.messages.getAllMessages(f.source.id)).toHaveLength(all.length)
             expect((await f.engine.forkConversation(f.source.id, 'default')).type).toBe('success')
@@ -137,7 +139,7 @@ describe('explicit abandonment of unknown delivery', () => {
         } finally { f.close() }
     })
 
-    it('rolls back the note when persisting the Hub resolution fails, allowing an idempotent retry', async () => {
+    it('preserves the unresolved record on a failed Hub transition and retries without inserting chat messages', async () => {
         const f = fixture()
         try {
             ;(f.store as any).db.exec("CREATE TRIGGER fail_abandon BEFORE UPDATE ON messages WHEN NEW.delivery_state = 'abandoned' BEGIN SELECT RAISE(ABORT, 'disk unavailable'); END")
@@ -146,7 +148,8 @@ describe('explicit abandonment of unknown delivery', () => {
             expect(f.store.messages.getAllMessages(f.source.id).some(row => (row.content as any).meta?.abandonedDelivery)).toBe(false)
             ;(f.store as any).db.exec('DROP TRIGGER fail_abandon')
             expect((await f.engine.abandonIndeterminateMessage(f.source.id, f.row.id)).status).toBe('abandoned')
-            expect(f.store.messages.getAllMessages(f.source.id).filter(row => (row.content as any).meta?.abandonedDelivery)).toHaveLength(1)
+            expect(f.store.messages.getAllMessages(f.source.id)).toHaveLength(2)
+            expect(f.events.some(event => event.type === 'message-received')).toBe(false)
         } finally { f.close() }
     })
 })

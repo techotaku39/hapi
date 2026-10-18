@@ -490,15 +490,14 @@ export class MessageService {
             return settled.status === 'invoked' ? { status: 'invoked', message: toDecryptedMessage(settled.message) } : { status: 'not-found' }
         }
         if (ack !== 'abandoned') return { status: 'unavailable', localId: lookup.localId }
-        const notice = this.store.messages.abandonIndeterminateMessage(sessionId, lookup.resolvedId)
-        if (!notice) {
+        const abandoned = this.store.messages.abandonIndeterminateMessage(sessionId, lookup.resolvedId)
+        if (!abandoned) {
             const settled = this.store.messages.lookupQueuedMessage(sessionId, messageId)
             return settled.status === 'invoked' ? { status: 'invoked', message: toDecryptedMessage(settled.message) }
                 : settled.status === 'absent' ? { status: 'abandoned', localId: lookup.localId }
                 : { status: 'unavailable', localId: lookup.localId }
         }
         this.publisher.emit({ type: 'message-cancelled', sessionId, messageId: lookup.resolvedId, localId: lookup.localId })
-        this.publisher.emit({ type: 'message-received', sessionId, message: notice })
         return { status: 'abandoned', localId: lookup.localId }
     }
 

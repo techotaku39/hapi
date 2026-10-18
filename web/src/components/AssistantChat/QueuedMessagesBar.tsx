@@ -193,6 +193,7 @@ export function computeCanCancel({
  *
  * Edit = client-side cancel + prefill composer with message text (Codex dialect).
  * Cancel = DELETE /sessions/:id/messages/:messageId with optimistic removal.
+ * Unknown shared delivery opens an explicit resolution dialog instead.
  */
 export function QueuedMessagesBar({
     sessionId,
@@ -359,11 +360,15 @@ export function QueuedMessagesBar({
                         const editText = getQueuedMessageEditText(preview)
                         const hasAttachments = attachmentNames.length > 0
                         const localId = msg.localId ?? msg.id
-                        const isPending = cancelMutation.isPending || queuedOperationPending
+                        const isPending = cancelMutation.isPending || abandonMutation.isPending || queuedOperationPending
                         const canCancel = computeCanCancel({ id: msg.id, localId: msg.localId, isPending })
 
                         const handleCancel = () => {
                             if (!canCancel) return
+                            if (canAbandon && msg.deliveryState === 'indeterminate') {
+                                setAbandonTarget(msg)
+                                return
+                            }
                             const token = beginQueuedOperation(sessionId)
                             if (!token) return
                             void cancelMutation.mutateAsync({
@@ -447,9 +452,8 @@ export function QueuedMessagesBar({
                                 // A 'busy' cancel means the row is inside an async steer / live
                                 // dispatch — it was NOT cancelled. Never prefill (the instruction
                                 // may still be delivered; prefilling invites a duplicate send).
-                                // Cancel still force-dismisses an already-indeterminate row (#1839);
-                                // Edit clears the stuck chip but waits for a confirmed cancel before
-                                // restoring composer text.
+                                // Shared unknown input stays visible. Edit waits for
+                                // a confirmed cancel before restoring composer text.
                                 if (result.status === 'busy') {
                                     if (msg.deliveryState === 'indeterminate' && mountedRef.current) {
                                         addToast({
@@ -570,13 +574,6 @@ export function QueuedMessagesBar({
                                             <span aria-hidden="true">↻</span>
                                         </button>
                                     ) : null}
-                                    {canAbandon && msg.deliveryState === 'indeterminate' ? (
-                                        <button type="button" disabled={!canCancel || abandonMutation.isPending}
-                                            onClick={() => setAbandonTarget(msg)}
-                                            className="rounded px-2 py-1 text-xs text-[var(--app-warning-text)] hover:bg-[var(--app-border)] disabled:opacity-40">
-                                            {t('queuedMessages.abandon')}
-                                        </button>
-                                    ) : null}
                                     {canSteerRow ? (
                                         <button
                                             type="button"
@@ -616,6 +613,7 @@ export function QueuedMessagesBar({
                                     <button
                                         type="button"
                                         aria-label="Cancel queued message"
+                                        title={canAbandon && msg.deliveryState === 'indeterminate' ? t('queuedMessages.abandon') : undefined}
                                         disabled={!canCancel}
                                         onClick={handleCancel}
                                         onMouseDown={(e) => e.preventDefault()}
@@ -646,9 +644,11 @@ export function QueuedMessagesBar({
                 onClose={() => setAbandonTarget(null)}
                 title={t('queuedMessages.abandonTitle')}
                 description={t('queuedMessages.abandonDescription')}
-                confirmLabel={t('queuedMessages.abandon')}
+                confirmLabel={t('queuedMessages.abandonConfirm')}
                 confirmingLabel={t('queuedMessages.abandonPending')}
                 isPending={abandonMutation.isPending}
+                centerTitle
+                destructive
                 onConfirm={async () => {
                     if (!abandonTarget) return
                     const token = beginQueuedOperation(sessionId)

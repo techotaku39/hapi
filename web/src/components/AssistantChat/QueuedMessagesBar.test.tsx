@@ -881,11 +881,14 @@ describe('QueuedMessagesBar explicit abandonment', () => {
         const abandon = vi.fn().mockResolvedValue({ status: 'abandoned', localId: 'local-server-message-id' })
         const api = { abandonIndeterminateMessage: abandon } as unknown as ApiClient
         renderQueuedMessage(null, null, 0, false, api, true, { deliveryState: 'indeterminate', queueDismissed: true })
-        fireEvent.click(screen.getByRole('button', { name: 'queuedMessages.abandon' }))
+        expect(screen.queryByRole('button', { name: 'queuedMessages.abandon' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
         const dialog = screen.getByRole('dialog')
         expect(within(dialog).getByText('queuedMessages.abandonDescription')).toBeTruthy()
         expect(abandon).not.toHaveBeenCalled()
-        fireEvent.click(within(dialog).getByRole('button', { name: 'queuedMessages.abandon' }))
+        const confirmButton = within(dialog).getByRole('button', { name: 'queuedMessages.abandonConfirm' })
+        expect(confirmButton.className).toContain('bg-red-600')
+        fireEvent.click(confirmButton)
         await waitFor(() => expect(abandon).toHaveBeenCalledWith('session-1', 'server-message-id'))
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
         expect(mocks.mutateAsync).not.toHaveBeenCalled()
@@ -895,10 +898,46 @@ describe('QueuedMessagesBar explicit abandonment', () => {
         const abandon = vi.fn().mockResolvedValue({ status: 'unavailable', localId: 'local-server-message-id' })
         renderQueuedMessage(null, null, 0, false, { abandonIndeterminateMessage: abandon } as unknown as ApiClient,
             true, { deliveryState: 'indeterminate' })
-        fireEvent.click(screen.getByRole('button', { name: 'queuedMessages.abandon' }))
-        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'queuedMessages.abandon' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'queuedMessages.abandonConfirm' }))
         await waitFor(() => expect(screen.getByText('queuedMessages.abandonUnavailable')).toBeTruthy())
         expect(screen.getByRole('dialog')).toBeTruthy()
         expect(screen.getByText('Queued request')).toBeTruthy()
+    })
+
+    it('keeps unknown input unchanged when the confirmation dialog is dismissed', () => {
+        const abandon = vi.fn()
+        renderQueuedMessage(null, null, 0, false, { abandonIndeterminateMessage: abandon } as unknown as ApiClient,
+            true, { deliveryState: 'indeterminate' })
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'button.cancel' }))
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(screen.getByText('Queued request')).toBeTruthy()
+        expect(abandon).not.toHaveBeenCalled()
+        expect(mocks.mutateAsync).not.toHaveBeenCalled()
+    })
+
+    it.each([null, Date.now() + 60_000])('cancels ordinary queued input normally with schedule %s', async (scheduledAt) => {
+        const abandon = vi.fn()
+        mocks.mutateAsync.mockResolvedValue({ status: 'cancelled', localId: 'local-server-message-id' })
+        renderQueuedMessage(scheduledAt, null, 0, false,
+            { abandonIndeterminateMessage: abandon } as unknown as ApiClient, true)
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
+        await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1', messageId: 'server-message-id',
+        })))
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(abandon).not.toHaveBeenCalled()
+    })
+
+    it('preserves normal cancellation for unknown input without abandonment support', async () => {
+        const abandon = vi.fn()
+        mocks.mutateAsync.mockResolvedValue({ status: 'busy', localId: 'local-server-message-id' })
+        renderQueuedMessage(null, null, 0, false, { abandonIndeterminateMessage: abandon } as unknown as ApiClient,
+            false, { deliveryState: 'indeterminate' })
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
+        await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalled())
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(abandon).not.toHaveBeenCalled()
     })
 })

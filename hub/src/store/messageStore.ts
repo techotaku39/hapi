@@ -191,7 +191,7 @@ export class MessageStore {
         return lookupQueuedMessage(this.db, sessionId, messageId)
     }
 
-    abandonIndeterminateMessage(sessionId: string, messageId: string): StoredMessage | null {
+    abandonIndeterminateMessage(sessionId: string, messageId: string): boolean {
         return abandonIndeterminateMessage(this.db, sessionId, messageId)
     }
 

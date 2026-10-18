@@ -94,11 +94,13 @@ being received on the same app-server connection.
   permission/question controls. Stop the engine before publishing inactivity.
 - Wrapper/app-server crash: no automatic replay of accepted or uncertain writes.
   A durable per-session queue ledger records unknown outcomes before dispatch.
-- If an unknown delivery remains unresolved after recovery, **Abandon confirmation**
-  in the Web queue explicitly stops HAPI from resending that input and removes
+- If an unknown delivery remains unresolved after recovery, click its **X** in the
+  Web queue and choose **Confirm** in the removal dialog to stop HAPI from resending it and remove
   its history-action blocker. The agent must be connected and idle, and the input
   must no longer be in its native queue. This does not claim cancellation or undo
-  possible execution. The original input is preserved in a conversation note.
+  possible execution. The input disappears from the queue and visible history
+  without adding a conversation note. Its internal record prevents replay and
+  preserves correlation with late consumption acknowledgements.
   Normal **Cancel** still requires confirmation of native removal.
 - Cold resume checks wrapper **and** app-server process generations. A live
   orphan or an unverifiable generation blocks recovery. Inspect and explicitly

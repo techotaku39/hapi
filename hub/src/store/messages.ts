@@ -871,28 +871,17 @@ export function claimIndeterminateMessage(
     })()
 }
 
-/** Retire unknown delivery and record a note without destroying late-ACK correlation. */
-export function abandonIndeterminateMessage(db: Database, sessionId: string, messageId: string): StoredMessage | null {
+/** Retire unknown delivery without adding visible history or destroying late-ACK correlation. */
+export function abandonIndeterminateMessage(db: Database, sessionId: string, messageId: string): boolean {
     return db.transaction(() => {
-        const row = prepareCached(db, `SELECT * FROM messages WHERE session_id = ?
+        const row = prepareCached(db, `SELECT id FROM messages WHERE session_id = ?
             AND (id = ? OR local_id = ?) AND invoked_at IS NULL AND delivery_state = 'indeterminate' LIMIT 1`)
-            .get(sessionId, messageId, messageId) as DbMessageRow | undefined
-        if (!row) return null
-        const original = toStoredMessage(row)
-        const content = original.content as { content?: { text?: string; attachments?: Array<{ filename?: string }> } }
-        const text = content?.content?.text ?? ''
-        const attachments = content?.content?.attachments
-        const names = Array.isArray(attachments) ? attachments.map(item => item?.filename ?? 'attachment').join(', ') : ''
-        const notice = addMessage(db, sessionId, {
-            role: 'agent',
-            content: { id: randomUUID(), type: 'event', data: { type: 'message',
-                message: `Delivery confirmation abandoned. This does not undo execution or resend the message.\n\n${text || names}` } },
-            meta: { abandonedDelivery: { localId: row.local_id, content: original.content } }
-        })
+            .get(sessionId, messageId, messageId) as Pick<DbMessageRow, 'id'> | undefined
+        if (!row) return false
         // Preserve localId for late authoritative consumption acknowledgements.
         prepareCached(db, "UPDATE messages SET delivery_state = 'abandoned' WHERE id = ? AND session_id = ? AND invoked_at IS NULL").run(row.id, sessionId)
         bumpMessageEpoch(db, sessionId)
-        return notice
+        return true
     })()
 }
 
