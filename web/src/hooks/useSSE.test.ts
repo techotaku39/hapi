@@ -177,6 +177,28 @@ describe('useSSE cancelled delivery reconciliation', () => {
     })
 
     for (const scope of ['global', 'full'] as const) {
+        it(`preserves authoritative consumption before a late cancellation in ${scope} scope`, () => {
+            const message: DecryptedMessage = {
+                id: 'cancelled-server', localId: 'cancelled-local', seq: 1, createdAt: 1000, invokedAt: null,
+                content: { role: 'user', content: { type: 'text', text: 'original input' } },
+            }
+            appendOptimisticMessage('cancelled-session', message)
+            const { unmount } = renderUseSSE({ scope })
+            try {
+                act(() => {
+                    const source = FakeEventSource.instances[0]!
+                    source.simulateOpen()
+                    source.simulateMessage({ type: 'messages-consumed', sessionId: 'cancelled-session', localIds: ['cancelled-local'], invokedAt: 2000 })
+                    source.simulateMessage({ type: 'message-received', sessionId: 'cancelled-session', message: { ...message, invokedAt: 2000 } })
+                    // The other app connection may deliver its older cancellation
+                    // after this connection has already established consumption.
+                    source.simulateMessage({ type: 'message-cancelled', sessionId: 'cancelled-session', messageId: message.id, localId: message.localId })
+                })
+                expect(getMessageWindowState('cancelled-session').messages).toEqual([
+                    expect.objectContaining({ id: message.id, invokedAt: 2000 }),
+                ])
+            } finally { unmount() }
+        })
         it.each([
             { name: 'optimistic attachment retry with a missed server echo', id: 'cancelled-local', localId: 'cancelled-local', eventLocalId: 'cancelled-local' },
             { name: 'server-echoed message', id: 'cancelled-server', localId: 'cancelled-local', eventLocalId: 'cancelled-local' },
