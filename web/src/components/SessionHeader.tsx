@@ -8,6 +8,7 @@ import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { ArchiveSessionDialog } from '@/components/ArchiveSessionDialog'
 import { useScratchlistCount } from '@/lib/use-scratchlist-count'
 import { formatReopenError } from '@/lib/reopenError'
 import { formatReasoningLabel, getReasoningEffortForFlavor } from '@/lib/codexStatusLabels'
@@ -565,17 +566,14 @@ export function SessionHeader(props: {
                 api={api}
             />
 
-            <ConfirmDialog
+            <ArchiveSessionDialog
                 isOpen={archiveOpen}
                 onClose={() => setArchiveOpen(false)}
-                title={t('dialog.archive.title')}
-                description={t('dialog.archive.description', { name: title })}
-                confirmLabel={t('dialog.archive.confirm')}
-                confirmingLabel={t('dialog.archive.confirming')}
+                sessionId={session.id}
+                sessionName={title}
+                active={session.active}
                 onConfirm={archiveSession}
                 isPending={isPending}
-                destructive
-                centerTitle
             />
 
             <ConfirmDialog

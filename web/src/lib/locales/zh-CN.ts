@@ -297,6 +297,9 @@ export default {
   'dialog.archive.description': '确定要归档 "{name}" 吗？这将断开活动会话。',
   'dialog.archive.confirm': '归档',
   'dialog.archive.confirming': '归档中…',
+  'dialog.archive.cleaning': '正在确认清理…',
+  'dialog.archive.cleanupDescription': '会话已断开，正在确认归档和后台清理。关闭此窗口不会取消归档。',
+  'dialog.archive.error': '归档尚未确认完成',
 
   'dialog.reopen.errorTitle': '无法重新打开会话',
   'dialog.reopen.dismiss': '关闭',
