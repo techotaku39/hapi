@@ -8,6 +8,10 @@ export function useAbandonIndeterminateMessage(api: ApiClient | null) {
     return useMutation({
         mutationFn: async (input: { sessionId: string; messageId: string; localId: string }) => {
             if (!api) throw new Error('API unavailable')
+            // A disconnected worker can leave a native queued submission marked
+            // unknown in the Hub. Preserve confirmed cancellation after reconnect.
+            const cancellation = await api.cancelMessage(input.sessionId, input.messageId)
+            if (cancellation.status !== 'busy') return cancellation
             const result = await api.abandonIndeterminateMessage(input.sessionId, input.messageId)
             if (result.status === 'unavailable') throw new Error(t('queuedMessages.abandonUnavailable'))
             return result

@@ -88,7 +88,11 @@ for (const variant of [
         test('confirmation waits for acknowledgement, blocks double submission and removes the chip', async ({ page }, testInfo) => {
             let release!: () => void
             const held = new Promise<void>((resolve) => { release = resolve })
-            const calls = await mockApi(page, async (route) => {
+            const calls = await mockApi(page, async (route, call) => {
+                if (call.method === 'DELETE') {
+                    await route.fulfill({ json: { status: 'busy', localId: 'queued-resolution-local' } })
+                    return
+                }
                 await held
                 await route.fulfill({ json: { status: 'abandoned', localId: 'queued-resolution-local' } })
             })
@@ -97,8 +101,11 @@ for (const variant of [
             const dialog = page.getByRole('dialog')
             await dialog.getByRole('button', { name: variant.confirm, exact: true }).click()
             try {
-                await expect.poll(() => calls.length).toBe(1)
-                expect(calls).toEqual([{ method: 'POST', path: `${messagePath}/abandon`, body: { confirm: true } }])
+                await expect.poll(() => calls.length).toBe(2)
+                expect(calls).toEqual([
+                    { method: 'DELETE', path: messagePath, body: null },
+                    { method: 'POST', path: `${messagePath}/abandon`, body: { confirm: true } },
+                ])
                 await expect(dialog.getByRole('button', { name: variant.pending, exact: true })).toBeDisabled()
                 await expect(page.getByRole('listitem', { includeHidden: true })).toBeVisible()
             } finally {
@@ -109,12 +116,12 @@ for (const variant of [
             await expect(page.getByText('Please continue the previous task', { exact: false })).toHaveCount(0)
             expect(await page.evaluate(() => window.__queuedResolutionFixture.getMessages())).toEqual([])
             await page.screenshot({ path: testInfo.outputPath(`${variant.name}-removed.png`) })
-            expect(calls).toHaveLength(1)
+            expect(calls).toHaveLength(2)
         })
 
         test('unavailable resolution keeps the chip and can be retried explicitly', async ({ page }) => {
-            const calls = await mockApi(page, (route, _call) => route.fulfill({ json: {
-                status: calls.length === 1 ? 'unavailable' : 'abandoned', localId: 'queued-resolution-local',
+            const calls = await mockApi(page, (route, call) => route.fulfill({ json: {
+                status: call.method === 'DELETE' ? 'busy' : calls.length === 2 ? 'unavailable' : 'abandoned', localId: 'queued-resolution-local',
             } }))
             await page.goto(fixture)
             await page.getByRole('button', { name: 'Cancel queued message', exact: true }).click()
@@ -125,8 +132,33 @@ for (const variant of [
             await dialog.getByRole('button', { name: variant.confirm, exact: true }).click()
             await expect(dialog).toHaveCount(0)
             await expect(page.getByRole('listitem')).toHaveCount(0)
-            expect(calls).toHaveLength(2)
-            expect(calls.every((call) => call.method === 'POST' && call.path === `${messagePath}/abandon`)).toBe(true)
+            expect(calls).toHaveLength(4)
+            expect(calls.filter(call => call.path === `${messagePath}/abandon`)).toHaveLength(2)
+        })
+
+        test('offline cancellation can still remove native queued input after reconnection', async ({ page }) => {
+            let cancelAttempts = 0
+            const calls = await mockApi(page, (route, call) => {
+                if (call.method === 'DELETE') {
+                    cancelAttempts++
+                    return route.fulfill({ json: { status: cancelAttempts === 1 ? 'busy' : 'cancelled', localId: 'queued-resolution-local' } })
+                }
+                if (call.path.endsWith('/queued-state')) {
+                    return route.fulfill({ json: { queuedLocalIds: [], indeterminateLocalIds: ['queued-resolution-local'], invokedLocalMessages: [] } })
+                }
+                return route.fulfill({ status: 500, json: { error: 'Unexpected abandonment' } })
+            })
+            await page.goto(`${fixture}?kind=queued`)
+            await page.getByRole('button', { name: 'Cancel queued message', exact: true }).click()
+            await expect.poll(() => calls.some(call => call.path.endsWith('/queued-state'))).toBe(true)
+            const remove = page.getByRole('button', { name: 'Cancel queued message', exact: true })
+            await expect(remove).toBeEnabled()
+            await remove.click()
+            await page.getByRole('dialog').getByRole('button', { name: variant.confirm, exact: true }).click()
+            await expect(page.getByRole('listitem')).toHaveCount(0)
+            await expect(page.getByRole('dialog')).toHaveCount(0)
+            expect(cancelAttempts).toBe(2)
+            expect(calls.some(call => call.path.endsWith('/abandon'))).toBe(false)
         })
 
         for (const kind of ['queued', 'scheduled']) {

@@ -877,9 +877,9 @@ describe('QueuedMessagesBar steer action', () => {
 })
 
 describe('QueuedMessagesBar explicit abandonment', () => {
-    it('shows hidden unknown input again, requires confirmation and never calls normal cancellation', async () => {
+    it('shows hidden unknown input again and requires explicit confirmation before resolving it', async () => {
         const abandon = vi.fn().mockResolvedValue({ status: 'abandoned', localId: 'local-server-message-id' })
-        const api = { abandonIndeterminateMessage: abandon } as unknown as ApiClient
+        const api = { cancelMessage: vi.fn().mockResolvedValue({ status: 'busy' }), abandonIndeterminateMessage: abandon } as unknown as ApiClient
         renderQueuedMessage(null, null, 0, false, api, true, { deliveryState: 'indeterminate', queueDismissed: true })
         expect(screen.queryByRole('button', { name: 'queuedMessages.abandon' })).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
@@ -896,7 +896,7 @@ describe('QueuedMessagesBar explicit abandonment', () => {
 
     it('keeps the dialog and queued row on an unavailable abandonment', async () => {
         const abandon = vi.fn().mockResolvedValue({ status: 'unavailable', localId: 'local-server-message-id' })
-        renderQueuedMessage(null, null, 0, false, { abandonIndeterminateMessage: abandon } as unknown as ApiClient,
+        renderQueuedMessage(null, null, 0, false, { cancelMessage: vi.fn().mockResolvedValue({ status: 'busy' }), abandonIndeterminateMessage: abandon } as unknown as ApiClient,
             true, { deliveryState: 'indeterminate' })
         fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
         fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'queuedMessages.abandonConfirm' }))
@@ -907,7 +907,7 @@ describe('QueuedMessagesBar explicit abandonment', () => {
 
     it('keeps unknown input unchanged when the confirmation dialog is dismissed', () => {
         const abandon = vi.fn()
-        renderQueuedMessage(null, null, 0, false, { abandonIndeterminateMessage: abandon } as unknown as ApiClient,
+        renderQueuedMessage(null, null, 0, false, { cancelMessage: vi.fn().mockResolvedValue({ status: 'busy' }), abandonIndeterminateMessage: abandon } as unknown as ApiClient,
             true, { deliveryState: 'indeterminate' })
         fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
         fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'button.cancel' }))
@@ -921,7 +921,7 @@ describe('QueuedMessagesBar explicit abandonment', () => {
         const abandon = vi.fn()
         mocks.mutateAsync.mockResolvedValue({ status: 'cancelled', localId: 'local-server-message-id' })
         renderQueuedMessage(scheduledAt, null, 0, false,
-            { abandonIndeterminateMessage: abandon } as unknown as ApiClient, true)
+            { cancelMessage: vi.fn().mockResolvedValue({ status: 'busy' }), abandonIndeterminateMessage: abandon } as unknown as ApiClient, true)
         fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
         await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-1', messageId: 'server-message-id',
@@ -933,7 +933,7 @@ describe('QueuedMessagesBar explicit abandonment', () => {
     it('preserves normal cancellation for unknown input without abandonment support', async () => {
         const abandon = vi.fn()
         mocks.mutateAsync.mockResolvedValue({ status: 'busy', localId: 'local-server-message-id' })
-        renderQueuedMessage(null, null, 0, false, { abandonIndeterminateMessage: abandon } as unknown as ApiClient,
+        renderQueuedMessage(null, null, 0, false, { cancelMessage: vi.fn().mockResolvedValue({ status: 'busy' }), abandonIndeterminateMessage: abandon } as unknown as ApiClient,
             false, { deliveryState: 'indeterminate' })
         fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
         await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalled())
