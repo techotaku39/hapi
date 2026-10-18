@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import type { ApiClient } from '@/api/client'
 import { useAbandonIndeterminateMessage } from './useAbandonIndeterminateMessage'
 const calls = vi.hoisted(() => ({ consumed: vi.fn(), removed: vi.fn() }))
-vi.mock('@/lib/message-window-store', () => ({ markMessagesConsumed: calls.consumed, removeOptimisticMessage: calls.removed }))
+vi.mock('@/lib/message-window-store', () => ({ getMessageWindowState: () => ({ messages: [] }), markMessagesConsumed: calls.consumed, removeOptimisticMessage: calls.removed }))
 vi.mock('@/lib/use-translation', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 function wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>{children}</QueryClientProvider>

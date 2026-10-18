@@ -161,6 +161,30 @@ for (const variant of [
             expect(calls.some(call => call.path.endsWith('/abandon'))).toBe(false)
         })
 
+        test('keeps authoritative consumption received before a delayed removal response', async ({ page }) => {
+            let release!: () => void
+            const held = new Promise<void>(resolve => { release = resolve })
+            const calls = await mockApi(page, async (route, call) => {
+                if (call.method === 'DELETE') {
+                    await route.fulfill({ json: { status: 'busy', localId: 'queued-resolution-local' } })
+                    return
+                }
+                await held
+                await route.fulfill({ json: { status: 'abandoned', localId: 'queued-resolution-local' } })
+            })
+            await page.goto(fixture)
+            await page.getByRole('button', { name: 'Cancel queued message', exact: true }).click()
+            await page.getByRole('dialog').getByRole('button', { name: variant.confirm, exact: true }).click()
+            try {
+                await expect.poll(() => calls.length).toBe(2)
+                await page.evaluate(() => window.__queuedResolutionFixture.receiveConsumption())
+            } finally { release() }
+            await expect.poll(() => page.evaluate(() => window.__queuedResolutionFixture.pendingMutations())).toBe(0)
+            await expect(page.getByRole('dialog')).toHaveCount(0)
+            await expect(page.getByRole('listitem')).toHaveCount(0)
+            await expect.poll(() => page.evaluate(() => window.__queuedResolutionFixture.getMessages().map(row => row.invokedAt))).toEqual([2000])
+        })
+
         for (const kind of ['queued', 'scheduled']) {
             test(`X cancels ${kind} input directly without opening the resolution dialog`, async ({ page }) => {
                 const calls = await mockApi(page, (route) => route.fulfill({ json: {

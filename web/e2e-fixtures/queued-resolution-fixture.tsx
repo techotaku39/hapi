@@ -6,7 +6,7 @@ import { ApiClient } from '../src/api/client'
 import { QueuedMessagesBar } from '../src/components/AssistantChat/QueuedMessagesBar'
 import { I18nProvider } from '../src/lib/i18n-context'
 import { ToastProvider } from '../src/lib/toast-context'
-import { appendOptimisticMessage, clearMessageWindow, getMessageWindowState } from '../src/lib/message-window-store'
+import { appendOptimisticMessage, clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed } from '../src/lib/message-window-store'
 import type { DecryptedMessage } from '../src/types/api'
 
 // Only API responses are mocked by Playwright. The component, mutation hooks,
@@ -30,10 +30,17 @@ appendOptimisticMessage(sessionId, message)
 
 declare global {
     interface Window {
-        __queuedResolutionFixture: { getMessages: () => DecryptedMessage[] }
+        __queuedResolutionFixture: { getMessages: () => DecryptedMessage[]; receiveConsumption: () => void; pendingMutations: () => number }
     }
 }
-window.__queuedResolutionFixture = { getMessages: () => getMessageWindowState(sessionId).messages }
+window.__queuedResolutionFixture = {
+    getMessages: () => getMessageWindowState(sessionId).messages,
+    pendingMutations: () => queryClient.isMutating(),
+    receiveConsumption: () => {
+        markMessagesConsumed(sessionId, [message.localId!], 2000)
+        ingestIncomingMessages(sessionId, [{ ...message, invokedAt: 2000, status: 'sent', deliveryState: undefined }])
+    },
+}
 
 const api = new ApiClient('')
 const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
