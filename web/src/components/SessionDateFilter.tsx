@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type Ref, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { CheckIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
 import { cn } from '@/lib/utils'
@@ -193,7 +194,7 @@ export function SessionDateRangePicker(props: {
 
     const isFloating = props.anchorRef !== undefined
 
-    return (
+    const picker = (
         <div
             role="dialog"
             aria-label={t('sessions.timeFilter.label')}
@@ -288,4 +289,8 @@ export function SessionDateRangePicker(props: {
             </div>
         </div>
     )
+
+    return isFloating && typeof document !== 'undefined'
+        ? createPortal(picker, document.body)
+        : picker
 }

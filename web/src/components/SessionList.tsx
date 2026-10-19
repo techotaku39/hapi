@@ -1294,6 +1294,9 @@ export function SessionList(props: {
     const [toolbarChrome, setToolbarChrome] = useState({ morePx: TOOLBAR_MORE_PX, gapPx: TOOLBAR_GAP_PX, machinePx: 0 })
     const [searchChromePx, setSearchChromePx] = useState(0)
     const [searchMaxPx, setSearchMaxPx] = useState(0)
+    const [isDesktopToolbar, setIsDesktopToolbar] = useState(() => (
+        typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches
+    ))
     // jsdom reports clientWidth 0; the row observer publishes the stubbed width.
     const [toolbarRowBoxPx, setToolbarRowBoxPx] = useState(0)
     // Search expand unmounts the actions box. A callback ref re-observes the
@@ -1335,6 +1338,13 @@ export function SessionList(props: {
         if (row && row !== node) ro.observe(row)
         actionsObserverRef.current = ro
         publishActions(node.clientWidth || node.getBoundingClientRect().width)
+    }, [])
+    useEffect(() => {
+        const media = window.matchMedia('(min-width: 768px)')
+        const update = () => setIsDesktopToolbar(media.matches)
+        update()
+        media.addEventListener?.('change', update)
+        return () => media.removeEventListener?.('change', update)
     }, [])
     const normalizedQuery = normalizeSearch(searchQuery)
     const timeRange = getSessionTimeRange(customStart, customEnd)
@@ -2171,7 +2181,8 @@ export function SessionList(props: {
                                         )
                                     })
                                 }
-                                definedSlots.push({
+                                if (!showMachineFilterBar || isDesktopToolbar) {
+                                    definedSlots.push({
                                     id: 'session-filter',
                                     keep: 5,
                                     widthPx: slotWidth('session-filter', TOOLBAR_ICON_PX),
@@ -2190,7 +2201,8 @@ export function SessionList(props: {
                                             className={showMachineFilterBar ? 'max-md:hidden' : undefined}
                                         />
                                     )
-                                })
+                                    })
+                                }
                                 if (renderHeader) {
                                     definedSlots.push({
                                         id: 'new',

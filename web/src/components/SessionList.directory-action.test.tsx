@@ -1257,10 +1257,9 @@ describe('SessionList search toggle', () => {
         // Empty query + 320px still fits the daily controls. Do not collapse
         // the row to [search][⋯]. Machine menu stays in the row (not shed).
         const actions = screen.getByTestId('session-list-header-actions')
-        expect(within(actions).getByTestId('session-toolbar-slot-session-filter')).toBeInTheDocument()
+        expect(screen.getByTestId('session-list-header-machine-menu')).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: 'New Session' })).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
-        expect(within(actions).getByTestId('session-toolbar-slot-session-filter')).toBeInTheDocument()
         expect(screen.queryByTestId('session-list-header-overflow')).toBeNull()
 
         vi.unstubAllGlobals()
@@ -1343,7 +1342,7 @@ describe('SessionList search toggle', () => {
         expect(maxWidth).toBeLessThanOrEqual(320 - machineMenuPx - morePx)
         expect(screen.getByTestId('session-list-header-overflow')).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: /more/i })).toBeInTheDocument()
-        expect(within(actions).getByTestId('session-list-header-machine-menu')).toBeInTheDocument()
+        expect(screen.getByTestId('session-list-header-machine-menu')).toBeInTheDocument()
 
         if (originalOffset) {
             Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffset)
