@@ -34,7 +34,7 @@ export function SessionListFilterMenu(props: {
     const wrapperRef = useRef<HTMLDivElement>(null)
     const menuRef = useRef<HTMLDivElement>(null)
     const dateFilterButtonRef = useRef<HTMLButtonElement>(null)
-    const [anchor, setAnchor] = useState<{ right: number; bottom: number } | null>(null)
+    const [anchor, setAnchor] = useState<{ left: number; right: number; bottom: number } | null>(null)
     const [menuLeft, setMenuLeft] = useState<number | null>(null)
     const hasDateFilter = props.customStart !== undefined
         && props.customEnd !== undefined
@@ -60,7 +60,7 @@ export function SessionListFilterMenu(props: {
 
         const wrapperRect = wrapper.getBoundingClientRect()
         const menuRect = menu.getBoundingClientRect()
-        setAnchor({ right: wrapperRect.right, bottom: wrapperRect.bottom })
+        setAnchor({ left: wrapperRect.left, right: wrapperRect.right, bottom: wrapperRect.bottom })
         setMenuLeft(getCenteredFilterMenuLeft(
             { left: wrapperRect.left, width: wrapperRect.width },
             menuRect.width,

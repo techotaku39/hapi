@@ -85,6 +85,7 @@ export default {
   'sessions.filter.error': 'Unable to load scratchlist sessions.',
   'sessions.filter.retry': 'Retry',
   'sessions.unreadFilter.toggle': 'Unread only',
+  'sessions.toolbar.more': 'More session list actions',
   'sessions.markAllRead.button': 'Mark all as read ({count})',
   'sessions.markAllRead.title': 'Mark all as read?',
   'sessions.markAllRead.description': 'This will mark {count} unread sessions as read on this device.',

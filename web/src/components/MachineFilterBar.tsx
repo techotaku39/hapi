@@ -205,6 +205,12 @@ function SessionFilterMenuRow(props: {
 const MENU_VIEWPORT_MARGIN_PX = 8
 const MENU_TOP_GAP_PX = 4 // mt-1
 
+export type MachineFilterMenuAnchor = {
+    left: number
+    right: number
+    bottom: number
+}
+
 export function getCenteredFilterMenuLeft(
     anchor: { left: number; width: number },
     menuWidth: number,
@@ -220,25 +226,33 @@ export function getCenteredFilterMenuLeft(
 }
 
 export function getMachineFilterMenuClampStyle(
-    anchor: { right: number; bottom: number },
+    anchor: MachineFilterMenuAnchor,
     options: { widthCap?: string | null; horizontal?: 'right' | 'center' } = {}
 ): CSSProperties {
     const widthExpression = options.horizontal === 'center'
-        ? 'calc(100vw - '
-            + MENU_VIEWPORT_MARGIN_PX * 2
-            + 'px - env(safe-area-inset-left) - env(safe-area-inset-right))'
-        : 'calc('
-            + anchor.right
-            + 'px - '
-            + MENU_VIEWPORT_MARGIN_PX
-            + 'px - env(safe-area-inset-left))'
+        ? 'calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))'
+        : 'calc(100vw - '
+            + anchor.left
+            + 'px - 8px - env(safe-area-inset-right))'
     const maxWidth = options.widthCap === null
         ? widthExpression
-        : 'min(' + (options.widthCap ?? '16rem') + ', ' + widthExpression + ')'
+        : options.horizontal === 'center'
+            ? 'min(' + (options.widthCap ?? '16rem') + ', ' + widthExpression + ')'
+            : 'min(16rem, max(calc(' + (anchor.right - 8) + 'px - env(safe-area-inset-left)), ' + widthExpression + '))'
     return {
         maxWidth,
         maxHeight: `min(20rem, calc(var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh)) - ${anchor.bottom + MENU_TOP_GAP_PX}px - ${MENU_VIEWPORT_MARGIN_PX}px - env(safe-area-inset-bottom)))`
     }
+}
+
+/** Left-align (open rightward) when that pocket is at least as wide as right-align. */
+export function machineFilterMenuAlignsStart(
+    anchor: Pick<MachineFilterMenuAnchor, 'left' | 'right'>,
+    viewportWidth: number
+): boolean {
+    const spaceOpeningRight = Math.max(0, viewportWidth - anchor.left)
+    const spaceOpeningLeft = Math.max(0, anchor.right)
+    return spaceOpeningRight >= spaceOpeningLeft
 }
 
 // Mobile (below md) counterpart of MachineFilterBar: collapses the machine
@@ -265,7 +279,7 @@ export function MachineFilterMenu(props: {
     const wrapperRef = useRef<HTMLDivElement>(null)
     const menuRef = useRef<HTMLDivElement>(null)
     const dateFilterButtonRef = useRef<HTMLButtonElement>(null)
-    const [anchor, setAnchor] = useState<{ right: number; bottom: number } | null>(null)
+    const [anchor, setAnchor] = useState<MachineFilterMenuAnchor | null>(null)
     const [menuLeft, setMenuLeft] = useState<number | null>(null)
     const [datePickerOpen, setDatePickerOpen] = useState(false)
     const hasSessionFilter = props.sessionFilter !== undefined && props.onSessionFilterChange !== undefined
@@ -304,7 +318,7 @@ export function MachineFilterMenu(props: {
 
         const wrapperRect = wrapper.getBoundingClientRect()
         const menuRect = menu.getBoundingClientRect()
-        setAnchor({ right: wrapperRect.right, bottom: wrapperRect.bottom })
+        setAnchor({ left: wrapperRect.left, right: wrapperRect.right, bottom: wrapperRect.bottom })
         setMenuLeft(getCenteredFilterMenuLeft(
             { left: wrapperRect.left, width: wrapperRect.width },
             menuRect.width,
@@ -318,7 +332,6 @@ export function MachineFilterMenu(props: {
             setMenuLeft(null)
             return
         }
-
         updateMenuPosition()
         const frame = window.requestAnimationFrame(updateMenuPosition)
         const resizeObserver = typeof ResizeObserver === 'undefined' || !menuRef.current
