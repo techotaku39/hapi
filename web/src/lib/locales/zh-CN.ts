@@ -88,6 +88,7 @@ export default {
   'sessions.search.content.incomplete': '部分长消息被截断，搜索结果可能不完整。',
   'sessions.search.content.truncated': '此消息过长，搜索索引已截断，部分内容可能未被搜索。',
   'sessions.unreadFilter.toggle': '仅显示未读',
+  'sessions.toolbar.more': '更多会话列表操作',
   'sessions.markAllRead.button': '全部标为已读（{count}）',
   'sessions.markAllRead.title': '全部标为已读？',
   'sessions.markAllRead.description': '这会将当前设备上的 {count} 个未读会话标记为已读。',

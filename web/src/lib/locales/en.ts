@@ -88,6 +88,7 @@ export default {
   'sessions.search.content.incomplete': 'Some long messages were truncated, so results may be incomplete.',
   'sessions.search.content.truncated': 'This message was truncated for search; some content may be missing.',
   'sessions.unreadFilter.toggle': 'Unread only',
+  'sessions.toolbar.more': 'More session list actions',
   'sessions.markAllRead.button': 'Mark all as read ({count})',
   'sessions.markAllRead.title': 'Mark all as read?',
   'sessions.markAllRead.description': 'This will mark {count} unread sessions as read on this device.',
