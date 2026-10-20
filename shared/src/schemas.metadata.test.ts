@@ -24,4 +24,14 @@ describe('MetadataSchema cursorSessionProtocol', () => {
         expect(result.success).toBe(true);
         expect(result.data?.conversationHistoryEntryIds).toEqual({ 'local-user-id': 'pi-entry-id' });
     });
+
+    it('accepts the Hub-owned automatic title attempt marker', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            titleSuggestionAutoAttemptedAt: 1234,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data?.titleSuggestionAutoAttemptedAt).toBe(1234);
+    });
 });

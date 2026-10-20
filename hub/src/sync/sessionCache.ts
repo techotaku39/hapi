@@ -1058,6 +1058,82 @@ export class SessionCache {
     }
 
     /**
+     * Atomically reserve the one automatic first-turn title attempt.
+     *
+     * The marker is Hub-owned so a sparse CLI metadata update cannot erase it.
+     * A failed provider request intentionally leaves the marker in place: the
+     * automatic fallback is best-effort and must not retry on later turns.
+     */
+    claimAutomaticTitleAttempt(sessionId: string, attemptedAt: number = Date.now()): boolean {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) return false
+
+            const metadata = session.metadata
+            if (metadata?.name?.trim() || metadata?.summary?.text?.trim() || metadata?.titleSuggestionAutoAttemptedAt !== undefined) {
+                return false
+            }
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                { ...(metadata ?? { path: '', host: '' }), titleSuggestionAutoAttemptedAt: attemptedAt },
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'error') return false
+            if (result.result === 'success') {
+                this.refreshSession(sessionId)
+                return true
+            }
+
+            this.refreshSession(sessionId)
+        }
+
+        return false
+    }
+
+    /**
+     * Persist an automatic title only while the session is still untitled.
+     * A manual/native title that arrives while the provider is in flight wins.
+     */
+    async updateAutomaticSessionSummary(sessionId: string, text: string): Promise<boolean> {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) return false
+
+            const metadata = session.metadata
+            if (metadata?.name?.trim() || metadata?.summary?.text?.trim()) {
+                return false
+            }
+
+            const nextMetadata = { ...(metadata ?? { path: '', host: '' }) }
+            if (typeof nextMetadata.name === 'string' && !nextMetadata.name.trim()) {
+                delete nextMetadata.name
+            }
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                { ...nextMetadata, summary: { text, updatedAt: Date.now() } },
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'error') return false
+            if (result.result === 'success') {
+                this.refreshSession(sessionId)
+                return true
+            }
+
+            this.refreshSession(sessionId)
+        }
+
+        return false
+    }
+
+    /**
      * Clear archive-related metadata on an archived session so it can be resumed.
      * - Removes `lifecycleState`, `archivedBy`, `archiveReason`, and stamps
      *   `lifecycleStateSince` so subsequent CLI lifecycle writes still win on time.
@@ -1507,6 +1583,12 @@ export class SessionCache {
 
         if (typeof oldObj.name === 'string' && typeof newObj.name !== 'string') {
             merged.name = oldObj.name
+            changed = true
+        }
+
+        if (typeof oldObj.titleSuggestionAutoAttemptedAt === 'number'
+            && typeof newObj.titleSuggestionAutoAttemptedAt !== 'number') {
+            merged.titleSuggestionAutoAttemptedAt = oldObj.titleSuggestionAutoAttemptedAt
             changed = true
         }
 

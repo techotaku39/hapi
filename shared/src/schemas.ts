@@ -59,6 +59,9 @@ export const MetadataSchema = z.object({
     name: z.string().optional(),
     os: z.string().optional(),
     summary: MetadataSummarySchema.optional(),
+    // Hub-owned marker: the automatic first-turn title fallback has been
+    // attempted for this session. It prevents silent retries after failures.
+    titleSuggestionAutoAttemptedAt: z.number().int().positive().optional(),
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),
     // Parent HAPI session id when this session was created by message-level fork

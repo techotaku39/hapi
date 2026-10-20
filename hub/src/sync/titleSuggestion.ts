@@ -312,6 +312,34 @@ export class TitleSuggestionService {
         this.rateWindowMs = options.rateWindowMs ?? TITLE_SUGGESTION_RATE_WINDOW_MS
     }
 
+    isConfigured(): boolean {
+        return this.provider !== null
+    }
+
+    hasCompletedFirstTurn(sessionId: string): boolean {
+        // Scan beyond the provider's bounded prompt window. A long first turn
+        // can have hundreds of tool rows; a later turn must not look like the
+        // first just because the older user message fell outside that window.
+        let before: { at: number; seq: number } | undefined
+        let users = 0
+        let assistantSeen = false
+        let answered = false
+        while (true) {
+            const messages = this.store.messages.getMessagesByPosition(sessionId, TITLE_SUGGESTION_MESSAGE_LIMIT, before)
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const extracted = extractTitleMessage(messages[index]!)
+                if (extracted?.role === 'assistant') assistantSeen = true
+                if (extracted?.role === 'user') {
+                    if (++users > 1) return false
+                    answered = assistantSeen
+                }
+            }
+            if (messages.length < TITLE_SUGGESTION_MESSAGE_LIMIT) return users === 1 && answered
+            const oldest = messages[0]!
+            before = { at: oldest.invokedAt ?? oldest.createdAt, seq: oldest.seq }
+        }
+    }
+
     async suggestTitle(sessionId: string): Promise<string> {
         if (!this.provider) {
             throw new TitleSuggestionError(
