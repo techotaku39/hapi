@@ -29,9 +29,11 @@ describe('MetadataSchema cursorSessionProtocol', () => {
         const result = MetadataSchema.safeParse({
             ...base,
             titleSuggestionAutoAttemptedAt: 1234,
+            titleSuggestionTurn: { first: true, completed: false },
         });
 
         expect(result.success).toBe(true);
         expect(result.data?.titleSuggestionAutoAttemptedAt).toBe(1234);
+        expect(result.data?.titleSuggestionTurn).toEqual({ first: true, completed: false });
     });
 });

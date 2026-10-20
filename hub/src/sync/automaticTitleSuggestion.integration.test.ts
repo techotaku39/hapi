@@ -38,6 +38,47 @@ afterEach(() => {
 })
 
 describe('automatic first-turn title generation', () => {
+    it.each([true, false])('retains a partially answered first turn across restart (thinking heartbeat: %s)', async (thinkingHeartbeat) => {
+        let calls = 0
+        globalThis.fetch = (async () => {
+            calls++
+            return Response.json({ choices: [{ message: { content: 'Restarted first turn' } }] })
+        }) as unknown as typeof fetch
+        const store = new Store(':memory:')
+        const createEngine = () => new SyncEngine(store,
+            { of: () => ({ to: () => ({ emit() {} }) }) } as never,
+            new RpcRegistry(), { broadcast() {} } as never)
+        let engine = createEngine()
+        try {
+            const session = engine.getOrCreateSession('partial-first-turn-restart',
+                { path: '/project', host: 'test' }, null, 'tenant')
+            const now = Date.now()
+            store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'Explain deployment' } })
+            engine.handleSessionAlive({ sid: session.id, time: now, thinking: true })
+            store.messages.addMessage(session.id, { role: 'assistant', content: { type: 'text', text: 'Checking deployment' } })
+            engine.stop()
+            engine = createEngine()
+            if (thinkingHeartbeat) engine.handleSessionAlive({ sid: session.id, time: now + 1, thinking: true })
+            store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'Include rollback' } })
+            store.messages.addMessage(session.id, { role: 'assistant', content: { type: 'text', text: 'Deployment and rollback explained' } })
+            if (thinkingHeartbeat) {
+                engine.handleSessionAlive({ sid: session.id, time: now + 2, thinking: false })
+            } else {
+                const ready = store.messages.addMessage(session.id,
+                    { role: 'agent', content: { type: 'event', data: { type: 'ready' } } })
+                engine.handleRealtimeEvent({ type: 'message-received', sessionId: session.id, message: ready })
+            }
+            for (let i = 0; i < 20 && !engine.getSession(session.id)?.metadata?.summary; i++) {
+                await new Promise(resolve => setTimeout(resolve, 0))
+            }
+            expect(calls).toBe(1)
+            expect(engine.getSession(session.id)?.metadata?.summary?.text).toBe('Restarted first turn')
+        } finally {
+            engine.stop()
+            store.close()
+        }
+    })
+
     it.each(['batch', 'steer', 'heartbeat-steer'])('generates once for multiple prompts in the first %s turn', async (kind) => {
         let calls = 0
         globalThis.fetch = (async () => {

@@ -70,7 +70,8 @@ const SIMPLE_RESUME_TOKENS = [
 // Hub-owned metadata that must survive sparse CLI metadata replacements.
 // `null` remains the explicit-clear sentinel handled by carryForwardIfMissing.
 const HUB_OWNED_METADATA_FIELDS = [
-    'titleSuggestionAutoAttemptedAt'
+    'titleSuggestionAutoAttemptedAt',
+    'titleSuggestionTurn'
 ] as const
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

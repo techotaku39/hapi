@@ -472,7 +472,8 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
             {
                 path: '/tmp/project',
                 host: 'example',
-                titleSuggestionAutoAttemptedAt: 1234
+                titleSuggestionAutoAttemptedAt: 1234,
+                titleSuggestionTurn: { first: true, completed: false }
             },
             null,
             'default'
@@ -487,6 +488,7 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
 
         expect(result.result).toBe('success')
         expect(getMetadata(store, session.id)?.titleSuggestionAutoAttemptedAt).toBe(1234)
+        expect(getMetadata(store, session.id)?.titleSuggestionTurn).toEqual({ first: true, completed: false })
         store.close()
     })
 

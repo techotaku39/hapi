@@ -1057,12 +1057,31 @@ export class SessionCache {
         throw new Error('Session was modified concurrently. Please try again.')
     }
 
+    /** Preserve the observed turn identity across a Hub restart. */
+    updateAutomaticTitleTurn(sessionId: string, turn: { first: boolean; completed: boolean }): boolean {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) return false
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                { ...(session.metadata ?? { path: '', host: '' }), titleSuggestionTurn: turn },
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'error') return false
+            if (result.result === 'success') {
+                this.refreshSession(sessionId)
+                return true
+            }
+            this.refreshSession(sessionId)
+        }
+        return false
+    }
+
     /**
      * Atomically reserve the one automatic first-turn title attempt.
-     *
-     * The marker is Hub-owned so a sparse CLI metadata update cannot erase it.
-     * A failed provider request intentionally leaves the marker in place: the
-     * automatic fallback is best-effort and must not retry on later turns.
+     * The Hub-owned marker survives sparse CLI updates and provider failure.
      */
     claimAutomaticTitleAttempt(sessionId: string, attemptedAt: number = Date.now()): boolean {
         for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
@@ -1589,6 +1608,11 @@ export class SessionCache {
         if (typeof oldObj.titleSuggestionAutoAttemptedAt === 'number'
             && typeof newObj.titleSuggestionAutoAttemptedAt !== 'number') {
             merged.titleSuggestionAutoAttemptedAt = oldObj.titleSuggestionAutoAttemptedAt
+            changed = true
+        }
+
+        if (oldObj.titleSuggestionTurn && !newObj.titleSuggestionTurn) {
+            merged.titleSuggestionTurn = oldObj.titleSuggestionTurn
             changed = true
         }
 

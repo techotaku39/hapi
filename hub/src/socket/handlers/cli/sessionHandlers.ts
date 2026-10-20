@@ -71,7 +71,8 @@ const updateStateSchema = z.object({
 const HUB_OWNED_METADATA_KEYS = [
     'supersededBySessionId',
     'opencodeClearOperation',
-    'titleSuggestionAutoAttemptedAt'
+    'titleSuggestionAutoAttemptedAt',
+    'titleSuggestionTurn'
 ] as const
 
 function preserveHubOwnedMetadata(incoming: unknown, current: unknown): unknown {
