@@ -553,6 +553,22 @@ async function waitForProcessToDie(pid: number, force: boolean, canSignal?: () =
   }
 }
 
+/** Exit listeners cannot await another turn; signal this owned child tree now. */
+export function killProcessByChildProcessSync(child: ChildProcess): void {
+  const pid = child.pid;
+  if (!pid || pid <= 0 || child.exitCode != null || child.signalCode != null) return;
+  if (isWindows()) {
+    // Preserve normal cleanup's soft signal, with immediate forced fallback
+    // only when Windows refuses it. Exit hooks cannot wait for escalation.
+    if (!killProcessWindows(pid, false) && isProcessAlive(pid)) killProcessWindows(pid, true);
+    return;
+  }
+  const tree = collectProcessTree(pid);
+  for (const target of tree === 'scan_failed' ? [pid] : tree) {
+    try { process.kill(target, 'SIGTERM'); } catch { /* best effort during exit */ }
+  }
+}
+
 export async function killProcessByChildProcess(
   child: ChildProcess,
   force: boolean = false,
