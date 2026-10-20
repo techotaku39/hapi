@@ -27,6 +27,49 @@ function deferred() {
 }
 
 describe('automatic title safety and first-turn eligibility', () => {
+    it('treats batched initial prompts as one completed turn', async () => {
+        const h = setup()
+        h.add('user', 'Explain deployment')
+        h.add('user', 'Include rollback')
+        h.add('assistant', 'Deployment and rollback explained')
+        await h.automatic.onTurnCompleted(h.session.id)
+        expect(h.cache.getSession(h.session.id)?.metadata?.summary?.text).toBe('Fallback title')
+    })
+
+    it('includes prompts steered after partial output before the first ready boundary', async () => {
+        const h = setup()
+        h.add('user', 'Explain deployment')
+        h.add('assistant', 'Checking the workflow')
+        h.add('user', 'Also include rollback')
+        h.add('assistant', 'Deployment and rollback explained')
+        h.store.messages.addMessage(h.session.id, { role: 'agent', content: { type: 'event', data: { type: 'ready' } } })
+        await h.automatic.onTurnCompleted(h.session.id)
+        expect(h.cache.getSession(h.session.id)?.metadata?.summary?.text).toBe('Fallback title')
+    })
+
+    it('does not count a second consumed prompt after an earlier ready as the first turn', () => {
+        const h = setup()
+        h.add('user', 'First task')
+        h.add('assistant', 'First answer')
+        h.store.messages.addMessage(h.session.id, { role: 'agent', content: { type: 'event', data: { type: 'ready' } } })
+        h.add('user', 'Second task')
+        h.add('assistant', 'Second answer')
+        h.store.messages.addMessage(h.session.id, { role: 'agent', content: { type: 'event', data: { type: 'ready' } } })
+        expect(h.service.hasCompletedFirstTurn(h.session.id)).toBe(false)
+    })
+
+    it('finds a previous ready boundary beyond the provider message window', () => {
+        const h = setup()
+        h.add('user', 'First task'); h.add('assistant', 'First answer')
+        h.store.messages.addMessage(h.session.id, { role: 'agent', content: { type: 'event', data: { type: 'ready' } } })
+        h.add('user', 'Second task')
+        for (let i = 0; i < 205; i++) h.store.messages.addMessage(h.session.id,
+            { role: 'agent', content: { type: 'codex', data: { type: 'tool-call', name: 'shell', input: {} } } })
+        h.add('assistant', 'Second answer')
+        h.store.messages.addMessage(h.session.id, { role: 'agent', content: { type: 'event', data: { type: 'ready' } } })
+        expect(h.service.hasCompletedFirstTurn(h.session.id)).toBe(false)
+    })
+
     it('coalesces overlapping completion events into one provider request', async () => {
         const pending = deferred()
         let calls = 0

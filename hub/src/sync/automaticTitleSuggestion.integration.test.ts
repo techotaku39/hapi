@@ -38,6 +38,45 @@ afterEach(() => {
 })
 
 describe('automatic first-turn title generation', () => {
+    it.each(['batch', 'steer'])('generates once for multiple prompts in the first %s turn', async (kind) => {
+        let calls = 0
+        globalThis.fetch = (async () => {
+            calls++
+            return Response.json({ choices: [{ message: { content: 'Deployment and rollback' } }] })
+        }) as unknown as typeof fetch
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(store, { of: () => ({ to: () => ({ emit() {} }) }) } as never,
+            new RpcRegistry(), { broadcast() {} } as never)
+        try {
+            const session = engine.getOrCreateSession(`first-turn-${kind}`,
+                { path: '/project', host: 'test' }, null, 'tenant')
+            const now = Date.now()
+            store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'Explain deployment' } }, 'initial')
+            engine.handleSessionAlive({ sid: session.id, time: now, thinking: true })
+            store.messages.markMessagesInvoked(session.id, ['initial'], now)
+            if (kind === 'steer') {
+                store.messages.addMessage(session.id, { role: 'assistant', content: { type: 'text', text: 'Checking deployment' } })
+            }
+            store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'Include rollback' } }, 'additional')
+            store.messages.markMessagesInvoked(session.id, ['additional'], now)
+            store.messages.addMessage(session.id, { role: 'assistant', content: { type: 'text', text: 'Deployment and rollback explained' } })
+            if (kind === 'steer') {
+                const ready = store.messages.addMessage(session.id,
+                    { role: 'agent', content: { type: 'event', data: { type: 'ready' } } })
+                engine.handleRealtimeEvent({ type: 'message-received', sessionId: session.id, message: ready })
+            }
+            engine.handleSessionAlive({ sid: session.id, time: now + 1, thinking: false })
+            for (let i = 0; i < 20 && !engine.getSession(session.id)?.metadata?.summary; i++) {
+                await new Promise(resolve => setTimeout(resolve, 0))
+            }
+            expect(calls).toBe(1)
+            expect(engine.getSession(session.id)?.metadata?.summary?.text).toBe('Deployment and rollback')
+        } finally {
+            engine.stop()
+            store.close()
+        }
+    })
+
     it.each(['ready', 'idle-without-completion', 'thinking'])('handles the %s completion boundary', async (boundary) => {
         let calls = 0
         globalThis.fetch = (async () => {
