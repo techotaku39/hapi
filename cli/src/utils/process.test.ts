@@ -388,6 +388,43 @@ describe('killProcess on Windows (orphanReap / stopSession)', () => {
         expect(alive.size).toBe(0)
     })
 
+    it.each(['marker yield', 'pre-signal timer', 'replacement binding', 'new sibling'])('handles pre-signal wrapper exit with %s while protecting replacements and siblings', async phase => {
+        vi.useRealTimers()
+        const { killProcessTreeByPid } = await import('./process')
+        const { captureStopSignalBinding } = await import('../runner/processBinding')
+        const alive = new Set([100, 200])
+        let binding: object | undefined = {}
+        let sibling = false
+        const canSignal = captureStopSignalBinding(() => [binding], () => sibling)
+        const signalled: number[] = []
+        const exit = () => {
+            alive.delete(100)
+            binding = phase === 'replacement binding' ? {} : undefined
+            sibling = phase === 'new sibling'
+        }
+        spawnSyncMock.mockImplementation((cmd: string, args: string[] = []) => {
+            if (cmd === 'powershell') {
+                const script = args.at(-1) ?? ''
+                if (script.includes('ParentProcessId')) return completed('OK:200,100')
+                if (phase === 'pre-signal timer' && script.includes('ProcessId = 100')) setTimeout(exit, 0)
+                return completed('generation')
+            }
+            if (cmd === 'tasklist') {
+                const pid = Number(args.find(arg => arg.startsWith('PID eq '))?.slice(7))
+                return completed(alive.has(pid) ? `proc.exe ${pid} Console` : 'INFO: No tasks')
+            }
+            if (cmd === 'taskkill') {
+                const pid = Number(args[args.indexOf('/PID') + 1]); signalled.push(pid); alive.delete(pid)
+            }
+            return completed('')
+        })
+        if (phase !== 'pre-signal timer') setImmediate(exit)
+        const protectedBinding = phase === 'replacement binding' || phase === 'new sibling'
+        expect(await killProcessTreeByPid(100, true, undefined, canSignal)).toBe(!protectedBinding)
+        expect(signalled).toEqual(protectedBinding ? [] : [200])
+        expect(alive.has(200)).toBe(protectedBinding)
+    })
+
     it('services queued control work between Windows tree generation probes', async () => {
         vi.useRealTimers()
         const { killProcessTreeByPid } = await import('./process')

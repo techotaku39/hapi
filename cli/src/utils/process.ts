@@ -437,11 +437,21 @@ export async function killProcessTreeByPid(
       return finish('scan_failed');
     }
     const markers = new Map<number, string | null>();
+    const canSignalSurvivor = () => {
+      if (!canSignal || canSignal()) return true;
+      // Normal exit can clear bindings at any yield, including before the
+      // initial signal. Continue only for the captured descendant generation.
+      const rootMarker = markers.get(n);
+      const rootAlive = isProcessAlive(n);
+      const currentRootMarker = rootAlive && rootMarker ? getProcessStartMarker(n) : null;
+      const rootGone = !rootAlive || Boolean(rootMarker && currentRootMarker && currentRootMarker !== rootMarker);
+      return rootGone && canSignal('descendant');
+    };
     for (const candidate of treePids) {
       // CIM/tasklist probes are synchronous and can take seconds per PID.
       // Let the runner accept session-started webhooks between probes.
       await new Promise<void>(resolve => setImmediate(resolve));
-      if (canSignal && !canSignal()) return finish('unconfirmed');
+      if (!canSignalSurvivor()) return finish('unconfirmed');
       markers.set(candidate, getProcessStartMarker(candidate));
       members.set(candidate, { pid: candidate, expectedMarker: markers.get(candidate) ?? null });
     }
@@ -450,19 +460,11 @@ export async function killProcessTreeByPid(
     // Drain control HTTP work queued while synchronous marker probes ran.
     // A setImmediate continuation alone can run before newly readable sockets.
     await new Promise<void>(resolve => setTimeout(resolve, 0));
-    if (canSignal && !canSignal()) return finish('unconfirmed');
-    await signalAndWaitWindowsRoot(n, force, canSignal);
-    const canSignalSurvivor = () => {
-      if (!canSignal || canSignal()) return true;
-      // A child-exit callback normally clears the wrapper's maps. Only allow
-      // descendant cleanup in that state after proving the original root is
-      // gone; generation checks below still protect each captured descendant.
-      const rootMarker = markers.get(n);
-      const rootAlive = isProcessAlive(n);
-      const currentRootMarker = rootAlive && rootMarker ? getProcessStartMarker(n) : null;
-      const rootGone = !rootAlive || Boolean(rootMarker && currentRootMarker && currentRootMarker !== rootMarker);
-      return rootGone && canSignal('descendant');
-    };
+    if (!canSignal || canSignal()) {
+      await signalAndWaitWindowsRoot(n, force, canSignal);
+    } else if (!canSignalSurvivor()) {
+      return finish('unconfirmed');
+    }
     for (const survivor of treePids) {
       await new Promise<void>(resolve => setImmediate(resolve));
       if (survivor === n) continue;

@@ -15,7 +15,8 @@ import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
-import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
+import { findStopSessionOrphanTargets, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
+import { readStopRuntimeCandidates } from './stopRuntimes';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
 import { observeHeartbeatProcesses, type HeartbeatProcessState } from './heartbeatProcesses';
 import { captureProcessBinding, captureStopSignalBinding, sharedStopBinding, terminateCapturedBinding } from './processBinding';
@@ -43,7 +44,7 @@ import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
-import { readRuntimes, runtimeMayBeAlive, runtimeAuthHash } from '@/codex/shared/registry';
+import { readRuntimes, runtimeAuthHash } from '@/codex/shared/registry';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
 import { agentUnavailableMessage, getAgentAvailability } from '@/agent/agentAvailability';
@@ -1151,18 +1152,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // of old registry entries. Per-record tasklist/CIM calls made three
           // reads of nine retired runtimes exceed the 30s StopSession RPC.
           // Read the registry first, then snapshot; never reuse it across scans.
-          let markers: ReadonlyMap<number, string | null> | undefined;
-          if (isWindows() && records.length > 0) {
-            try {
-              const processes = listWindowsProcessesWithCommandLine();
-              if (!processes.length) throw new Error('Empty Windows process snapshot');
-              markers = new Map(processes.map(proc => [proc.pid, proc.startMarker ?? null]));
-            } catch (error) {
-              logger.warn(`[RUNNER RUN] Cannot verify Windows runtimes during stop of ${sessionId}: ${String(error)}`);
-              return null;
-            }
-          }
-          const live = records.filter(runtime => runtimeMayBeAlive(runtime, markers));
+          const live = readStopRuntimeCandidates(records, sessionId);
           logger.debug('[RUNNER RUN] Runtime stop scan', { sessionId, records: records.length, live: live.length, elapsedMs: Date.now() - scanStarted });
           return live;
         } catch (error) {
