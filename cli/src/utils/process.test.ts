@@ -335,6 +335,20 @@ describe('killProcess on Windows (orphanReap / stopSession)', () => {
         expect(taskkills[0]![1]).toEqual(['/F', '/T', '/PID', '9901'])
     })
 
+    it('aborts before signalling when a sibling webhook invalidates the binding during a marker yield', async () => {
+        vi.useRealTimers()
+        const { killProcessTreeByPid } = await import('./process')
+        let bindingValid = true
+        spawnSyncMock.mockImplementation((cmd: string, args: string[] = []) => {
+            if (cmd === 'powershell') return completed(args.at(-1)?.includes('ParentProcessId') ? 'OK:200,100' : 'generation')
+            if (cmd === 'tasklist') return completed('proc.exe 100 Console')
+            return completed('')
+        })
+        setImmediate(() => { bindingValid = false })
+        expect(await killProcessTreeByPid(100, true, undefined, () => bindingValid)).toBe(false)
+        expect(spawnSyncMock.mock.calls.filter(call => call[0] === 'taskkill')).toHaveLength(0)
+    })
+
     it('services queued control work between Windows tree generation probes', async () => {
         vi.useRealTimers()
         const { killProcessTreeByPid } = await import('./process')

@@ -1286,7 +1286,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             );
             return await finishWithOrphanSweep('stopped');
           }
-          if (!(await killProcessTreeByPid(pid))) return 'still_alive';
+          if (!(await killProcessTreeByPid(pid, false, undefined, bindingUnchanged))) return 'still_alive';
           if (bindingUnchanged() && !isProcessAlive(pid)) rememberVerifiedExit(sessionId);
           return await finishWithOrphanSweep('stopped');
         }
@@ -1391,8 +1391,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 logger.debug('[RUNNER RUN] Session process tree stop proof', { sessionId, ...report });
               };
               const treeStopped = session.childProcess
-                ? await killProcessByChildProcess(session.childProcess, false, reportStop)
-                : await killProcessTreeByPid(pid, false, reportStop);
+                ? await killProcessByChildProcess(session.childProcess, false, reportStop, bindingUnchanged)
+                : await killProcessTreeByPid(pid, false, reportStop, bindingUnchanged);
               if (!treeStopped) {
                 logger.debug(`[RUNNER RUN] Process tree for session ${sessionId} is still alive after stop request`);
                 return 'still_alive';
@@ -1406,7 +1406,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           } else {
             // For externally started sessions, try to kill by PID
             try {
-              if (!(await killProcess(pid))) return 'still_alive';
+              if (!(await killProcess(pid, false, bindingUnchanged))) return 'still_alive';
               logger.debug(`[RUNNER RUN] Requested termination for external session PID ${pid}`);
             } catch (error) {
               logger.debug(`[RUNNER RUN] Failed to kill external session PID ${pid}:`, error);
@@ -1493,7 +1493,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             );
             return decision;
           }
-          const outcome = await terminateCapturedBinding(bindingUnchanged, () => killProcessTreeByPid(pid), () => {
+          const outcome = await terminateCapturedBinding(bindingUnchanged, () => killProcessTreeByPid(pid, false, undefined, bindingUnchanged), () => {
             if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
             if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
             rememberVerifiedExit(`PID-${pid}`);

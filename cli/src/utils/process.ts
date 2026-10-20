@@ -269,7 +269,8 @@ export function collectWindowsProcessTree(pid: number): number[] | 'scan_failed'
   return parseWindowsProcessTreeStdout((result.stdout ?? '').toString(), n)
 }
 
-async function signalAndWaitWindowsRoot(pid: number, force: boolean): Promise<void> {
+async function signalAndWaitWindowsRoot(pid: number, force: boolean, canSignal?: () => boolean): Promise<void> {
+  if (canSignal && !canSignal()) return;
   if (force) {
     killProcessWindows(pid, true);
     await waitForProcessToDie(pid, true);
@@ -281,14 +282,15 @@ async function signalAndWaitWindowsRoot(pid: number, force: boolean): Promise<vo
     await waitForProcessToDie(pid, true);
     return;
   }
-  await waitForProcessToDie(pid, false);
+  await waitForProcessToDie(pid, false, canSignal);
 }
 
-export async function killProcess(pid: number, force: boolean = false): Promise<boolean> {
+export async function killProcess(pid: number, force: boolean = false, canSignal?: () => boolean): Promise<boolean> {
   const n = typeof pid === 'number' ? pid : Number(pid)
   if (!Number.isFinite(n) || n <= 0) {
     return false;
   }
+  if (canSignal && !canSignal()) return false;
 
   if (isWindows()) {
     // Soft taskkill (/T without /F) is routinely refused on win32 console trees
@@ -297,7 +299,7 @@ export async function killProcess(pid: number, force: boolean = false): Promise<
     // but the PID is still draining, honor the grace wait before /F so archive
     // flush can finish.
     // Root-only verify — callers that need full-tree proof use killProcessTreeByPid.
-    await signalAndWaitWindowsRoot(n, force);
+    await signalAndWaitWindowsRoot(n, force, canSignal);
     return !isProcessAlive(n);
   }
 
@@ -404,10 +406,12 @@ export type ProcessTreeStopReport = {
 export async function killProcessTreeByPid(
   pid: number,
   force: boolean = false,
-  onReport?: (report: ProcessTreeStopReport) => void
+  onReport?: (report: ProcessTreeStopReport) => void,
+  canSignal?: () => boolean,
 ): Promise<boolean> {
   const n = typeof pid === 'number' ? pid : Number(pid)
   if (!Number.isFinite(n) || n <= 0) return false;
+  if (canSignal && !canSignal()) return false;
   if (isWindows()) {
     const started = Date.now();
     const phaseMs: Record<string, number> = {};
@@ -428,7 +432,7 @@ export async function killProcessTreeByPid(
     if (treePids === 'scan_failed') {
       // Still signal the (known) root — scan failure must not mean zero kill —
       // but never claim stopped without a full-tree verify (#1911 Opus Major).
-      await signalAndWaitWindowsRoot(n, force);
+      await signalAndWaitWindowsRoot(n, force, canSignal);
       phaseMs.signal = Date.now() - started - phaseMs.scan;
       return finish('scan_failed');
     }
@@ -437,12 +441,17 @@ export async function killProcessTreeByPid(
       // CIM/tasklist probes are synchronous and can take seconds per PID.
       // Let the runner accept session-started webhooks between probes.
       await new Promise<void>(resolve => setImmediate(resolve));
+      if (canSignal && !canSignal()) return finish('unconfirmed');
       markers.set(candidate, getProcessStartMarker(candidate));
       members.set(candidate, { pid: candidate, expectedMarker: markers.get(candidate) ?? null });
     }
     phaseMs.markers = Date.now() - started - phaseMs.scan;
     const signallingStarted = Date.now();
-    await signalAndWaitWindowsRoot(n, force);
+    // Drain control HTTP work queued while synchronous marker probes ran.
+    // A setImmediate continuation alone can run before newly readable sockets.
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    if (canSignal && !canSignal()) return finish('unconfirmed');
+    await signalAndWaitWindowsRoot(n, force, canSignal);
     for (const survivor of treePids) {
       await new Promise<void>(resolve => setImmediate(resolve));
       if (survivor === n) continue;
@@ -452,7 +461,8 @@ export async function killProcessTreeByPid(
       Object.assign(members.get(survivor)!, { observedMarker: current, observedAt: Date.now() });
       // Unverifiable or reused PID — never signal the new/unknown process.
       if (!expected || !current || current !== expected) continue;
-      await signalAndWaitWindowsRoot(survivor, true);
+      if (canSignal && !canSignal()) return finish('unconfirmed');
+      await signalAndWaitWindowsRoot(survivor, true, canSignal);
     }
     phaseMs.signal = Date.now() - signallingStarted;
     // A wrapper can exit before its descendants finish draining. Keep the
@@ -500,7 +510,7 @@ export async function killProcessTreeByPid(
  * Waits for a process to die, escalating if the graceful signal didn't work.
  * POSIX: SIGTERM → SIGKILL. Windows: taskkill /T → taskkill /F /T.
  */
-async function waitForProcessToDie(pid: number, force: boolean): Promise<void> {
+async function waitForProcessToDie(pid: number, force: boolean, canSignal?: () => boolean): Promise<void> {
   const maxWait = 2000;
   // Windows isProcessAlive shells out to tasklist; keep the poll coarse so a
   // stop cannot burn the runner event loop for seconds (#1911 Overseer).
@@ -514,6 +524,7 @@ async function waitForProcessToDie(pid: number, force: boolean): Promise<void> {
 
   // Graceful kill didn't finish — escalate (same structure on both platforms).
   if (!force && isProcessAlive(pid)) {
+    if (canSignal && !canSignal()) return;
     try {
       if (isWindows()) {
         killProcessWindows(pid, true);
@@ -534,7 +545,8 @@ async function waitForProcessToDie(pid: number, force: boolean): Promise<void> {
 export async function killProcessByChildProcess(
   child: ChildProcess,
   force: boolean = false,
-  onReport?: (report: ProcessTreeStopReport) => void
+  onReport?: (report: ProcessTreeStopReport) => void,
+  canSignal?: () => boolean,
 ): Promise<boolean> {
   const pid = child.pid;
   if (!pid) {
@@ -542,5 +554,5 @@ export async function killProcessByChildProcess(
   }
 
   // Both platforms: tree-kill + full-tree verify (win32 must not trust root-only).
-  return killProcessTreeByPid(pid, force, onReport);
+  return killProcessTreeByPid(pid, force, onReport, canSignal);
 }
