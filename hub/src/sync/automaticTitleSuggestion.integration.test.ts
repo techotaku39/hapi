@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 describe('automatic first-turn title generation', () => {
-    it.each(['batch', 'steer'])('generates once for multiple prompts in the first %s turn', async (kind) => {
+    it.each(['batch', 'steer', 'heartbeat-steer'])('generates once for multiple prompts in the first %s turn', async (kind) => {
         let calls = 0
         globalThis.fetch = (async () => {
             calls++
@@ -54,7 +54,7 @@ describe('automatic first-turn title generation', () => {
             store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'Explain deployment' } }, 'initial')
             engine.handleSessionAlive({ sid: session.id, time: now, thinking: true })
             store.messages.markMessagesInvoked(session.id, ['initial'], now)
-            if (kind === 'steer') {
+            if (kind !== 'batch') {
                 store.messages.addMessage(session.id, { role: 'assistant', content: { type: 'text', text: 'Checking deployment' } })
             }
             store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'Include rollback' } }, 'additional')

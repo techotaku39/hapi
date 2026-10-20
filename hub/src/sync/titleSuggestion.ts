@@ -317,7 +317,23 @@ export class TitleSuggestionService {
         return this.provider !== null
     }
 
-    hasCompletedFirstTurn(sessionId: string): boolean {
+    hasTitleResponse(sessionId: string): boolean {
+        let before: { at: number; seq: number } | undefined
+        let assistantSeen = false
+        while (true) {
+            const messages = this.store.messages.getMessagesByPosition(sessionId, TITLE_SUGGESTION_MESSAGE_LIMIT, before)
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const extracted = extractTitleMessage(messages[index]!)
+                if (extracted?.role === 'assistant') assistantSeen = true
+                if (extracted?.role === 'user' && assistantSeen) return true
+            }
+            if (messages.length < TITLE_SUGGESTION_MESSAGE_LIMIT) return false
+            const oldest = messages[0]!
+            before = { at: oldest.invokedAt ?? oldest.createdAt, seq: oldest.seq }
+        }
+    }
+
+    hasCompletedFirstTurn(sessionId: string, observedFirstTurn: boolean = false): boolean {
         // Scan beyond the provider's bounded prompt window. A long first turn
         // can have hundreds of tool rows; a later turn must not look like the
         // first just because the older user message fell outside that window.
@@ -353,7 +369,7 @@ export class TitleSuggestionService {
                 // Batched prompts are one turn. A single ready boundary also
                 // permits steering after partial assistant output. Without a
                 // durable boundary, keep the conservative legacy-history guard.
-                return userSeen && answered && (readySeen || !interleavedPrompts)
+                return userSeen && answered && (observedFirstTurn || readySeen || !interleavedPrompts)
             }
             const oldest = messages[0]!
             before = { at: oldest.invokedAt ?? oldest.createdAt, seq: oldest.seq }

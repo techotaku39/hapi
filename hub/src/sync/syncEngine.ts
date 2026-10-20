@@ -558,6 +558,9 @@ export class SyncEngine {
         collaborationMode?: CodexCollaborationMode
     }): void {
         const wasThinking = this.sessionCache.getSession(payload.sid)?.thinking === true
+        if (!wasThinking && payload.thinking === true) {
+            this.automaticTitleSuggestionService.onTurnStarted(payload.sid)
+        }
         this.sessionCache.handleSessionAlive(payload)
         if (wasThinking && !this.sessionCache.getSession(payload.sid)?.thinking) {
             this.titleTurnCompletedIds.add(payload.sid)
@@ -1095,6 +1098,9 @@ export class SyncEngine {
     ): Promise<void> {
         if (this.historyActionsInFlight.has(sessionId)) {
             throw new Error('Conversation history action already in progress')
+        }
+        if (!this.sessionCache.getSession(sessionId)?.thinking) {
+            this.automaticTitleSuggestionService.onTurnStarted(sessionId)
         }
         const { actualSessionId, createdAt: activeTurnStartedAt } = await this.messageService.sendMessage(sessionId, payload)
         this.sessionCache.markMessageQueued(actualSessionId, Date.now(), activeTurnStartedAt)
@@ -2133,6 +2139,7 @@ export class SyncEngine {
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
         this.titleTurnCompletedIds.delete(sessionId)
+        this.automaticTitleSuggestionService.forgetSession(sessionId)
     }
 
     async applySessionConfig(

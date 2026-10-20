@@ -27,6 +27,37 @@ function deferred() {
 }
 
 describe('automatic title safety and first-turn eligibility', () => {
+    it('uses the observed first turn for steering when completion has no ready record', async () => {
+        const h = setup()
+        h.automatic.onTurnStarted(h.session.id)
+        h.add('user', 'Initial task'); h.add('assistant', 'Partial output')
+        h.add('user', 'Steering prompt'); h.add('assistant', 'Final output')
+        await h.automatic.onTurnCompleted(h.session.id)
+        expect(h.cache.getSession(h.session.id)?.metadata?.summary?.text).toBe('Fallback title')
+    })
+
+    it('does not treat an observed later turn without ready records as the first', async () => {
+        const h = setup()
+        h.add('user', 'Old task'); h.add('assistant', 'Old answer')
+        h.automatic.onTurnStarted(h.session.id)
+        h.add('user', 'Current task'); h.add('assistant', 'Current answer')
+        await h.automatic.onTurnCompleted(h.session.id)
+        expect(h.cache.getSession(h.session.id)?.metadata?.summary).toBeUndefined()
+        expect(h.cache.getSession(h.session.id)?.metadata?.titleSuggestionAutoAttemptedAt).toBeUndefined()
+    })
+
+    it('allows the first answered turn after an earlier empty completion', async () => {
+        const h = setup()
+        h.automatic.onTurnStarted(h.session.id)
+        h.add('user', 'Unanswered task')
+        await h.automatic.onTurnCompleted(h.session.id)
+        expect(h.cache.getSession(h.session.id)?.metadata?.titleSuggestionAutoAttemptedAt).toBeUndefined()
+        h.automatic.onTurnStarted(h.session.id)
+        h.add('user', 'Try again'); h.add('assistant', 'First answer')
+        await h.automatic.onTurnCompleted(h.session.id)
+        expect(h.cache.getSession(h.session.id)?.metadata?.summary?.text).toBe('Fallback title')
+    })
+
     it('treats batched initial prompts as one completed turn', async () => {
         const h = setup()
         h.add('user', 'Explain deployment')

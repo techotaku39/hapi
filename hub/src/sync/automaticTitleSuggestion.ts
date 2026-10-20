@@ -9,6 +9,7 @@ import type { TitleSuggestionService } from './titleSuggestion'
  */
 export class AutomaticTitleSuggestionService {
     private readonly inFlightSessionIds = new Set<string>()
+    private readonly observedTurns = new Map<string, { first: boolean; completed: boolean }>()
     private stopped = false
 
     constructor(
@@ -20,6 +21,30 @@ export class AutomaticTitleSuggestionService {
 
     stop(): void {
         this.stopped = true
+        this.observedTurns.clear()
+    }
+
+    forgetSession(sessionId: string): void {
+        this.observedTurns.delete(sessionId)
+    }
+
+    onTurnStarted(sessionId: string): void {
+        if (this.stopped || !this.titleSuggestionService.isConfigured()) return
+        const prior = this.observedTurns.get(sessionId)
+        if (prior && !prior.completed) return
+        const metadata = this.sessionCache.getSession(sessionId)?.metadata
+        if (metadata?.name?.trim() || metadata?.summary?.text?.trim()
+            || metadata?.titleSuggestionAutoAttemptedAt !== undefined) return
+        try {
+            // Capture before assistant output can interleave with steering.
+            // Pi completes with a false heartbeat, without a stored ready event.
+            this.observedTurns.set(sessionId, {
+                first: !this.titleSuggestionService.hasTitleResponse(sessionId),
+                completed: false
+            })
+        } catch {
+            // Diagnostics and title fallback must not interrupt agent startup.
+        }
     }
 
     /**
@@ -28,6 +53,8 @@ export class AutomaticTitleSuggestionService {
      * primary agent conversation.
      */
     onTurnCompleted(sessionId: string): Promise<void> {
+        const turn = this.observedTurns.get(sessionId)
+        if (turn) turn.completed = true
         if (this.stopped || this.inFlightSessionIds.has(sessionId)) return Promise.resolve()
         this.inFlightSessionIds.add(sessionId)
 
@@ -39,7 +66,8 @@ export class AutomaticTitleSuggestionService {
                     const metadata = this.sessionCache.getSession(sessionId)?.metadata
                     if (metadata?.name?.trim() || metadata?.summary?.text?.trim()
                         || metadata?.titleSuggestionAutoAttemptedAt !== undefined) return
-                    if (!this.titleSuggestionService.hasCompletedFirstTurn(sessionId)) return
+                    if (turn?.first === false) return
+                    if (!this.titleSuggestionService.hasCompletedFirstTurn(sessionId, turn?.first)) return
                     if (!this.sessionCache.claimAutomaticTitleAttempt(sessionId, this.now())) return
 
                     const title = await this.titleSuggestionService.suggestTitle(sessionId)
