@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { captureProcessBinding, sharedStopBinding, terminateCapturedBinding } from './processBinding';
+import { captureProcessBinding, captureStopSignalBinding, sharedStopBinding, terminateCapturedBinding } from './processBinding';
 
 describe('asynchronous process binding guard', () => {
+    it('allows empty post-exit bindings only for captured descendants, never a replacement or sibling', () => {
+        let bindings: unknown[] = [{}, 'old', 'old', {}, 'old'];
+        let sibling = false;
+        const canSignal = captureStopSignalBinding(() => bindings, () => sibling);
+        expect(canSignal()).toBe(true);
+        bindings = [undefined, undefined, undefined, undefined, undefined];
+        expect(canSignal()).toBe(false);
+        expect(canSignal('descendant')).toBe(true);
+        bindings[0] = {};
+        expect(canSignal('descendant')).toBe(false);
+        bindings[0] = undefined; sibling = true;
+        expect(canSignal('descendant')).toBe(false);
+    });
     it('allows the target archive webhook while rejecting a newly reported sibling', () => {
         const session: { sharedSessions?: Record<string, unknown> } = { sharedSessions: { target: {} } };
         const unchanged = captureProcessBinding(() => [session, sharedStopBinding(session, 'target')]);

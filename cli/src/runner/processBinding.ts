@@ -7,6 +7,16 @@ export function captureProcessBinding(readBinding: () => readonly unknown[]): ()
     };
 }
 
+/** Empty maps after a proven wrapper exit are expected, unlike replacement bindings. */
+export function captureStopSignalBinding(
+    readBinding: () => readonly unknown[],
+    hasOtherRoots: () => boolean,
+): (phase?: 'root' | 'descendant') => boolean {
+    const unchanged = captureProcessBinding(readBinding);
+    return phase => !hasOtherRoots() && (unchanged()
+        || (phase === 'descendant' && readBinding().every(value => value === undefined)));
+}
+
 /** Archiving the target root is expected; a different root must keep its PID. */
 export function sharedStopBinding(session: { sharedSessions?: Record<string, unknown> } | undefined, sessionId: string): string {
     return JSON.stringify(Object.keys(session?.sharedSessions ?? {}).filter(id => id !== sessionId).sort());

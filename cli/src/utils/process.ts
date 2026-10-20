@@ -407,7 +407,7 @@ export async function killProcessTreeByPid(
   pid: number,
   force: boolean = false,
   onReport?: (report: ProcessTreeStopReport) => void,
-  canSignal?: () => boolean,
+  canSignal?: (phase?: 'root' | 'descendant') => boolean,
 ): Promise<boolean> {
   const n = typeof pid === 'number' ? pid : Number(pid)
   if (!Number.isFinite(n) || n <= 0) return false;
@@ -452,6 +452,17 @@ export async function killProcessTreeByPid(
     await new Promise<void>(resolve => setTimeout(resolve, 0));
     if (canSignal && !canSignal()) return finish('unconfirmed');
     await signalAndWaitWindowsRoot(n, force, canSignal);
+    const canSignalSurvivor = () => {
+      if (!canSignal || canSignal()) return true;
+      // A child-exit callback normally clears the wrapper's maps. Only allow
+      // descendant cleanup in that state after proving the original root is
+      // gone; generation checks below still protect each captured descendant.
+      const rootMarker = markers.get(n);
+      const rootAlive = isProcessAlive(n);
+      const currentRootMarker = rootAlive && rootMarker ? getProcessStartMarker(n) : null;
+      const rootGone = !rootAlive || Boolean(rootMarker && currentRootMarker && currentRootMarker !== rootMarker);
+      return rootGone && canSignal('descendant');
+    };
     for (const survivor of treePids) {
       await new Promise<void>(resolve => setImmediate(resolve));
       if (survivor === n) continue;
@@ -461,8 +472,8 @@ export async function killProcessTreeByPid(
       Object.assign(members.get(survivor)!, { observedMarker: current, observedAt: Date.now() });
       // Unverifiable or reused PID — never signal the new/unknown process.
       if (!expected || !current || current !== expected) continue;
-      if (canSignal && !canSignal()) return finish('unconfirmed');
-      await signalAndWaitWindowsRoot(survivor, true, canSignal);
+      if (!canSignalSurvivor()) return finish('unconfirmed');
+      await signalAndWaitWindowsRoot(survivor, true, canSignalSurvivor);
     }
     phaseMs.signal = Date.now() - signallingStarted;
     // A wrapper can exit before its descendants finish draining. Keep the
@@ -546,7 +557,7 @@ export async function killProcessByChildProcess(
   child: ChildProcess,
   force: boolean = false,
   onReport?: (report: ProcessTreeStopReport) => void,
-  canSignal?: () => boolean,
+  canSignal?: (phase?: 'root' | 'descendant') => boolean,
 ): Promise<boolean> {
   const pid = child.pid;
   if (!pid) {

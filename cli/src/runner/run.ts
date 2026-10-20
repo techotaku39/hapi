@@ -18,7 +18,7 @@ import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProc
 import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
 import { observeHeartbeatProcesses, type HeartbeatProcessState } from './heartbeatProcesses';
-import { captureProcessBinding, sharedStopBinding, terminateCapturedBinding } from './processBinding';
+import { captureProcessBinding, captureStopSignalBinding, sharedStopBinding, terminateCapturedBinding } from './processBinding';
 import {
     decideKeepWrapperArchive,
     decideRawPidStop,
@@ -391,6 +391,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       pidToConfirmedSessionId.get(pid), persistedResumeProcesses.get(pid),
       existingSessionIdByChildPid.get(pid), sharedStopBinding(pidToTrackedSession.get(pid), sessionId),
     ]);
+    const capturePidSignalGuard = (pid: number, sessionId: string) => captureStopSignalBinding(() => [
+      pidToTrackedSession.get(pid), pidToRequestedSessionId.get(pid),
+      pidToConfirmedSessionId.get(pid), persistedResumeProcesses.get(pid),
+      existingSessionIdByChildPid.get(pid),
+    ], () => sharedStopBinding(pidToTrackedSession.get(pid), sessionId) !== '[]');
     for (const [pid, record] of [...persistedResumeProcesses]) {
       const alive = isProcessAlive(pid);
       const marker = alive ? getProcessStartMarker(pid) : null;
@@ -1193,6 +1198,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           sessionId
         );
         const orphanStatus = await reapRunnerSpawnedOrphans(sessionId, {
+          killTree: pid => killProcessTreeByPid(pid, false, undefined, capturePidSignalGuard(pid, sessionId)),
           findTargets: (id) => findStopSessionOrphanTargets(
             id,
             (sid, pid) => shouldSkipOrphanPid(liveRuntimes, protectedTrackedPids, sid, pid)
@@ -1261,6 +1267,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         const pid = parseInt(sessionId.slice(4), 10);
         if (Number.isFinite(pid) && pid > 0) {
           const bindingUnchanged = capturePidBinding(pid, sessionId);
+          const canSignal = capturePidSignalGuard(pid, sessionId);
           const liveForPid = await liveRegistryRuntimes();
           if (liveForPid === null) return 'still_alive';
           if (!bindingUnchanged()) return 'unknown';
@@ -1286,7 +1293,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             );
             return await finishWithOrphanSweep('stopped');
           }
-          if (!(await killProcessTreeByPid(pid, false, undefined, bindingUnchanged))) return 'still_alive';
+          if (!(await killProcessTreeByPid(pid, false, undefined, canSignal))) return 'still_alive';
           if (bindingUnchanged() && !isProcessAlive(pid)) rememberVerifiedExit(sessionId);
           return await finishWithOrphanSweep('stopped');
         }
@@ -1339,6 +1346,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         if (session.happySessionId === sessionId ||
           session.requestedHappySessionId === sessionId) {
           const bindingUnchanged = capturePidBinding(pid, sessionId);
+          const canSignal = capturePidSignalGuard(pid, sessionId);
 
           // Primary match, but live shared siblings still use this wrapper
           // (KillSession may already have cleared this id from sharedSessions).
@@ -1391,8 +1399,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 logger.debug('[RUNNER RUN] Session process tree stop proof', { sessionId, ...report });
               };
               const treeStopped = session.childProcess
-                ? await killProcessByChildProcess(session.childProcess, false, reportStop, bindingUnchanged)
-                : await killProcessTreeByPid(pid, false, reportStop, bindingUnchanged);
+                ? await killProcessByChildProcess(session.childProcess, false, reportStop, canSignal)
+                : await killProcessTreeByPid(pid, false, reportStop, canSignal);
               if (!treeStopped) {
                 logger.debug(`[RUNNER RUN] Process tree for session ${sessionId} is still alive after stop request`);
                 return 'still_alive';
@@ -1460,6 +1468,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         const confirmedSessionId = pidToConfirmedSessionId.get(pid) ?? persisted?.confirmedSessionId;
         if (requestedSessionId !== sessionId && confirmedSessionId !== sessionId) continue;
         const bindingUnchanged = capturePidBinding(pid, sessionId);
+        const canSignal = capturePidSignalGuard(pid, sessionId);
         if (isProcessAlive(pid)) {
           if (!persisted) return 'still_alive';
           const currentMarker = getProcessStartMarker(pid);
@@ -1493,7 +1502,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             );
             return decision;
           }
-          const outcome = await terminateCapturedBinding(bindingUnchanged, () => killProcessTreeByPid(pid, false, undefined, bindingUnchanged), () => {
+          const outcome = await terminateCapturedBinding(bindingUnchanged, () => killProcessTreeByPid(pid, false, undefined, canSignal), () => {
             if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
             if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
             rememberVerifiedExit(`PID-${pid}`);
@@ -1527,6 +1536,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           sessionId
         );
         const orphanStatus = await reapRunnerSpawnedOrphans(sessionId, {
+          killTree: pid => killProcessTreeByPid(pid, false, undefined, capturePidSignalGuard(pid, sessionId)),
           findTargets: (id) => findStopSessionOrphanTargets(
             id,
             (sid, pid) => shouldSkipOrphanPid(liveRuntimes, protectedTrackedPids, sid, pid)

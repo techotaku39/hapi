@@ -349,6 +349,31 @@ describe('killProcess on Windows (orphanReap / stopSession)', () => {
         expect(spawnSyncMock.mock.calls.filter(call => call[0] === 'taskkill')).toHaveLength(0)
     })
 
+    it('reaps a captured surviving descendant after the wrapper exit handler clears its bindings', async () => {
+        vi.useRealTimers()
+        const { killProcessTreeByPid } = await import('./process')
+        const { captureStopSignalBinding } = await import('../runner/processBinding')
+        const alive = new Set([100, 200])
+        let binding: object | undefined = {}
+        const canSignal = captureStopSignalBinding(() => [binding], () => false)
+        const signalled: number[] = []
+        spawnSyncMock.mockImplementation((cmd: string, args: string[] = []) => {
+            if (cmd === 'powershell') return completed(args.at(-1)?.includes('ParentProcessId') ? 'OK:200,100' : 'generation')
+            if (cmd === 'tasklist') {
+                const pid = Number(args.find(arg => arg.startsWith('PID eq '))?.slice(7))
+                return completed(alive.has(pid) ? `proc.exe ${pid} Console` : 'INFO: No tasks')
+            }
+            if (cmd === 'taskkill') {
+                const pid = Number(args[args.indexOf('/PID') + 1]); signalled.push(pid); alive.delete(pid)
+                if (pid === 100) binding = undefined
+            }
+            return completed('')
+        })
+        expect(await killProcessTreeByPid(100, true, undefined, canSignal)).toBe(true)
+        expect(signalled).toEqual([100, 200])
+        expect(alive.size).toBe(0)
+    })
+
     it('services queued control work between Windows tree generation probes', async () => {
         vi.useRealTimers()
         const { killProcessTreeByPid } = await import('./process')
