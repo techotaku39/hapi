@@ -18,7 +18,7 @@ import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProc
 import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
 import { observeHeartbeatProcesses, type HeartbeatProcessState } from './heartbeatProcesses';
-import { captureProcessBinding } from './processBinding';
+import { captureProcessBinding, sharedStopBinding, terminateCapturedBinding } from './processBinding';
 import {
     decideKeepWrapperArchive,
     decideRawPidStop,
@@ -386,6 +386,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         logger.debug('[RUNNER RUN] Failed to persist resume processes:', error);
       }
     };
+    const capturePidBinding = (pid: number, sessionId: string) => captureProcessBinding(() => [
+      pidToTrackedSession.get(pid), pidToRequestedSessionId.get(pid),
+      pidToConfirmedSessionId.get(pid), persistedResumeProcesses.get(pid),
+      existingSessionIdByChildPid.get(pid), sharedStopBinding(pidToTrackedSession.get(pid), sessionId),
+    ]);
     for (const [pid, record] of [...persistedResumeProcesses]) {
       const alive = isProcessAlive(pid);
       const marker = alive ? getProcessStartMarker(pid) : null;
@@ -1255,8 +1260,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (sessionId.startsWith('PID-')) {
         const pid = parseInt(sessionId.slice(4), 10);
         if (Number.isFinite(pid) && pid > 0) {
+          const bindingUnchanged = capturePidBinding(pid, sessionId);
           const liveForPid = await liveRegistryRuntimes();
           if (liveForPid === null) return 'still_alive';
+          if (!bindingUnchanged()) return 'unknown';
           const decision = decideRawPidStop({
             alive: isProcessAlive(pid),
             expectedMarker: opts?.processStartMarker,
@@ -1280,7 +1287,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             return await finishWithOrphanSweep('stopped');
           }
           if (!(await killProcessTreeByPid(pid))) return 'still_alive';
-          rememberVerifiedExit(sessionId);
+          if (bindingUnchanged() && !isProcessAlive(pid)) rememberVerifiedExit(sessionId);
           return await finishWithOrphanSweep('stopped');
         }
         return 'unknown';
@@ -1331,11 +1338,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       for (const [pid, session] of pidToTrackedSession.entries()) {
         if (session.happySessionId === sessionId ||
           session.requestedHappySessionId === sessionId) {
-          const bindingUnchanged = captureProcessBinding(() => [
-            pidToTrackedSession.get(pid), pidToRequestedSessionId.get(pid),
-            pidToConfirmedSessionId.get(pid), persistedResumeProcesses.get(pid),
-            existingSessionIdByChildPid.get(pid), webhookRevisionFor(session),
-          ]);
+          const bindingUnchanged = capturePidBinding(pid, sessionId);
 
           // Primary match, but live shared siblings still use this wrapper
           // (KillSession may already have cleared this id from sharedSessions).
@@ -1456,6 +1459,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         const requestedSessionId = pidToRequestedSessionId.get(pid) ?? persisted?.requestedSessionId;
         const confirmedSessionId = pidToConfirmedSessionId.get(pid) ?? persisted?.confirmedSessionId;
         if (requestedSessionId !== sessionId && confirmedSessionId !== sessionId) continue;
+        const bindingUnchanged = capturePidBinding(pid, sessionId);
         if (isProcessAlive(pid)) {
           if (!persisted) return 'still_alive';
           const currentMarker = getProcessStartMarker(pid);
@@ -1474,6 +1478,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           }
           const liveForPid = await liveRegistryRuntimes();
           if (liveForPid === null) return 'still_alive';
+          if (!bindingUnchanged()) return await finishWithOrphanSweep('unknown');
           if (wrapperHasActiveSiblingRoots(liveForPid, sessionId, pid)) {
             // Keep this shared wrapper; siblings alone are not stop proof for
             // this root — require an inactive registry binding (KillSession ack).
@@ -1488,15 +1493,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             );
             return decision;
           }
-          if (!(await killProcessTreeByPid(pid))) return 'still_alive';
-          if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
-          if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
-          rememberVerifiedExit(`PID-${pid}`);
-          pidToRequestedSessionId.delete(pid);
-          pidToConfirmedSessionId.delete(pid);
-          if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
-          releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
-          return await finishWithOrphanSweep('stopped');
+          const outcome = await terminateCapturedBinding(bindingUnchanged, () => killProcessTreeByPid(pid), () => {
+            if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
+            if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
+            rememberVerifiedExit(`PID-${pid}`);
+            pidToRequestedSessionId.delete(pid);
+            pidToConfirmedSessionId.delete(pid);
+            if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
+            releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
+          });
+          if (outcome === 'still_alive') return outcome;
+          return await finishWithOrphanSweep(outcome);
         }
         if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
         if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
