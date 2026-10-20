@@ -17,6 +17,7 @@ import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
+import { observeHeartbeatProcesses, type HeartbeatProcessState } from './heartbeatProcesses';
 import {
     decideKeepWrapperArchive,
     decideRawPidStop,
@@ -283,6 +284,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     // Setup state - key by PID
     const pidToTrackedSession = new Map<number, TrackedSession>();
+    // A webhook can refresh an existing shared wrapper without replacing its
+    // map entry. Such fresh liveness evidence invalidates an in-flight scan.
+    const sessionWebhookRevisions = new WeakMap<TrackedSession, number>();
+    const webhookRevisionFor = (session: TrackedSession | undefined) => session ? sessionWebhookRevisions.get(session) ?? 0 : 0;
     // Retained until actual child exit even if webhook timeout removes normal
     // tracking, so confirmed exit can be attributed to the requested HAPI row.
     const pidToRequestedSessionId = new Map<number, string>();
@@ -451,6 +456,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
       // Check if we already have this PID (runner-spawned)
       const existingSession = pidToTrackedSession.get(pid);
+      if (existingSession) {
+        sessionWebhookRevisions.set(existingSession, (sessionWebhookRevisions.get(existingSession) ?? 0) + 1);
+      }
 
       if (existingSession && sessionMetadata.capabilities?.concurrentClients) {
         existingSession.sharedSessions ??= {};
@@ -1757,22 +1765,47 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         logger.debug(`[RUNNER RUN] Health check started at ${new Date().toLocaleString()}`);
       }
 
-      // Prune stale sessions
-      const pidsToCheck = new Set([
+      // Snapshot bindings before yielding to CIM. A new child or webhook can
+      // change these maps while the query is in flight; never apply an old
+      // absence/generation observation to a different binding of the same PID.
+      const candidates = [...new Set([
         ...pidToTrackedSession.keys(),
         ...existingSessionIdByChildPid.keys()
-      ]);
-      for (const pid of pidsToCheck) {
-        if (!isProcessAlive(pid)) {
+      ])].map(pid => ({ pid,
+        tracked: pidToTrackedSession.get(pid),
+        webhookRevision: webhookRevisionFor(pidToTrackedSession.get(pid)),
+        persisted: persistedResumeProcesses.get(pid),
+        requested: pidToRequestedSessionId.get(pid),
+        confirmed: pidToConfirmedSessionId.get(pid),
+        existing: existingSessionIdByChildPid.get(pid),
+      }));
+      let observations: Map<number, HeartbeatProcessState> | undefined;
+      try {
+        observations = await observeHeartbeatProcesses(candidates.map(candidate => candidate.pid));
+      } catch (error) {
+        // Unknown state is not proof of exit. Keep all bindings and continue
+        // publishing heartbeat/version state; a later tick retries the scan.
+        logger.warn(`[RUNNER RUN] Cannot verify heartbeat process snapshot: ${String(error)}`);
+      }
+      for (const candidate of candidates) {
+        const { pid, persisted } = candidate;
+        if (pidToTrackedSession.get(pid) !== candidate.tracked
+          || webhookRevisionFor(candidate.tracked) !== candidate.webhookRevision
+          || persistedResumeProcesses.get(pid) !== persisted
+          || pidToRequestedSessionId.get(pid) !== candidate.requested
+          || pidToConfirmedSessionId.get(pid) !== candidate.confirmed
+          || existingSessionIdByChildPid.get(pid) !== candidate.existing) continue;
+        const observation = observations?.get(pid);
+        if (!observation) continue;
+        if (!observation.alive) {
           logger.debug(`[RUNNER RUN] Removing stale session with PID ${pid} (process no longer exists)`);
           onChildExited(pid);
           continue;
         }
-        const persisted = persistedResumeProcesses.get(pid);
         if (persisted) {
           const generation = classifyRecoveredProcessGeneration(
             true,
-            getProcessStartMarker(pid),
+            observation.startMarker,
             persisted.processStartMarker
           );
           if (generation === 'exited') {
