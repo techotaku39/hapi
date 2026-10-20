@@ -1011,7 +1011,7 @@ export class ApiClient {
         )
     }
 
-    async renameSession(sessionId: string, name: string, titleLocked?: boolean): Promise<void> {
+    async renameSession(sessionId: string, name: string | undefined, titleLocked?: boolean): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'PATCH',
             body: JSON.stringify({ name, titleLocked })

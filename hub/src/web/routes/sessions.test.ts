@@ -274,6 +274,16 @@ describe('sessions routes', () => {
         expect(await response.json()).toEqual({ error: 'No Runner online', code: 'no_machine_online' })
         expect(clears).toBe(0)
     })
+    it('accepts a lock-only save without converting a generated title to a manual name', async () => {
+        const calls: unknown[] = []
+        const { app } = createApp(createSession(), { renameSession: async (...args) => { calls.push(args) } })
+        const response = await app.request('/api/sessions/session-1', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ titleLocked: true })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([['session-1', undefined, true]])
+    })
+
     it.each([true, false])('passes explicit title lock %s atomically through both user title routes', async (titleLocked) => {
         const calls: unknown[] = []
         const { app } = createApp(createSession(), {

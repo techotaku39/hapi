@@ -47,7 +47,7 @@ Source: `hub/src/web/routes/sessions.ts`; request schemas in `shared/src/apiType
 | `POST /api/sessions/:id/abort` | `{}` | `{ok: true}` (active sessions only) |
 | `POST /api/sessions/:id/archive` | `{}` | `{ok: true}` or `{ok: true, alreadyArchived: true}`; 409 for a plain inactive session |
 | `DELETE /api/sessions/:id` | — | `{ok: true}`; 409 while active (archive first) |
-| `PATCH /api/sessions/:id` | `{name, titleLocked?}` (name: 1–255 chars; lock: boolean) | `{ok: true}` (rename) |
+| `PATCH /api/sessions/:id` | `{name?, titleLocked?}` (at least one; name: 1–255 chars; lock: boolean) | `{ok: true}` (rename) |
 | `PATCH /api/sessions/:id/summary` | `{text, titleLocked?}` (text: 1–255 chars; lock: boolean) | `{ok: true}` |
 | `PUT /api/sessions/:id/pin` | `{mode: 'none'\|'project'\|'global'}` | `{ok: true}` |
 | `POST /api/sessions/:id/switch` | `{}` | `{ok: true}` — hands terminal-controlled session over to remote control |
@@ -315,7 +315,8 @@ internal and must never be used by clients.
 `metadata.titleLocked` is an optional, Hub-owned boolean exposed in session detail,
 list summaries and metadata events. Missing means unlocked. The two user title
 PATCH routes above accept `titleLocked` and save it atomically with the title;
-omitting it preserves the existing lock. A manual rename alone does not lock a
+omitting it preserves the existing lock. A lock-only PATCH omits `name` and
+preserves the existing name/summary fields. A manual rename alone does not lock a
 session. Agent metadata writes cannot set or clear this flag. While locked, the
 Hub preserves both `name` and `summary` across agent writes; user title saves
 remain allowed. Unlocking preserves the current title until a future update.

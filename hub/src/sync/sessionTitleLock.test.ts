@@ -22,6 +22,23 @@ function setup() {
 }
 
 describe('explicit per-session title lock', () => {
+    it('preserves summary-only titles through lock-only saves and native updates after unlock', async () => {
+        const { store, cache, write } = setup()
+        try {
+            const session = cache.getOrCreateSession('summary-only', {
+                path: '/project', host: 'localhost', summary: { text: 'Native title', updatedAt: 1 }
+            }, null, 'default')
+            await cache.renameSession(session.id, undefined, true)
+            write(session.id, { summary: { text: 'Blocked native title', updatedAt: 2 } })
+            expect(store.sessions.getSession(session.id)?.metadata).toMatchObject({ titleLocked: true, summary: { text: 'Native title' } })
+            cache.refreshSession(session.id)
+            await cache.renameSession(session.id, undefined, false)
+            write(session.id, { summary: { text: 'New native title', updatedAt: 3 } })
+            expect(store.sessions.getSession(session.id)?.metadata).toMatchObject({ summary: { text: 'New native title' } })
+            expect(store.sessions.getSession(session.id)?.metadata).not.toHaveProperty('name')
+        } finally { store.close() }
+    })
+
     it('allows agent renames after a manual rename unless explicitly locked', async () => {
         const { store, cache, create, write } = setup()
         try {

@@ -14,7 +14,7 @@ type RenameSessionDialogProps = {
     currentName: string
     currentTitleLocked?: boolean
     sessionId?: string
-    onRename: (newName: string, titleLocked?: boolean) => Promise<void>
+    onRename: (newName: string | undefined, titleLocked?: boolean) => Promise<void>
     onSuggestTitle?: () => Promise<string>
     onUpdateSummary?: (text: string, titleLocked?: boolean) => Promise<void>
     isPending: boolean
@@ -30,7 +30,6 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
     const [draftEdited, setDraftEdited] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
-    const inputRef = useRef<HTMLInputElement>(null)
     const generationRef = useRef(0)
     const busy = isPending || isGenerating || isSaving
     const openedRef = useRef(false)
@@ -60,10 +59,6 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
             setDraftSource('manual')
             setDraftEdited(false)
             setIsGenerating(false)
-            setTimeout(() => {
-                inputRef.current?.focus()
-                inputRef.current?.select()
-            }, 100)
         }
     }, [isOpen, currentName, currentTitleLocked, sessionId])
 
@@ -95,7 +90,8 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
         if (busy) return
         const trimmed = name.trim()
         const lockChanged = titleLocked !== currentTitleLocked
-        if (!trimmed || (!draftEdited && draftSource === 'manual' && trimmed === currentName && !lockChanged)) {
+        const untouchedTitle = !draftEdited && draftSource === 'manual'
+        if (!trimmed || (untouchedTitle && !lockChanged)) {
             handleClose()
             return
         }
@@ -103,7 +99,10 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
         setIsSaving(true)
         const saveGeneration = generationRef.current
         try {
-            if (draftSource === 'generated' && onUpdateSummary) {
+            if (untouchedTitle && lockChanged) {
+                // Preserve summary/name ownership when only the lock changes.
+                await onRename(undefined, titleLocked)
+            } else if (draftSource === 'generated' && onUpdateSummary) {
                 await onUpdateSummary(trimmed, titleLocked)
             } else {
                 await onRename(trimmed, titleLocked)
@@ -133,7 +132,6 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
                 <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
                     <div className="relative">
                         <input
-                            ref={inputRef}
                             type="text"
                             value={name}
                             onChange={(e) => {

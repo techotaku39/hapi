@@ -977,7 +977,7 @@ export class SessionCache {
         throw new Error('Session was modified concurrently while archiving from hub')
     }
 
-    async renameSession(sessionId: string, name: string, titleLocked?: boolean): Promise<void> {
+    async renameSession(sessionId: string, name: string | undefined, titleLocked?: boolean): Promise<void> {
         // tiann/hapi#919: retry-with-refresh on version-mismatch instead of
         // throwing on the first contention. Mirrors the good pattern in
         // mergeSessions (~L780) and in syncEngine's metadata helpers. Without
@@ -990,7 +990,7 @@ export class SessionCache {
             }
 
             const currentMetadata = session.metadata ?? { path: '', host: '' }
-            const newMetadata = { ...currentMetadata, name }
+            const newMetadata = name === undefined ? { ...currentMetadata } : { ...currentMetadata, name }
 
             const result = this.store.sessions.updateSessionMetadata(
                 sessionId,

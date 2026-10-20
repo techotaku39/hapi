@@ -6,7 +6,7 @@ import { RenameSessionDialog } from './RenameSessionDialog'
 afterEach(cleanup)
 const label = 'Lock title against agent updates'
 function fixture(locked = false) {
-    const onRename = vi.fn(async (_name: string, _locked?: boolean) => {})
+    const onRename = vi.fn(async (_name: string | undefined, _locked?: boolean) => {})
     const onUpdateSummary = vi.fn(async (_text: string, _locked?: boolean) => {})
     const onClose = vi.fn()
     const props = { isOpen: true, currentName: 'Session', currentTitleLocked: locked, sessionId: 'first',
@@ -18,6 +18,21 @@ function fixture(locked = false) {
 }
 
 describe('title lock draft', () => {
+    it('saves only the lock when the title draft is untouched', async () => {
+        const f = fixture()
+        fireEvent.click(screen.getByRole('button', { name: label }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(f.onRename).toHaveBeenCalledWith(undefined, true))
+    })
+
+    it('does not pin a stale displayed title when an agent update arrives during a lock-only draft', async () => {
+        const f = fixture()
+        fireEvent.click(screen.getByRole('button', { name: label }))
+        f.update({ currentName: 'New native title' })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(f.onRename).toHaveBeenCalledWith(undefined, true))
+    })
+
     it('defaults unlocked, never locks on manual rename, and saves both values together', async () => {
         const f = fixture()
         expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'false')
@@ -31,7 +46,7 @@ describe('title lock draft', () => {
         fireEvent.click(screen.getByRole('button', { name: label }))
         expect(f.onRename).not.toHaveBeenCalled()
         fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-        await waitFor(() => expect(f.onRename).toHaveBeenCalledWith('Session', true))
+        await waitFor(() => expect(f.onRename).toHaveBeenCalledWith(undefined, true))
         f.update({ isOpen: false })
         f.update({ currentTitleLocked: true })
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Another manual title' } })
@@ -43,7 +58,7 @@ describe('title lock draft', () => {
         const f = fixture(true)
         fireEvent.click(screen.getByRole('button', { name: label }))
         fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-        await waitFor(() => expect(f.onRename).toHaveBeenCalledWith('Session', false))
+        await waitFor(() => expect(f.onRename).toHaveBeenCalledWith(undefined, false))
         f.update({ isOpen: false })
         f.update({ currentTitleLocked: false })
         fireEvent.click(screen.getByRole('button', { name: 'Generate' }))

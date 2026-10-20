@@ -334,8 +334,10 @@ export const SessionServiceTierRequestSchema = z.object({
 export type SessionServiceTierRequest = z.infer<typeof SessionServiceTierRequestSchema>
 
 export const RenameSessionRequestSchema = z.object({
-    name: z.string().min(1).max(255),
+    name: z.string().min(1).max(255).optional(),
     titleLocked: z.boolean().optional()
+}).refine(value => value.name !== undefined || value.titleLocked !== undefined, {
+    message: 'name or titleLocked is required'
 })
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
