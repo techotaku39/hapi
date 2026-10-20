@@ -18,6 +18,7 @@ import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProc
 import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
 import { observeHeartbeatProcesses, type HeartbeatProcessState } from './heartbeatProcesses';
+import { captureProcessBinding } from './processBinding';
 import {
     decideKeepWrapperArchive,
     decideRawPidStop,
@@ -1330,6 +1331,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       for (const [pid, session] of pidToTrackedSession.entries()) {
         if (session.happySessionId === sessionId ||
           session.requestedHappySessionId === sessionId) {
+          const bindingUnchanged = captureProcessBinding(() => [
+            pidToTrackedSession.get(pid), pidToRequestedSessionId.get(pid),
+            pidToConfirmedSessionId.get(pid), persistedResumeProcesses.get(pid),
+            existingSessionIdByChildPid.get(pid), webhookRevisionFor(session),
+          ]);
 
           // Primary match, but live shared siblings still use this wrapper
           // (KillSession may already have cleared this id from sharedSessions).
@@ -1344,6 +1350,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             detachSharedRootFromWrapper(session, sessionId);
             return await finishKeepWrapperDetach(pid);
           }
+
+          if (!bindingUnchanged()) return await finishWithOrphanSweep('unknown');
 
           let treeTerminationVerified = false;
           if (session.startedBy === 'runner') {
@@ -1406,7 +1414,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // A stop request starts termination but does not prove that a detached
           // child is gone. Keep its HAPI-row dedupe key until exit/stale detection.
           const existingSessionId = existingSessionIdByChildPid.get(pid);
-          if (existingSessionId) {
+          if (bindingUnchanged() && existingSessionId) {
             spawnSession.markChildStopping(existingSessionId);
           }
           const deadline = Date.now() + 5_000;
@@ -1419,6 +1427,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             logger.debug(`[RUNNER RUN] Session ${sessionId} process ${pid} is still alive after stop request`);
             return 'still_alive';
           }
+          // The verifier proves the old generation exited, not that the PID
+          // still belongs to it. Its exit handler may already have removed the
+          // old binding and a concurrent spawn/webhook installed a replacement.
+          if (!bindingUnchanged()) return await finishWithOrphanSweep('stopped');
           if (session.happySessionId) rememberVerifiedExit(session.happySessionId);
           if (session.requestedHappySessionId) rememberVerifiedExit(session.requestedHappySessionId);
           rememberVerifiedExit(`PID-${pid}`);
