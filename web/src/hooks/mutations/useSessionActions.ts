@@ -228,11 +228,11 @@ export function useSessionActions(
     })
 
     const renameMutation = useMutation({
-        mutationFn: async (name: string) => {
+        mutationFn: async ({ name, titleLocked }: { name: string; titleLocked?: boolean }) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            await api.renameSession(sessionId, name)
+            await api.renameSession(sessionId, name, titleLocked)
         },
         onSuccess: () => void invalidateSession(),
     })
@@ -248,11 +248,11 @@ export function useSessionActions(
     })
 
     const summaryMutation = useMutation({
-        mutationFn: async (text: string) => {
+        mutationFn: async ({ text, titleLocked }: { text: string; titleLocked?: boolean }) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            await api.updateSessionSummary(sessionId, text)
+            await api.updateSessionSummary(sessionId, text, titleLocked)
         },
         onSuccess: () => void invalidateSession(),
     })
@@ -292,9 +292,9 @@ export function useSessionActions(
         setModelReasoningEffort: modelReasoningEffortMutation.mutateAsync,
         setEffort: effortMutation.mutateAsync,
         setServiceTier: serviceTierMutation.mutateAsync,
-        renameSession: renameMutation.mutateAsync,
+        renameSession: (name: string, titleLocked?: boolean) => renameMutation.mutateAsync({ name, titleLocked }),
         suggestSessionTitle: titleSuggestionMutation.mutateAsync,
-        updateSessionSummary: summaryMutation.mutateAsync,
+        updateSessionSummary: (text: string, titleLocked?: boolean) => summaryMutation.mutateAsync({ text, titleLocked }),
         setPinMode: pinMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
         isPending: abortMutation.isPending
