@@ -3,6 +3,7 @@ import type { SessionEndReason } from '@hapi/protocol'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import { shouldSuppressBackgroundNotification } from '../notifications/backgroundOnly'
 import { buildSessionUrl, getAgentName, getSessionName } from '../notifications/sessionInfo'
+import { composeInputRequestNotification, getFirstPendingRequest } from '../notifications/inputRequest'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 
 export const WXPUSHER_SEND_URL = 'https://wxpusher.zjiecode.com/api/send/message'
@@ -39,29 +40,96 @@ export class WxPusherChannel implements NotificationChannel {
         private readonly requestTimeoutMs = WXPUSHER_REQUEST_TIMEOUT_MS
     ) {}
 
-    async sendReady(_session: Session): Promise<void> {}
-
-    async sendPermissionRequest(_session: Session): Promise<void> {}
-
-    async sendTaskNotification(_session: Session, _notification: TaskNotification): Promise<void> {}
-
-    async sendSessionCompletion(session: Session, _reason: SessionEndReason): Promise<void> {
-        if (shouldSuppressBackgroundNotification(session, this.visibilityTracker, this.backgroundOnly)) {
+    async sendReady(session: Session): Promise<void> {
+        if (!session.active || this.shouldSuppress(session)) {
             return
         }
 
         const agentName = getAgentName(session)
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send({
+        await this.send(this.createMessage(
+            'HAPI Ready for input',
+            `${agentName} 正在等待输入\n\n会话：${name}`,
+            url
+        ))
+    }
+
+    async sendPermissionRequest(session: Session): Promise<void> {
+        if (!session.active || this.shouldSuppress(session)) {
+            return
+        }
+
+        const name = getSessionName(session)
+        const pending = getFirstPendingRequest(session)
+        const request = pending?.request
+        const inputNotification = composeInputRequestNotification(session, pending)
+        const toolName = request?.tool ? ` (${request.tool})` : ''
+        const url = buildSessionUrl(this.publicUrl, session.id)
+        await this.send(this.createMessage(
+            inputNotification ? `HAPI ${inputNotification.title}` : 'HAPI Permission Request',
+            inputNotification?.body ?? `${name}${toolName}`,
+            url
+        ))
+    }
+
+    async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
+        if (!session.active || this.shouldSuppress(session)) {
+            return
+        }
+
+        const status = notification.status?.trim().toLowerCase()
+        const isFailure = status === 'failed' || status === 'error' || status === 'killed' || status === 'aborted'
+        if (!isFailure) {
+            return
+        }
+
+        const agentName = getAgentName(session)
+        const name = getSessionName(session)
+        const url = buildSessionUrl(this.publicUrl, session.id)
+        await this.send(this.createMessage(
+            'HAPI Task failed',
+            `${agentName} · ${name}\n\n${notification.summary}`,
+            url
+        ))
+    }
+
+    async sendSessionCompletion(session: Session, _reason: SessionEndReason): Promise<void> {
+        if (this.shouldSuppress(session)) {
+            return
+        }
+
+        const agentName = getAgentName(session)
+        const name = getSessionName(session)
+        const url = buildSessionUrl(this.publicUrl, session.id)
+        await this.send(this.createMessage('HAPI Session completed', `${agentName} · ${name}\n\n会话已结束。`, url))
+    }
+
+    async sendSessionError(session: Session, _reason: SessionEndReason): Promise<void> {
+        if (this.shouldSuppress(session)) {
+            return
+        }
+
+        const agentName = getAgentName(session)
+        const name = getSessionName(session)
+        const url = buildSessionUrl(this.publicUrl, session.id)
+        await this.send(this.createMessage('HAPI Session error', `${agentName} · ${name}\n\n会话异常结束。`, url))
+    }
+
+    private shouldSuppress(session: Session): boolean {
+        return shouldSuppressBackgroundNotification(session, this.visibilityTracker, this.backgroundOnly)
+    }
+
+    private createMessage(summary: string, content: string, url: string): WxPusherMessage {
+        return {
             appToken: this.appToken,
-            content: `${agentName} · ${name}\n\n会话已结束。\n\n${url}`,
-            summary: 'HAPI Session completed',
+            content: `${content}\n\n${url}`,
+            summary,
             contentType: 1,
             ...(this.uids.length > 0 ? { uids: this.uids } : {}),
             ...(this.topicIds.length > 0 ? { topicIds: this.topicIds } : {}),
             url,
-        })
+        }
     }
 
     private async send(message: WxPusherMessage): Promise<void> {

@@ -51,7 +51,7 @@ Related environment variables:
 
 ## ServerChan (Server酱) Setup
 
-Server酱 pushes notifications to WeChat and other channels. The hub sends ServerChan messages when a session is ready for input, requests a permission, a task fails, or a session completes.
+Server酱 pushes notifications to WeChat and other channels. The hub sends ServerChan messages when a session is ready for input, requests a permission, a task fails, ends unexpectedly with an error, or completes.
 
 1. Get a SendKey from [sct.ftqq.com](https://sct.ftqq.com/)
 2. Set the SendKey and start the hub:
@@ -96,7 +96,7 @@ Multiple UIDs can be separated by commas. Topic recipients can be configured wit
 export WXPUSHER_TOPIC_IDS="123,456"
 ```
 
-The current WxPusher channel sends session completion notifications only. It remains disabled unless an app token and at least one UID or topic ID are configured.
+The WxPusher channel sends notifications when a session is ready for input, requests a permission, a task fails, ends unexpectedly with an error, or completes. Successful intermediate task notifications are not sent. It remains disabled unless an app token and at least one UID or topic ID are configured.
 
 Related environment variables:
 

@@ -11,7 +11,7 @@ function createSession(overrides: Partial<Session> = {}): Session {
         seq: 1,
         createdAt: 0,
         updatedAt: 0,
-        active: false,
+        active: true,
         activeAt: 0,
         metadata: {
             path: 'F:\\develop\\code\\hapi',
@@ -97,7 +97,7 @@ describe('WxPusherChannel', () => {
         }
     })
 
-    it('does not send ready, permission, or task notifications', async () => {
+    it('sends ready, permission, failed task, and session error notifications', async () => {
         const fetchMock = mock(async () => new Response(JSON.stringify({ code: 1000 }), { status: 200 }))
         const originalFetch = globalThis.fetch
         globalThis.fetch = fetchMock as unknown as typeof fetch
@@ -105,12 +105,35 @@ describe('WxPusherChannel', () => {
         try {
             const channel = new WxPusherChannel('AT_TEST', ['UID_ONE'], [], 'https://hapi.example.com')
             const session = createSession()
+            const permissionSession = createSession({
+                agentState: {
+                    requests: {
+                        'request-1': {
+                            tool: 'Bash',
+                            arguments: { command: 'bun test' },
+                            createdAt: 1
+                        }
+                    }
+                }
+            })
 
             await channel.sendReady(session)
-            await channel.sendPermissionRequest(session)
+            await channel.sendPermissionRequest(permissionSession)
             await channel.sendTaskNotification(session, { status: 'failed', summary: 'failed' })
+            await channel.sendTaskNotification(session, { status: 'completed', summary: 'done' })
+            await channel.sendSessionError(session, 'error' satisfies SessionEndReason)
 
-            expect(fetchMock).not.toHaveBeenCalled()
+            expect(fetchMock).toHaveBeenCalledTimes(4)
+            const summaries = fetchMock.mock.calls.map((call) => {
+                const init = (call as unknown[])[1] as RequestInit | undefined
+                return (JSON.parse(String(init?.body)) as { summary: string }).summary
+            })
+            expect(summaries).toEqual([
+                'HAPI Ready for input',
+                'HAPI Permission Request',
+                'HAPI Task failed',
+                'HAPI Session error'
+            ])
         } finally {
             globalThis.fetch = originalFetch
         }
@@ -133,6 +156,19 @@ describe('WxPusherChannel', () => {
                 true
             )
 
+            await channel.sendReady(createSession())
+            await channel.sendPermissionRequest(createSession({
+                agentState: {
+                    requests: {
+                        'request-1': { tool: 'Bash', arguments: {}, createdAt: 1 }
+                    }
+                }
+            }))
+            await channel.sendTaskNotification(createSession(), {
+                status: 'failed',
+                summary: 'Subtask failed'
+            })
+            await channel.sendSessionError(createSession(), 'error' satisfies SessionEndReason)
             await channel.sendSessionCompletion(createSession(), 'completed' satisfies SessionEndReason)
 
             expect(fetchMock).not.toHaveBeenCalled()

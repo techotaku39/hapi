@@ -36,6 +36,7 @@ class StubChannel implements NotificationChannel {
     readonly permissionSessions: Session[] = []
     readonly taskNotifications: Array<{ session: Session; notification: TaskNotification }> = []
     readonly sessionCompletions: Session[] = []
+    readonly sessionErrors: Session[] = []
 
     async sendReady(session: Session): Promise<void> {
         this.readySessions.push(session)
@@ -51,6 +52,10 @@ class StubChannel implements NotificationChannel {
 
     async sendSessionCompletion(session: Session): Promise<void> {
         this.sessionCompletions.push(session)
+    }
+
+    async sendSessionError(session: Session): Promise<void> {
+        this.sessionErrors.push(session)
     }
 }
 
@@ -216,7 +221,7 @@ describe('NotificationHub', () => {
         hub.stop()
     })
 
-    it('sends session completion only for completed session-ended events', async () => {
+    it('sends completion and error notifications for matching session-ended events', async () => {
         const engine = new FakeSyncEngine()
         const channel = new StubChannel()
         const hub = new NotificationHub(engine as unknown as SyncEngine, [channel], {
@@ -225,14 +230,21 @@ describe('NotificationHub', () => {
         })
 
         const completedSession = createSession({ id: 'session-completed', active: false })
+        const errorSession = createSession({ id: 'session-error', active: false })
         const terminatedSession = createSession({ id: 'session-terminated', active: false })
         engine.setSession(completedSession)
+        engine.setSession(errorSession)
         engine.setSession(terminatedSession)
 
         engine.emit({
             type: 'session-ended',
             sessionId: completedSession.id,
             reason: 'completed' satisfies SessionEndReason
+        })
+        engine.emit({
+            type: 'session-ended',
+            sessionId: errorSession.id,
+            reason: 'error' satisfies SessionEndReason
         })
         engine.emit({
             type: 'session-ended',
@@ -243,6 +255,8 @@ describe('NotificationHub', () => {
 
         expect(channel.sessionCompletions).toHaveLength(1)
         expect(channel.sessionCompletions[0]?.id).toBe(completedSession.id)
+        expect(channel.sessionErrors).toHaveLength(1)
+        expect(channel.sessionErrors[0]?.id).toBe(errorSession.id)
 
         hub.stop()
     })

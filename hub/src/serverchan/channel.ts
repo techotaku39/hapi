@@ -69,6 +69,17 @@ export class ServerChanChannel implements NotificationChannel {
         await this.send('HAPI Session completed', `${agentName} · ${name}\n\n会话已结束。\n\n${url}`)
     }
 
+    async sendSessionError(session: Session, _reason: SessionEndReason): Promise<void> {
+        if (this.shouldSuppress(session)) {
+            return
+        }
+
+        const agentName = getAgentName(session)
+        const name = getSessionName(session)
+        const url = buildSessionUrl(this.publicUrl, session.id)
+        await this.send('HAPI Session error', `${agentName} · ${name}\n\n会话异常结束。\n\n${url}`)
+    }
+
     private async send(title: string, desp: string): Promise<void> {
         const url = `https://sctapi.ftqq.com/${this.sendKey}.send`
         const body = new URLSearchParams({
