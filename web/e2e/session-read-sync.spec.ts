@@ -2,7 +2,8 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import type { SessionReadState } from '../../shared/src/sessionReadState'
 
 test.describe('session read state across isolated devices', () => {
-    test.skip(process.env.HAPI_LIVE !== '1', 'Requires an isolated seeded Hub')
+    test.skip(process.env.HAPI_LIVE !== '1' || !process.env.HAPI_READ_SYNC_TEST_URL,
+        'Set HAPI_LIVE=1 and HAPI_READ_SYNC_TEST_URL for an explicitly isolated seeded Hub')
 
     test('recovers a closed offline tab without randomUUID or sessionStorage', async ({ browser, request }) => {
         const baseUrl = process.env.HAPI_READ_SYNC_TEST_URL ?? process.env.HAPI_URL
