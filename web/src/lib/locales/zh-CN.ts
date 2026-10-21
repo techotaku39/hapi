@@ -305,6 +305,9 @@ export default {
   'dialog.rename.providerReason.connectionFailed': '连接失败',
   'dialog.rename.providerReason.emptyResponse': '返回了空响应',
   'dialog.rename.providerReason.invalidResponse': '返回了无效响应',
+  'dialog.rename.generateEmpty': '此会话还没有对话内容，请先发送一条消息再生成标题。',
+  'dialog.rename.showRawError': '展开报错原文',
+  'dialog.rename.hideRawError': '收起报错原文',
   'dialog.rename.generateUnavailable': '此 Hub 尚未配置标题生成。请在 $HAPI_HOME/settings.json（默认 ~/.hapi/settings.json）的 titleProvider.baseUrl、titleProvider.apiKey、titleProvider.model 中配置，或在 Hub 环境变量中设置 HAPI_TITLE_PROVIDER_BASE_URL、HAPI_TITLE_PROVIDER_API_KEY 和 HAPI_TITLE_PROVIDER_MODEL，然后重启 Hub。',
 
   'dialog.archive.title': '归档会话',

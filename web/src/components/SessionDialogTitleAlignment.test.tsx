@@ -85,6 +85,39 @@ describe('session dialog title alignment', () => {
         expect(screen.getByText(/titleProvider\.baseUrl/)).toBeInTheDocument()
     })
 
+    it('explains that an empty session needs a message before title generation', async () => {
+        renderWithProviders(
+            <RenameSessionDialog
+                isOpen={true}
+                onClose={vi.fn()}
+                currentName="Session"
+                onRename={vi.fn(async () => {})}
+                onSuggestTitle={async () => {
+                    throw new ApiError(
+                        'HTTP 422 Unprocessable Entity: {"error":"No conversation content","code":"empty"}',
+                        422,
+                        'empty',
+                        JSON.stringify({ error: 'No conversation content', code: 'empty' })
+                    )
+                }}
+                isPending={false}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+        await waitFor(() => expect(screen.getByText(
+            'This session has no conversation content yet. Send a message before generating a title.'
+        )).toBeInTheDocument())
+        const rawErrorToggle = screen.getByRole('button', { name: 'Show original error' })
+        expect(rawErrorToggle).toHaveClass('inline-flex', 'whitespace-nowrap')
+        expect(rawErrorToggle.parentElement).toHaveClass('leading-5')
+        expect(rawErrorToggle).toHaveAttribute('aria-expanded', 'false')
+        fireEvent.click(rawErrorToggle)
+        expect(screen.getByRole('button', { name: 'Hide original error' })).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByTestId('title-suggestion-raw-error')).toHaveTextContent('HTTP 422')
+    })
+
     it('uses the generic error for a provider failure with HTTP 503', async () => {
         renderWithProviders(
             <RenameSessionDialog

@@ -302,6 +302,26 @@ describe('sessions routes', () => {
         })
     })
 
+    it('returns a distinct error code when the session has no conversation content', async () => {
+        const { app } = createApp(createSession(), {
+            suggestSessionTitle: async () => {
+                throw new TitleSuggestionError(
+                    'empty',
+                    'No conversation content is available for a title suggestion',
+                    422
+                )
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/title-suggestion', { method: 'POST' })
+
+        expect(response.status).toBe(422)
+        expect(await response.json()).toEqual({
+            error: 'No conversation content is available for a title suggestion',
+            code: 'empty'
+        })
+    })
+
     it('preserves the safe provider error reason for the web client', async () => {
         const { app } = createApp(createSession(), {
             suggestSessionTitle: async () => {

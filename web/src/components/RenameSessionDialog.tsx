@@ -19,6 +19,15 @@ type RenameSessionDialogProps = {
     isPending: boolean
 }
 
+function redactRawError(message: string): string {
+    return message
+        .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+        .replace(/\b((?:sk|rk|pk)-)[A-Za-z0-9_-]+/g, '$1[redacted]')
+        .replace(/([?&](?:api[-_ ]?key|token|secret|password)=)[^&\s]+/gi, '$1[redacted]')
+        .replace(/\b((?:api[-_ ]?key|token|secret|password)(?:\s+provided)?)\b\s*[:=]\s*["']?[^,\s}"']+/gi, '$1: [credential redacted]')
+        .trim()
+}
+
 type TitleSuggestionProviderReason =
     | 'request-rejected'
     | 'authentication-failed'
@@ -119,6 +128,8 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
     const [draftSource, setDraftSource] = useState<'manual' | 'generated'>('manual')
     const [draftEdited, setDraftEdited] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
+    const [rawError, setRawError] = useState<string | null>(null)
+    const [showRawError, setShowRawError] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
     const generationRef = useRef(0)
     const busy = isPending || isGenerating
@@ -126,6 +137,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
     const handleClose = () => {
         generationRef.current += 1
         setIsGenerating(false)
+        setShowRawError(false)
         onClose()
     }
 
@@ -139,6 +151,8 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
         if (isOpen) {
             setName(currentName)
             setError(null)
+            setRawError(null)
+            setShowRawError(false)
             setDraftSource('manual')
             setDraftEdited(false)
             setIsGenerating(false)
@@ -154,6 +168,8 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
 
         const generation = ++generationRef.current
         setError(null)
+        setRawError(null)
+        setShowRawError(false)
         setIsGenerating(true)
         try {
             const suggested = (await onSuggestTitle()).trim()
@@ -163,7 +179,12 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
             setDraftSource('generated')
         } catch (error) {
             if (generation === generationRef.current) {
-                if (error instanceof ApiError && error.code === 'unavailable') {
+                if (error instanceof ApiError) {
+                    setRawError(redactRawError(error.message))
+                }
+                if (error instanceof ApiError && (error.code === 'empty' || error.status === 422)) {
+                    setError(t('dialog.rename.generateEmpty'))
+                } else if (error instanceof ApiError && error.code === 'unavailable') {
                     setError(t('dialog.rename.generateUnavailable'))
                 } else {
                     const detail = error instanceof ApiError
@@ -236,7 +257,34 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
 
                     {error ? (
                         <div className="rounded-md bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
-                            {error}
+                            <div className="leading-5">
+                                <span>{error}</span>
+                                {rawError ? (
+                                    <>
+                                        {' '}
+                                        <button
+                                            type="button"
+                                            aria-controls="title-suggestion-raw-error"
+                                            aria-expanded={showRawError}
+                                            className="inline-flex whitespace-nowrap align-baseline underline underline-offset-2"
+                                            onClick={() => setShowRawError((visible) => !visible)}
+                                        >
+                                            {showRawError
+                                                ? t('dialog.rename.hideRawError')
+                                                : t('dialog.rename.showRawError')}
+                                        </button>
+                                    </>
+                                ) : null}
+                                {showRawError ? (
+                                    <pre
+                                        id="title-suggestion-raw-error"
+                                        data-testid="title-suggestion-raw-error"
+                                        className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-black/10 p-2 font-mono text-xs"
+                                    >
+                                        {rawError}
+                                    </pre>
+                                ) : null}
+                            </div>
                         </div>
                     ) : null}
 
