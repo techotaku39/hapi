@@ -167,6 +167,12 @@ export function extractAssistantPlainText(content: unknown): string | null {
         if (typeof data.message === 'string' && data.message.trim().length > 0) {
             return data.message
         }
+        // Claude also sends assistant prose as a plain string `message.content`
+        // (the renderer handles this shape in normalizeAgent). Without this the
+        // reply is visible but absent from both backfill and live indexing.
+        if (typeof message?.content === 'string') {
+            return message.content.trim().length > 0 ? message.content : null
+        }
         const blocks = Array.isArray(message?.content) ? message.content : null
         if (!blocks) return null
         const textParts: string[] = []
@@ -443,12 +449,17 @@ function extractSearchableAssistantPlainText(
 
     const message = isObject(data.message) ? data.message : null
     const blocks = Array.isArray(message?.content) ? message.content : null
-    if (!blocks) {
+    // String `message.content` runs through the same sentinel filtering and
+    // bounding as block text; the plain-text fallback below is unbounded.
+    const stringContent = !blocks && typeof message?.content === 'string'
+        ? message.content
+        : null
+    if (!blocks && stringContent === null) {
         const text = extractAssistantPlainText(content)
         return text === null ? null : { text, truncated: false }
     }
 
-    const taskToolCall = blocks.find((block) => {
+    const taskToolCall = blocks?.find((block) => {
         if (!isObject(block) || block.type !== 'tool_use') return false
         const name = typeof block.name === 'string' ? block.name : ''
         return name === 'Task'
@@ -462,10 +473,14 @@ function extractSearchableAssistantPlainText(
     const hiddenTaskPrompt = typeof taskToolInput?.prompt === 'string'
         ? taskToolInput.prompt.trim()
         : null
-    const textParts = blocks.flatMap((block) => {
-        if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') return []
-        return hiddenTaskPrompt && block.text.trim() === hiddenTaskPrompt ? [] : [block.text]
-    })
+    const textParts = blocks
+        ? blocks.flatMap((block) => {
+            if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') return []
+            return hiddenTaskPrompt && block.text.trim() === hiddenTaskPrompt ? [] : [block.text]
+        })
+        : stringContent !== null && stringContent.trim().length > 0
+            ? [stringContent]
+            : []
     if (textParts.length === 1) {
         const parentUuid = extractAssistantParentUuid(content)
         if (

@@ -27,6 +27,28 @@ describe('extractAssistantPlainText', () => {
         expect(extractAssistantPlainText(42)).toBeNull()
     })
 
+    test('extracts Claude assistant prose sent as a plain string content', () => {
+        const content = {
+            type: 'output',
+            data: {
+                type: 'assistant',
+                message: { role: 'assistant', content: 'Here is the answer.' }
+            }
+        }
+        expect(extractAssistantPlainText(content)).toBe('Here is the answer.')
+    })
+
+    test('returns null for blank string assistant content', () => {
+        const content = {
+            type: 'output',
+            data: {
+                type: 'assistant',
+                message: { role: 'assistant', content: '   ' }
+            }
+        }
+        expect(extractAssistantPlainText(content)).toBeNull()
+    })
+
     test('extracts codex/message text', () => {
         const content = {
             type: 'codex',
@@ -165,6 +187,71 @@ describe('extractSearchableMessageText', () => {
         expect(text).toContain('Tail phrase')
         expect(text).not.toContain('Middle')
         expect(text?.length).toBeLessThanOrEqual(32)
+    })
+
+    test('indexes Claude assistant prose sent as a plain string content', () => {
+        // Rendered via normalizeAgent's string branch; it must reach search too.
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    message: { role: 'assistant', content: 'Here is the answer.' }
+                }
+            }
+        })).toEqual({ role: 'assistant', text: 'Here is the answer.' })
+    })
+
+    test('bounds string assistant content like block text', () => {
+        const assistant = extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    message: {
+                        role: 'assistant',
+                        content: `head ${'middle filler '.repeat(20)}unique middle-only marker tail phrase`
+                    }
+                }
+            }
+        }, { maxSourceCharacters: 32 })
+
+        expect(assistant).toMatchObject({ role: 'assistant', truncated: true })
+        expect(assistant?.text).toContain('tail phrase')
+        expect(assistant?.text).not.toContain('unique middle-only marker')
+    })
+
+    test('applies the injected-turn sentinel filter to string assistant content', () => {
+        const sentinel = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'injected-turn',
+                    message: { role: 'assistant', content: 'No response requested.' }
+                }
+            }
+        }
+
+        expect(extractSearchableMessageText(sentinel, {
+            injectedTurnUuids: new Set(['injected-turn'])
+        })).toBeNull()
+        expect(extractSearchableMessageText(sentinel, {
+            injectedTurnUuids: new Set(['other-turn'])
+        })).toEqual({ role: 'assistant', text: 'No response requested.' })
+    })
+
+    test('skips blank string assistant content', () => {
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: { type: 'assistant', message: { role: 'assistant', content: '   ' } }
+            }
+        })).toBeNull()
     })
 
     test('marks searchable text that was truncated for indexing', () => {

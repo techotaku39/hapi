@@ -112,6 +112,37 @@ describe('message content search', () => {
         expect(store.messages.searchContent('hidden sidechain prose', 'default')).toEqual([])
     })
 
+    it('indexes Claude assistant prose sent as a plain string content', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'content-search-string-content')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    message: { role: 'assistant', content: 'Rotate the signing certificate yearly.' }
+                }
+            }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    isSidechain: true,
+                    message: { role: 'assistant', content: 'hidden sidechain string prose' }
+                }
+            }
+        })
+
+        const hits = store.messages.searchContent('signing certificate', 'default')
+        expect(hits.map((result) => result.sessionId)).toEqual([session.id])
+        expect(hits[0]?.role).toBe('assistant')
+        expect(store.messages.searchContent('hidden sidechain string', 'default')).toEqual([])
+    })
+
     it('indexes only visible AGY planner prose', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'agy-content-search')
