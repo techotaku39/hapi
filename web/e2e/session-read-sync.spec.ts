@@ -4,6 +4,56 @@ import type { SessionReadState } from '../../shared/src/sessionReadState'
 test.describe('session read state across isolated devices', () => {
     test.skip(process.env.HAPI_LIVE !== '1', 'Requires an isolated seeded Hub')
 
+    test('recovers a closed offline tab without randomUUID or sessionStorage', async ({ browser, request }) => {
+        const baseUrl = process.env.HAPI_URL
+        const accessToken = process.env.HAPI_ACCESS_TOKEN
+        if (!baseUrl || !accessToken || /:3006(?:\/|$)/.test(baseUrl)) throw new Error('Explicit isolated Hub URL and token required')
+        const auth = await request.post(`${baseUrl}/api/auth`, { data: { accessToken } })
+        expect(auth.ok()).toBe(true)
+        const { token } = await auth.json() as { token: string }
+        const headers = { authorization: `Bearer ${token}` }
+        const id = 'read-sync-fixture-c'
+        const sessions = await (await request.get(`${baseUrl}/api/sessions`, { headers })).json() as {
+            sessions: Array<{ id: string; updatedAt: number }>
+        }
+        const session = sessions.sessions.find(row => row.id === id)!
+        expect(session).toBeTruthy()
+        const readState = async () => {
+            const response = await request.get(`${baseUrl}/api/session-read-state`, { headers })
+            return (await response.json() as { states: SessionReadState[] }).states.find(row => row.sessionId === id)
+        }
+        const current = await readState()
+        const response = await request.post(`${baseUrl}/api/session-read-state`, { headers, data: { mutations: [{
+            mutationId: crypto.randomUUID(), sessionId: id, kind: 'seen', activityAt: session.updatedAt,
+            expectedVersion: current?.version ?? 0
+        }] } })
+        expect(response.ok()).toBe(true)
+        const context = await browser.newContext({ serviceWorkers: 'block' })
+        try {
+            await context.addInitScript(({ url, access }) => {
+                localStorage.setItem(`hapi_access_token::${url}`, access)
+                localStorage.setItem('hapi-session-list-status-mode', 'detailed')
+                localStorage.setItem('hapi-language', 'en')
+                Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: undefined })
+            }, { url: baseUrl, access: accessToken })
+            const page = await context.newPage()
+            await page.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded' })
+            const row = page.locator('button.session-list-item').filter({ hasText: 'Read sync C' })
+            await expect(row).toBeVisible()
+            await context.setOffline(true)
+            await row.dispatchEvent('contextmenu', { clientX: 120, clientY: 180 })
+            await page.getByRole('menuitem', { name: 'Mark as unread', exact: true }).click()
+            await expect(row.locator('span.rounded-full[class*="--app-link"]')).toBeVisible()
+            await page.close()
+            await context.setOffline(false)
+            const reopened = await context.newPage()
+            await reopened.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded' })
+            await expect.poll(async () => (await readState())?.manualUnreadAt, { timeout: 75000 }).toBe(session.updatedAt)
+            await expect(reopened.locator('button.session-list-item').filter({ hasText: 'Read sync C' })
+                .locator('span.rounded-full[class*="--app-link"]')).toBeVisible()
+        } finally { await context.close() }
+    })
+
     test('desktop/mobile share read, manual unread, bulk read, filtering, badge, reload and offline recovery', async ({ browser, request }) => {
         const baseUrl = process.env.HAPI_URL
         const accessToken = process.env.HAPI_ACCESS_TOKEN

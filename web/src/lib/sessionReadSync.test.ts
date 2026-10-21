@@ -48,6 +48,77 @@ beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clea
 afterEach(() => { sync?.stop(); sync = undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Hub read-state synchronization', () => {
+    it('starts and creates mutations when randomUUID is unavailable on HTTP LAN origins', async () => {
+        vi.stubGlobal('crypto', {})
+        try {
+            const api = mockApi()
+            sync = startSessionReadSync(api, scope)
+            await tick()
+            markSessionUnread('a', 100)
+            await tick()
+            expect(api.records.get('a')?.manualUnreadAt).toBe(100)
+        } finally { vi.unstubAllGlobals() }
+    })
+
+    it('recovers an offline action after the tab closes and sessionStorage is discarded', async () => {
+        const api = mockApi([state(1, 50)])
+        const update = api.updateSessionReadState.getMockImplementation()!
+        api.updateSessionReadState.mockRejectedValue(new TypeError('offline'))
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionUnread('a', 100)
+        await tick()
+        sync.stop()
+        sessionStorage.clear()
+        api.updateSessionReadState.mockImplementation(update)
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(api.records.get('a')).toMatchObject({ version: 2, manualUnreadAt: 100 })
+    })
+
+    it('leaves a live peer queue alone and recovers it only after its owner expires', async () => {
+        const prefix = `hapi.sessionReadSync.v1:${scope}`
+        localStorage.setItem(`${prefix}:pending:peer`, JSON.stringify([
+            { mutationId: 'offline-peer', sessionId: 'a', kind: 'unread', activityAt: 100, expectedVersion: 1 }
+        ]))
+        localStorage.setItem(`${prefix}:owner:peer`, String(Date.now()))
+        const api = mockApi([state(1, 50)])
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(api.updateSessionReadState).not.toHaveBeenCalled()
+        expect(localStorage.getItem(`${prefix}:pending:peer`)).not.toBeNull()
+        await vi.advanceTimersByTimeAsync(61000)
+        expect(api.records.get('a')).toMatchObject({ version: 2, manualUnreadAt: 100 })
+        expect(localStorage.getItem(`${prefix}:pending:peer`)).toBeNull()
+    })
+
+    it('does not adopt an orphan belonging to another namespace', async () => {
+        const otherScope = JSON.stringify(['http://hub', 'other'])
+        const key = `hapi.sessionReadSync.v1:${otherScope}:pending:closed`
+        localStorage.setItem(key, JSON.stringify([
+            { mutationId: 'foreign-action', sessionId: 'a', kind: 'unread', activityAt: 100, expectedVersion: 1 }
+        ]))
+        const api = mockApi([state(1, 50)])
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(api.updateSessionReadState).not.toHaveBeenCalled()
+        expect(localStorage.getItem(key)).not.toBeNull()
+    })
+
+    it('retains an orphan source when persisting the recovered copy fails', async () => {
+        const key = `hapi.sessionReadSync.v1:${scope}:pending:closed`
+        const saved = JSON.stringify([
+            { mutationId: 'recover-me', sessionId: 'a', kind: 'unread', activityAt: 100, expectedVersion: 1 }
+        ])
+        localStorage.setItem(key, saved)
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+        const api = mockApi([state(1, 50)])
+        api.updateSessionReadState.mockRejectedValue(new TypeError('offline'))
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(localStorage.getItem(key)).toBe(saved)
+    })
+
     it('loads Hub state instead of promoting a legacy read baseline', async () => {
         localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ a: 9999 }))
         const api = mockApi([state(2, 99, 100)])

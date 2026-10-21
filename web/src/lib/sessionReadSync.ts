@@ -1,5 +1,6 @@
 import type { ApiClient } from '@/api/client'
 import { ApiError } from '@/api/client'
+import { randomId } from './randomId'
 import { SessionReadMutationSchema, SessionReadSnapshotSchema, type SessionReadMutation, type SessionReadState } from '@hapi/protocol'
 import {
     applySessionReadStates, configureSessionReadSync, disconnectSessionReadSync, getLegacyManualUnread
@@ -23,14 +24,15 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
     let running = false
     let refreshPromise: Promise<void> | null = null
     let retry: ReturnType<typeof setTimeout> | undefined
-    // Independent tabs retain independent offline queues; reload resumes the same queue.
-    let tabId: string
-    try {
-        tabId = sessionStorage.getItem('hapi.readSyncTab') ?? crypto.randomUUID()
-        sessionStorage.setItem('hapi.readSyncTab', tabId)
-    } catch { tabId = crypto.randomUUID() }
+    // Every controller owns a distinct durable queue, including duplicated tabs.
+    // Closed/crashed controllers are discovered by scope instead of sessionStorage.
+    const tabId = randomId()
     const cacheKey = `hapi.sessionReadSync.v1:${scope}`
-    const queueKey = `${cacheKey}:pending:${tabId}`
+    const queuePrefix = `${cacheKey}:pending:`
+    const queueKey = `${queuePrefix}${tabId}`
+    const ownerPrefix = `${cacheKey}:owner:`
+    const ownerKey = `${ownerPrefix}${tabId}`
+    const ownerTtlMs = 60000
     let pending: SessionReadMutation[] = []
     try {
         const cached = SessionReadSnapshotSchema.safeParse(JSON.parse(localStorage.getItem(cacheKey) ?? 'null'))
@@ -48,8 +50,48 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
     const persist = () => {
         try {
             localStorage.setItem(cacheKey, JSON.stringify({ states: [...states.values()] }))
-            localStorage.setItem(queueKey, JSON.stringify(pending))
+            if (pending.length) localStorage.setItem(queueKey, JSON.stringify(pending))
+            else localStorage.removeItem(queueKey)
+            return true
         } catch { /* Storage can be unavailable in private browsing. */ }
+        return false
+    }
+    const releaseOwnership = () => {
+        try { localStorage.removeItem(ownerKey) } catch { /* Optional storage. */ }
+    }
+    const renewOwnership = () => {
+        try { localStorage.setItem(ownerKey, String(Date.now())) } catch { /* Optional storage. */ }
+    }
+    const recoverOrphanedQueues = () => {
+        let recovered = false
+        try {
+            const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+            const knownIds = new Set(pending.map(item => item.mutationId))
+            for (const key of keys) {
+                if (!key?.startsWith(queuePrefix) || key === queueKey) continue
+                const lease = `${ownerPrefix}${key.slice(queuePrefix.length)}`
+                const renewedAt = Number(localStorage.getItem(lease))
+                if (renewedAt > Date.now() - ownerTtlMs) continue
+                const raw = localStorage.getItem(key)
+                let queue: unknown
+                try { queue = JSON.parse(raw ?? 'null') } catch { continue }
+                if (!Array.isArray(queue)) continue
+                for (const value of queue) {
+                    const parsed = SessionReadMutationSchema.safeParse(value)
+                    if (!parsed.success || knownIds.has(parsed.data.mutationId)) continue
+                    pending.push(parsed.data)
+                    recovered = true
+                    knownIds.add(parsed.data.mutationId)
+                }
+                // Copy durably before removing the source; failed writes retain it.
+                // Concurrent recovery is harmless: mutation IDs are idempotent at the Hub.
+                if (persist() && localStorage.getItem(key) === raw) {
+                    localStorage.removeItem(key)
+                    localStorage.removeItem(lease)
+                }
+            }
+        } catch { /* Online sync must still work when storage is inaccessible. */ }
+        return recovered
     }
     const publish = () => {
         const visible = new Map(states)
@@ -125,7 +167,7 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
         for (const { id, updatedAt } of sessions) {
             const expectedVersion = pending.filter(item => item.sessionId === id)
                 .reduce((version, item) => Math.max(version, item.expectedVersion + 1), states.get(id)?.version ?? 0)
-            pending.push({ mutationId: crypto.randomUUID(), sessionId: id, kind, activityAt: updatedAt, expectedVersion })
+            pending.push({ mutationId: randomId(), sessionId: id, kind, activityAt: updatedAt, expectedVersion })
         }
         persist()
         // Let the optimistic local update finish before an immediate mocked response.
@@ -138,6 +180,8 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
         if (refreshPromise) return refreshPromise
         refreshPromise = (async () => {
             try {
+                renewOwnership()
+                recoverOrphanedQueues()
                 const snapshot = await api.getSessionReadState()
                 if (stopped) return
                 apply(snapshot.states)
@@ -150,7 +194,7 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
                         if (stopped) return
                         for (const session of sessions.sessions) {
                             if (!states.has(session.id) && legacy[session.id] === session.updatedAt) {
-                                pending.push({ mutationId: crypto.randomUUID(), sessionId: session.id, kind: 'import-unread', activityAt: session.updatedAt, expectedVersion: 0 })
+                                pending.push({ mutationId: randomId(), sessionId: session.id, kind: 'import-unread', activityAt: session.updatedAt, expectedVersion: 0 })
                             }
                         }
                     }
@@ -162,6 +206,13 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
         })()
         return refreshPromise
     }
+    // Keep live tab queues separate; recover abandoned queues even when another
+    // tab stays open through the original owner's crash. pagehide handles normal closes.
+    const ownershipTimer = setInterval(() => {
+        renewOwnership()
+        if (recoverOrphanedQueues()) void refresh()
+    }, 10000)
+    window.addEventListener('pagehide', releaseOwnership)
     void refresh()
     return {
         refresh,
@@ -169,6 +220,9 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
         stop() {
             stopped = true
             clearTimeout(retry)
+            clearInterval(ownershipTimer)
+            window.removeEventListener('pagehide', releaseOwnership)
+            releaseOwnership()
             disconnectSessionReadSync()
         }
     }
