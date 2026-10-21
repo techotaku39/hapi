@@ -50,6 +50,19 @@ beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clea
 afterEach(() => { sync?.stop(); sync = undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Hub read-state synchronization', () => {
+    it('starts a fresh snapshot after a connection refresh overlaps an older request', async () => {
+        const api = mockApi([state(2, 99, 100)])
+        let release!: (value: { states: SessionReadState[] }) => void
+        api.getSessionReadState.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+        sync = startSessionReadSync(api, scope)
+        const connectedRefresh = sync.refresh()
+        release({ states: [state(1, 100)] })
+        await connectedRefresh
+        await tick()
+        expect(api.getSessionReadState).toHaveBeenCalledTimes(2)
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+    })
+
     it('keeps a fresh intent ordered after a dependent write already in flight', async () => {
         const api = mockApi([state(1, 50)])
         const update = api.updateSessionReadState.getMockImplementation()!

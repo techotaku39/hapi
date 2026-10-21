@@ -24,6 +24,7 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
     let ready = false
     let running = false
     let refreshPromise: Promise<void> | null = null
+    let followupRefresh: Promise<void> | null = null
     let retry: ReturnType<typeof setTimeout> | undefined
     // Every controller owns a distinct durable queue, including duplicated tabs.
     // Closed/crashed controllers are discovered by scope instead of sessionStorage.
@@ -195,7 +196,15 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
 
     async function refresh(): Promise<void> {
         if (stopped) return
-        if (refreshPromise) return refreshPromise
+        if (refreshPromise) {
+            // A connection handshake must observe a snapshot captured after the
+            // subscription registered. Coalesce overlaps into one subsequent GET.
+            followupRefresh ??= refreshPromise.then(() => {
+                followupRefresh = null
+                return refresh()
+            })
+            return followupRefresh
+        }
         refreshPromise = (async () => {
             try {
                 renewOwnership()
