@@ -13,6 +13,9 @@ test.describe('project sort modes', () => {
         await expect(projectHeaders.nth(0)).toHaveAttribute('title', '/projects/mine')
         await expect(projectHeaders.nth(1)).toHaveAttribute('title', '/projects/hapi')
         await page.screenshot({ path: testInfo.outputPath('project-order-stable.png'), fullPage: true })
+        await page.evaluate(() => window.updateProjectSession('hapi-session', Date.now() + 60_000))
+        await expect(projectHeaders.nth(0)).toHaveAttribute('title', '/projects/mine')
+        await expect(projectHeaders.nth(1)).toHaveAttribute('title', '/projects/hapi')
     })
 
     test('orders projects by recent activity when selected', async ({ page }, testInfo) => {
@@ -23,5 +26,8 @@ test.describe('project sort modes', () => {
         await expect(projectHeaders.nth(0)).toHaveAttribute('title', '/projects/hapi')
         await expect(projectHeaders.nth(1)).toHaveAttribute('title', '/projects/mine')
         await page.screenshot({ path: testInfo.outputPath('project-order-recent.png'), fullPage: true })
+        await page.evaluate(() => window.updateProjectSession('mine-session', Date.now() + 60_000))
+        await expect(projectHeaders.nth(0)).toHaveAttribute('title', '/projects/mine')
+        await expect(projectHeaders.nth(1)).toHaveAttribute('title', '/projects/hapi')
     })
 })

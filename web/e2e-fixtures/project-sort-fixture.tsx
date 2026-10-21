@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { SessionSummary } from '@/types/api'
 import { SessionList } from '@/components/SessionList'
@@ -60,22 +61,39 @@ const queryClient = new QueryClient({
     },
 })
 
+declare global {
+    interface Window {
+        updateProjectSession: (id: string, updatedAt: number) => void
+    }
+}
+
+function ProjectSortFixture() {
+    const [currentSessions, setCurrentSessions] = useState(sessions)
+    window.updateProjectSession = (id, updatedAt) => {
+        setCurrentSessions((previous) => previous.map((session) => session.id === id ? { ...session, updatedAt } : session))
+    }
+
+    return (
+        <div className="h-screen w-full bg-[var(--app-bg)] text-[var(--app-fg)]">
+            <SessionList
+                sessions={currentSessions}
+                selectedSessionId={null}
+                onSelect={() => {}}
+                onNewSession={() => {}}
+                onRefresh={async () => {}}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        </div>
+    )
+}
+
 createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
         <ToastProvider>
             <I18nProvider>
-                <div className="h-screen w-full bg-[var(--app-bg)] text-[var(--app-fg)]">
-                    <SessionList
-                        sessions={sessions}
-                        selectedSessionId={null}
-                        onSelect={() => {}}
-                        onNewSession={() => {}}
-                        onRefresh={async () => {}}
-                        isLoading={false}
-                        renderHeader={false}
-                        api={null}
-                    />
-                </div>
+                <ProjectSortFixture />
             </I18nProvider>
         </ToastProvider>
     </QueryClientProvider>,
