@@ -7,6 +7,7 @@ import {
 } from './sessionLastSeen'
 
 type ReadApi = Pick<ApiClient, 'getSessionReadState' | 'updateSessionReadState' | 'getSessions'>
+type PendingMutation = SessionReadMutation & { baseVersion: number }
 
 /** Hub identity includes namespace, not the short-lived JWT or user transport identity. */
 export function sessionReadScope(baseUrl: string, token: string): string {
@@ -33,7 +34,15 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
     const ownerPrefix = `${cacheKey}:owner:`
     const ownerKey = `${ownerPrefix}${tabId}`
     const ownerTtlMs = 60000
-    let pending: SessionReadMutation[] = []
+    let pending: PendingMutation[] = []
+    let inFlight = new Set<PendingMutation>()
+    const parsePending = (value: unknown): PendingMutation | null => {
+        const parsed = SessionReadMutationSchema.safeParse(value)
+        if (!parsed.success) return null
+        const base = (value as { baseVersion?: unknown }).baseVersion
+        return { ...parsed.data, baseVersion: typeof base === 'number' && Number.isSafeInteger(base) && base >= 0
+            ? base : parsed.data.expectedVersion }
+    }
     try {
         const cached = SessionReadSnapshotSchema.safeParse(JSON.parse(localStorage.getItem(cacheKey) ?? 'null'))
         if (cached.success) for (const state of cached.data.states) states.set(state.sessionId, state)
@@ -41,8 +50,8 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
         if (Array.isArray(queue)) {
             // Reuse the wire validator, including numeric bounds, for persisted queue data.
             for (const value of queue) {
-                const parsed = SessionReadMutationSchema.safeParse(value)
-                if (parsed.success) pending.push(parsed.data)
+                const parsed = parsePending(value)
+                if (parsed) pending.push(parsed)
             }
         }
     } catch { /* Storage is optional; online synchronization still works. */ }
@@ -77,11 +86,11 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
                 try { queue = JSON.parse(raw ?? 'null') } catch { continue }
                 if (!Array.isArray(queue)) continue
                 for (const value of queue) {
-                    const parsed = SessionReadMutationSchema.safeParse(value)
-                    if (!parsed.success || knownIds.has(parsed.data.mutationId)) continue
-                    pending.push(parsed.data)
+                    const parsed = parsePending(value)
+                    if (!parsed || knownIds.has(parsed.mutationId)) continue
+                    pending.push(parsed)
                     recovered = true
-                    knownIds.add(parsed.data.mutationId)
+                    knownIds.add(parsed.mutationId)
                 }
                 // Copy durably before removing the source; failed writes retain it.
                 // Concurrent recovery is harmless: mutation IDs are idempotent at the Hub.
@@ -139,6 +148,7 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
                 })
                 let response
                 try {
+                    inFlight = new Set(batch)
                     response = await api.updateSessionReadState(batch)
                 } catch (error) {
                     if (stopped) return
@@ -150,12 +160,14 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
                         continue
                     }
                     throw error
-                }
+                } finally { inFlight.clear() }
                 if (stopped) return
-                const rejected = new Set(batch.filter(item => !response.acceptedSessionIds.includes(item.sessionId)).map(item => item.sessionId))
+                const rejected = new Map(batch.filter(item => !response.acceptedSessionIds.includes(item.sessionId))
+                    .map(item => [item.sessionId, item.baseVersion]))
                 // Drop the entire dependent offline chain on conflict. Its projected
                 // versions might otherwise accidentally match an intervening peer write.
-                pending = pending.filter(item => !batch.includes(item) && !rejected.has(item.sessionId))
+                pending = pending.filter(item => !batch.includes(item)
+                    && (!rejected.has(item.sessionId) || item.baseVersion > rejected.get(item.sessionId)!))
                 apply(response.states)
             }
         } catch {
@@ -165,9 +177,15 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
     }
     configureSessionReadSync(scope, (kind, sessions) => {
         for (const { id, updatedAt } of sessions) {
-            const expectedVersion = pending.filter(item => item.sessionId === id)
-                .reduce((version, item) => Math.max(version, item.expectedVersion + 1), states.get(id)?.version ?? 0)
-            pending.push({ mutationId: randomId(), sessionId: id, kind, activityAt: updatedAt, expectedVersion })
+            const confirmedVersion = states.get(id)?.version ?? 0
+            const parent = [...inFlight].find(item => item.sessionId === id && item.expectedVersion >= confirmedVersion)
+            const baseVersion = parent?.baseVersion ?? confirmedVersion
+            // A fresh intent based on an observed peer update supersedes unsent
+            // intents from older state, but does not depend on a stale in-flight write.
+            pending = pending.filter(item => item.sessionId !== id || item.baseVersion >= confirmedVersion || inFlight.has(item))
+            const expectedVersion = pending.filter(item => item.sessionId === id && item.baseVersion === baseVersion)
+                .reduce((version, item) => Math.max(version, item.expectedVersion + 1), baseVersion)
+            pending.push({ mutationId: randomId(), sessionId: id, kind, activityAt: updatedAt, expectedVersion, baseVersion })
         }
         persist()
         // Let the optimistic local update finish before an immediate mocked response.
@@ -194,7 +212,7 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
                         if (stopped) return
                         for (const session of sessions.sessions) {
                             if (!states.has(session.id) && legacy[session.id] === session.updatedAt) {
-                                pending.push({ mutationId: randomId(), sessionId: session.id, kind: 'import-unread', activityAt: session.updatedAt, expectedVersion: 0 })
+                                pending.push({ mutationId: randomId(), sessionId: session.id, kind: 'import-unread', activityAt: session.updatedAt, expectedVersion: 0, baseVersion: 0 })
                             }
                         }
                     }

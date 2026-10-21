@@ -50,6 +50,57 @@ beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clea
 afterEach(() => { sync?.stop(); sync = undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Hub read-state synchronization', () => {
+    it('keeps a fresh intent ordered after a dependent write already in flight', async () => {
+        const api = mockApi([state(1, 50)])
+        const update = api.updateSessionReadState.getMockImplementation()!
+        let release!: () => void
+        api.updateSessionReadState.mockImplementationOnce(update).mockImplementationOnce(async mutations => {
+            await new Promise<void>(resolve => { release = resolve })
+            return update(mutations)
+        })
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('a', 100)
+        markSessionUnread('a', 100)
+        await tick()
+        markSessionSeen('a', 100)
+        release()
+        await tick()
+        expect(api.records.get('a')).toMatchObject({ version: 4, lastSeenAt: 100, manualUnreadAt: null })
+    })
+
+    it('retains an independent fresh intent when a stale in-flight request is rejected', async () => {
+        const api = mockApi([state(1, 50)])
+        let release!: (value: { states: SessionReadState[]; acceptedSessionIds: string[] }) => void
+        api.updateSessionReadState.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('a', 100)
+        await tick()
+        api.records.set('a', state(2, 99, 100))
+        sync.receive([state(2, 99, 100)])
+        markAllSessionsSeen([{ id: 'a', updatedAt: 100 }])
+        release({ states: [state(2, 99, 100)], acceptedSessionIds: [] })
+        await tick()
+        expect(api.records.get('a')).toMatchObject({ version: 3, lastSeenAt: 100, manualUnreadAt: null })
+    })
+
+    it('preserves a fresh action based on a peer update when an older offline chain is rejected', async () => {
+        const api = mockApi([state(1, 50)])
+        const update = api.updateSessionReadState.getMockImplementation()!
+        api.updateSessionReadState.mockRejectedValue(new TypeError('offline'))
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('a', 100)
+        await tick()
+        api.records.set('a', state(2, 99, 100))
+        sync.receive([state(2, 99, 100)])
+        api.updateSessionReadState.mockImplementation(update)
+        markAllSessionsSeen([{ id: 'a', updatedAt: 100 }])
+        await tick()
+        expect(api.records.get('a')).toMatchObject({ version: 3, lastSeenAt: 100, manualUnreadAt: null })
+    })
+
     it('acknowledges the selected session after a deferred Hub snapshot instead of trusting cached readiness', async () => {
         localStorage.setItem(`hapi.sessionReadSync.v1:${scope}`, JSON.stringify({ states: [state(1, 100)] }))
         const api = mockApi([state(2, 99, 100)])
@@ -250,7 +301,7 @@ describe('Hub read-state synchronization', () => {
         sync = startSessionReadSync(api, scope)
         await tick()
         expect(api.updateSessionReadState).toHaveBeenCalledWith([
-            { mutationId: expect.any(String), sessionId: 'a', kind: 'import-unread', activityAt: 100, expectedVersion: 0 }
+            { mutationId: expect.any(String), sessionId: 'a', kind: 'import-unread', activityAt: 100, expectedVersion: 0, baseVersion: 0 }
         ])
         sync.stop()
         const other = mockApi()
