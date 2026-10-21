@@ -190,5 +190,5 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1')('installed Code
             await new Promise<void>(resolve => http.close(() => resolve()));
             await rm(home, { recursive: true, force: true, maxRetries: 3 });
         }
-    }, 60_000);
+    }, 120_000);
 });

@@ -6,6 +6,7 @@ import type { SessionBootstrapResult } from '@/agent/sessionFactory';
 import { SharedCodexRoot, type RootHost } from './root';
 import { codexPlanProposalId } from './plan';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { SharedRewindBarrier } from './rewind';
 
 type NativeTurn = { id: string; status: string; items: unknown[] };
 
@@ -17,9 +18,10 @@ vi.mock('../codexAppServerClient', () => ({
         queue: Array<{ id: string; clientUserMessageId: unknown; input: unknown }> = [];
         notify?: (method: string, params: unknown) => void;
         abandoned?: () => void;
+        serverRequest?: (request: { id: number; method: string; params: unknown }) => void;
         setNotificationHandler(handler: typeof this.notify) { this.notify = handler; }
         setTransportAbandonedHandler(handler: (() => void) | null) { this.abandoned = handler ?? undefined; }
-        setServerRequestHandler() {}
+        setServerRequestHandler(handler: typeof this.serverRequest) { this.serverRequest = handler; }
         async connect() {}
         async initialize() { this.initialized = true; }
         isInitialized() { return this.initialized; }
@@ -102,6 +104,7 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end'] }) 
         queue: Array<{ id: string; clientUserMessageId: string; input: unknown }>;
         notify(method: string, params: unknown): void;
         abandoned(): void;
+        serverRequest(request: { id: number; method: string; params: unknown }): void;
     };
     return {
         root, native, rpc, send, metadata: () => metadata, state: () => state, updateState,
@@ -232,6 +235,58 @@ describe('shared conversation rewind', () => {
         spy.mockImplementation(async (method, params) => method === 'thread/revert' ? {} : request(method, params));
         await expect(f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' })).rejects.toThrow('reconciliation');
         expect(() => f.root.nativeAdmission('turn/start')).toThrow();
+    });
+
+    it('reconnects after transport loss during rejected read-only rewind preflight', async () => {
+        const f = await history();
+        const planId = await completePlan(f);
+        const request = f.root.client.request.bind(f.root.client);
+        const spy = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            if (method === 'thread/goal/get') {
+                f.native.initialized = false; f.native.abandoned();
+                throw new Error('Lost preflight connection');
+            }
+            return request(method, params);
+        });
+        expect(await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }))
+            .toMatchObject({ success: false, outcome: 'rejected' });
+        await vi.waitFor(() => expect(f.native.initialized).toBe(true));
+        expect(spy.mock.calls.some(([method]) => method === 'thread/resume')).toBe(true);
+        expect(f.native.thread.turns).toHaveLength(4);
+        spy.mockImplementation(request);
+        // Native initialization precedes queue/history recovery. Wait for the
+        // final UI control publication before exercising the recovered root.
+        await vi.waitFor(() => expect(f.state().codexPlanProposalId).toBe(planId));
+        await expect(f.rpc.get(RPC_METHODS.SetSessionConfig)!({ model: 'reconnected' })).resolves.toBeDefined();
+    });
+
+    it('retires native approval resolutions arriving while the rewind marker is being written', async () => {
+        const f = await history();
+        f.native.thread.turns[2]!.status = 'inProgress';
+        f.native.serverRequest({ id: 77, method: 'item/tool/requestUserInput', params: {
+            threadId: 'thread', turnId: 'three', itemId: 'question', questions: [
+                { id: 'q', header: 'Choice', question: 'Choose?', options: [{ label: 'A', description: 'A' }] }
+            ]
+        } });
+        await vi.waitFor(() => expect(Object.keys(f.state().requests ?? {})).toHaveLength(1));
+        const id = Object.keys(f.state().requests!)[0]!;
+        const begin = SharedRewindBarrier.prototype.begin;
+        const spy = vi.spyOn(SharedRewindBarrier.prototype, 'begin').mockImplementation(function(this: SharedRewindBarrier) {
+            const writing = begin.call(this);
+            // begin synchronously closes admission, then awaits its marker write.
+            f.native.notify('serverRequest/resolved', { threadId: 'thread', requestId: 77 });
+            return writing;
+        });
+        try {
+            expect(await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }))
+                .toMatchObject({ success: false, outcome: 'rejected' });
+        } finally { spy.mockRestore(); }
+        expect(f.state().requests).toEqual({});
+        expect(f.state().completedRequests?.[id]?.status).toBe('resolved');
+        f.native.thread.turns[2]!.status = 'completed';
+        await f.root.refresh();
+        expect(await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }))
+            .toMatchObject({ success: true });
     });
 
     it('refuses cold recovery before connecting a native client after an interrupted rewind', async () => {

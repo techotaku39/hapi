@@ -83,11 +83,11 @@ export class SharedCodexRoot {
         this.rewindBarrier = new SharedRewindBarrier(join(host.directory, `${this.session.sessionId}.rewind.json`));
         this.client = new CodexAppServerClient({ endpoint: host.endpoint, token: host.token, cwd: bootstrap.workingDirectory });
         this.client.setNotificationHandler((method, params) => {
-            const eventThread = string(record(params).threadId);
-            if (this.rewindBarrier.blocked && (eventThread === this.threadId || this.children.has(eventThread ?? ''))) return;
             if (method === 'serverRequest/resolved') {
                 this.permissions?.resolved(string(record(params).threadId) ?? '', record(params).requestId); return;
             }
+            const eventThread = string(record(params).threadId);
+            if (this.rewindBarrier.blocked && (eventThread === this.threadId || this.children.has(eventThread ?? ''))) return;
             if (method === 'thread/settings/updated' && record(params).threadId === this.threadId) this.acceptSettings(record(record(params).threadSettings));
             if (record(params).threadId === this.threadId) {
                 if (method === 'turn/started') {
@@ -595,7 +595,14 @@ export class SharedCodexRoot {
                 // preflight is checking it. Restore notifications suppressed
                 // during that check before exposing controls again.
                 this.acceptSettings(this.host.settingsFor(this.threadId) ?? {});
-                await this.refresh().catch(refreshError => logger.debug('[Codex shared] rejected rewind refresh', refreshError));
+                if (!this.client.isInitialized()) {
+                    // Transport loss while the barrier was closed deferred its
+                    // callback. Pre-dispatch rejection is safe to reconnect;
+                    // never take this path after native mutation was dispatched.
+                    void this.reconnect().catch(reconnectError => logger.debug('[Codex shared] rejected rewind reconnect', reconnectError));
+                } else {
+                    await this.refresh().catch(refreshError => logger.debug('[Codex shared] rejected rewind refresh', refreshError));
+                }
                 this.publishPlan(); return rejected(error);
             }
             this.session.updateMetadata(metadata => ({ ...metadata, conversationHistoryDiverged: true }));
