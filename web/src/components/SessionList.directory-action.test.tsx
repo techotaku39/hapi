@@ -1050,8 +1050,7 @@ describe('SessionList search toggle', () => {
             )
 
             fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
-            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.click(screen.getByTestId('session-list-search-scope'))
             const input = screen.getByRole('searchbox')
             fireEvent.change(input, { target: { value: 'old query' } })
 
@@ -1109,8 +1108,7 @@ describe('SessionList search toggle', () => {
             )
 
             fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
-            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.click(screen.getByTestId('session-list-search-scope'))
             fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'content' } })
 
             await act(async () => {
@@ -1159,8 +1157,7 @@ describe('SessionList search toggle', () => {
             )
 
             fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
-            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.click(screen.getByTestId('session-list-search-scope'))
             fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'content' } })
 
             await act(async () => {
@@ -1214,8 +1211,7 @@ describe('SessionList search toggle', () => {
 
             fireEvent.click(screen.getByRole('button', { name: 'Unread only' }))
             fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
-            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.click(screen.getByTestId('session-list-search-scope'))
             fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'content' } })
 
             await act(async () => {
@@ -1280,8 +1276,7 @@ describe('SessionList search toggle', () => {
             )
 
             fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
-            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.click(screen.getByTestId('session-list-search-scope'))
             fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'missing' } })
 
             await act(async () => {
@@ -1335,8 +1330,7 @@ describe('SessionList search toggle', () => {
             )
 
             fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
-            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.click(screen.getByTestId('session-list-search-scope'))
             fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'partial' } })
 
             await act(async () => {
@@ -1377,8 +1371,7 @@ describe('SessionList search toggle', () => {
             )
 
             fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
-            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.click(screen.getByTestId('session-list-search-scope'))
             fireEvent.change(screen.getByRole('searchbox'), { target: { value: '你' } })
 
             await act(async () => {

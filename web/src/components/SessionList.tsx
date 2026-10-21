@@ -587,7 +587,8 @@ function XIcon(props: { className?: string }) {
     )
 }
 
-function ChevronDownIcon(props: { className?: string }) {
+/** Metadata scope: an ID card, for title/summary/path/Agent/machine/ID. */
+function ScopeMetadataIcon(props: { className?: string }) {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -602,7 +603,32 @@ function ChevronDownIcon(props: { className?: string }) {
             className={props.className}
             aria-hidden="true"
         >
-            <path d="m6 9 6 6 6-6" />
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="8.5" cy="10" r="1.8" />
+            <path d="M5.5 16.6c.5-1.3 1.6-2 3-2s2.5.7 3 2" />
+            <path d="M14.5 9.5h4M14.5 13.5h4" />
+        </svg>
+    )
+}
+
+/** Content scope: a speech bubble with text, for the message full-text index. */
+function ScopeContentIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2Z" />
+            <path d="M8 8.5h9M8 12.5h6" />
         </svg>
     )
 }
@@ -860,7 +886,6 @@ export function SessionListSearch(props: {
 }) {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
-    const [searchModeOpen, setSearchModeOpen] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
@@ -871,7 +896,6 @@ export function SessionListSearch(props: {
             inputRef.current?.focus()
         } else {
             setDatePickerOpen(false)
-            setSearchModeOpen(false)
         }
     }, [props.expanded])
 
@@ -965,45 +989,37 @@ export function SessionListSearch(props: {
         ? t('sessions.search.content.placeholder')
         : t('sessions.search.open')
 
+    // A two-state toggle, not a menu: one tap flips the scope, and the glyph
+    // (ID card vs speech bubble) carries the mode without a chrome label.
+    const otherSearchMode = searchMode === 'content' ? 'metadata' : 'content'
+    const scopeHint = t('sessions.search.scope.' + searchMode + '.description')
+        + '. '
+        + t('sessions.search.scope.switch', {
+            scope: t('sessions.search.scope.' + otherSearchMode + '.name'),
+        })
+    const ScopeIcon = searchMode === 'content' ? ScopeContentIcon : ScopeMetadataIcon
+
     const renderSearchMode = () => canSearchContent ? (
-        <div className="relative shrink-0">
-            <button
-                type="button"
-                aria-label={t('sessions.search.scope.toggle')}
-                aria-expanded={searchModeOpen}
-                onClick={() => setSearchModeOpen(open => !open)}
-                className="flex h-full w-auto items-center gap-0.5 border-r border-[var(--app-border)] px-1.5 text-xs leading-none text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
-            >
-                <span className="shrink-0 whitespace-nowrap leading-none">{t('sessions.search.scope.' + searchMode)}</span>
-                <ChevronDownIcon className={cn(
-                    'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                    searchModeOpen && 'rotate-180'
-                )} />
-            </button>
-            {searchModeOpen ? (
-                <div className="absolute left-0 top-full z-30 mt-1 flex w-max min-w-full flex-col gap-0.5 overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-0.5 shadow-lg">
-                    {(['metadata', 'content'] as const).map((mode) => (
-                        <button
-                            key={mode}
-                            type="button"
-                            aria-pressed={searchMode === mode}
-                            onClick={() => {
-                                props.onSearchModeChange?.(mode)
-                                setSearchModeOpen(false)
-                            }}
-                            className={cn(
-                                'flex min-h-8 w-full items-center justify-center whitespace-nowrap rounded-md px-2 py-0.5 text-center text-sm leading-none transition-colors',
-                                searchMode === mode
-                                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
-                                    : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
-                            )}
-                        >
-                            {t('sessions.search.scope.' + mode)}
-                        </button>
-                    ))}
-                </div>
-            ) : null}
-        </div>
+        <button
+            type="button"
+            data-testid="session-list-search-scope"
+            data-search-scope={searchMode}
+            onClick={() => props.onSearchModeChange?.(otherSearchMode)}
+            // Hit target matches the clear endcap so the scope is as tappable
+            // as the action beside it (tiann/hapi#2081).
+            className={cn(
+                'session-list-search-scope flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center',
+                'border-r border-[var(--app-border)] transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset',
+                searchMode === 'content'
+                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)]'
+                    : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+            )}
+            title={scopeHint}
+            aria-label={scopeHint}
+        >
+            <ScopeIcon className="h-5 w-5 shrink-0" />
+        </button>
     ) : null
 
     if (!props.expanded) {
@@ -1056,8 +1072,20 @@ export function SessionListSearch(props: {
                         title={collapsedLabel}
                         aria-label={collapsedLabel}
                     >
-                        <span data-toolbar-chrome="" className="inline-flex shrink-0">
-                            <SearchIcon className="h-5 w-5 shrink-0" />
+                        <span
+                            data-toolbar-chrome=""
+                            data-search-scope={hasTextQuery ? searchMode : undefined}
+                            className="inline-flex shrink-0"
+                        >
+                            {/*
+                              * The applying chip keeps the scope glyph so a content-scoped
+                              * query stays readable once the field collapses. Idle (no
+                              * query) stays a magnifier: there is no scope in effect yet,
+                              * and this is also the button that opens search.
+                              */}
+                            {hasTextQuery && searchMode === 'content'
+                                ? <ScopeContentIcon className="h-5 w-5 shrink-0" />
+                                : <SearchIcon className="h-5 w-5 shrink-0" />}
                         </span>
                         {hasTextQuery ? (
                             <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>

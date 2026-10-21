@@ -49,16 +49,18 @@ test('content search opens the matching message instead of the session tail', as
 
     const searchInput = page.getByRole('searchbox')
     await expect(searchInput).toBeVisible()
-    const scopeButton = page.getByRole('button', { name: 'Search scope' })
+    const scopeButton = page.getByTestId('session-list-search-scope')
     await expect(scopeButton).toBeVisible()
+    await expect(scopeButton).toHaveAttribute('data-search-scope', 'metadata')
+    // The toggle stays an icon-sized endcap, and matches the clear endcap's hit target.
     await expect.poll(() => scopeButton.evaluate((button) => button.getBoundingClientRect().width))
         .toBeLessThan(80)
+    await expect.poll(() => scopeButton.evaluate((button) => {
+        const box = button.getBoundingClientRect()
+        return Math.min(box.width, box.height)
+    })).toBeGreaterThanOrEqual(48)
     await scopeButton.click()
-    const defaultScopeOption = page.getByRole('button', { name: 'Default', exact: true })
-    await expect(defaultScopeOption).toBeVisible()
-    await expect.poll(() => defaultScopeOption.evaluate((button) => button.getBoundingClientRect().width))
-        .toBeLessThan(80)
-    await page.getByRole('button', { name: 'Content', exact: true }).click()
+    await expect(scopeButton).toHaveAttribute('data-search-scope', 'content')
     await searchInput.fill('cache')
 
     const row = page.locator('.session-list-item').filter({
@@ -112,8 +114,7 @@ test('content search shows its loading state before the debounce completes', asy
     await searchButton.click()
     const searchInput = page.getByRole('searchbox')
     await expect(searchInput).toBeVisible()
-    await page.getByRole('button', { name: 'Search scope' }).click()
-    await page.getByRole('button', { name: 'Content', exact: true }).click()
+    await page.getByTestId('session-list-search-scope').click()
     await searchInput.fill('cache')
 
     const loading = page.getByText(/Searching message content|正在搜索消息内容/).first()
@@ -271,8 +272,7 @@ test('content search loads and opens a matching message outside the initial late
 
     const searchInput = page.getByRole('searchbox')
     await expect(searchInput).toBeVisible()
-    await page.getByRole('button', { name: 'Search scope' }).click()
-    await page.getByRole('button', { name: 'Content', exact: true }).click()
+    await page.getByTestId('session-list-search-scope').click()
     await searchInput.fill('cache')
 
     const row = page.locator('.session-list-item').filter({
@@ -378,8 +378,7 @@ test('content search can jump to the same historical message repeatedly', async 
         await searchButton.click()
         const searchInput = page.getByRole('searchbox')
         await expect(searchInput).toBeVisible()
-        await page.getByRole('button', { name: 'Search scope' }).click()
-        await page.getByRole('button', { name: 'Content', exact: true }).click()
+        await page.getByTestId('session-list-search-scope').click()
         await searchInput.fill('cache')
 
         const row = page.locator('.session-list-item').filter({
