@@ -35,6 +35,8 @@ import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { usePinInProgressSessionsMode } from '@/hooks/usePinInProgressSessionsMode'
+import { useSessionProjectOrder, sortSessionGroupsByProjectOrder } from '@/hooks/useSessionProjectOrder'
+import { useSessionProjectSortMode } from '@/hooks/useSessionProjectSortMode'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import {
     getSessionLastSeenAt,
@@ -332,13 +334,19 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
     return Math.max(normalizedStep, current - normalizedStep)
 }
 
+function getSessionProjectKey(session: SessionSummary): string {
+    const directory = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+    const machineId = session.metadata?.machineId ?? null
+    return `${machineId ?? UNKNOWN_MACHINE_ID}::${directory}`
+}
+
 function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
         const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
         const machineId = session.metadata?.machineId ?? null
-        const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
+        const key = getSessionProjectKey(session)
         if (!groups.has(key)) {
             groups.set(key, {
                 directory: path,
@@ -1241,6 +1249,7 @@ export function SessionList(props: {
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { pinInProgressSessionsMode } = usePinInProgressSessionsMode()
+    const { sessionProjectSortMode } = useSessionProjectSortMode()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const isCombinedPinLayout = pinInProgressSessions
         && pinInProgressSessionsMode === 'combined'
@@ -1326,14 +1335,32 @@ export function SessionList(props: {
         },
         [allSessions, hasTextQuery, isFiltering, normalizedQuery, searchScoreIndex, timeScopedSessions, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
-    const allGroups = useMemo(
-        () => groupSessionsByDirectory(allSessions),
-        [allSessions]
-    )
     const unfilteredGroups = useMemo(
         () => groupSessionsByDirectory(sidebarSessions),
         [sidebarSessions]
     )
+    const projectKeys = useMemo(
+        () => {
+            const seen = new Set<string>()
+            const keys: string[] = []
+            for (const session of sidebarSessions) {
+                const key = getSessionProjectKey(session)
+                if (!seen.has(key)) {
+                    seen.add(key)
+                    keys.push(key)
+                }
+            }
+            return keys
+        },
+        [sidebarSessions]
+    )
+    const projectOrder = useSessionProjectOrder(projectKeys)
+    const allGroups = useMemo(() => {
+        const grouped = groupSessionsByDirectory(allSessions)
+        return sessionProjectSortMode === 'stable'
+            ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+            : grouped
+    }, [allSessions, projectOrder, sessionProjectSortMode])
     const machineFilters = useMemo(
         () => groupByMachine(allGroups, resolveMachineLabel),
         [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
@@ -1411,9 +1438,11 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return grouped
+            return sessionProjectSortMode === 'stable'
+                ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+                : grouped
         },
-        [machineFilteredSessions, pinInProgressSessions, searchScoreIndex, hasTextQuery]
+        [machineFilteredSessions, pinInProgressSessions, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
     )
     const combinedActiveGroups = useMemo(
         () => {
@@ -1424,9 +1453,11 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return grouped
+            return sessionProjectSortMode === 'stable'
+                ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+                : grouped
         },
-        [machineFilteredSessions, isCombinedPinLayout, searchScoreIndex, hasTextQuery]
+        [machineFilteredSessions, isCombinedPinLayout, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
     )
     const combinedArchivedGroups = useMemo(
         () => {
@@ -1437,21 +1468,25 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return grouped
+            return sessionProjectSortMode === 'stable'
+                ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+                : grouped
         },
-        [machineFilteredSessions, isCombinedPinLayout, searchScoreIndex, hasTextQuery]
+        [machineFilteredSessions, isCombinedPinLayout, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
     )
     // Directory groups whose rows all floated to the pinned sections still
     // render an action-only header so copy-path / new-session-in-directory
     // stay available (no rows to group, but the project itself is live).
     // Based on the same machineFilteredSessions set as `groups` so machine /
     // unread filters stay consistent.
-    const allDirectoryGroups = useMemo(
-        () => groupSessionsByDirectory(
+    const allDirectoryGroups = useMemo(() => {
+        const grouped = groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => !session.globalPinned)
-        ),
-        [machineFilteredSessions]
-    )
+        )
+        return sessionProjectSortMode === 'stable'
+            ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+            : grouped
+    }, [machineFilteredSessions, projectOrder, sessionProjectSortMode])
     const actionOnlyGroups = useMemo(() => {
         if (!pinInProgressSessions) {
             return []
