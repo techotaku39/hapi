@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { applySessionReadStates, configureSessionReadSync, disconnectSessionReadSync } from '@/lib/sessionLastSeen'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
@@ -7,7 +8,7 @@ import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { SessionList } from './SessionList'
 
-afterEach(() => cleanup())
+afterEach(() => { cleanup(); disconnectSessionReadSync() })
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -63,6 +64,17 @@ function renderSessionList(sessions: SessionSummary[]) {
 }
 
 describe('SessionList mark all as read', () => {
+    it('offers manual unread and bulk read only after the initial Hub state is ready', () => {
+        configureSessionReadSync('pending-hub', vi.fn())
+        renderSessionList([makeSession({ id: 'loading', updatedAt: 1000, metadata: { path: '/work', name: 'Loading state' } })])
+        expect(screen.queryByRole('button', { name: 'Mark all as read (1)' })).toBeNull()
+        const row = screen.getByRole('button', { name: /Loading state/ })
+        fireEvent.contextMenu(row, { clientX: 100, clientY: 100 })
+        expect(screen.queryByRole('menuitem', { name: 'Mark as unread' })).toBeNull()
+        act(() => applySessionReadStates([{ sessionId: 'loading', lastSeenAt: 0, manualUnreadAt: null, version: 1 }]))
+        expect(screen.getByRole('button', { name: 'Mark all as read (1)' })).toBeTruthy()
+        expect(screen.getByRole('menuitem', { name: 'Mark as unread' })).toBeTruthy()
+    })
     beforeEach(() => {
         localStorage.clear()
     })
