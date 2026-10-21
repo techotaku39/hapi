@@ -289,6 +289,35 @@ describe('shared conversation rewind', () => {
             .toMatchObject({ success: true });
     });
 
+    it.each([false, true])('recovers new requests received during rejected preflight without reviving resolved ones (%s)', async resolved => {
+        const f = await history();
+        f.native.thread.turns[2]!.status = 'inProgress';
+        const begin = SharedRewindBarrier.prototype.begin;
+        const spy = vi.spyOn(SharedRewindBarrier.prototype, 'begin').mockImplementation(function(this: SharedRewindBarrier) {
+            const writing = begin.call(this);
+            f.native.serverRequest({ id: 88, method: 'item/tool/requestUserInput', params: {
+                threadId: 'thread', turnId: 'three', itemId: 'new-question', questions: [
+                    { id: 'new-q', header: 'Choice', question: 'New choice?', options: [{ label: 'A', description: 'A' }] }
+                ]
+            } });
+            if (resolved) f.native.notify('serverRequest/resolved', { threadId: 'thread', requestId: 88 });
+            return writing;
+        });
+        try {
+            expect(await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }))
+                .toMatchObject({ success: false, outcome: 'rejected' });
+        } finally { spy.mockRestore(); }
+        expect(Object.values(f.state().requests ?? {})).toHaveLength(resolved ? 0 : 1);
+        if (!resolved) {
+            expect(Object.values(f.state().requests!)[0]?.toolCallId).toBe('new-question');
+            f.native.notify('serverRequest/resolved', { threadId: 'thread', requestId: 88 });
+        }
+        f.native.thread.turns[2]!.status = 'completed';
+        await f.root.refresh();
+        expect(await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }))
+            .toMatchObject({ success: true });
+    });
+
     it('refuses cold recovery before connecting a native client after an interrupted rewind', async () => {
         const f = await history();
         await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' });

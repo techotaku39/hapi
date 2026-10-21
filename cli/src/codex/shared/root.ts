@@ -26,6 +26,7 @@ import { planImplementationMessageId, planProposalForItem, planProposalForTurn }
 import { SharedRewindBarrier, isNativeHistoryRead } from './rewind';
 
 type RuntimeSettings = NonNullable<Parameters<ApiSessionClient['keepAlive']>[2]>;
+type NativeServerRequest = { id: string | number; method: string; params: unknown };
 export type RootHost = {
     directory: string; generation: string; endpoint: string; token?: string;
     settingsFor(threadId: string): Record<string, unknown> | undefined;
@@ -77,6 +78,7 @@ export class SharedCodexRoot {
     private readonly rewindBarrier: SharedRewindBarrier;
     private supportsRevert?: boolean;
     private retainedTurnIds?: string[];
+    private deferredRequests: NativeServerRequest[] = [];
 
     constructor(readonly bootstrap: SessionBootstrapResult, private readonly host: RootHost) {
         this.session = bootstrap.session;
@@ -169,13 +171,24 @@ export class SharedCodexRoot {
         this.permissions = new SharedCodexPermissions(this.session, this.client, this.host.generation);
         this.client.setServerRequestHandler(request => { void this.receiveRequest(request); });
     }
-    private async receiveRequest(request: { id: string | number; method: string; params: unknown }): Promise<void> {
+    private async receiveRequest(request: NativeServerRequest): Promise<void> {
         await this.bound;
-        if (this.closed || this.stopping || this.rewindBarrier.blocked) return;
+        if (this.closed || this.stopping) return;
+        if (this.rewindBarrier.blocked) { this.deferredRequests.push(request); return; }
         const threadId = string(record(request.params).threadId);
         // App-server automatically subscribes every initialized connection to
         // newly created threads, including siblings. Never answer their calls.
-        if (threadId && await this.ownsThread(threadId)) this.permissions.receive(request);
+        if (threadId && await this.ownsThread(threadId)) {
+            // Ownership lookup can await native ancestry while admission closes.
+            if (this.rewindBarrier.blocked) this.deferredRequests.push(request);
+            else this.permissions.receive(request);
+        }
+    }
+    private async replayDeferredRequests(): Promise<void> {
+        const requests = this.deferredRequests.splice(0);
+        // Native resolutions are tracked even while admission is closed, so
+        // permissions.receive ignores any buffered request already retired.
+        for (const request of requests) await this.receiveRequest(request);
     }
     private async ownsThread(threadId: string): Promise<boolean> {
         const visited = new Set<string>();
@@ -383,6 +396,8 @@ export class SharedCodexRoot {
     }
     private async reconnect(): Promise<void> {
         if (this.closed || this.stopping || this.reconnecting || !this.threadId || this.rewindBarrier.blocked) return;
+        // The new connection replays authoritative pending native requests.
+        this.deferredRequests = [];
         this.reconnecting = true; this.publishSteering(); this.publishPlan(); this.permissions.close();
         try {
             while (!this.closed && !this.stopping) {
@@ -582,6 +597,7 @@ export class SharedCodexRoot {
             // subtree reconciliation protocol exists, preserve them via Fork.
             if (this.children.size) throw new Error('Rewind with child-agent history is unavailable; fork at the message instead');
             if (await this.session.flush() === false) throw new Error('Hub transcript acknowledgement is unavailable');
+            if (this.deferredRequests.length) throw new Error('Native input arrived during rewind preflight');
             this.retainedTurnIds = turns.slice(0, index).map(turn => turn.id);
             dispatched = true;
             await this.client.request('thread/revert', { threadId: this.threadId, beforeTurnId: turnId });
@@ -601,6 +617,7 @@ export class SharedCodexRoot {
                     // never take this path after native mutation was dispatched.
                     void this.reconnect().catch(reconnectError => logger.debug('[Codex shared] rejected rewind reconnect', reconnectError));
                 } else {
+                    await this.replayDeferredRequests();
                     await this.refresh().catch(refreshError => logger.debug('[Codex shared] rejected rewind refresh', refreshError));
                 }
                 this.publishPlan(); return rejected(error);
@@ -642,6 +659,7 @@ export class SharedCodexRoot {
             await this.projection.history(thread);
             if (await this.session.flush() === false) throw new Error('Hub history reconciliation acknowledgement is unavailable');
         });
+        this.deferredRequests = [];
         this.publishPlan(); return { success: true };
     }
     private async assertBoundary(localId: string, turnId: string): Promise<Record<string, unknown>> {
