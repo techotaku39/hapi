@@ -109,7 +109,7 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
                     : mutation.activityAt
             })
         }
-        applySessionReadStates([...visible.values()], true)
+        applySessionReadStates([...visible.values()], true, ready)
     }
     const apply = (incoming: SessionReadState[]) => {
         if (stopped) return
@@ -200,6 +200,7 @@ export function startSessionReadSync(api: ReadApi, scope: string) {
                     }
                 }
                 ready = true
+                publish()
                 await flush()
             } catch { schedule() }
             finally { refreshPromise = null }

@@ -31,7 +31,7 @@ export function disconnectSessionReadSync(): void {
     notifyStoreChanged()
 }
 
-export function applySessionReadStates(states: SessionReadState[], replace = false): void {
+export function applySessionReadStates(states: SessionReadState[], replace = false, ready = true): void {
     const seen = replace ? {} : readStore()
     const unread = replace ? {} : readManualUnreadStore()
     for (const state of states) {
@@ -41,7 +41,7 @@ export function applySessionReadStates(states: SessionReadState[], replace = fal
     }
     writeStore(seen)
     writeManualUnreadStore(unread)
-    syncReady = true
+    syncReady = ready
     notifyStoreChanged()
 }
 

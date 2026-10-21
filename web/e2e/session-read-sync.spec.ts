@@ -5,7 +5,7 @@ test.describe('session read state across isolated devices', () => {
     test.skip(process.env.HAPI_LIVE !== '1', 'Requires an isolated seeded Hub')
 
     test('recovers a closed offline tab without randomUUID or sessionStorage', async ({ browser, request }) => {
-        const baseUrl = process.env.HAPI_URL
+        const baseUrl = process.env.HAPI_READ_SYNC_TEST_URL ?? process.env.HAPI_URL
         const accessToken = process.env.HAPI_ACCESS_TOKEN
         if (!baseUrl || !accessToken || /:3006(?:\/|$)/.test(baseUrl)) throw new Error('Explicit isolated Hub URL and token required')
         const auth = await request.post(`${baseUrl}/api/auth`, { data: { accessToken } })
@@ -55,7 +55,7 @@ test.describe('session read state across isolated devices', () => {
     })
 
     test('desktop/mobile share read, manual unread, bulk read, filtering, badge, reload and offline recovery', async ({ browser, request }) => {
-        const baseUrl = process.env.HAPI_URL
+        const baseUrl = process.env.HAPI_READ_SYNC_TEST_URL ?? process.env.HAPI_URL
         const accessToken = process.env.HAPI_ACCESS_TOKEN
         if (!baseUrl || !accessToken || /:3006(?:\/|$)/.test(baseUrl)) throw new Error('Explicit isolated Hub URL and token required')
         const auth = await request.post(`${baseUrl}/api/auth`, { data: { accessToken } })
@@ -128,13 +128,13 @@ test.describe('session read state across isolated devices', () => {
             await expect.poll(async () => (await snapshots()).find(s => s.sessionId === 'read-sync-fixture-a')?.manualUnreadAt).toBeNull()
             await expect(unread(mobile.page, 'A')).toHaveCount(0)
             await expect.poll(() => badge(mobile.page)).toBe(2)
-            await desktop.page.goto(`${baseUrl}/sessions`)
+            await desktop.page.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded', timeout: 30000 })
             await markUnread(desktop.page, 'A')
             await expect(unread(mobile.page, 'A')).toBeVisible()
             await expect.poll(() => badge(mobile.page)).toBe(3)
             await expect.poll(async () => (await snapshots()).find(s => s.sessionId === 'read-sync-fixture-a')?.manualUnreadAt).not.toBeNull()
 
-            await mobile.page.reload()
+            await mobile.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
             await expect(unread(mobile.page, 'A')).toBeVisible()
             await desktop.page.getByRole('button', { name: /Mark all as read/ }).click()
             const dialog = desktop.page.getByRole('dialog')
@@ -151,7 +151,7 @@ test.describe('session read state across isolated devices', () => {
             await expect.poll(async () => (await snapshots()).find(s => s.sessionId === 'read-sync-fixture-b')?.manualUnreadAt).not.toBeNull()
             await desktop.context.setOffline(false)
             await expect(unread(desktop.page, 'B')).toBeVisible()
-            await desktop.page.reload()
+            await desktop.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
             await expect(unread(desktop.page, 'B')).toBeVisible()
             await expect(unread(desktop.page, 'A')).toHaveCount(0)
             await mobile.page.getByRole('button', { name: 'Unread only', exact: true }).click()

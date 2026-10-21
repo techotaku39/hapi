@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
+import { useSelectedSessionSeen } from '@/hooks/useSelectedSessionSeen'
 import type { SessionReadMutation, SessionReadState } from '@hapi/protocol'
 import type { SessionsResponse } from '@/types/api'
 import { ApiError } from '@/api/client'
@@ -48,6 +50,24 @@ beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clea
 afterEach(() => { sync?.stop(); sync = undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Hub read-state synchronization', () => {
+    it('acknowledges the selected session after a deferred Hub snapshot instead of trusting cached readiness', async () => {
+        localStorage.setItem(`hapi.sessionReadSync.v1:${scope}`, JSON.stringify({ states: [state(1, 100)] }))
+        const api = mockApi([state(2, 99, 100)])
+        let release!: (value: { states: SessionReadState[] }) => void
+        api.getSessionReadState.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+        sync = startSessionReadSync(api, scope)
+        const hook = renderHook(() => useSelectedSessionSeen('a', 100))
+        try {
+            expect(api.updateSessionReadState).not.toHaveBeenCalled()
+            await act(async () => { release({ states: [state(2, 99, 100)] }); await tick() })
+            expect(api.records.get('a')).toMatchObject({ version: 3, lastSeenAt: 100, manualUnreadAt: null })
+            act(() => sync!.receive([state(4, 99, 100)]))
+            await tick()
+            expect(getSessionManualUnreadAt('a')).toBe(100)
+            expect(api.updateSessionReadState).toHaveBeenCalledTimes(1)
+        } finally { hook.unmount() }
+    })
+
     it('starts and creates mutations when randomUUID is unavailable on HTTP LAN origins', async () => {
         vi.stubGlobal('crypto', {})
         try {
