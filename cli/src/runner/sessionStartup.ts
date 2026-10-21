@@ -1,4 +1,16 @@
 import type { SpawnSessionResult } from '@/modules/common/rpcTypes';
+import type { ChildProcess } from 'node:child_process';
+
+/** A failed startup may still own a live process using its working directory. */
+export function cleanupFailedStartupAfterExit(
+    child: Pick<ChildProcess, 'exitCode' | 'signalCode'> & { once(event: 'exit', listener: () => void): unknown },
+    shouldCleanup: () => boolean,
+    cleanup: () => void,
+): void {
+    const onExit = () => { if (shouldCleanup()) cleanup(); };
+    if (child.exitCode !== null || child.signalCode !== null) onExit();
+    else child.once('exit', onExit);
+}
 
 export function sessionStartupTimeout(agent: string | undefined, configured?: string): number {
     const explicit = Number(configured);

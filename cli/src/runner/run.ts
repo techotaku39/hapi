@@ -17,7 +17,7 @@ import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { findStopSessionOrphanTargets, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
-import { sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
+import { cleanupFailedStartupAfterExit, sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
 import {
     decideKeepWrapperArchive,
     decideRawPidStop,
@@ -954,7 +954,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             reportSpawnOutcomeToHub?.({ type: 'success' });
             logger.debug(`[RUNNER RUN] Late startup confirmed for PID ${pid}`);
           },
-          onLateFailure: message => reportSpawnOutcomeToHub?.({ type: 'error', details: { message, pid } }),
+          onLateFailure: message => {
+            reportSpawnOutcomeToHub?.({ type: 'error', details: { message, pid } });
+            if (worktreeInfo && happyProcess) cleanupFailedStartupAfterExit(
+              happyProcess,
+              () => !trackedSession.happySessionId,
+              () => { void cleanupWorktree().catch(error => logger.debug('[RUNNER RUN] Late startup worktree cleanup failed', error)); },
+            );
+          },
         }) : null;
         if (recoverableStartup) {
           // Keep both callbacks and all PID bindings after the caller deadline.

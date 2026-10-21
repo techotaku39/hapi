@@ -1,8 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
+import { cleanupFailedStartupAfterExit, sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
+import { EventEmitter } from 'node:events';
 import { createSpawnDeduplicator } from './run';
 
 afterEach(() => vi.useRealTimers());
+describe('failed startup worktree cleanup', () => {
+    const child = () => Object.assign(new EventEmitter(), { exitCode: null as number | null, signalCode: null as NodeJS.Signals | null });
+    it('waits for confirmed exit after an unconfirmed startup failure and cleans only once', async () => {
+        vi.useFakeTimers();
+        const process = child(); const cleanup = vi.fn();
+        const startup = waitForRecoverableStartup<string>({ timeoutMs: 30_000, timeoutMessage: 'Still starting', sessionId: id => id, onLateReady: vi.fn(),
+            onLateFailure: () => cleanupFailedStartupAfterExit(process, () => true, cleanup) });
+        await vi.advanceTimersByTimeAsync(30_000); await startup.result;
+        startup.fail('Process error'); startup.fail('Duplicate error');
+        expect(cleanup).not.toHaveBeenCalled();
+        process.exitCode = 1; process.emit('exit', 1); process.emit('exit', 1);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+    });
+    it.each(['exit', 'signal'])('cleans immediately when %s already proved the child dead', proof => {
+        const process = child(); const cleanup = vi.fn();
+        if (proof === 'exit') process.exitCode = 1; else process.signalCode = 'SIGTERM';
+        cleanupFailedStartupAfterExit(process, () => true, cleanup);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(process.listenerCount('exit')).toBe(0);
+    });
+    it('preserves the worktree if the process later reports a successful startup before exit', () => {
+        const process = child(); const cleanup = vi.fn(); let confirmed = false;
+        cleanupFailedStartupAfterExit(process, () => !confirmed, cleanup);
+        confirmed = true; process.emit('exit', 0);
+        expect(cleanup).not.toHaveBeenCalled();
+    });
+});
 describe('recoverable Codex startup', () => {
     const setup = () => {
         vi.useFakeTimers();
