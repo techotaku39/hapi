@@ -431,37 +431,43 @@ function getSourceMessageIdsForBlock(block: VisibleChatBlock): string[] {
     return []
 }
 
-function getSourceMessageIdForBlock(block: VisibleChatBlock): string | undefined {
-    return getSourceMessageIdsForBlock(block)[0]
-}
-
 type SourceAwareTextMessagePart = {
     type: 'text'
     text: string
     sourceMessageId?: string
+    sourceMessageIds?: string[]
 }
 
 type SourceAwareReasoningMessagePart = {
     type: 'reasoning'
     text: string
     sourceMessageId?: string
+    sourceMessageIds?: string[]
 }
 
+// A block that kept both its live and terminal rows carries several source
+// ids. Exposing only the first leaves a search hit on any later id to fall
+// back to the group-wide marker, which then matches the first occurrence
+// anywhere in the joined reply (tiann/hapi#1598 review).
 function createTextMessagePart(block: VisibleChatBlock, text: string): SourceAwareTextMessagePart {
-    const sourceMessageId = getSourceMessageIdForBlock(block)
+    const sourceMessageIds = getSourceMessageIdsForBlock(block)
+    const sourceMessageId = sourceMessageIds[0]
     return {
         type: 'text',
         text,
-        ...(sourceMessageId ? { sourceMessageId } : {})
+        ...(sourceMessageId ? { sourceMessageId } : {}),
+        ...(sourceMessageIds.length > 0 ? { sourceMessageIds } : {})
     }
 }
 
 function createReasoningMessagePart(block: VisibleChatBlock, text: string): SourceAwareReasoningMessagePart {
-    const sourceMessageId = getSourceMessageIdForBlock(block)
+    const sourceMessageIds = getSourceMessageIdsForBlock(block)
+    const sourceMessageId = sourceMessageIds[0]
     return {
         type: 'reasoning',
         text,
-        ...(sourceMessageId ? { sourceMessageId } : {})
+        ...(sourceMessageId ? { sourceMessageId } : {}),
+        ...(sourceMessageIds.length > 0 ? { sourceMessageIds } : {})
     }
 }
 

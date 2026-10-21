@@ -116,6 +116,15 @@ function getConversationMessageCandidates(messageId: string): HTMLElement[] {
         if (element.getAttribute('data-hapi-source-message-id') === messageId) add(element)
     }
 
+    // Per-part ids before the group-wide marker below: a block that kept both
+    // its live and terminal rows only exposes the first as
+    // data-hapi-source-message-id, and falling through to the group marker
+    // would match the first occurrence anywhere in the joined reply.
+    for (const element of document.querySelectorAll<HTMLElement>('[data-hapi-source-part-message-ids]')) {
+        const partIds = element.getAttribute('data-hapi-source-part-message-ids')?.split(/\s+/) ?? []
+        if (partIds.includes(messageId)) add(element)
+    }
+
     add(document.getElementById(getConversationMessageAnchorId(messageId)))
 
     for (const element of document.querySelectorAll<HTMLElement>('[data-hapi-source-message-ids]')) {

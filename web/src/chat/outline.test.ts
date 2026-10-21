@@ -112,6 +112,36 @@ describe('conversation outline', () => {
         joined.remove()
     })
 
+    it('anchors a terminal-row hit to its own part when two streams share a phrase', () => {
+        // Each stream kept a live and a terminal row, so the part exposes the
+        // live id singly but carries both. A hit on the later stream's
+        // terminal row must land on that part, not on the group marker (which
+        // would select the first occurrence in the whole reply).
+        const group = document.createElement('div')
+        group.setAttribute('data-hapi-source-message-ids', 'live-1 terminal-1 live-2 terminal-2')
+
+        const firstPart = document.createElement('div')
+        firstPart.setAttribute('data-hapi-source-message-id', 'live-1')
+        firstPart.setAttribute('data-hapi-source-part-message-ids', 'live-1 terminal-1')
+        firstPart.textContent = 'The shared phrase appears here first'
+
+        const secondPart = document.createElement('div')
+        secondPart.setAttribute('data-hapi-source-message-id', 'live-2')
+        secondPart.setAttribute('data-hapi-source-part-message-ids', 'live-2 terminal-2')
+        secondPart.textContent = 'The shared phrase appears here again'
+
+        group.append(firstPart, secondPart)
+        document.body.append(group)
+
+        expect(findConversationMessageAnchor('terminal-2')).toBe(secondPart)
+        expect(findConversationMessageAnchor('terminal-2', 'shared phrase')).toBe(secondPart)
+        expect(findConversationMessageAnchor('terminal-1', 'shared phrase')).toBe(firstPart)
+        // Group-wide ids still resolve for callers with no per-part marker.
+        expect(findConversationMessageAnchor('live-1')).toBe(firstPart)
+
+        group.remove()
+    })
+
     it('selects the rendered block containing the search query when a message is split', () => {
         const first = document.createElement('div')
         first.setAttribute('data-hapi-source-message-id', 'raw-message')
