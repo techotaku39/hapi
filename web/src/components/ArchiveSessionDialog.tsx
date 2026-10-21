@@ -25,12 +25,14 @@ export function ArchiveSessionDialog(props: ArchiveSessionDialogProps) {
             title={t('dialog.archive.title')}
             description={confirmingCleanup
                 ? t('dialog.archive.cleanupDescription')
-                : t('dialog.archive.description', { name: props.sessionName })}
+                : props.isPending
+                    ? t('dialog.archive.pendingDescription')
+                    : t('dialog.archive.description', { name: props.sessionName })}
             confirmLabel={t('dialog.archive.confirm')}
             confirmingLabel={t(confirmingCleanup ? 'dialog.archive.cleaning' : 'dialog.archive.confirming')}
             onConfirm={props.onConfirm}
             isPending={props.isPending}
-            allowDismissWhilePending={confirmingCleanup}
+            allowDismissWhilePending
             onBackgroundError={(message) => addToast({
                 title: t('dialog.archive.error'), body: message,
                 sessionId: props.sessionId, url: `/sessions/${props.sessionId}`

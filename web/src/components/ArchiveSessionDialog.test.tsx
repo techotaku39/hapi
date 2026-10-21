@@ -44,7 +44,8 @@ describe('ArchiveSessionDialog', () => {
         const rendered = render(view(true, confirm))
         fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
         expect(screen.getByRole('button', { name: 'Archiving…' })).toBeDisabled()
-        expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+        expect(screen.getByText(/Archiving this session\. You can close this window/)).toBeVisible()
+        expect(within(screen.getByRole('dialog')).getAllByRole('button', { name: 'Close' })).toHaveLength(2)
         rendered.rerender(view(false, confirm))
         expect(screen.getByText(/Session disconnected\. Confirming archive/)).toBeVisible()
         expect(screen.getByRole('button', { name: 'Confirming cleanup…' })).toBeDisabled()
@@ -55,17 +56,39 @@ describe('ArchiveSessionDialog', () => {
         expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
-    it.each([false, true])('surfaces a cleanup failure after dismissal (unmount=%s)', async unmountOnClose => {
+    it.each([
+        { active: true, unmountOnClose: false },
+        { active: true, unmountOnClose: true },
+        { active: false, unmountOnClose: false },
+        { active: false, unmountOnClose: true },
+    ])('surfaces a failure after dismissal (active=$active, unmount=$unmountOnClose)', async ({ active, unmountOnClose }) => {
         const archive = pendingArchive()
         const confirm = vi.fn(() => archive.promise)
         const rendered = render(view(true, confirm, unmountOnClose))
         fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
-        rendered.rerender(view(false, confirm, unmountOnClose))
+        rendered.rerender(view(active, confirm, unmountOnClose))
+        expect(within(screen.getByRole('dialog')).getAllByRole('button', { name: 'Close' })).toHaveLength(2)
         fireEvent.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: 'Close' })[0]!)
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
         await act(async () => archive.reject(new Error('Session process is still running')))
         expect(await screen.findByRole('alert')).toHaveTextContent('Archive could not be confirmed: Session process is still running')
         expect(confirm).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([true, false])('keeps the archive running after closing (active=%s)', async active => {
+        const archive = pendingArchive()
+        const confirm = vi.fn(() => archive.promise)
+        render(view(active, confirm))
+        fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+        const dialog = screen.getByRole('dialog')
+        const closeButtons = within(dialog).getAllByRole('button', { name: 'Close' })
+        expect(closeButtons).toHaveLength(2)
+        fireEvent.click(closeButtons[0]!)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(confirm).toHaveBeenCalledTimes(1)
+        await act(async () => archive.resolve())
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
     it('keeps failures visible in an open dialog without claiming success', async () => {

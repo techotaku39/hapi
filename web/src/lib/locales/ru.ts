@@ -296,6 +296,7 @@ export default {
   'dialog.archive.description': 'Вы уверены, что хотите архивировать «{name}»? Активная сессия будет отключена.',
   'dialog.archive.confirm': 'Архивировать',
   'dialog.archive.confirming': 'Архивирование…',
+  'dialog.archive.pendingDescription': 'Архивируем сессию. Это окно можно закрыть: архивирование продолжится в фоне.',
   'dialog.archive.cleaning': 'Проверка завершения…',
   'dialog.archive.cleanupDescription': 'Сессия отключена. Проверяем архивирование и завершение фоновых процессов. Это окно можно закрыть: архивирование продолжится.',
   'dialog.archive.error': 'Не удалось подтвердить архивирование',
@@ -307,6 +308,8 @@ export default {
   'dialog.delete.scratchlist.other': 'Также будут удалены записи блокнота: {n}.',
   'dialog.delete.confirm': 'Удалить',
   'dialog.delete.confirming': 'Удаление…',
+  'dialog.delete.waitingForArchive': 'Ожидание завершения архивации…',
+  'dialog.delete.waitingForArchiveDescription': 'Архивирование ещё продолжается. Дождитесь его завершения, затем подтвердите удаление.',
   'dialog.error.default': 'Операция не удалась. Попробуйте ещё раз.',
 
   // Экспорт сессии

@@ -18,6 +18,7 @@ type ConfirmDialogProps = {
     confirmingLabel: string
     onConfirm: () => Promise<void>
     isPending: boolean
+    isConfirmDisabled?: boolean
     allowDismissWhilePending?: boolean
     onBackgroundError?: (message: string) => void
     destructive?: boolean
@@ -35,6 +36,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         confirmingLabel,
         onConfirm,
         isPending,
+        isConfirmDisabled = false,
         allowDismissWhilePending = false,
         onBackgroundError,
         destructive = false,
@@ -109,7 +111,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
                         type="button"
                         variant={destructive ? 'destructive' : 'secondary'}
                         onClick={handleConfirm}
-                        disabled={isPending}
+                        disabled={isPending || isConfirmDisabled}
                     >
                         {isPending ? confirmingLabel : confirmLabel}
                     </Button>
