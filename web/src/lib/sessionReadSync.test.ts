@@ -1,0 +1,208 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SessionReadMutation, SessionReadState } from '@hapi/protocol'
+import type { SessionsResponse } from '@/types/api'
+import { ApiError } from '@/api/client'
+import { startSessionReadSync, sessionReadScope } from './sessionReadSync'
+import { getSessionLastSeenAt, getSessionManualUnreadAt, markAllSessionsSeen, markSessionSeen, markSessionUnread } from './sessionLastSeen'
+
+const scope = JSON.stringify(['http://hub', 'default'])
+let sync: ReturnType<typeof startSessionReadSync> | undefined
+const state = (version: number, lastSeenAt = 100, manualUnreadAt: number | null = null): SessionReadState =>
+    ({ sessionId: 'a', version, lastSeenAt, manualUnreadAt })
+const tick = async () => { for (let i = 0; i < 15; i++) await Promise.resolve() }
+
+function mockApi(initial: SessionReadState[] = []) {
+    const records = new Map(initial.map(row => [row.sessionId, row]))
+    const mutationIds = new Map<string, string>()
+    return {
+        records,
+        getSessions: vi.fn(async (): Promise<SessionsResponse> => ({ sessions: [{ id: 'a', updatedAt: 100 } as SessionsResponse['sessions'][number]] })),
+        getSessionReadState: vi.fn(async () => ({ states: [...records.values()] })),
+        updateSessionReadState: vi.fn(async (mutations: SessionReadMutation[]) => {
+            const acceptedSessionIds: string[] = []
+            const states = mutations.flatMap(mutation => {
+            const current = records.get(mutation.sessionId)
+            if (current && mutationIds.get(mutation.sessionId) === mutation.mutationId) {
+                acceptedSessionIds.push(current.sessionId)
+                return [current]
+            }
+            if ((current?.version ?? 0) === mutation.expectedVersion) {
+                const next = {
+                    sessionId: mutation.sessionId,
+                    version: mutation.expectedVersion + 1,
+                    lastSeenAt: mutation.kind === 'seen' ? mutation.activityAt : Math.max(0, mutation.activityAt - 1),
+                    manualUnreadAt: mutation.kind === 'seen' ? null : mutation.activityAt
+                }
+                records.set(next.sessionId, next)
+                mutationIds.set(next.sessionId, mutation.mutationId)
+                acceptedSessionIds.push(next.sessionId)
+                return [next]
+            }
+            return current ? [current] : []
+            })
+            return { states, acceptedSessionIds }
+        })
+    }
+}
+beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear() })
+afterEach(() => { sync?.stop(); sync = undefined; vi.useRealTimers(); vi.restoreAllMocks() })
+
+describe('Hub read-state synchronization', () => {
+    it('loads Hub state instead of promoting a legacy read baseline', async () => {
+        localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({ a: 9999 }))
+        const api = mockApi([state(2, 99, 100)])
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(getSessionLastSeenAt('a')).toBe(99)
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+        expect(api.updateSessionReadState).not.toHaveBeenCalled()
+    })
+
+    it('synchronizes sequential seen, manual unread, and bulk read actions', async () => {
+        const api = mockApi()
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('a', 100)
+        markSessionUnread('a', 100)
+        await tick()
+        expect(api.records.get('a')).toMatchObject({ version: 2, manualUnreadAt: 100 })
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+        expect(markAllSessionsSeen([{ id: 'a', updatedAt: 100 }, { id: 'b', updatedAt: 200 }])).toBe(2)
+        await tick()
+        expect(api.records.get('a')).toMatchObject({ lastSeenAt: 100, manualUnreadAt: null, version: 3 })
+        expect(api.records.get('b')).toMatchObject({ lastSeenAt: 200 })
+    })
+
+    it('ignores out-of-order SSE and snapshots without generating echo writes', async () => {
+        const api = mockApi([state(1)])
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        sync.receive([state(3, 99, 100)])
+        sync.receive([state(2)])
+        await sync.refresh()
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+        expect(api.updateSessionReadState).not.toHaveBeenCalled()
+    })
+
+    it('reconciles stale offline seen against a newer peer unread marker without rebasing', async () => {
+        const api = mockApi([state(1, 50)])
+        const originalUpdate = api.updateSessionReadState.getMockImplementation()!
+        api.updateSessionReadState.mockRejectedValue(new TypeError('offline'))
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('a', 100)
+        await tick()
+        api.records.set('a', state(2, 99, 100))
+        api.updateSessionReadState.mockImplementation(originalUpdate)
+        await sync.refresh()
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+        expect(api.updateSessionReadState.mock.calls.at(-1)?.[0][0]?.expectedVersion).toBe(1)
+    })
+
+    it('persists pending actions across a reload and retries lost responses idempotently', async () => {
+        const api = mockApi([state(1, 50)])
+        const originalUpdate = api.updateSessionReadState.getMockImplementation()!
+        api.updateSessionReadState.mockImplementationOnce(async mutations => {
+            await originalUpdate(mutations)
+            throw new TypeError('response lost')
+        })
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionUnread('a', 100)
+        await tick()
+        sync.stop()
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(api.records.get('a')).toMatchObject({ version: 2, manualUnreadAt: 100 })
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+        expect(api.updateSessionReadState).toHaveBeenCalledTimes(2)
+    })
+
+    it('drops dependent offline operations after a peer version collision', async () => {
+        const api = mockApi([state(1, 50)])
+        const update = api.updateSessionReadState.getMockImplementation()!
+        api.updateSessionReadState.mockRejectedValue(new TypeError('offline'))
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('a', 100)
+        markSessionUnread('a', 100)
+        markSessionSeen('a', 100)
+        await tick()
+        api.records.set('a', state(2, 99, 100))
+        api.updateSessionReadState.mockImplementation(update)
+        await sync.refresh()
+        expect(api.records.get('a')).toEqual(state(2, 99, 100))
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+    })
+
+    it('retries a committed operation after response loss before applying its dependent manual unread', async () => {
+        const api = mockApi([state(1, 50)])
+        const update = api.updateSessionReadState.getMockImplementation()!
+        api.updateSessionReadState.mockImplementationOnce(async mutations => {
+            await update(mutations)
+            throw new TypeError('response lost')
+        })
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('a', 100)
+        markSessionUnread('a', 100)
+        await tick()
+        await sync.refresh()
+        expect(api.records.get('a')).toMatchObject({ version: 3, manualUnreadAt: 100 })
+        expect(getSessionManualUnreadAt('a')).toBe(100)
+    })
+
+    it('imports an explicit legacy unread only for the known default Hub', async () => {
+        localStorage.setItem('hapi.sessionLastSeenBaseline.v1:http://hub', '1')
+        localStorage.setItem('hapi.sessionManualUnread.v1', JSON.stringify({ a: 100, b: 200 }))
+        const api = mockApi()
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(api.updateSessionReadState).toHaveBeenCalledWith([
+            { mutationId: expect.any(String), sessionId: 'a', kind: 'import-unread', activityAt: 100, expectedVersion: 0 }
+        ])
+        sync.stop()
+        const other = mockApi()
+        sync = startSessionReadSync(other, JSON.stringify(['http://hub', 'other']))
+        await tick()
+        expect(getSessionManualUnreadAt('a')).toBeNull()
+        expect(other.updateSessionReadState).not.toHaveBeenCalled()
+    })
+
+    it('discards deleted targets so one failed operation does not block later actions', async () => {
+        const api = mockApi()
+        api.updateSessionReadState.mockRejectedValueOnce(new ApiError('not found', 404))
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        markSessionSeen('deleted', 100)
+        markSessionUnread('a', 100)
+        await tick()
+        await vi.advanceTimersByTimeAsync(5000)
+        expect(api.records.get('a')?.manualUnreadAt).toBe(100)
+    })
+
+    it('continues online without localStorage and isolates delayed responses after a Hub switch', async () => {
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+        const api = mockApi([state(1, 50)])
+        let release!: (value: { states: SessionReadState[] }) => void
+        api.getSessionReadState.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+        sync = startSessionReadSync(api, scope)
+        sync.stop()
+        const other = mockApi([state(2, 70)])
+        sync = startSessionReadSync(other, JSON.stringify(['http://other', 'default']))
+        await tick()
+        release({ states: [state(10, 999)] })
+        await tick()
+        expect(getSessionLastSeenAt('a')).toBe(70)
+        markSessionSeen('a', 100)
+        await tick()
+        expect(other.records.get('a')?.lastSeenAt).toBe(100)
+    })
+
+    it('uses Hub and namespace as identity across JWT refreshes', () => {
+        const jwt = (ns: string, exp: number) => `header.${btoa(JSON.stringify({ ns, exp }))}.sig`
+        expect(sessionReadScope('hub-a', jwt('default', 1))).toBe(sessionReadScope('hub-a', jwt('default', 2)))
+        expect(sessionReadScope('hub-a', jwt('other', 1))).not.toBe(sessionReadScope('hub-a', jwt('default', 1)))
+        expect(sessionReadScope('hub-b', jwt('default', 1))).not.toBe(sessionReadScope('hub-a', jwt('default', 1)))
+    })
+})

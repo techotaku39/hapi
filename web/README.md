@@ -23,6 +23,16 @@ React Mini App / PWA for monitoring and controlling hapi sessions.
 - When opened in a normal browser, you can log in with `CLI_API_TOKEN:<namespace>` (or `CLI_API_TOKEN` for the default namespace).
 - The login screen includes a top-right hub picker; if unset, the app uses the same origin it was loaded from.
 - Live updates come from the hub via SSE.
+- Session read/unread state is shared by Web/PWA clients connected to the same
+  Hub and namespace. Opening a visible session, marking it unread, and marking
+  all sessions read synchronize automatically; no extra setting is required.
+  Offline changes retry on reconnect. A newer peer change wins over a stale
+  offline action, and read-state changes never affect session activity/sorting.
+- On first upgrade, legacy browser read receipts are not uploaded, so they
+  cannot clear another device's unread activity. Existing sessions without a
+  Hub read position start unread. Matching explicit manual-unread markers are
+  imported only for a previously used Hub's default namespace and never replace
+  an existing Hub record. Other namespaces start with isolated shared state.
 - Session `@` suggestions require conversation content, including untitled conversations. Names and directory labels affect display/search, not eligibility; empty stubs stay excluded.
 
 ## Routes
