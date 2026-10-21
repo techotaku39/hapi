@@ -1494,6 +1494,16 @@ export function SessionList(props: {
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
     }, [groups, allDirectoryGroups, pinInProgressSessions])
+    const stableDirectoryGroups = useMemo(
+        () => sessionProjectSortMode === 'stable' && !hasTextQuery
+            ? sortSessionGroupsByProjectOrder([...groups, ...actionOnlyGroups], projectOrder)
+            : [],
+        [actionOnlyGroups, groups, hasTextQuery, projectOrder, sessionProjectSortMode]
+    )
+    const normalDirectoryKeys = useMemo(
+        () => new Set(groups.map((group) => group.key)),
+        [groups]
+    )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
@@ -2226,8 +2236,16 @@ export function SessionList(props: {
                             count: activeSessionTotal,
                             bucketKeys: ['active', 'idle'],
                         })}
-                        {groups.map((group) => renderDirectoryGroup(group))}
-                        {actionOnlyGroups.map(renderActionOnlyGroupHeader)}
+                        {sessionProjectSortMode === 'stable' && !hasTextQuery
+                            ? stableDirectoryGroups.map((group) => normalDirectoryKeys.has(group.key)
+                                ? renderDirectoryGroup(group)
+                                : renderActionOnlyGroupHeader(group))
+                            : (
+                                <>
+                                    {groups.map((group) => renderDirectoryGroup(group))}
+                                    {actionOnlyGroups.map(renderActionOnlyGroupHeader)}
+                                </>
+                            )}
                     </>
                 )}
                 </SessionListScrollAnchor>
