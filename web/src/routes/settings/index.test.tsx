@@ -11,7 +11,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setPinInProgressSessionsMode, setVoice, pinSettingsState, setAppBadgeEnabled } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setPinInProgressSessionsMode, setSessionProjectSortMode, setVoice, pinSettingsState, setAppBadgeEnabled } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -21,6 +21,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setComposerEnterBehavior: vi.fn(),
     setCodexExplorationCollapsed: vi.fn(),
     setPinInProgressSessionsMode: vi.fn(),
+    setSessionProjectSortMode: vi.fn(),
     setVoice: vi.fn(),
     pinSettingsState: { enabled: false },
     setAppBadgeEnabled: vi.fn(),
@@ -93,6 +94,14 @@ vi.mock('@/hooks/usePinInProgressSessionsMode', () => ({
     getPinInProgressSessionsModeOptions: () => [
         { value: 'combined', labelKey: 'settings.display.pinInProgressSessions.mode.combined' },
         { value: 'detailed', labelKey: 'settings.display.pinInProgressSessions.mode.detailed' },
+    ],
+}))
+
+vi.mock('@/hooks/useSessionProjectSortMode', () => ({
+    useSessionProjectSortMode: () => ({ sessionProjectSortMode: 'stable', setSessionProjectSortMode }),
+    getSessionProjectSortModeOptions: () => [
+        { value: 'stable', labelKey: 'settings.display.projectSort.stable' },
+        { value: 'recent', labelKey: 'settings.display.projectSort.recent' },
     ],
 }))
 
@@ -349,6 +358,19 @@ describe('responsive settings pages', () => {
         expect(screen.getByRole('radio', { name: 'Detailed' })).toBeDisabled()
         fireEvent.click(screen.getByRole('radio', { name: 'Combined' }))
         expect(setPinInProgressSessionsMode).not.toHaveBeenCalled()
+    })
+
+    it('defaults to stable project order and supports recent activity order', () => {
+        renderPage(<SettingsDisplayPage />)
+
+        const choices = screen.getByRole('radiogroup', { name: 'Project order' })
+        expect(screen.getByRole('radio', { name: 'Stable' })).toHaveAttribute('aria-checked', 'true')
+        expect(screen.getByRole('radio', { name: 'Recent activity' })).toHaveAttribute('aria-checked', 'false')
+        expect(screen.getByText('Stable order keeps projects from moving while agents work. Recent activity orders projects by their latest session update.')).toBeInTheDocument()
+        expect(within(choices).getAllByRole('radio').map((radio) => radio.textContent?.trim())).toEqual(['Stable', 'Recent activity'])
+
+        fireEvent.click(screen.getByRole('radio', { name: 'Recent activity' }))
+        expect(setSessionProjectSortMode).toHaveBeenCalledWith('recent')
     })
 
     it('keeps chat enum choices inline', () => {

@@ -15,6 +15,8 @@ afterEach(() => {
     localStorage.removeItem('hapi-session-preview-limit')
     localStorage.removeItem('hapi-pin-in-progress-sessions')
     localStorage.removeItem('hapi-pin-in-progress-sessions-mode')
+    localStorage.removeItem('hapi-session-project-sort-mode')
+    localStorage.removeItem('hapi-session-project-order')
 })
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
