@@ -881,7 +881,7 @@ export default {
   'settings.display.pinInProgressSessions.mode.detailed': '详细',
   'settings.display.pinInProgressSessions.mode.combined': '合并',
   'settings.display.projectSort': '项目排序',
-  'settings.display.projectSort.desc': '最近活动沿用上游排序；会话最多按项目中的会话数量从多到少排序。',
+  'settings.display.projectSort.desc': '默认最近活动；会话最多按项目中的会话数量从多到少排序。',
   'settings.display.projectSort.recent': '最近活动',
   'settings.display.projectSort.count': '会话最多',
   'settings.display.appBadge': '任务栏未读角标',
