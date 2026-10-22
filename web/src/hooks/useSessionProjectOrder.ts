@@ -21,12 +21,18 @@ function writeStoredProjectOrder(order: string[]): void {
     }
 }
 
-export function sortSessionGroupsByProjectOrder<T extends { key: string }>(groups: readonly T[], projectOrder: readonly string[]): T[] {
+export function sortSessionGroupsBySessionCount<T extends { key: string; sessions: readonly unknown[] }>(groups: readonly T[], projectOrder: readonly string[]): T[] {
     const rank = new Map(projectOrder.map((key, index) => [key, index]))
     return [...groups].sort((a, b) => {
-        const rankA = rank.get(a.key) ?? Number.MAX_SAFE_INTEGER
-        const rankB = rank.get(b.key) ?? Number.MAX_SAFE_INTEGER
-        return rankA - rankB
+        const countDifference = b.sessions.length - a.sessions.length
+        if (countDifference !== 0) return countDifference
+
+        const rankA = rank.get(a.key)
+        const rankB = rank.get(b.key)
+        if (rankA !== undefined || rankB !== undefined) {
+            return (rankA ?? Number.MAX_SAFE_INTEGER) - (rankB ?? Number.MAX_SAFE_INTEGER)
+        }
+        return a.key.localeCompare(b.key)
     })
 }
 
