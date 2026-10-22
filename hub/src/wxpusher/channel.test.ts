@@ -182,6 +182,43 @@ describe('WxPusherChannel', () => {
         }
     })
 
+    it('retains the full session name for composed input-request content', async () => {
+        const fetchMock = mock(async () => new Response(JSON.stringify({ code: 1000 }), { status: 200 }))
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = fetchMock as unknown as typeof fetch
+
+        try {
+            const sessionName = 'Long input request session '.repeat(5)
+            const channel = new WxPusherChannel('AT_TEST', ['UID_ONE'], [], 'https://hapi.example.com')
+            await channel.sendPermissionRequest(createSession({
+                metadata: {
+                    path: 'F:\\develop\\code\\hapi',
+                    host: 'DESKTOP',
+                    name: sessionName
+                },
+                agentState: {
+                    requests: {
+                        'request-1': {
+                            tool: 'request_user_input',
+                            arguments: {
+                                questions: [{ question: 'Which option should I use?' }]
+                            },
+                            createdAt: 1
+                        }
+                    }
+                }
+            }))
+
+            const call = fetchMock.mock.calls[0] as unknown[] | undefined
+            const init = call?.[1] as RequestInit | undefined
+            const message = JSON.parse(String(init?.body)) as { summary: string; content: string }
+            expect(message.summary.endsWith('…')).toBe(true)
+            expect(message.content).toContain(`会话：${sessionName}`)
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+    })
+
     it('sends ready, permission, failed task, and session error notifications', async () => {
         const fetchMock = mock(async () => new Response(JSON.stringify({ code: 1000 }), { status: 200 }))
         const originalFetch = globalThis.fetch

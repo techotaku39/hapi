@@ -88,9 +88,12 @@ export class WxPusherChannel implements NotificationChannel {
         const inputNotification = composeInputRequestNotification(session, pending)
         const toolName = request?.tool ? ` (${request.tool})` : ''
         const url = buildSessionUrl(this.publicUrl, session.id)
+        const content = inputNotification
+            ? `${inputNotification.body}\n会话：${name}`
+            : `${name}${toolName}`
         await this.send(this.createMessage(
             `授权：${name}`,
-            inputNotification?.body ?? `${name}${toolName}`,
+            content,
             url
         ))
     }
