@@ -59,7 +59,7 @@ describe('WxPusherChannel', () => {
             expect(JSON.parse(String(init?.body))).toEqual({
                 appToken: 'AT_TEST',
                 content: 'Agent · WxPusher review\n\n会话已结束。\n\nhttps://hapi.example.com/sessions/session-1',
-                summary: 'HAPI Session completed',
+                summary: '完成：WxPusher review',
                 contentType: 1,
                 uids: ['UID_ONE', 'UID_TWO'],
                 topicIds: [42],
@@ -129,10 +129,10 @@ describe('WxPusherChannel', () => {
                 return (JSON.parse(String(init?.body)) as { summary: string }).summary
             })
             expect(summaries).toEqual([
-                'HAPI Ready for input',
-                'HAPI Permission Request',
-                'HAPI Task failed',
-                'HAPI Session error'
+                '就绪：WxPusher review',
+                '授权：WxPusher review',
+                '失败：WxPusher review',
+                '异常：WxPusher review'
             ])
         } finally {
             globalThis.fetch = originalFetch

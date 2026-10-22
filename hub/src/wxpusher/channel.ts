@@ -49,7 +49,7 @@ export class WxPusherChannel implements NotificationChannel {
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
         await this.send(this.createMessage(
-            'HAPI Ready for input',
+            `就绪：${name}`,
             `${agentName} 正在等待输入\n\n会话：${name}`,
             url
         ))
@@ -67,7 +67,7 @@ export class WxPusherChannel implements NotificationChannel {
         const toolName = request?.tool ? ` (${request.tool})` : ''
         const url = buildSessionUrl(this.publicUrl, session.id)
         await this.send(this.createMessage(
-            inputNotification ? `HAPI ${inputNotification.title}` : 'HAPI Permission Request',
+            `授权：${name}`,
             inputNotification?.body ?? `${name}${toolName}`,
             url
         ))
@@ -88,7 +88,7 @@ export class WxPusherChannel implements NotificationChannel {
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
         await this.send(this.createMessage(
-            'HAPI Task failed',
+            `失败：${name}`,
             `${agentName} · ${name}\n\n${notification.summary}`,
             url
         ))
@@ -102,7 +102,7 @@ export class WxPusherChannel implements NotificationChannel {
         const agentName = getAgentName(session)
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send(this.createMessage('HAPI Session completed', `${agentName} · ${name}\n\n会话已结束。`, url))
+        await this.send(this.createMessage(`完成：${name}`, `${agentName} · ${name}\n\n会话已结束。`, url))
     }
 
     async sendSessionError(session: Session, _reason: SessionEndReason): Promise<void> {
@@ -113,7 +113,7 @@ export class WxPusherChannel implements NotificationChannel {
         const agentName = getAgentName(session)
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send(this.createMessage('HAPI Session error', `${agentName} · ${name}\n\n会话异常结束。`, url))
+        await this.send(this.createMessage(`异常：${name}`, `${agentName} · ${name}\n\n会话异常结束。`, url))
     }
 
     private shouldSuppress(session: Session): boolean {
