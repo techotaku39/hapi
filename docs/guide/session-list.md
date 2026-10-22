@@ -55,9 +55,10 @@ as the tie-breaker. This means an older session with a distinctive title can
 appear above a newer session that only matches a common path segment.
 
 Search preserves the session-list structure: pinned rows remain contiguous and
-project groups remain visible. Search does not apply a relevance cutoff; if a
-group is collapsed, matching rows remain available when that group is
-expanded.
+project groups remain visible. Matching project groups open automatically, but
+the preview limit still applies within an open group. Search does not apply a
+relevance cutoff; use the group's batch reveal controls to show additional
+matching rows.
 
 ## Filters and display settings
 
@@ -70,9 +71,9 @@ expanded.
   when that machine is no longer available.
 - **Active sessions only** hides inactive sessions but keeps the selected
   session visible.
-- **Session preview limit** controls how many rows a collapsed project shows.
-  Sessions with pending requests and the selected session can remain visible;
-  a project can be expanded in batches.
+- **Session preview limit** controls how many rows are initially visible within
+  each project group. Sessions with pending requests and the selected session
+  can remain visible; a project can reveal more rows in batches.
 - **Session-list status** controls whether rows show the standard or detailed
   attention/status presentation.
 
