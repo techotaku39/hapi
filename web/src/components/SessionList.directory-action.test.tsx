@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
@@ -16,8 +15,6 @@ afterEach(() => {
     localStorage.removeItem('hapi-session-preview-limit')
     localStorage.removeItem('hapi-pin-in-progress-sessions')
     localStorage.removeItem('hapi-pin-in-progress-sessions-mode')
-    localStorage.removeItem('hapi-session-project-sort-mode')
-    localStorage.removeItem('hapi-session-project-order')
 })
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -765,45 +762,6 @@ describe('SessionList collapse behavior', () => {
             target: { value: '' },
         })
         expect(screen.getByTitle('/work/kept').nextElementSibling).not.toHaveAttribute('data-open', 'true')
-    })
-
-    it('keeps the session-count tie order when a project moves into an action-only header', async () => {
-        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
-        localStorage.setItem('hapi-session-project-sort-mode', 'count')
-        localStorage.setItem('hapi-session-project-order', JSON.stringify([
-            '__unknown__::/work/a',
-            '__unknown__::/work/b',
-        ]))
-        const initialSessions = [
-            makeSession({ id: 'a', updatedAt: 200, metadata: { path: '/work/a', name: 'A' } }),
-            makeSession({ id: 'b', updatedAt: 100, metadata: { path: '/work/b', name: 'B' } }),
-        ]
-        function StatefulSessionList() {
-            const [sessions, setSessions] = useState(initialSessions)
-            return (
-                <>
-                    <button type="button" data-testid="activate-a" onClick={() => setSessions((current) => current.map((session) => session.id === 'a' ? { ...session, active: true } : session))}>Activate A</button>
-                    <SessionList
-                        sessions={sessions}
-                        selectedSessionId={null}
-                        onSelect={vi.fn()}
-                        onNewSession={vi.fn()}
-                        onRefresh={vi.fn()}
-                        isLoading={false}
-                        renderHeader={false}
-                        api={null}
-                    />
-                </>
-            )
-        }
-
-        renderWithProviders(<StatefulSessionList />)
-        fireEvent.click(screen.getByTestId('activate-a'))
-        await waitFor(() => {
-            const headers = screen.getAllByTitle(/^\/work\/[ab]$/)
-            expect(headers[0]).toHaveAttribute('title', '/work/a')
-            expect(headers[1]).toHaveAttribute('title', '/work/b')
-        })
     })
 
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
