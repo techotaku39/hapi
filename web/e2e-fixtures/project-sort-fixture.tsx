@@ -13,8 +13,14 @@ if (params.get('mode') === 'count') {
 } else {
     window.localStorage.removeItem('hapi-session-project-sort-mode')
 }
-window.localStorage.removeItem('hapi-pin-in-progress-sessions')
-window.localStorage.removeItem('hapi-pin-in-progress-sessions-mode')
+if (params.get('mode') === 'combined-count') {
+    window.localStorage.setItem('hapi-session-project-sort-mode', 'count')
+    window.localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+    window.localStorage.setItem('hapi-pin-in-progress-sessions-mode', 'combined')
+} else {
+    window.localStorage.removeItem('hapi-pin-in-progress-sessions')
+    window.localStorage.removeItem('hapi-pin-in-progress-sessions-mode')
+}
 window.localStorage.removeItem('hapi-session-project-order')
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -43,7 +49,14 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
 const now = Date.now()
 const sessions: SessionSummary[] = [
     makeSession({
+        id: 'hapi-session',
+        active: true,
+        updatedAt: now - 2 * 60_000,
+        metadata: { path: '/projects/hapi', name: 'HAPI task', flavor: 'codex' },
+    }),
+    makeSession({
         id: 'mine-session',
+        active: true,
         updatedAt: now - 30 * 60_000,
         metadata: { path: '/projects/mine', name: 'Mine task', flavor: 'codex' },
     }),
@@ -51,11 +64,6 @@ const sessions: SessionSummary[] = [
         id: 'mine-session-2',
         updatedAt: now - 45 * 60_000,
         metadata: { path: '/projects/mine', name: 'Mine follow-up', flavor: 'codex' },
-    }),
-    makeSession({
-        id: 'hapi-session',
-        updatedAt: now - 2 * 60_000,
-        metadata: { path: '/projects/hapi', name: 'HAPI task', flavor: 'codex' },
     }),
 ]
 

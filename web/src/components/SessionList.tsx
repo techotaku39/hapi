@@ -1407,6 +1407,14 @@ export function SessionList(props: {
             ),
         [unreadFilteredSessions, activeMachineFilter]
     )
+    const projectSessionCounts = useMemo(() => {
+        const counts = new Map<string, number>()
+        for (const session of machineFilteredSessions) {
+            const key = getSessionProjectKey(session)
+            counts.set(key, (counts.get(key) ?? 0) + 1)
+        }
+        return counts
+    }, [machineFilteredSessions])
     const globalPinnedSessions = useMemo(() => {
         const pinned = machineFilteredSessions.filter((session) => Boolean(session.globalPinned))
         if (searchScoreIndex && hasTextQuery) {
@@ -1439,10 +1447,10 @@ export function SessionList(props: {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
             return sessionProjectSortMode === 'count'
-                ? sortSessionGroupsBySessionCount(grouped, projectOrder)
+                ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
                 : grouped
         },
-        [machineFilteredSessions, pinInProgressSessions, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
+        [machineFilteredSessions, pinInProgressSessions, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
     )
     const combinedActiveGroups = useMemo(
         () => {
@@ -1454,10 +1462,10 @@ export function SessionList(props: {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
             return sessionProjectSortMode === 'count'
-                ? sortSessionGroupsBySessionCount(grouped, projectOrder)
+                ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
                 : grouped
         },
-        [machineFilteredSessions, isCombinedPinLayout, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
+        [machineFilteredSessions, isCombinedPinLayout, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
     )
     const combinedArchivedGroups = useMemo(
         () => {
@@ -1469,10 +1477,10 @@ export function SessionList(props: {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
             return sessionProjectSortMode === 'count'
-                ? sortSessionGroupsBySessionCount(grouped, projectOrder)
+                ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
                 : grouped
         },
-        [machineFilteredSessions, isCombinedPinLayout, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
+        [machineFilteredSessions, isCombinedPinLayout, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
     )
     // Directory groups whose rows all floated to the pinned sections still
     // render an action-only header so copy-path / new-session-in-directory
@@ -1484,9 +1492,9 @@ export function SessionList(props: {
             machineFilteredSessions.filter((session) => !session.globalPinned)
         )
         return sessionProjectSortMode === 'count'
-            ? sortSessionGroupsBySessionCount(grouped, projectOrder)
+            ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
             : grouped
-    }, [machineFilteredSessions, projectOrder, sessionProjectSortMode])
+    }, [machineFilteredSessions, projectOrder, projectSessionCounts, sessionProjectSortMode])
     const actionOnlyGroups = useMemo(() => {
         if (!pinInProgressSessions) {
             return []
@@ -1496,9 +1504,9 @@ export function SessionList(props: {
     }, [groups, allDirectoryGroups, pinInProgressSessions])
     const countSortedDirectoryGroups = useMemo(
         () => sessionProjectSortMode === 'count' && !hasTextQuery
-            ? sortSessionGroupsBySessionCount([...groups, ...actionOnlyGroups], projectOrder)
+            ? sortSessionGroupsBySessionCount([...groups, ...actionOnlyGroups], projectOrder, projectSessionCounts)
             : [],
-        [actionOnlyGroups, groups, hasTextQuery, projectOrder, sessionProjectSortMode]
+        [actionOnlyGroups, groups, hasTextQuery, projectOrder, projectSessionCounts, sessionProjectSortMode]
     )
     const normalDirectoryKeys = useMemo(
         () => new Set(groups.map((group) => group.key)),

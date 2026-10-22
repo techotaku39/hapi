@@ -21,10 +21,16 @@ function writeStoredProjectOrder(order: string[]): void {
     }
 }
 
-export function sortSessionGroupsBySessionCount<T extends { key: string; sessions: readonly unknown[] }>(groups: readonly T[], projectOrder: readonly string[]): T[] {
+export function sortSessionGroupsBySessionCount<T extends { key: string; sessions: readonly unknown[] }>(
+    groups: readonly T[],
+    projectOrder: readonly string[],
+    totalSessionCounts?: ReadonlyMap<string, number>
+): T[] {
     const rank = new Map(projectOrder.map((key, index) => [key, index]))
     return [...groups].sort((a, b) => {
-        const countDifference = b.sessions.length - a.sessions.length
+        const countA = totalSessionCounts?.get(a.key) ?? a.sessions.length
+        const countB = totalSessionCounts?.get(b.key) ?? b.sessions.length
+        const countDifference = countB - countA
         if (countDifference !== 0) return countDifference
 
         const rankA = rank.get(a.key)
