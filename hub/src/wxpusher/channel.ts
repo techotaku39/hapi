@@ -33,12 +33,22 @@ function isWxPusherResponse(value: unknown): value is WxPusherResponse {
 }
 
 function truncateWxPusherSummary(summary: string): string {
-    const segments = Array.from(wxPusherGraphemes.segment(summary), ({ segment }) => segment)
-    if (segments.length <= WXPUSHER_SUMMARY_LIMIT) {
+    if (Array.from(summary).length <= WXPUSHER_SUMMARY_LIMIT) {
         return summary
     }
 
-    return `${segments.slice(0, WXPUSHER_SUMMARY_LIMIT - 1).join('')}…`
+    let result = ''
+    let length = 0
+    for (const { segment } of wxPusherGraphemes.segment(summary)) {
+        const segmentLength = Array.from(segment).length
+        if (length + segmentLength > WXPUSHER_SUMMARY_LIMIT - 1) {
+            break
+        }
+        result += segment
+        length += segmentLength
+    }
+
+    return `${result.trimEnd()}…`
 }
 
 export class WxPusherChannel implements NotificationChannel {
