@@ -36,4 +36,16 @@ describe('sortSessionGroupsBySessionCount', () => {
             'hapi',
         ])
     })
+
+    it('uses total project counts when a group only contains one session state', () => {
+        const groups = [
+            { key: 'hapi', sessions: [{ id: 'hapi-active' }] },
+            { key: 'mine', sessions: [{ id: 'mine-active' }] },
+        ]
+
+        expect(sortSessionGroupsBySessionCount(groups, ['hapi', 'mine'], new Map([
+            ['hapi', 1],
+            ['mine', 2],
+        ])).map((group) => group.key)).toEqual(['mine', 'hapi'])
+    })
 })

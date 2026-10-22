@@ -30,4 +30,14 @@ test.describe('project sort modes', () => {
         await expect(projectHeaders.nth(0)).toHaveAttribute('title', '/projects/mine')
         await expect(projectHeaders.nth(1)).toHaveAttribute('title', '/projects/hapi')
     })
+
+    test('uses total project counts across combined active and archived groups', async ({ page }) => {
+        await page.goto(`${fixtureUrl}?mode=combined-count`)
+
+        const projectHeaders = page.locator('[title^="/projects/"]')
+        await expect(projectHeaders).toHaveCount(3)
+        await expect(projectHeaders.nth(0)).toHaveAttribute('title', '/projects/mine')
+        await expect(projectHeaders.nth(1)).toHaveAttribute('title', '/projects/hapi')
+        await expect(projectHeaders.nth(2)).toHaveAttribute('title', '/projects/mine')
+    })
 })
