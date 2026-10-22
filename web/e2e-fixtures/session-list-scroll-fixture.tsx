@@ -8,8 +8,8 @@ import type { SessionSummary } from '../src/types/api'
 import '../src/index.css'
 
 localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
-// This fixture verifies the legacy recent-activity reorder and its scroll
-// anchoring behavior. The product default is now stable project order.
+// This fixture verifies the upstream recent-activity reorder and its scroll
+// anchoring behavior.
 localStorage.setItem('hapi-session-project-sort-mode', 'recent')
 const initialSessions: SessionSummary[] = Array.from({ length: 40 }, (_, index) => ({
     id: `session-${index}`, active: false, thinking: false, activeAt: 0,

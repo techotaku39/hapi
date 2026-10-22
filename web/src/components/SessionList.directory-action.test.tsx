@@ -767,9 +767,9 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByTitle('/work/kept').nextElementSibling).not.toHaveAttribute('data-open', 'true')
     })
 
-    it('keeps stable project order when a project moves into an action-only header', async () => {
+    it('keeps the session-count tie order when a project moves into an action-only header', async () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
-        localStorage.setItem('hapi-session-project-sort-mode', 'stable')
+        localStorage.setItem('hapi-session-project-sort-mode', 'count')
         localStorage.setItem('hapi-session-project-order', JSON.stringify([
             '__unknown__::/work/a',
             '__unknown__::/work/b',

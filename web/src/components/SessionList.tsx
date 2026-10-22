@@ -35,7 +35,7 @@ import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { usePinInProgressSessionsMode } from '@/hooks/usePinInProgressSessionsMode'
-import { useSessionProjectOrder, sortSessionGroupsByProjectOrder } from '@/hooks/useSessionProjectOrder'
+import { useSessionProjectOrder, sortSessionGroupsBySessionCount } from '@/hooks/useSessionProjectOrder'
 import { useSessionProjectSortMode } from '@/hooks/useSessionProjectSortMode'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import {
@@ -1357,8 +1357,8 @@ export function SessionList(props: {
     const projectOrder = useSessionProjectOrder(projectKeys)
     const allGroups = useMemo(() => {
         const grouped = groupSessionsByDirectory(allSessions)
-        return sessionProjectSortMode === 'stable'
-            ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+        return sessionProjectSortMode === 'count'
+            ? sortSessionGroupsBySessionCount(grouped, projectOrder)
             : grouped
     }, [allSessions, projectOrder, sessionProjectSortMode])
     const machineFilters = useMemo(
@@ -1438,8 +1438,8 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return sessionProjectSortMode === 'stable'
-                ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+            return sessionProjectSortMode === 'count'
+                ? sortSessionGroupsBySessionCount(grouped, projectOrder)
                 : grouped
         },
         [machineFilteredSessions, pinInProgressSessions, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
@@ -1453,8 +1453,8 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return sessionProjectSortMode === 'stable'
-                ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+            return sessionProjectSortMode === 'count'
+                ? sortSessionGroupsBySessionCount(grouped, projectOrder)
                 : grouped
         },
         [machineFilteredSessions, isCombinedPinLayout, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
@@ -1468,8 +1468,8 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return sessionProjectSortMode === 'stable'
-                ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+            return sessionProjectSortMode === 'count'
+                ? sortSessionGroupsBySessionCount(grouped, projectOrder)
                 : grouped
         },
         [machineFilteredSessions, isCombinedPinLayout, projectOrder, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
@@ -1483,8 +1483,8 @@ export function SessionList(props: {
         const grouped = groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => !session.globalPinned)
         )
-        return sessionProjectSortMode === 'stable'
-            ? sortSessionGroupsByProjectOrder(grouped, projectOrder)
+        return sessionProjectSortMode === 'count'
+            ? sortSessionGroupsBySessionCount(grouped, projectOrder)
             : grouped
     }, [machineFilteredSessions, projectOrder, sessionProjectSortMode])
     const actionOnlyGroups = useMemo(() => {
@@ -1494,9 +1494,9 @@ export function SessionList(props: {
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
     }, [groups, allDirectoryGroups, pinInProgressSessions])
-    const stableDirectoryGroups = useMemo(
-        () => sessionProjectSortMode === 'stable' && !hasTextQuery
-            ? sortSessionGroupsByProjectOrder([...groups, ...actionOnlyGroups], projectOrder)
+    const countSortedDirectoryGroups = useMemo(
+        () => sessionProjectSortMode === 'count' && !hasTextQuery
+            ? sortSessionGroupsBySessionCount([...groups, ...actionOnlyGroups], projectOrder)
             : [],
         [actionOnlyGroups, groups, hasTextQuery, projectOrder, sessionProjectSortMode]
     )
@@ -2236,8 +2236,8 @@ export function SessionList(props: {
                             count: activeSessionTotal,
                             bucketKeys: ['active', 'idle'],
                         })}
-                        {sessionProjectSortMode === 'stable' && !hasTextQuery
-                            ? stableDirectoryGroups.map((group) => normalDirectoryKeys.has(group.key)
+                        {sessionProjectSortMode === 'count' && !hasTextQuery
+                            ? countSortedDirectoryGroups.map((group) => normalDirectoryKeys.has(group.key)
                                 ? renderDirectoryGroup(group)
                                 : renderActionOnlyGroupHeader(group))
                             : (

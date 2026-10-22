@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export type SessionProjectSortMode = 'stable' | 'recent'
+export type SessionProjectSortMode = 'recent' | 'count'
 
-export const DEFAULT_SESSION_PROJECT_SORT_MODE: SessionProjectSortMode = 'stable'
+export const DEFAULT_SESSION_PROJECT_SORT_MODE: SessionProjectSortMode = 'recent'
 
 const SESSION_PROJECT_SORT_MODE_CHANGED_EVENT = 'hapi-session-project-sort-mode-changed'
 
 export function getSessionProjectSortModeOptions(): ReadonlyArray<{ value: SessionProjectSortMode; labelKey: string }> {
     return [
-        { value: 'stable', labelKey: 'settings.display.projectSort.stable' },
         { value: 'recent', labelKey: 'settings.display.projectSort.recent' },
+        { value: 'count', labelKey: 'settings.display.projectSort.count' },
     ]
 }
 
@@ -49,9 +49,10 @@ function safeRemoveItem(key: string): void {
 }
 
 function parseSessionProjectSortMode(raw: string | null): SessionProjectSortMode {
-    return raw === 'recent' || raw === 'stable'
-        ? raw
-        : DEFAULT_SESSION_PROJECT_SORT_MODE
+    if (raw === 'recent' || raw === 'count') return raw
+    // Migrate the previous PR-local setting to its replacement mode.
+    if (raw === 'stable') return 'count'
+    return DEFAULT_SESSION_PROJECT_SORT_MODE
 }
 
 export function getInitialSessionProjectSortMode(): SessionProjectSortMode {
@@ -74,7 +75,7 @@ export function useSessionProjectSortMode(): {
         }
         const onLocalChange = (event: Event) => {
             if (!(event instanceof CustomEvent)) return
-            if (event.detail === 'stable' || event.detail === 'recent') {
+            if (event.detail === 'recent' || event.detail === 'count') {
                 setSessionProjectSortModeState(event.detail)
             }
         }

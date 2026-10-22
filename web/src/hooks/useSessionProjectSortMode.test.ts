@@ -12,12 +12,12 @@ describe('useSessionProjectSortMode', () => {
         window.localStorage.clear()
     })
 
-    it('defaults to stable order and lists recent activity second', () => {
-        expect(DEFAULT_SESSION_PROJECT_SORT_MODE).toBe('stable')
-        expect(getInitialSessionProjectSortMode()).toBe('stable')
+    it('defaults to recent activity and lists most sessions second', () => {
+        expect(DEFAULT_SESSION_PROJECT_SORT_MODE).toBe('recent')
+        expect(getInitialSessionProjectSortMode()).toBe('recent')
         expect(getSessionProjectSortModeOptions()).toEqual([
-            { value: 'stable', labelKey: 'settings.display.projectSort.stable' },
             { value: 'recent', labelKey: 'settings.display.projectSort.recent' },
+            { value: 'count', labelKey: 'settings.display.projectSort.count' },
         ])
     })
 
@@ -26,7 +26,10 @@ describe('useSessionProjectSortMode', () => {
         expect(getInitialSessionProjectSortMode()).toBe('recent')
 
         window.localStorage.setItem('hapi-session-project-sort-mode', 'invalid')
-        expect(getInitialSessionProjectSortMode()).toBe('stable')
+        expect(getInitialSessionProjectSortMode()).toBe('recent')
+
+        window.localStorage.setItem('hapi-session-project-sort-mode', 'stable')
+        expect(getInitialSessionProjectSortMode()).toBe('count')
     })
 
     it('synchronizes mode changes between hook instances', () => {
@@ -35,10 +38,10 @@ describe('useSessionProjectSortMode', () => {
 
         act(() => first.result.current.setSessionProjectSortMode('recent'))
         expect(second.result.current.sessionProjectSortMode).toBe('recent')
-        expect(window.localStorage.getItem('hapi-session-project-sort-mode')).toBe('recent')
-
-        act(() => second.result.current.setSessionProjectSortMode('stable'))
-        expect(first.result.current.sessionProjectSortMode).toBe('stable')
         expect(window.localStorage.getItem('hapi-session-project-sort-mode')).toBeNull()
+
+        act(() => second.result.current.setSessionProjectSortMode('count'))
+        expect(first.result.current.sessionProjectSortMode).toBe('count')
+        expect(window.localStorage.getItem('hapi-session-project-sort-mode')).toBe('count')
     })
 })

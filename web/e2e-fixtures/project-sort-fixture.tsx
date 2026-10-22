@@ -8,8 +8,8 @@ import { ToastProvider } from '@/lib/toast-context'
 import '../src/index.css'
 
 const params = new URLSearchParams(window.location.search)
-if (params.get('mode') === 'recent') {
-    window.localStorage.setItem('hapi-session-project-sort-mode', 'recent')
+if (params.get('mode') === 'count') {
+    window.localStorage.setItem('hapi-session-project-sort-mode', 'count')
 } else {
     window.localStorage.removeItem('hapi-session-project-sort-mode')
 }
@@ -46,6 +46,11 @@ const sessions: SessionSummary[] = [
         id: 'mine-session',
         updatedAt: now - 30 * 60_000,
         metadata: { path: '/projects/mine', name: 'Mine task', flavor: 'codex' },
+    }),
+    makeSession({
+        id: 'mine-session-2',
+        updatedAt: now - 45 * 60_000,
+        metadata: { path: '/projects/mine', name: 'Mine follow-up', flavor: 'codex' },
     }),
     makeSession({
         id: 'hapi-session',
