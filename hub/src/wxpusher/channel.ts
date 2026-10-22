@@ -8,6 +8,9 @@ import type { VisibilityTracker } from '../visibility/visibilityTracker'
 
 export const WXPUSHER_SEND_URL = 'https://wxpusher.zjiecode.com/api/send/message'
 export const WXPUSHER_REQUEST_TIMEOUT_MS = 10_000
+export const WXPUSHER_SUMMARY_LIMIT = 100
+
+const wxPusherGraphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 type WxPusherResponse = {
     code?: number
@@ -27,6 +30,15 @@ export type WxPusherMessage = {
 
 function isWxPusherResponse(value: unknown): value is WxPusherResponse {
     return typeof value === 'object' && value !== null
+}
+
+function truncateWxPusherSummary(summary: string): string {
+    const segments = Array.from(wxPusherGraphemes.segment(summary), ({ segment }) => segment)
+    if (segments.length <= WXPUSHER_SUMMARY_LIMIT) {
+        return summary
+    }
+
+    return `${segments.slice(0, WXPUSHER_SUMMARY_LIMIT - 1).join('')}…`
 }
 
 export class WxPusherChannel implements NotificationChannel {
@@ -124,7 +136,7 @@ export class WxPusherChannel implements NotificationChannel {
         return {
             appToken: this.appToken,
             content: `${content}\n\n${url}`,
-            summary,
+            summary: truncateWxPusherSummary(summary),
             contentType: 1,
             ...(this.uids.length > 0 ? { uids: this.uids } : {}),
             ...(this.topicIds.length > 0 ? { topicIds: this.topicIds } : {}),

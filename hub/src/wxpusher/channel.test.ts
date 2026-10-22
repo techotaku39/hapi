@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from 'bun:test'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { Session } from '../sync/syncEngine'
 import { VisibilityTracker } from '../visibility/visibilityTracker'
-import { WXPUSHER_SEND_URL, WxPusherChannel } from './channel'
+import { WXPUSHER_SEND_URL, WXPUSHER_SUMMARY_LIMIT, WxPusherChannel } from './channel'
 
 function createSession(overrides: Partial<Session> = {}): Session {
     return {
@@ -92,6 +92,35 @@ describe('WxPusherChannel', () => {
             const message = JSON.parse(String(init?.body)) as { content?: string }
             expect(message.content).toContain('Agent · hapi\n\n会话已结束。')
             expect(message.content).not.toContain('F:\\develop\\code\\hapi')
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+    })
+
+    it('limits long Unicode summaries while preserving the full session name in content', async () => {
+        const fetchMock = mock(async () => new Response(JSON.stringify({ code: 1000 }), { status: 200 }))
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = fetchMock as unknown as typeof fetch
+
+        try {
+            const sessionName = '🚀'.repeat(100)
+            const channel = new WxPusherChannel('AT_TEST', ['UID_ONE'], [], 'https://hapi.example.com')
+            await channel.sendSessionCompletion(createSession({
+                metadata: {
+                    path: 'F:\\develop\\code\\hapi',
+                    host: 'DESKTOP',
+                    name: sessionName
+                }
+            }), 'completed' satisfies SessionEndReason)
+
+            const call = fetchMock.mock.calls[0] as unknown[] | undefined
+            const init = call?.[1] as RequestInit | undefined
+            const message = JSON.parse(String(init?.body)) as { summary: string; content: string }
+            expect(Array.from(message.summary).length).toBe(WXPUSHER_SUMMARY_LIMIT)
+            expect(message.summary.startsWith('完成：')).toBe(true)
+            expect(message.summary.endsWith('…')).toBe(true)
+            expect(message.summary).not.toContain('�')
+            expect(message.content).toContain(sessionName)
         } finally {
             globalThis.fetch = originalFetch
         }
