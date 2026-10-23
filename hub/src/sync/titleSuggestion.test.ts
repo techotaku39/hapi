@@ -93,7 +93,10 @@ describe('OpenAI-compatible title provider', () => {
         if (!request) throw new Error('request was not captured')
         expect(request.url).toBe('https://example.test/v1/chat/completions')
         expect(request.headers.get('authorization')).toBe('Bearer secret')
-        expect(await request.json()).toMatchObject({ model: 'small-model' })
+        expect(await request.json()).toMatchObject({
+            model: 'small-model',
+            max_tokens: 256
+        })
     })
 
     it('parses a large response envelope when the title content is short', async () => {
@@ -266,13 +269,13 @@ describe('OpenAI-compatible title provider', () => {
     })
 
     it('honors env-tunable max_tokens and timeout', async () => {
-        expect(readTitleProviderRequestLimits({})).toEqual({ maxTokens: 64, timeoutMs: 10_000 })
+        expect(readTitleProviderRequestLimits({})).toEqual({ maxTokens: 256, timeoutMs: 10_000 })
         expect(readTitleProviderRequestLimits({
             HAPI_TITLE_PROVIDER_MAX_TOKENS: '4096',
             HAPI_TITLE_PROVIDER_TIMEOUT_MS: '90000'
         })).toEqual({ maxTokens: 4096, timeoutMs: 90_000 })
         // Invalid values fall back to the defaults instead of breaking startup.
-        expect(readTitleProviderRequestLimits({ HAPI_TITLE_PROVIDER_MAX_TOKENS: '-5' })).toEqual({ maxTokens: 64, timeoutMs: 10_000 })
+        expect(readTitleProviderRequestLimits({ HAPI_TITLE_PROVIDER_MAX_TOKENS: '-5' })).toEqual({ maxTokens: 256, timeoutMs: 10_000 })
 
         let request: Request | undefined
         const provider = new OpenAICompatibleTitleProvider(

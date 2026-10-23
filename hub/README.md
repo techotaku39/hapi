@@ -47,9 +47,11 @@ provider. Configure `titleProvider.baseUrl`, `titleProvider.apiKey`, and
 `$HAPI_HOME/settings.json` (default `~/.hapi/settings.json`),
 or set the corresponding `HAPI_TITLE_PROVIDER_BASE_URL`,
 `HAPI_TITLE_PROVIDER_API_KEY`, `HAPI_TITLE_PROVIDER_MODEL`, and optionally
-`HAPI_TITLE_PROVIDER_TIMEOUT_MS` environment variables. The timeout defaults to
-10 seconds and environment values override settings-file values per field. API
-keys remain Hub-side and are never sent to the browser.
+`HAPI_TITLE_PROVIDER_TIMEOUT_MS` environment variables. For providers that use
+reasoning tokens, `HAPI_TITLE_PROVIDER_MAX_TOKENS` can raise or lower the
+completion-token budget (default: 256). The timeout defaults to 10 seconds and
+environment values override settings-file values per field. API keys remain
+Hub-side and are never sent to the browser.
 
 ### Optional
 

@@ -17,6 +17,7 @@
  * - HAPI_PUBLIC_URL: Public URL for external access (e.g., Telegram Mini App)
  * - CORS_ORIGINS: Comma-separated CORS origins
  * - HAPI_TITLE_PROVIDER_TIMEOUT_MS: Title provider request timeout in milliseconds (default: 10000)
+ * - HAPI_TITLE_PROVIDER_MAX_TOKENS: Maximum completion-token budget per title (default: 256)
  * - HAPI_RELAY_API: Relay API domain for tunwg (default: relay.hapi.run)
  * - HAPI_RELAY_AUTH: Relay auth key override (default: per-hub key issued by the relay)
  * - HAPI_RELAY_FORCE_TCP: Force TCP relay mode when UDP is unavailable (true/1)
