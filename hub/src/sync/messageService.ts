@@ -993,20 +993,48 @@ export class MessageService {
         const message = this.store.messages.claimIndeterminateMessage(sessionId, messageId)
         if (!message || !message.localId) return { status: 'not-found' }
 
+        const materializingKey = message.scheduledAt !== null
+            ? `${sessionId}:${message.id}`
+            : undefined
+        if (materializingKey) this.materializingScheduledMessageKeys.add(materializingKey)
         let deliveryContent: unknown
         try {
-            deliveryContent = message.scheduledAt === null
-                ? contentForDeferredDelivery(message.content)
-                : await this.getScheduledDeliveryContent(message)
-        } catch {
-            this.store.messages.setMessagesDeliveryState(sessionId, [message.localId], 'indeterminate')
-            this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [message.localId] })
-            return { status: 'retry-unavailable', localId: message.localId }
-        }
-        if (deliveryContent === null) {
-            this.store.messages.setMessagesDeliveryState(sessionId, [message.localId], 'indeterminate')
-            this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [message.localId] })
-            return { status: 'retry-unavailable', localId: message.localId }
+            try {
+                deliveryContent = message.scheduledAt === null
+                    ? contentForDeferredDelivery(message.content)
+                    : await this.getScheduledDeliveryContent(message)
+            } catch {
+                const settled = this.store.messages.lookupQueuedMessage(sessionId, message.id)
+                if (settled.status === 'absent') return { status: 'not-found' }
+                this.store.messages.setMessagesDeliveryState(sessionId, [message.localId], 'indeterminate')
+                this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [message.localId] })
+                return { status: 'retry-unavailable', localId: message.localId }
+            }
+
+            // Materialization yields to cancellation. Only the row that this
+            // retry claimed may proceed to the CLI; cancellation or another
+            // delivery outcome must suppress the stale retry and release any
+            // staged CLI upload that was cached while the await was pending.
+            const current = this.store.messages.lookupQueuedMessage(sessionId, message.id)
+            if (current.status !== 'dispatching') {
+                const staged = materializingKey
+                    ? this.scheduledAttachmentDeliveryCache.get(materializingKey)
+                    : undefined
+                if (materializingKey) this.scheduledAttachmentDeliveryCache.delete(materializingKey)
+                if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
+                if (current.status === 'invoked') {
+                    return { status: 'invoked', message: toDecryptedMessage(current.message) }
+                }
+                if (current.status === 'absent') return { status: 'not-found' }
+                return { status: 'retry-unavailable', localId: message.localId }
+            }
+            if (deliveryContent === null) {
+                this.store.messages.setMessagesDeliveryState(sessionId, [message.localId], 'indeterminate')
+                this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [message.localId] })
+                return { status: 'retry-unavailable', localId: message.localId }
+            }
+        } finally {
+            if (materializingKey) this.materializingScheduledMessageKeys.delete(materializingKey)
         }
 
         const update = {

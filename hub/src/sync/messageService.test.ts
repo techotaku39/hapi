@@ -873,6 +873,84 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
                 .toBe('/tmp/retried-scheduled-attachment.png')
         })
 
+        it('suppresses retry delivery when cancellation wins during materialization', async () => {
+            const store = makeStore()
+            const session = makeSession(store, 'retry-cancel-during-materialization')
+            const attachment = makeHubScratchlistAttachment(session.id, 'retry-cancel-during-materialization')
+            const message = store.messages.addMessage(
+                session.id,
+                { role: 'user', content: { type: 'text', text: 'cancel this retry', attachments: [attachment] } },
+                'local-retry-cancel-during-materialization',
+                Date.now() - 1_000,
+            )
+            store.messages.markMessagesIndeterminate(session.id, [message.localId!])
+
+            let materializeStarted!: () => void
+            const started = new Promise<void>((resolve) => { materializeStarted = resolve })
+            let resolveMaterialization!: (attachments: AttachmentMetadata[]) => void
+            const materialized = new Promise<AttachmentMetadata[]>((resolve) => {
+                resolveMaterialization = resolve
+            })
+            let ackCount = 0
+            let retriedUpdate: unknown
+            const deletedMaterializedPaths: string[] = []
+            const io = {
+                of: () => ({
+                    to: () => ({
+                        timeout: () => ({
+                            emit: (_event: string, data: unknown, callback: AckCallback) => {
+                                ackCount += 1
+                                if (ackCount <= 3) {
+                                    callback(null, [{ removed: true }])
+                                } else {
+                                    retriedUpdate = data
+                                    callback(null, [{ removed: false, accepted: true } as any])
+                                }
+                            },
+                        }),
+                        emit: () => {},
+                    }),
+                    adapter: { rooms: { get: () => new Set(['cli']) } },
+                }),
+            } as unknown as Server
+            const service = new MessageService(
+                store,
+                io,
+                makePublisher() as any,
+                undefined,
+                {
+                    materializeScheduledAttachments: async (_sessionId, attachments) => {
+                        materializeStarted()
+                        await materialized
+                        return attachments.map((candidate) => ({
+                            ...candidate,
+                            path: '/tmp/cancelled-retry.png',
+                        }))
+                    },
+                    deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                        deletedMaterializedPaths.push(...attachments.map((candidate) => candidate.path))
+                    },
+                },
+            )
+
+            const retry = service.retryIndeterminateMessage(session.id, message.id)
+            await started
+            await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({
+                status: 'busy',
+                localId: message.localId,
+            })
+            await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({
+                status: 'cancelled',
+                localId: message.localId,
+            })
+            resolveMaterialization([])
+
+            await expect(retry).resolves.toEqual({ status: 'not-found' })
+            expect(retriedUpdate).toBeUndefined()
+            expect(deletedMaterializedPaths).toEqual(['/tmp/cancelled-retry.png'])
+            expect(store.messages.lookupQueuedMessage(session.id, message.id).status).toBe('absent')
+        })
+
         it('preserves ordinary CLI attachment paths when retrying an unscheduled message', async () => {
             const store = makeStore()
             const session = makeSession(store, 'retry-cli-attachment')
