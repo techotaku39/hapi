@@ -22,7 +22,7 @@ const message: DecryptedMessage = {
     invokedAt: null,
     status: 'queued',
     scheduledAt: kind === 'scheduled' ? Date.now() + 3_600_000 : null,
-    ...(kind === 'unknown' ? { deliveryState: 'indeterminate' as const, queueDismissed: true } : {}),
+    ...(['unknown', 'compacting'].includes(kind) ? { deliveryState: 'indeterminate' as const, queueDismissed: true } : {}),
     content: { role: 'user', content: { type: 'text', text: 'Please continue the previous task after the restart.' } },
 }
 clearMessageWindow(sessionId)
@@ -57,6 +57,7 @@ function Fixture() {
                             <header className="border-b border-[var(--app-border)] p-4">Queued message recovery</header>
                             <div className="flex-1 p-4 text-[var(--app-hint)]">Codex</div>
                             <QueuedMessagesBar sessionId={sessionId} api={api} canAbandon
+                                compactionPendingMessageIds={kind === 'compacting' ? ['queued-resolution-local'] : undefined}
                                 pendingSchedule={null} pendingScheduleRevision={0} />
                             <footer className="p-3">
                                 <textarea aria-label="Message draft" placeholder="Message" className="w-full rounded-xl bg-[var(--app-secondary-bg)] p-3" />

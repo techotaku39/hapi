@@ -198,5 +198,16 @@ for (const variant of [
                 expect(calls).toEqual([{ method: 'DELETE', path: messagePath, body: null }])
             })
         }
+        test('observed compaction stays on normal cancellation without an unknown-delivery dialog', async ({ page }) => {
+            const calls = await mockApi(page, (route, call) => route.fulfill({ json: call.method === 'DELETE'
+                ? { status: 'busy', localId: 'queued-resolution-local' }
+                : { queuedLocalIds: [], indeterminateLocalIds: ['queued-resolution-local'], invokedLocalMessages: [] } }))
+            await page.goto(`${fixture}?kind=compacting`)
+            await expect(page.getByText(variant.locale === 'zh-CN' ? '正在压缩上下文' : 'Compacting context', { exact: false })).toBeVisible()
+            await page.getByRole('button', { name: 'Cancel queued message', exact: true }).click()
+            await expect.poll(() => calls.some(call => call.method === 'DELETE')).toBe(true)
+            await expect(page.getByRole('dialog')).toHaveCount(0)
+            expect(calls.some(call => call.path.endsWith('/abandon'))).toBe(false)
+        })
     })
 }
