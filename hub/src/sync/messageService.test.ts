@@ -1907,6 +1907,82 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect(store.messages.lookupQueuedMessage(session.id, message.id)).toEqual({ status: 'absent' })
     })
 
+    it('holds scheduled delivery while the cancellation acknowledgement is pending', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cancel-ack-pending')
+        const cliEmitted: unknown[] = []
+        let materializeStarted!: () => void
+        const started = new Promise<void>((resolve) => { materializeStarted = resolve })
+        let resolveMaterialization!: (attachments: AttachmentMetadata[]) => void
+        const materialized = new Promise<AttachmentMetadata[]>((resolve) => { resolveMaterialization = resolve })
+        let resolveCancelAck!: (removed: boolean) => void
+        const cancelAck = new Promise<boolean>((resolve) => { resolveCancelAck = resolve })
+        let cancelAckStarted!: () => void
+        const cancelStarted = new Promise<void>((resolve) => { cancelAckStarted = resolve })
+        const deletedMaterializedPaths: string[] = []
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    },
+                    timeout: (_ms: number) => ({
+                        emit: (
+                            _event: string,
+                            _data: unknown,
+                            callback: (err: Error | null, responses: Array<{ removed: boolean }>) => void,
+                        ) => {
+                            cancelAckStarted()
+                            void cancelAck.then((removed) => callback(null, [{ removed }]))
+                        },
+                    }),
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } },
+            }),
+        } as unknown as Server
+        const attachment = makeHubScratchlistAttachment(session.id, 'cancel-ack-pending')
+        const service = new MessageService(
+            store,
+            io,
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => {
+                    materializeStarted()
+                    await materialized
+                    return attachments.map((candidate) => ({
+                        ...candidate,
+                        path: '/tmp/cancel-ack-pending.png',
+                    }))
+                },
+                deleteMaterializedScheduledAttachments: async (_sessionId, attachments) => {
+                    deletedMaterializedPaths.push(...attachments.map((candidate) => candidate.path))
+                },
+            },
+        )
+        const message = store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'cancel pending ack', attachments: [attachment] } },
+            'local-cancel-ack-pending',
+            Date.now() - 1_000,
+        )
+
+        const release = service.releaseMatureScheduledMessages(Date.now())
+        await materializeStarted
+        const cancel = service.cancelQueuedMessage(session.id, message.id)
+        await cancelStarted
+        resolveMaterialization([attachment])
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(cliEmitted).toHaveLength(0)
+        resolveCancelAck(false)
+
+        await expect(cancel).resolves.toMatchObject({ status: 'cancelled', localId: message.localId })
+        await release
+        expect(cliEmitted).toHaveLength(0)
+        expect(deletedMaterializedPaths).toEqual(['/tmp/cancel-ack-pending.png'])
+        expect(store.messages.lookupQueuedMessage(session.id, message.id).status).toBe('absent')
+    })
+
     it('cleans the CLI upload when cancelling after scheduled attachment materialization', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-cancel-after-materialize')

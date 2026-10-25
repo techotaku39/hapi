@@ -1407,6 +1407,13 @@ export class MessageService {
                     }
                     if (deliveryContent === null) break
 
+                    if (this.cancellingScheduledMessageKeys.has(materializingKey)) {
+                        const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
+                        this.scheduledAttachmentDeliveryCache.delete(materializingKey)
+                        if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
+                        continue
+                    }
+
                     const current = this.store.messages.lookupQueuedMessage(sessionId, msg.id)
                     if (current.status !== 'queued') {
                         const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
@@ -1552,6 +1559,13 @@ export class MessageService {
                         break
                     }
                     if (deliveryContent === null) break
+
+                    if (this.cancellingScheduledMessageKeys.has(materializingKey)) {
+                        const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
+                        this.scheduledAttachmentDeliveryCache.delete(materializingKey)
+                        if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
+                        continue
+                    }
 
                     // Cancellation or an acknowledgement may have won while
                     // the attachment was being uploaded. Never emit the stale
