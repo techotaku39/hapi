@@ -235,11 +235,31 @@ export function shouldCancelInitialScrollSettling(
 }
 
 /**
- * Anchor ids are rendered DOM ids (`hapi-message-<kind>:<messageId>[:n]`).
- * Recover the raw message id so the store can protect that row from trimming.
+ * Recover the raw message id behind a scroll anchor so the store can protect
+ * that row from trimming.
+ *
+ * Parsing the rendered DOM id is not enough: a streamed Pi assistant card
+ * carries its *stream* id there, while the store matches canonical
+ * `message.id` / `localId`. Prefer the source metadata the renderer already
+ * emits, and fall back to the id only for kinds that embed a raw id.
  */
-function anchorMessageIdFromAnchor(anchor: ScrollAnchor | null): string | null {
+export function anchorMessageIdFromAnchor(anchor: ScrollAnchor | null): string | null {
     if (!anchor) return null
+
+    const element = document.getElementById(anchor.id)
+    if (element) {
+        const own = element
+            .closest('[data-hapi-source-message-id]')
+            ?.getAttribute('data-hapi-source-message-id')
+        if (own) return own
+
+        for (const attribute of ['data-hapi-source-part-message-ids', 'data-hapi-source-message-ids']) {
+            const ids = element.closest(`[${attribute}]`)?.getAttribute(attribute)
+            const first = ids?.split(/\s+/).filter(Boolean)[0]
+            if (first) return first
+        }
+    }
+
     const withoutPrefix = anchor.id.replace(/^hapi-message-/, '')
     const parts = withoutPrefix.split(':')
     return parts.length > 1 ? parts[1]! : null
