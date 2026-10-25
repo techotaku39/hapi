@@ -385,9 +385,9 @@ function SessionPage() {
     // Must stay above the `if (!session)` early return below: declaring it
     // after that branch changes the hook count once session data resolves.
     const handleLoadNewerMessages = useCallback(async (
-        preserveMessageId?: string | null
+        resolvePreserveMessageId?: () => string | null
     ): Promise<boolean> => {
-        const outcome = await loadNewerMessages(preserveMessageId)
+        const outcome = await loadNewerMessages(resolvePreserveMessageId)
         return outcome.kind === 'caught-up'
     }, [loadNewerMessages])
 

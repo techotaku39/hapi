@@ -2126,10 +2126,57 @@ describe('reading forward from a context window', () => {
                 snapshotHeadSeq: 9_000
             }
         ))
-        await fetchNewerMessages(api, id, { preserveMessageId: 'target' })
+        await fetchNewerMessages(api, id, { resolvePreserveMessageId: () => 'target' })
 
         // Without the guard the oldest rows are trimmed and the reader is
         // dropped somewhere else entirely.
+        expect(getMessageWindowState(id).messages.some((m) => m.id === 'target')).toBe(true)
+    })
+
+    it('protects the row the reader moved to, not the one they started from', async () => {
+        const id = sessionId('context-forward-anchor-moves')
+        const target = makeAgentMessage({ id: 'target', seq: 1, at: 1_000 })
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+        api.getMessageContext = vi.fn(async () => contextResponse([
+            target,
+            ...Array.from({ length: 599 }, (_, i) => makeAgentMessage({
+                id: `ctx-${i}`, seq: i + 2, at: (i + 2) * 1_000
+            }))
+        ], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 1_000,
+            nextBeforeSeq: 1,
+            snapshotHeadAt: 9_000_000,
+            snapshotHeadSeq: 9_000,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        // The reader starts at the bottom, then scrolls back to the oldest row
+        // while the page is still in flight.
+        let anchored = 'ctx-598'
+        getMessages.mockImplementationOnce(async () => {
+            anchored = 'target'
+            return afterResponse(
+                Array.from({ length: 200 }, (_, i) => makeAgentMessage({
+                    id: `fwd-${i}`, seq: 1_000 + i, at: (1_000 + i) * 1_000
+                })),
+                {
+                    epoch: 7,
+                    hasMore: true,
+                    nextAfterAt: 1_199_000,
+                    nextAfterSeq: 1_199,
+                    snapshotHeadAt: 9_000_000,
+                    snapshotHeadSeq: 9_000
+                }
+            )
+        })
+        await fetchNewerMessages(api, id, { resolvePreserveMessageId: () => anchored })
+
+        // A value captured at request time would have protected 'ctx-598' and
+        // trimmed 'target' out from under the reader.
         expect(getMessageWindowState(id).messages.some((m) => m.id === 'target')).toBe(true)
     })
 

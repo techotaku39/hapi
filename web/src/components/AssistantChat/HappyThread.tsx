@@ -689,7 +689,7 @@ export function HappyThread(props: {
     isLoadingMoreMessages: boolean
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
     /** Walk a context window one page forward; resolves true once caught up. */
-    onLoadNewer?: (preserveMessageId?: string | null) => Promise<boolean>
+    onLoadNewer?: (resolvePreserveMessageId?: () => string | null) => Promise<boolean>
     onCancelLoadMore: () => void
     unseenCount: number
     rawMessagesCount: number
@@ -1122,8 +1122,11 @@ export function HappyThread(props: {
                     // Hand the anchored row to the store so trimming cannot
                     // evict it while the page is in flight; the refreshed
                     // anchor is the one that matters if the reader moved.
+                    // Resolved when the page is applied, so a reader who
+                    // scrolled during the request keeps the row they are on
+                    // rather than the one they started from.
                     void onLoadNewerRef.current(
-                        anchorMessageIdFromAnchor(pendingForwardAnchorRef.current ?? forwardAnchor)
+                        () => anchorMessageIdFromAnchor(pendingForwardAnchorRef.current)
                     ).finally(() => { loadingNewerRef.current = false })
                 }
                 return

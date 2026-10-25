@@ -52,7 +52,7 @@ export function useMessages(
     historyVersion: number
     tailRevision: number
     loadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
-    loadNewer: (preserveMessageId?: string | null) => Promise<NewerLoadOutcome>
+    loadNewer: (resolvePreserveMessageId?: () => string | null) => Promise<NewerLoadOutcome>
     loadMessageContext: (messageId: string) => Promise<boolean>
     cancelLoadMore: () => void
     refetch: () => Promise<void>
@@ -112,11 +112,11 @@ export function useMessages(
         return await fetchOlderMessages(api, sessionId, { onBeforeApply })
     }, [api, sessionId])
 
-    const loadNewer = useCallback(async (preserveMessageId?: string | null) => {
+    const loadNewer = useCallback(async (resolvePreserveMessageId?: () => string | null) => {
         if (!api || !sessionId) {
             return { kind: 'stopped', reason: 'unavailable' } as const
         }
-        return await fetchNewerMessages(api, sessionId, { preserveMessageId })
+        return await fetchNewerMessages(api, sessionId, { resolvePreserveMessageId })
     }, [api, sessionId])
 
     const cancelLoadMore = useCallback(() => {

@@ -1377,12 +1377,12 @@ export async function fetchNewerMessages(
     sessionId: string,
     options: {
         /**
-         * Row the reader is currently anchored to. Forward paging trims from
-         * the old end, so without this a reader who scrolled back into the
-         * oldest rows would have their anchor evicted and be dropped at a
-         * different message.
+         * Resolves the row the reader is anchored to, read at apply time
+         * rather than request time. Forward paging trims from the old end, and
+         * the reader can scroll during a slow page — a value captured when the
+         * request started would protect the row they have already left.
          */
-        preserveMessageId?: string | null
+        resolvePreserveMessageId?: () => string | null
     } = {}
 ): Promise<NewerLoadOutcome> {
     const initial = getState(sessionId)
@@ -1431,10 +1431,11 @@ export async function fetchNewerMessages(
             // newly appended rows are the ones that must survive — unless the
             // reader is anchored in the rows that would go, in which case keep
             // the window longer rather than moving them.
-            const anchorIndex = options.preserveMessageId
+            const preserveMessageId = options.resolvePreserveMessageId?.() ?? null
+            const anchorIndex = preserveMessageId
                 ? merged.findIndex((message) => (
-                    message.id === options.preserveMessageId
-                    || message.localId === options.preserveMessageId
+                    message.id === preserveMessageId
+                    || message.localId === preserveMessageId
                 ))
                 : -1
             const trimLimit = anchorIndex >= 0
