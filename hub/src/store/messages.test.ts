@@ -133,6 +133,45 @@ describe('assistant reply timestamp', () => {
         expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
         store.close()
     })
+
+    it('keeps injected ancestry when the sentinel is outside the recent message window', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'assistant-reply-clock-long-hidden')
+        const injectedUuid = 'injected-long-turn'
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: injectedUuid,
+                    isSidechain: true,
+                    message: { content: '<system-reminder>internal</system-reminder>' }
+                }
+            }
+        }, undefined, undefined, 1_000)
+        for (let index = 0; index < 220; index += 1) {
+            store.messages.addMessage(session.id, {
+                role: 'user',
+                content: { type: 'text', text: `filler ${index}` }
+            }, undefined, undefined, 2_000 + index)
+        }
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: injectedUuid,
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }, undefined, undefined, 3_000)
+
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBeNull()
+        store.close()
+    })
 })
 
 describe('cancelQueuedMessage', () => {

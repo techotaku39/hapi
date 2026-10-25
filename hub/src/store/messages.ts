@@ -32,28 +32,55 @@ type DbMessageContentRow = {
     content: string | Uint8Array
 }
 
-const ASSISTANT_REPLY_CONTEXT_LIMIT = 200
+const injectedTurnUuidCaches = new WeakMap<Database, Map<string, Set<string>>>()
 
-function getRecentInjectedTurnUuids(db: Database, sessionId: string): Set<string> {
+function getInjectedTurnUuidCache(db: Database, sessionId: string): Set<string> {
+    let sessionCaches = injectedTurnUuidCaches.get(db)
+    if (!sessionCaches) {
+        sessionCaches = new Map()
+        injectedTurnUuidCaches.set(db, sessionCaches)
+    }
+    const cached = sessionCaches.get(sessionId)
+    if (cached) return cached
+
     const rows = prepareCached(db, `
         SELECT content
         FROM messages
         WHERE session_id = ?
-        ORDER BY seq DESC
-        LIMIT ?
-    `).all(sessionId, ASSISTANT_REPLY_CONTEXT_LIMIT) as DbMessageContentRow[]
+        ORDER BY seq ASC
+    `).all(sessionId) as DbMessageContentRow[]
     const injectedTurnUuids = new Set<string>()
     for (const row of rows) {
         const injectedTurnUuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
         if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
     }
+    sessionCaches.set(sessionId, injectedTurnUuids)
     return injectedTurnUuids
+}
+
+function rememberInjectedTurnUuid(db: Database, sessionId: string, content: unknown): void {
+    const injectedTurnUuid = extractInjectedTurnUuid(content)
+    if (!injectedTurnUuid) return
+    injectedTurnUuidCaches.get(db)?.get(sessionId)?.add(injectedTurnUuid)
+}
+
+function invalidateInjectedTurnUuidCache(db: Database, sessionId: string): void {
+    injectedTurnUuidCaches.get(db)?.delete(sessionId)
+}
+
+function prepareAssistantReplyContext(db: Database, sessionId: string, content: unknown): void {
+    if (isAssistantTextMessage(content) && extractAssistantParentUuid(content)) {
+        // Populate the ancestry cache before entering the message write
+        // transaction. The first lookup may scan a long legacy transcript,
+        // but subsequent live replies only perform a Set membership check.
+        getInjectedTurnUuidCache(db, sessionId)
+    }
 }
 
 export function isVisibleAssistantReply(db: Database, sessionId: string, content: unknown): boolean {
     if (!isAssistantTextMessage(content)) return false
     if (!extractAssistantParentUuid(content)) return true
-    return !isClaudeInjectedAutoReply(content, getRecentInjectedTurnUuids(db, sessionId))
+    return !isClaudeInjectedAutoReply(content, getInjectedTurnUuidCache(db, sessionId))
 }
 
 function touchLastAssistantMessageAt(
@@ -83,6 +110,7 @@ function touchLastAssistantMessageAt(
 // recomputation to SessionCache so merge/rewind transactions never decode the
 // entire transcript while holding SQLite's write lock.
 function markAssistantReplyClockNeedsBackfill(db: Database, sessionId: string): void {
+    invalidateInjectedTurnUuidCache(db, sessionId)
     db.prepare(`
         UPDATE sessions
         SET assistant_reply_clock_backfilled = 0,
@@ -124,6 +152,7 @@ export function addImportedMessage(
         return { message, inserted: false }
     }
 
+    prepareAssistantReplyContext(db, sessionId, content)
     const now = Date.now()
     const stampedAt = Number.isFinite(createdAt) ? Math.min(createdAt, now) : now
     return db.transaction(() => {
@@ -147,6 +176,7 @@ export function addImportedMessage(
             local_id: localId,
             invoked_at: stampedAt
         })
+        rememberInjectedTurnUuid(db, sessionId, content)
         touchLastAssistantMessageAt(db, sessionId, content, stampedAt)
         if (previousHead && stampedAt < previousHead.at) bumpMessageEpoch(db, sessionId)
         const row = prepareCached(db, 'SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
@@ -224,6 +254,8 @@ export function addMessage(
     // hub arrival order.
     const invokedAt = localId ? null : stampedAt
 
+    prepareAssistantReplyContext(db, sessionId, content)
+
     return db.transaction(() => {
         const previousHead = getNewestMessagePosition(db, sessionId)
         prepareCached(db, `
@@ -243,6 +275,7 @@ export function addMessage(
             scheduled_at: scheduledAt ?? null
         })
 
+        rememberInjectedTurnUuid(db, sessionId, content)
         touchLastAssistantMessageAt(db, sessionId, content, stampedAt)
 
         const positionAt = invokedAt ?? stampedAt
@@ -294,6 +327,7 @@ export function copyMessageToSession(
     }
 
     const invokedAt = localId ? message.invokedAt : (message.invokedAt ?? createdAt)
+    prepareAssistantReplyContext(db, sessionId, message.content)
     const id = randomUUID()
     prepareCached(db, `
         INSERT INTO messages (
@@ -315,6 +349,7 @@ export function copyMessageToSession(
         delivery_state: message.deliveryState ?? 'queued'
     })
 
+    rememberInjectedTurnUuid(db, sessionId, message.content)
     touchLastAssistantMessageAt(db, sessionId, message.content, createdAt)
 
     const row = prepareCached(db, 'SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
@@ -340,6 +375,13 @@ export function copyMessagesToSession(
 ): number {
     if (messages.length === 0) return 0
 
+    const hasParentedAssistant = messages.some((message) =>
+        isAssistantTextMessage(message.content) && extractAssistantParentUuid(message.content)
+    )
+    const injectedTurnUuids = hasParentedAssistant
+        ? getInjectedTurnUuidCache(db, sessionId)
+        : new Set<string>()
+
     return db.transaction(() => {
         let nextSeq = getMaxSeq(db, sessionId) + 1
         const assistantMessages: Array<{ content: unknown; createdAt: number }> = []
@@ -355,6 +397,8 @@ export function copyMessagesToSession(
         )
 
         for (const message of messages) {
+            const injectedTurnUuid = extractInjectedTurnUuid(message.content)
+            if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
             const createdAt = Number.isFinite(message.createdAt) ? message.createdAt : Date.now()
             let localId = message.localId
             if (localId) {
@@ -378,13 +422,17 @@ export function copyMessagesToSession(
                 scheduled_at: message.scheduledAt ?? null,
                 delivery_state: message.deliveryState ?? 'queued'
             })
-            if (isAssistantTextMessage(message.content)) assistantMessages.push({ content: message.content, createdAt })
+            if (
+                isAssistantTextMessage(message.content)
+                && !isClaudeInjectedAutoReply(message.content, injectedTurnUuids)
+            ) {
+                assistantMessages.push({ content: message.content, createdAt })
+            }
             nextSeq += 1
         }
 
         let latestAssistantMessage: { content: unknown; createdAt: number } | null = null
         for (const message of assistantMessages) {
-            if (!isVisibleAssistantReply(db, sessionId, message.content)) continue
             if (latestAssistantMessage === null || message.createdAt > latestAssistantMessage.createdAt) {
                 latestAssistantMessage = message
             }

@@ -101,4 +101,53 @@ describe('copyMessagesToSession', () => {
         expect(store.sessions.getSession(child.id)?.lastAssistantMessageAt).toBe(3_000)
         store.close()
     })
+
+    it('keeps copied injected ancestry when the source turn is outside the recent window', () => {
+        const store = new Store(':memory:')
+        const child = store.sessions.getOrCreateSession('hidden-long-child', { path: '/tmp' }, null, 'default')
+        const injectedUuid = 'injected-long-copy-turn'
+        const messages = [
+            {
+                role: 'agent',
+                content: {
+                    type: 'output',
+                    data: {
+                        type: 'user',
+                        uuid: injectedUuid,
+                        isSidechain: true,
+                        message: { content: '<system-reminder>internal</system-reminder>' }
+                    }
+                }
+            },
+            ...Array.from({ length: 220 }, (_, index) => ({
+                role: 'user',
+                content: { type: 'text', text: `filler ${index}` }
+            })),
+            {
+                role: 'agent',
+                content: {
+                    type: 'output',
+                    data: {
+                        type: 'assistant',
+                        parentUuid: injectedUuid,
+                        message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                    }
+                }
+            }
+        ]
+
+        store.messages.copyMessagesToSession(
+            child.id,
+            messages.map((content, index) => ({
+                content,
+                createdAt: 1_000 + index,
+                localId: null,
+                invokedAt: 1_000 + index,
+                scheduledAt: null
+            }))
+        )
+
+        expect(store.sessions.getSession(child.id)?.lastAssistantMessageAt).toBeNull()
+        store.close()
+    })
 })
