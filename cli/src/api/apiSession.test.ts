@@ -612,6 +612,39 @@ describe('ApiSessionClient lazy materialization', () => {
         expect(client.getMetadata()?.archivedBy).toBe('hub')
         client.close()
     })
+
+    it('drains live messages deferred during reconnect when no cursor exists', async () => {
+        socketHarness.sockets.length = 0
+        axiosHarness.get.mockReset()
+        axiosHarness.get.mockResolvedValue({
+            data: {
+                session: {
+                    metadataVersion: 0,
+                    metadata: { path: '/tmp', host: 'h', flavor: 'claude' }
+                }
+            }
+        })
+
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        const socket = socketHarness.sockets[0]
+        if (!socket) throw new Error('expected socket')
+        const receivedTexts: string[] = []
+        client.onUserMessage((message) => receivedTexts.push(message.content.text))
+
+        socket.triggerConnect()
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+        triggerIncomingUserMessage(socket, {
+            id: 'deferred-without-cursor',
+            seq: 1,
+            text: 'delivered after reconnect',
+            sentFrom: 'webapp'
+        })
+
+        await vi.waitFor(() => expect(receivedTexts).toEqual(['delivered after reconnect']))
+        client.close()
+    })
 })
 
 describe('ApiSessionClient agy transcript messages', () => {

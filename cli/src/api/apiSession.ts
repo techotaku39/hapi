@@ -1127,6 +1127,19 @@ export class ApiSessionClient extends EventEmitter {
         }
     }
 
+    private async drainDeferredLiveMessages(): Promise<void> {
+        // Drain repeatedly because another socket event can arrive while a
+        // deferred attachment is materializing.
+        while (this.deferredLiveMessages.length > 0) {
+            const deferred = this.deferredLiveMessages.splice(0)
+            await Promise.all(deferred.map((message) => (
+                this.handleIncomingMessage(message).catch((error) => {
+                    logger.debug('[API] Failed to materialize deferred live attachment', { error })
+                })
+            )))
+        }
+    }
+
     private async backfillMessages(): Promise<void> {
         if (this.backfillInFlight) {
             await this.backfillInFlight
@@ -1136,6 +1149,7 @@ export class ApiSessionClient extends EventEmitter {
         const startSeq = this.incomingFilter.cursorSeq()
         if (startSeq === null) {
             logger.debug('[API] Skipping backfill because no last-seen message sequence is available')
+            await this.drainDeferredLiveMessages()
             return
         }
 
@@ -1206,16 +1220,7 @@ export class ApiSessionClient extends EventEmitter {
             } finally {
                 if (backfillSucceeded) {
                     // Keep live socket messages behind every fetched backfill page.
-                    // Drain repeatedly because another socket event can arrive while
-                    // a deferred attachment is materializing.
-                    while (this.deferredLiveMessages.length > 0) {
-                        const deferred = this.deferredLiveMessages.splice(0)
-                        await Promise.all(deferred.map((message) => (
-                            this.handleIncomingMessage(message).catch((error) => {
-                                logger.debug('[API] Failed to materialize deferred live attachment', { error })
-                            })
-                        )))
-                    }
+                    await this.drainDeferredLiveMessages()
                 }
             }
         }
