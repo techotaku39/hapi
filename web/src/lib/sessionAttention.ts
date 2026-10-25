@@ -35,7 +35,8 @@ export function classifySessionAttention(
         return null
     }
 
-    const pendingRequestKinds = Array.isArray(summary.pendingRequestKinds)
+    // Requests left on an archived session can no longer be answered.
+    const pendingRequestKinds = summary.active && Array.isArray(summary.pendingRequestKinds)
         ? summary.pendingRequestKinds
         : []
 
