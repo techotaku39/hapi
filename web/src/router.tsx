@@ -382,6 +382,13 @@ function SessionPage() {
         skipInitialTailSync: hasCompleteInitialMessageTarget
     })
 
+    // Must stay above the `if (!session)` early return below: declaring it
+    // after that branch changes the hook count once session data resolves.
+    const handleLoadNewerMessages = useCallback(async (): Promise<boolean> => {
+        const outcome = await loadNewerMessages()
+        return outcome.kind === 'caught-up'
+    }, [loadNewerMessages])
+
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
     // assistant-ui clears the composer eagerly when a send is invoked, so to
@@ -817,11 +824,6 @@ function SessionPage() {
             </div>
         )
     }
-
-    const handleLoadNewerMessages = useCallback(async (): Promise<boolean> => {
-        const outcome = await loadNewerMessages()
-        return outcome.kind === 'caught-up'
-    }, [loadNewerMessages])
 
     return (
         <SessionChat

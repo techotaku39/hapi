@@ -1838,9 +1838,16 @@ describe('reading forward from a context window', () => {
         await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
 
         // First forward page stops mid-gap: still short of seq 100.
-        getMessages.mockResolvedValueOnce(latestResponse([
+        getMessages.mockResolvedValueOnce(afterResponse([
             makeAgentMessage({ id: 'mid', seq: 60, at: 60_000 })
-        ], { epoch: 7 }))
+        ], {
+            epoch: 7,
+            hasMore: true,
+            nextAfterAt: 60_000,
+            nextAfterSeq: 60,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100
+        }))
         const first = await fetchNewerMessages(api, id)
 
         expect(getMessages.mock.calls[0]?.[1]).toMatchObject({ afterAt: 40_000, afterSeq: 40 })
@@ -1849,15 +1856,98 @@ describe('reading forward from a context window', () => {
         expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
 
         // Second page reaches the head: forward loading is done.
-        getMessages.mockResolvedValueOnce(latestResponse([
+        getMessages.mockResolvedValueOnce(afterResponse([
             makeAgentMessage({ id: 'head', seq: 100, at: 100_000 })
-        ], { epoch: 7 }))
+        ], {
+            epoch: 7,
+            hasMore: false,
+            nextAfterAt: 100_000,
+            nextAfterSeq: 100,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100
+        }))
         const second = await fetchNewerMessages(api, id)
 
         expect(getMessages.mock.calls[1]?.[1]).toMatchObject({ afterAt: 60_000, afterSeq: 60 })
         expect(second.kind).toBe('caught-up')
         expect(getMessageWindowState(id).hasMoreNewer).toBe(false)
         expect(getMessageWindowState(id).messages.map((m) => m.id)).toEqual(['target', 'mid', 'head'])
+    })
+
+    it('ignores a concurrently streamed head row when advancing the cursor', async () => {
+        const id = sessionId('context-forward-sse-race')
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        // A live row lands at the head while the reader is still mid-history.
+        ingestIncomingMessages(id, [
+            makeAgentMessage({ id: 'live', seq: 1_001, at: 1_001_000 })
+        ])
+
+        getMessages.mockResolvedValueOnce(afterResponse([
+            makeAgentMessage({ id: 'mid', seq: 60, at: 60_000 })
+        ], {
+            epoch: 7,
+            hasMore: true,
+            nextAfterAt: 60_000,
+            nextAfterSeq: 60,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100
+        }))
+        const outcome = await fetchNewerMessages(api, id)
+
+        // The cursor follows the page boundary, not the streamed row, so the
+        // gap between 60 and the head is still reachable.
+        expect(outcome.kind).toBe('loaded')
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+        getMessages.mockResolvedValueOnce(afterResponse([], {
+            epoch: 7,
+            hasMore: true,
+            nextAfterAt: 80_000,
+            nextAfterSeq: 80,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100
+        }))
+        await fetchNewerMessages(api, id)
+        expect(getMessages.mock.calls[1]?.[1]).toMatchObject({ afterAt: 60_000, afterSeq: 60 })
+    })
+
+    it('keeps forward loading available when a queued prompt is pending', async () => {
+        const id = sessionId('context-forward-queued')
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const api = createApi(vi.fn(async () => latestResponse([])))
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+
+        // An out-of-band queued prompt sits past the head in the merged window.
+        appendOptimisticMessage(id, makeUserMessage({
+            id: 'queued-1',
+            localId: 'queued-1',
+            createdAt: 999_000,
+            invokedAt: null,
+            status: 'sending'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
     })
 
     it('refuses to page forward when there is nothing ahead', async () => {

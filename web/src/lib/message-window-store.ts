@@ -1283,7 +1283,11 @@ export async function loadMessageContext(
             // The window stops well short of the head. Keep newestPosition* on
             // the head for tail sync, and track the window's own newest row
             // separately so the reader can page forward across the gap.
-            const contextNewest = derivePosition(kept, 'newest')
+            // Derive from the context page itself. `kept` also holds queued
+            // prompts and rows that arrived over SSE while the request was in
+            // flight; either would push the cursor past the contiguous window
+            // and strand the messages in between.
+            const contextNewest = derivePosition(retained, 'newest')
             const snapshotHead = pagePosition(
                 response.page.snapshotHeadAt,
                 response.page.snapshotHeadSeq
@@ -1382,12 +1386,19 @@ export async function fetchNewerMessages(
             // newly appended rows are the ones that must survive.
             const { kept } = trimPreservingQueued(merged, HISTORY_WINDOW_SIZE, 'append')
             added = kept.length - previous.messages.length
-            const contextNewest = derivePosition(kept, 'newest')
+            // Advance from the page's own boundary rather than the merged
+            // window: an SSE row appended at the live head would otherwise
+            // look like we had caught up, skipping everything in between.
+            const contextNewest = pagePosition(
+                response.page.nextAfterAt,
+                response.page.nextAfterSeq
+            ) ?? derivePosition(retained, 'newest') ?? after
             const head = readPosition(previous.newestPositionAt, previous.newestPositionSeq)
             const oldest = derivePosition(kept, 'oldest')
-            const caughtUp = contextNewest !== null
-                && head !== null
-                && comparePosition(contextNewest, head) >= 0
+            const caughtUp = !response.page.hasMore
+                || (contextNewest !== null
+                    && head !== null
+                    && comparePosition(contextNewest, head) >= 0)
             return buildState(previous, {
                 messages: kept,
                 isLoadingMore: false,
@@ -1398,7 +1409,7 @@ export async function fetchNewerMessages(
                 oldestPositionSeq: oldest?.seq ?? previous.oldestPositionSeq,
                 contextNewestAt: contextNewest?.at ?? previous.contextNewestAt,
                 contextNewestSeq: contextNewest?.seq ?? previous.contextNewestSeq,
-                hasMoreNewer: !caughtUp && retained.length > 0,
+                hasMoreNewer: !caughtUp,
                 historyVersion: previous.historyVersion + 1,
                 warning: null
             })
