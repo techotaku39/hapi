@@ -13,6 +13,7 @@ import {
     getQueuedReconcileCandidateLocalIds,
     ingestIncomingMessages,
     invalidateMessageWindow,
+    fetchNewerMessages,
     loadMessageContext,
     markMessagesConsumed,
     reconcileQueuedLocalIds,
@@ -1778,6 +1779,131 @@ describe('history view and older pagination', () => {
         ])
 
         expect(getMessageWindowState(id).messages.some((message) => message.id === 'root')).toBe(true)
+    })
+})
+
+describe('reading forward from a context window', () => {
+    it('reports more newer messages when the context stops short of the head', async () => {
+        const id = sessionId('context-forward-flag')
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const api = createApi(vi.fn(async () => latestResponse([])))
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        // The head is recorded for tail sync, but the window itself ends at 40.
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+    })
+
+    it('does not offer forward loading when the context already reaches the head', async () => {
+        const id = sessionId('context-forward-at-head')
+        const target = makeAgentMessage({ id: 'target', seq: 100, at: 100_000 })
+        const api = createApi(vi.fn(async () => latestResponse([])))
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 100_000,
+            nextBeforeSeq: 100,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(false)
+    })
+
+    it('loads a bounded newer page and keeps going until the head is reached', async () => {
+        const id = sessionId('context-forward-paging')
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        // First forward page stops mid-gap: still short of seq 100.
+        getMessages.mockResolvedValueOnce(latestResponse([
+            makeAgentMessage({ id: 'mid', seq: 60, at: 60_000 })
+        ], { epoch: 7 }))
+        const first = await fetchNewerMessages(api, id)
+
+        expect(getMessages.mock.calls[0]?.[1]).toMatchObject({ afterAt: 40_000, afterSeq: 40 })
+        expect(first.kind).toBe('loaded')
+        expect(getMessageWindowState(id).messages.map((m) => m.id)).toEqual(['target', 'mid'])
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+
+        // Second page reaches the head: forward loading is done.
+        getMessages.mockResolvedValueOnce(latestResponse([
+            makeAgentMessage({ id: 'head', seq: 100, at: 100_000 })
+        ], { epoch: 7 }))
+        const second = await fetchNewerMessages(api, id)
+
+        expect(getMessages.mock.calls[1]?.[1]).toMatchObject({ afterAt: 60_000, afterSeq: 60 })
+        expect(second.kind).toBe('caught-up')
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(false)
+        expect(getMessageWindowState(id).messages.map((m) => m.id)).toEqual(['target', 'mid', 'head'])
+    })
+
+    it('refuses to page forward when there is nothing ahead', async () => {
+        const id = sessionId('context-forward-exhausted')
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+
+        const outcome = await fetchNewerMessages(api, id)
+
+        expect(outcome).toEqual({ kind: 'stopped', reason: 'exhausted' })
+        expect(getMessages).not.toHaveBeenCalled()
+    })
+
+    it('restores the forward cursor from a persisted context window', () => {
+        const id = sessionId('context-forward-persist')
+        sessionStorage.setItem(`hapi:message-window:v2:${id}`, JSON.stringify({
+            messages: [makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })],
+            hasMore: false,
+            oldestPositionAt: 40_000,
+            oldestPositionSeq: 40,
+            newestPositionAt: 100_000,
+            newestPositionSeq: 100,
+            contextNewestAt: 40_000,
+            contextNewestSeq: 40,
+            epoch: 7,
+            requiresLatestReset: true
+        }))
+
+        // Reading forward survives the reload instead of dead-ending again.
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+    })
+
+    it('does not resume forward loading for a legacy window with no context cursor', () => {
+        const id = sessionId('context-forward-legacy')
+        sessionStorage.setItem(`hapi:message-window:v2:${id}`, JSON.stringify({
+            messages: [makeAgentMessage({ id: 'cached', seq: 40, at: 40_000 })],
+            hasMore: false,
+            oldestPositionAt: 40_000,
+            oldestPositionSeq: 40,
+            newestPositionAt: 100_000,
+            newestPositionSeq: 100,
+            epoch: 7,
+            requiresLatestReset: true
+        }))
+
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(false)
     })
 })
 

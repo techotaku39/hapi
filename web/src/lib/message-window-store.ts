@@ -25,6 +25,16 @@ export type OlderLoadOutcome =
         error: Error
     }
 
+/** Result of walking a context window forward toward the session head. */
+export type NewerLoadOutcome =
+    | { kind: 'loaded'; added: number }
+    /** The window reached the head; tail mode is now a valid transition. */
+    | { kind: 'caught-up'; added: number }
+    | {
+        kind: 'stopped'
+        reason: 'unavailable' | 'busy' | 'invalidated' | 'epoch-reset' | 'exhausted' | 'failed'
+    }
+
 export type MessageWindowState = {
     sessionId: string
     messages: DecryptedMessage[]
@@ -40,6 +50,12 @@ export type MessageWindowState = {
     // cursor is invalid. Consumers must treat that window as provisional
     // until the next tail reconciliation completes.
     requiresLatestReset: boolean
+    /**
+     * A search/context window stops short of the session head. True while
+     * newer messages exist between the loaded window and that head, so the
+     * reader can keep going forward instead of only paging backward.
+     */
+    hasMoreNewer: boolean
     messagesVersion: number
     historyVersion: number
     tailRevision: number
@@ -65,6 +81,11 @@ type InternalState = MessageWindowState & {
     oldestPositionSeq: number | null
     newestPositionAt: number | null
     newestPositionSeq: number | null
+    // Newest row actually loaded by a context jump. newestPosition* holds the
+    // session head so tail sync stays correct; this is the forward-paging
+    // cursor for the gap between the two.
+    contextNewestAt: number | null
+    contextNewestSeq: number | null
     requiresLatestReset: boolean
     preferLatestOnActivation: boolean
     syncGeneration: number
@@ -78,6 +99,8 @@ type PersistedMessageWindowState = {
     oldestPositionSeq: number | null
     newestPositionAt: number | null
     newestPositionSeq: number | null
+    contextNewestAt: number | null
+    contextNewestSeq: number | null
     epoch: number | null
     requiresLatestReset: boolean
 }
@@ -194,6 +217,8 @@ function persistState(sessionId: string, state: InternalState): void {
             oldestPositionSeq: state.oldestPositionSeq,
             newestPositionAt: state.newestPositionAt,
             newestPositionSeq: state.newestPositionSeq,
+            contextNewestAt: state.contextNewestAt,
+            contextNewestSeq: state.contextNewestSeq,
             epoch: state.epoch,
             requiresLatestReset: state.requiresLatestReset
         }
@@ -256,6 +281,9 @@ function createState(sessionId: string): InternalState {
         oldestPositionSeq: null,
         newestPositionAt: null,
         newestPositionSeq: null,
+        contextNewestAt: null,
+        contextNewestSeq: null,
+        hasMoreNewer: false,
         requiresLatestReset: false,
         preferLatestOnActivation: false,
         syncGeneration: 0,
@@ -288,6 +316,7 @@ function hydrateState(sessionId: string): InternalState | null {
         }
         const oldest = readPosition(parsed.oldestPositionAt, parsed.oldestPositionSeq)
         const newest = readPosition(parsed.newestPositionAt, parsed.newestPositionSeq)
+        const contextNewest = readPosition(parsed.contextNewestAt, parsed.contextNewestSeq)
         const epoch = typeof parsed.epoch === 'number' && Number.isInteger(parsed.epoch) && parsed.epoch >= 0
             ? parsed.epoch
             : null
@@ -304,6 +333,13 @@ function hydrateState(sessionId: string): InternalState | null {
             oldestPositionSeq: oldest?.seq ?? null,
             newestPositionAt: newest?.at ?? null,
             newestPositionSeq: newest?.seq ?? null,
+            contextNewestAt: contextNewest?.at ?? null,
+            contextNewestSeq: contextNewest?.seq ?? null,
+            // Reading forward resumes after a reload only while the restored
+            // window still stops short of the head.
+            hasMoreNewer: contextNewest !== null
+                && newest !== null
+                && comparePosition(contextNewest, newest) < 0,
             epoch,
             requiresLatestReset
         })
@@ -419,6 +455,9 @@ function buildState(
         | 'oldestPositionSeq'
         | 'newestPositionAt'
         | 'newestPositionSeq'
+        | 'contextNewestAt'
+        | 'contextNewestSeq'
+        | 'hasMoreNewer'
         | 'requiresLatestReset'
         | 'preferLatestOnActivation'
         | 'syncGeneration'
@@ -1241,6 +1280,14 @@ export async function loadMessageContext(
             )
             const { kept } = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'prepend')
             applied = true
+            // The window stops well short of the head. Keep newestPosition* on
+            // the head for tail sync, and track the window's own newest row
+            // separately so the reader can page forward across the gap.
+            const contextNewest = derivePosition(kept, 'newest')
+            const snapshotHead = pagePosition(
+                response.page.snapshotHeadAt,
+                response.page.snapshotHeadSeq
+            )
             return buildState(previous, {
                 messages: kept,
                 hasMore: response.page.hasMore,
@@ -1250,6 +1297,11 @@ export async function loadMessageContext(
                 oldestPositionSeq: response.page.nextBeforeSeq,
                 newestPositionAt: response.page.snapshotHeadAt,
                 newestPositionSeq: response.page.snapshotHeadSeq,
+                contextNewestAt: contextNewest?.at ?? null,
+                contextNewestSeq: contextNewest?.seq ?? null,
+                hasMoreNewer: contextNewest !== null
+                    && snapshotHead !== null
+                    && comparePosition(contextNewest, snapshotHead) < 0,
                 requiresLatestReset: true,
                 isLoadingMore: false,
                 historyVersion: previous.historyVersion + 1,
@@ -1269,6 +1321,105 @@ export async function loadMessageContext(
             })
         }, true)
         return false
+    }
+}
+
+/**
+ * Load one bounded page of messages after a context window's newest row.
+ *
+ * A search jump leaves the window stranded in the middle of the session: the
+ * head is recorded for tail sync, but nothing fills the gap between the two,
+ * so scrolling down used to dead-end. This walks that gap forward a page at a
+ * time, and reports when the window has finally caught up with the head.
+ */
+export async function fetchNewerMessages(
+    api: ApiClient,
+    sessionId: string
+): Promise<NewerLoadOutcome> {
+    const initial = getState(sessionId)
+    if (initial.isSyncingTail || initial.isLoadingMore) {
+        return { kind: 'stopped', reason: 'busy' }
+    }
+    if (!initial.hasMoreNewer) {
+        return { kind: 'stopped', reason: 'exhausted' }
+    }
+    const after = readPosition(initial.contextNewestAt, initial.contextNewestSeq)
+    if (!after) {
+        return { kind: 'stopped', reason: 'unavailable' }
+    }
+
+    const generation = initial.olderGeneration + 1
+    updateState(sessionId, (previous) => buildState(previous, {
+        olderGeneration: generation,
+        isLoadingMore: true,
+        warning: null
+    }))
+
+    try {
+        const response = await api.getMessages(sessionId, {
+            afterAt: after.at,
+            afterSeq: after.seq,
+            limit: PAGE_SIZE
+        })
+        if (getState(sessionId).olderGeneration !== generation) {
+            return { kind: 'stopped', reason: 'invalidated' }
+        }
+        if (initial.epoch !== null && response.page.epoch !== initial.epoch) {
+            // The history changed under us; the same authoritative refresh the
+            // older path uses also releases the search lock.
+            const current = getState(sessionId)
+            markMessageWindowForLatestReset(sessionId, current.messages)
+            await syncTailMessages(api, sessionId, { ensureAfterCurrent: true })
+            return { kind: 'stopped', reason: 'epoch-reset' }
+        }
+
+        const retained = response.messages.filter(shouldRetainWindowMessage)
+        let added = 0
+        updateState(sessionId, (previous) => {
+            if (previous.olderGeneration !== generation) return previous
+            const merged = mergeMessages(previous.messages, retained)
+            // Trim from the old end: the reader is moving forward, so the
+            // newly appended rows are the ones that must survive.
+            const { kept } = trimPreservingQueued(merged, HISTORY_WINDOW_SIZE, 'append')
+            added = kept.length - previous.messages.length
+            const contextNewest = derivePosition(kept, 'newest')
+            const head = readPosition(previous.newestPositionAt, previous.newestPositionSeq)
+            const oldest = derivePosition(kept, 'oldest')
+            const caughtUp = contextNewest !== null
+                && head !== null
+                && comparePosition(contextNewest, head) >= 0
+            return buildState(previous, {
+                messages: kept,
+                isLoadingMore: false,
+                // Trimming the old end means older paging is live again even if
+                // the context page had already reached the start.
+                hasMore: previous.hasMore || kept.length < merged.length,
+                oldestPositionAt: oldest?.at ?? previous.oldestPositionAt,
+                oldestPositionSeq: oldest?.seq ?? previous.oldestPositionSeq,
+                contextNewestAt: contextNewest?.at ?? previous.contextNewestAt,
+                contextNewestSeq: contextNewest?.seq ?? previous.contextNewestSeq,
+                hasMoreNewer: !caughtUp && retained.length > 0,
+                historyVersion: previous.historyVersion + 1,
+                warning: null
+            })
+        }, true)
+
+        const settled = getState(sessionId)
+        return settled.hasMoreNewer
+            ? { kind: 'loaded', added }
+            : { kind: 'caught-up', added }
+    } catch (error) {
+        if (getState(sessionId).olderGeneration !== generation) {
+            return { kind: 'stopped', reason: 'invalidated' }
+        }
+        updateState(sessionId, (previous) => {
+            if (previous.olderGeneration !== generation) return previous
+            return buildState(previous, {
+                isLoadingMore: false,
+                warning: error instanceof Error ? error.message : 'Failed to load newer messages'
+            })
+        }, true)
+        return { kind: 'stopped', reason: 'failed' }
     }
 }
 
@@ -1365,6 +1516,9 @@ function markMessageWindowForLatestReset(sessionId: string, messages: DecryptedM
     setState(sessionId, buildState(previous, {
         messages,
         epoch: null,
+        contextNewestAt: null,
+        contextNewestSeq: null,
+        hasMoreNewer: false,
         oldestPositionAt: null,
         oldestPositionSeq: null,
         newestPositionAt: null,

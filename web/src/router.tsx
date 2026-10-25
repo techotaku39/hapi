@@ -366,7 +366,9 @@ function SessionPage() {
         isSyncingTail: messagesSyncingTail,
         isLoadingMore: messagesLoadingMore,
         hasMore: messagesHasMore,
+        hasMoreNewer: messagesHasMoreNewer,
         loadMore: loadMoreMessages,
+        loadNewer: loadNewerMessages,
         cancelLoadMore: cancelLoadMoreMessages,
         refetch: refetchMessages,
         loadMessageContext: loadMessageContextForSession,
@@ -816,6 +818,11 @@ function SessionPage() {
         )
     }
 
+    const handleLoadNewerMessages = useCallback(async (): Promise<boolean> => {
+        const outcome = await loadNewerMessages()
+        return outcome.kind === 'caught-up'
+    }, [loadNewerMessages])
+
     return (
         <SessionChat
             api={api}
@@ -827,6 +834,7 @@ function SessionPage() {
             messages={messages}
             messagesWarning={messagesWarning}
             hasMoreMessages={messagesHasMore}
+            hasMoreNewerMessages={messagesHasMoreNewer}
             isSyncingTail={messagesSyncingTail}
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
@@ -838,6 +846,7 @@ function SessionPage() {
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
+            onLoadNewer={handleLoadNewerMessages}
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
