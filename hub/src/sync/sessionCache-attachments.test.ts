@@ -79,6 +79,36 @@ describe('durable attachment session lifecycle', () => {
         expect(existsSync(attachment.originalPath)).toBe(true)
     })
 
+    it('moves usage rows before deleting the merged source session', async () => {
+        const { store, cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+        store.usage.recordScan(oldSession.id, 0, 1, [{
+            sessionId: oldSession.id,
+            sourceKey: 'usage-merge',
+            sourceSeq: 1,
+            createdAt: 1,
+            agent: 'codex',
+            model: 'gpt-5',
+            kind: 'delta',
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            lastInputTokens: null,
+            lastOutputTokens: null,
+            lastCacheReadTokens: null,
+            lastCacheCreationTokens: null,
+        }], false)
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        expect(store.usage.getEvents([oldSession.id])).toHaveLength(0)
+        expect(store.usage.getEvents([newSession.id])).toEqual([expect.objectContaining({
+            sessionId: newSession.id,
+            sourceKey: 'usage-merge',
+        })])
+    })
+
     it('rolls back message movement when attachment ownership transfer fails', async () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)
