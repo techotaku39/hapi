@@ -114,6 +114,57 @@ describe('SessionCache.applySessionPatch', () => {
         store.close()
     })
 
+    it('excludes Claude injected no-response sentinels from the legacy reply clock', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'legacy-hidden-claude-reply',
+            { path: '/tmp' },
+            null,
+            'default'
+        )
+        const injectedUuid = 'injected-turn-uuid'
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: injectedUuid,
+                    isSidechain: true,
+                    message: { content: '<system-reminder>internal</system-reminder>' }
+                }
+            }
+        }, undefined, undefined, 1_000)
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: injectedUuid,
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }, undefined, undefined, 2_000)
+
+        const db = (store as unknown as { db: import('bun:sqlite').Database }).db
+        db.prepare(`
+            UPDATE sessions
+            SET last_assistant_message_at = NULL,
+                assistant_reply_clock_backfilled = 0
+            WHERE id = ?
+        `).run(session.id)
+
+        const cache = new SessionCache(store, createPublisher([]))
+        cache.refreshSession(session.id)
+        const backfilled = await waitForAssistantReplyClock(store, session.id)
+
+        expect(backfilled.lastAssistantMessageAt).toBeNull()
+        expect(backfilled.assistantReplyClockBackfilled).toBe(true)
+        cache.stop()
+        store.close()
+    })
+
     it('backfills a large legacy transcript page by page', async () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession(

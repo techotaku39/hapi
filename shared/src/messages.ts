@@ -184,6 +184,56 @@ export function extractAssistantPlainText(content: unknown): string | null {
     return null
 }
 
+export type AssistantTextMessageContext = {
+    injectedTurnUuids?: ReadonlySet<string>
+}
+
+/** Return the UUID of a Claude system-injected user turn, if present. */
+export function extractInjectedTurnUuid(value: unknown): string | null {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (!record || record.role !== 'agent' || !isObject(record.content) || record.content.type !== 'output') {
+        return null
+    }
+    const data = isObject(record.content.data) ? record.content.data : null
+    if (!data || data.type !== 'user') return null
+    const message = isObject(data.message) ? data.message : null
+    const messageContent = message?.content
+    const isSystemInjected = Boolean(data.isSidechain) || typeof messageContent === 'string'
+    return isSystemInjected && typeof data.uuid === 'string' && data.uuid.length > 0
+        ? data.uuid
+        : null
+}
+
+export function extractAssistantParentUuid(content: unknown): string | null {
+    const record = unwrapRoleWrappedRecordEnvelope(content)
+    const messageContent = record?.content ?? content
+    if (!isObject(messageContent) || messageContent.type !== 'output') return null
+    const data = isObject(messageContent.data) ? messageContent.data : null
+    return data?.type === 'assistant'
+        && typeof data.parentUuid === 'string'
+        && data.parentUuid.length > 0
+        ? data.parentUuid
+        : null
+}
+
+export function isNoResponseRequestedText(text: string): boolean {
+    const trimmed = text.trim()
+    return trimmed === 'No response requested.' || trimmed === 'No response requested'
+}
+
+export function isClaudeInjectedAutoReply(
+    content: unknown,
+    injectedTurnUuids: ReadonlySet<string>
+): boolean {
+    const parentUuid = extractAssistantParentUuid(content)
+    const record = unwrapRoleWrappedRecordEnvelope(content)
+    const text = extractAssistantPlainText(record?.content ?? content)
+    return parentUuid !== null
+        && injectedTurnUuids.has(parentUuid)
+        && text !== null
+        && isNoResponseRequestedText(text)
+}
+
 /**
  * Whether a stored role-wrapped message contains visible assistant prose.
  *
@@ -191,9 +241,16 @@ export function extractAssistantPlainText(content: unknown): string | null {
  * calls, tool results, reasoning, and other agent events must not move the
  * sidebar's "last reply" clock.
  */
-export function isAssistantTextMessage(content: unknown): boolean {
+export function isAssistantTextMessage(
+    content: unknown,
+    context?: AssistantTextMessageContext
+): boolean {
     const record = unwrapRoleWrappedRecordEnvelope(content)
     if (record?.role !== 'agent') return false
+
+    if (context?.injectedTurnUuids && isClaudeInjectedAutoReply(content, context.injectedTurnUuids)) {
+        return false
+    }
 
     const messageContent = record.content
 

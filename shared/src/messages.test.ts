@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import {
     extractAssistantPlainText,
+    extractInjectedTurnUuid,
     hasConversationMessageContent,
     extractNotifySummary,
     isAssistantTextMessage,
+    isClaudeInjectedAutoReply,
     getLiveReasoningStreamId,
     getReasoningStreamId,
     isRedundantGoalStatusEventContent,
@@ -205,6 +207,44 @@ describe('isAssistantTextMessage', () => {
                 data: { type: 'agy_message', content: 'Inside the task-266 log\n[Message] result' }
             }
         })).toBe(false)
+    })
+
+    test('rejects Claude No response requested only for injected turns', () => {
+        const injectedTurn = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'injected-turn',
+                    isSidechain: true,
+                    message: { content: '<system-reminder>internal</system-reminder>' }
+                }
+            }
+        }
+        const sentinel = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'injected-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }
+        const normal = {
+            ...sentinel,
+            content: {
+                ...sentinel.content,
+                data: { ...sentinel.content.data, parentUuid: 'normal-turn' }
+            }
+        }
+        const injected = new Set([extractInjectedTurnUuid(injectedTurn)!])
+
+        expect(isClaudeInjectedAutoReply(sentinel.content, injected)).toBe(true)
+        expect(isAssistantTextMessage(sentinel.content, { injectedTurnUuids: injected })).toBe(false)
+        expect(isAssistantTextMessage(normal, { injectedTurnUuids: injected })).toBe(true)
     })
 })
 

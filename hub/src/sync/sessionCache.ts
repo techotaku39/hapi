@@ -1,6 +1,14 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
-import { isAssistantTextMessage } from '@hapi/protocol/messages'
+import {
+    extractAssistantParentUuid,
+    extractAssistantPlainText,
+    extractInjectedTurnUuid,
+    isAssistantTextMessage,
+    isClaudeInjectedAutoReply,
+    isNoResponseRequestedText,
+    unwrapRoleWrappedRecordEnvelope,
+} from '@hapi/protocol/messages'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
@@ -348,6 +356,21 @@ export class SessionCache {
 
         let latestAssistantMessageAt: number | null = null
         let beforeSeq: number | null = null
+        const injectedTurnUuids = new Set<string>()
+        const pendingAutoReplies: Array<{ content: unknown; createdAt: number }> = []
+        const considerAssistantMessage = (content: unknown, createdAt: number): void => {
+            if (!isAssistantTextMessage(content)) return
+            const parentUuid = extractAssistantParentUuid(content)
+            const record = unwrapRoleWrappedRecordEnvelope(content)
+            const text = extractAssistantPlainText(record?.content ?? content)
+            if (parentUuid && text && isNoResponseRequestedText(text)) {
+                pendingAutoReplies.push({ content, createdAt })
+                return
+            }
+            if (latestAssistantMessageAt === null || createdAt > latestAssistantMessageAt) {
+                latestAssistantMessageAt = createdAt
+            }
+        }
         while (!this.assistantReplyBackfillStopped) {
             const page = this.store.messages.getMessagesBeforeSeq(
                 sessionId,
@@ -355,10 +378,9 @@ export class SessionCache {
                 ASSISTANT_REPLY_BACKFILL_PAGE_SIZE
             )
             for (const message of page) {
-                if (!isAssistantTextMessage(message.content)) continue
-                if (latestAssistantMessageAt === null || message.createdAt > latestAssistantMessageAt) {
-                    latestAssistantMessageAt = message.createdAt
-                }
+                const injectedTurnUuid = extractInjectedTurnUuid(message.content)
+                if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
+                considerAssistantMessage(message.content, message.createdAt)
             }
 
             if (page.length < ASSISTANT_REPLY_BACKFILL_PAGE_SIZE) break
@@ -368,6 +390,13 @@ export class SessionCache {
             await new Promise<void>((resolve) => setTimeout(resolve, 0))
         }
         if (this.assistantReplyBackfillStopped) return false
+
+        for (const candidate of pendingAutoReplies) {
+            if (isClaudeInjectedAutoReply(candidate.content, injectedTurnUuids)) continue
+            if (latestAssistantMessageAt === null || candidate.createdAt > latestAssistantMessageAt) {
+                latestAssistantMessageAt = candidate.createdAt
+            }
+        }
 
         const completed = this.store.sessions.completeAssistantReplyClockBackfill(
             sessionId,
