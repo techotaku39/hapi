@@ -866,6 +866,10 @@ export function HappyThread(props: {
     // by an explicit jump to the latest messages or by a new session/target.
     const searchTargetHistoryLockRef = useRef(false)
     const hasMoreNewerRef = useRef(props.hasMoreNewerMessages === true)
+    // A forward page can trim 200 rows off the old end of the window. Message
+    // CSS disables browser scroll anchoring, so without restoring an anchor
+    // the unchanged scrollTop lands ~200 messages later.
+    const pendingForwardAnchorRef = useRef<ScrollAnchor | null>(null)
     const onLoadNewerRef = useRef(props.onLoadNewer)
     const loadingNewerRef = useRef(false)
     const searchTargetInputKeyRef = useRef<string | null>(null)
@@ -1099,6 +1103,10 @@ export function HappyThread(props: {
                 // stranding the reader (tiann/hapi#1598 review).
                 if (hasMoreNewerRef.current && !loadingNewerRef.current && onLoadNewerRef.current) {
                     loadingNewerRef.current = true
+                    const forwardViewport = viewportRef.current
+                    pendingForwardAnchorRef.current = forwardViewport
+                        ? captureScrollAnchor(forwardViewport)
+                        : null
                     void onLoadNewerRef.current()
                         .finally(() => { loadingNewerRef.current = false })
                 }
@@ -2218,6 +2226,17 @@ export function HappyThread(props: {
         needsViewportCoverage,
         scheduleCoverageAfterSettling
     ])
+
+    useLayoutEffect(() => {
+        const forwardAnchor = pendingForwardAnchorRef.current
+        if (forwardAnchor) {
+            const forwardViewport = viewportRef.current
+            if (forwardViewport && restoreScrollAnchor(forwardViewport, forwardAnchor)) {
+                lastScrollTopRef.current = forwardViewport.scrollTop
+            }
+            pendingForwardAnchorRef.current = null
+        }
+    }, [appliedHistoryVersion])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
