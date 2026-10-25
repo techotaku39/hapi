@@ -1600,7 +1600,6 @@ export class SessionCache {
                 )
                 committed = true
                 if (moved.moved > 0) {
-                    this.store.usage.transferSession(oldSessionId, newSessionId)
                     this.publisher.emit({ type: 'messages-invalidated', sessionId: newSessionId, namespace })
                 }
                 if (moved.scratchlistMoved > 0 || moved.scratchlistCollided > 0) {

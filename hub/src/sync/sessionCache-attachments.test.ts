@@ -173,6 +173,23 @@ describe('durable attachment session lifecycle', () => {
                 }]
             }
         }, 'merge-delete-failure-message')
+        store.usage.recordScan(oldSession.id, 1, 1, [{
+            sessionId: oldSession.id,
+            sourceKey: 'merge-delete-failure-usage',
+            sourceSeq: 1,
+            createdAt: Date.now(),
+            agent: 'codex',
+            model: 'test-model',
+            kind: 'delta',
+            inputTokens: 1,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            lastInputTokens: null,
+            lastOutputTokens: null,
+            lastCacheReadTokens: null,
+            lastCacheCreationTokens: null,
+        }], false)
         const db = (store as unknown as { db: Database }).db
         db.exec(`
             CREATE TRIGGER fail_merge_source_delete
@@ -189,6 +206,8 @@ describe('durable attachment session lifecycle', () => {
         expect(store.messages.getAllMessages(newSession.id)).toHaveLength(0)
         expect(store.attachments.getForSession(attachment.id, 'default', oldSession.id)).not.toBeNull()
         expect(store.attachments.getForSession(attachment.id, 'default', newSession.id)).toBeNull()
+        expect(store.usage.getEvents([oldSession.id])).toHaveLength(1)
+        expect(store.usage.getEvents([newSession.id])).toHaveLength(0)
         expect(store.scratchlist.list(oldSession.id).map((entry) => entry.entryId)).toEqual(['merge-delete-failure-note'])
         expect(store.scratchlist.list(newSession.id)).toHaveLength(0)
     })

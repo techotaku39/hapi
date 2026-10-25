@@ -1496,6 +1496,7 @@ export class Store {
                     throw new Error(`Failed to update merged scratchlist entry: ${entryId}`)
                 }
             }
+            this.usage.transferSessionInTransaction(fromSessionId, toSessionId)
             this.workGraph.reassignNotifySession(namespace, fromSessionId, toSessionId)
             if (!this.sessions.deleteSession(fromSessionId, namespace)) {
                 throw new Error('Failed to delete old session during merge')
