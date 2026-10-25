@@ -10,7 +10,8 @@ function Field() {
     const [query, setQuery] = useState('')
     const ref = useRef<HTMLInputElement>(null)
     const history = useSearchHistoryField('files', query, setQuery, ref)
-    return <div><input aria-label="Find files" ref={ref} value={query} {...history.inputProps} />{history.suggestions}</div>
+    return <div><input aria-label="Find files" ref={ref} value={query} {...history.inputProps} />
+        <button onClick={history.clearQuery}>Clear query</button>{history.suggestions}</div>
 }
 function Fixture() {
     const [show, setShow] = useState(true)
@@ -29,6 +30,16 @@ beforeEach(() => {
 })
 
 describe('search history interaction', () => {
+    it('does not record a cleared query on blur, pagehide or unmount', () => {
+        render(<Fixture />)
+        fireEvent.change(input(), { target: { value: 'discarded' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Clear query' }))
+        expect(input()).toHaveValue('')
+        fireEvent.blur(input())
+        act(() => window.dispatchEvent(new Event('pagehide')))
+        fireEvent.click(screen.getByRole('button', { name: 'close' }))
+        expect(history().files).toBeUndefined()
+    })
     it('records on Enter or blur, not on every edit, and recalls through keyboard or click', () => {
         render(<Fixture />)
         fireEvent.change(input(), { target: { value: 's' } })

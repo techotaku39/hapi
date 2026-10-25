@@ -15,6 +15,11 @@ export function useSearchHistoryField(type: SearchHistoryType, query: string, on
     const record = useRef(history.record)
     record.current = history.record
 
+    const cancelPending = () => {
+        dirty.current = false
+        pendingQuery.current = ''
+    }
+
     const commit = () => {
         if (!dirty.current || composingRef.current) return
         dirty.current = false
@@ -46,6 +51,11 @@ export function useSearchHistoryField(type: SearchHistoryType, query: string, on
         setOpen(false)
     }
     return {
+        clearQuery: () => {
+            cancelPending()
+            onChange('')
+            setOpen(true)
+        },
         inputProps: {
             autoComplete: 'off',
             'aria-controls': visible ? panelId : undefined,
@@ -81,7 +91,7 @@ export function useSearchHistoryField(type: SearchHistoryType, query: string, on
                 setOpen(false)
             }}
             onRemove={entry => { history.remove(type, entry); inputRef.current?.focus() }}
-            onClear={() => { history.clear(type); inputRef.current?.focus() }}
+            onClear={() => { cancelPending(); history.clear(type); inputRef.current?.focus() }}
             onClose={() => { inputRef.current?.focus(); setOpen(false) }}
         /> : null,
     }

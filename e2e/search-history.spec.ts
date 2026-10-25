@@ -104,6 +104,24 @@ test('Hub/account/namespace partitioning survives token refresh', async ({ page 
     await expect(recent(page).getByRole('button', { name: 'private', exact: true })).toBeVisible()
 })
 
+test('clearing the field cancels pending recording and cleared history stays empty', async ({ page }) => {
+    await page.goto(fixture)
+    await optIn(page)
+    const input = page.getByRole('searchbox')
+    await input.fill('saved')
+    await input.press('Enter')
+    await input.fill('discarded')
+    await page.getByRole('button', { name: 'Clear search', exact: true }).click()
+    await recent(page).getByRole('button', { name: 'Clear history', exact: true }).click()
+    await go(page, 'Settings')
+    expect((await history(page)).sessions).toEqual([])
+    await go(page, 'Sessions')
+    await input.fill('also discarded')
+    await page.getByRole('button', { name: 'Clear search', exact: true }).click()
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+    expect((await history(page)).sessions).toEqual([])
+})
+
 test('composition Enter does not save fragments; completed input and outline close do', async ({ page }) => {
     await page.goto(fixture)
     await optIn(page)

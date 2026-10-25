@@ -1005,7 +1005,7 @@ export function SessionListSearch(props: {
                         <button
                             type="button"
                             onClick={() => {
-                                props.onChange('')
+                                history.clearQuery()
                                 // The clear button unmounts with the query; keep focus on
                                 // the collapsed search trigger instead of dropping to body.
                                 collapsedButtonRef.current?.focus()
@@ -1055,7 +1055,7 @@ export function SessionListSearch(props: {
                     <button
                         type="button"
                         onClick={() => {
-                            props.onChange('')
+                            history.clearQuery()
                             // The clear button unmounts with the query; keep focus off <body>
                             // so a later outside click still routes blur through the wrapper.
                             inputRef.current?.focus()
