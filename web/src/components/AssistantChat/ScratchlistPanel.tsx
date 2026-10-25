@@ -717,6 +717,11 @@ function ScratchlistInventory({
             event.preventDefault()
             return
         }
+        // Let the browser's native editing menu (copy/paste/select) work
+        // inside the inline editor instead of opening the row action menu.
+        if (event.target instanceof Element && event.target.closest('textarea')) {
+            return
+        }
         if (isScratchlistActionTarget(event.target)) {
             event.preventDefault()
             return

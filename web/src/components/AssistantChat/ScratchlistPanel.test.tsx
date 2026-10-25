@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
     persistScratchlist,
@@ -400,6 +400,20 @@ describe('ScratchlistPanel', () => {
 
         expect(readScratchlist(SID).map((entry) => entry.text)).toEqual(['keep me'])
         expect(screen.getByTestId('scratchlist-entry-text')).toHaveTextContent('keep me')
+    })
+
+    it('preserves the native context menu while inline editing', () => {
+        persistScratchlist(SID, [makeEntry({ id: 'native-menu', text: 'edit me' })])
+        renderPanel()
+        expandPanel()
+
+        fireEvent.click(screen.getByTestId('scratchlist-entry-text'))
+        const editor = screen.getByRole('textbox', { name: 'Edit scratchlist entry' })
+        const event = createEvent.contextMenu(editor)
+        fireEvent(editor, event)
+
+        expect(event.defaultPrevented).toBe(false)
+        expect(screen.queryByTestId('scratchlist-action-menu')).toBeNull()
     })
 
     it('copy button writes the entry text to clipboard and closes the action menu', async () => {
