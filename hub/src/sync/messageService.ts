@@ -1411,7 +1411,7 @@ export class MessageService {
                         const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
                         this.scheduledAttachmentDeliveryCache.delete(materializingKey)
                         if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
-                        continue
+                        break
                     }
 
                     const current = this.store.messages.lookupQueuedMessage(sessionId, msg.id)
@@ -1564,7 +1564,7 @@ export class MessageService {
                         const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
                         this.scheduledAttachmentDeliveryCache.delete(materializingKey)
                         if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
-                        continue
+                        break
                     }
 
                     // Cancellation or an acknowledgement may have won while

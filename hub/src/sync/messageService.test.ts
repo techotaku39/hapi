@@ -1983,6 +1983,81 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         expect(store.messages.lookupQueuedMessage(session.id, message.id).status).toBe('absent')
     })
 
+    it('preserves FIFO when cancellation acknowledgement times out during materialization', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-cancel-timeout-fifo')
+        const cliEmitted: unknown[] = []
+        let materializeStarted!: () => void
+        const started = new Promise<void>((resolve) => { materializeStarted = resolve })
+        let resolveMaterialization!: (attachments: AttachmentMetadata[]) => void
+        const materialized = new Promise<AttachmentMetadata[]>((resolve) => { resolveMaterialization = resolve })
+        let resolveCancelAck!: () => void
+        const cancelAck = new Promise<void>((resolve) => { resolveCancelAck = resolve })
+        let cancelAckStarted!: () => void
+        const cancelStarted = new Promise<void>((resolve) => { cancelAckStarted = resolve })
+        const io = {
+            of: (namespace: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (namespace === '/cli') cliEmitted.push(data)
+                    },
+                    timeout: (_ms: number) => ({
+                        emit: (
+                            _event: string,
+                            _data: unknown,
+                            callback: (err: Error | null, responses: Array<{ removed: boolean }>) => void,
+                        ) => {
+                            cancelAckStarted()
+                            void cancelAck.then(() => callback(new Error('timed out'), []))
+                        },
+                    }),
+                }),
+                adapter: { rooms: { get: () => new Set(['cli']) } },
+            }),
+        } as unknown as Server
+        const attachment = makeHubScratchlistAttachment(session.id, 'cancel-timeout-fifo')
+        const service = new MessageService(
+            store,
+            io,
+            makePublisher() as any,
+            undefined,
+            {
+                materializeScheduledAttachments: async (_sessionId, attachments) => {
+                    materializeStarted()
+                    await materialized
+                    return attachments.map((candidate) => ({ ...candidate, path: '/tmp/cancel-timeout-fifo.png' }))
+                },
+            },
+        )
+        const first = store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'first', attachments: [attachment] } },
+            'local-cancel-timeout-first',
+            Date.now() - 1_000,
+        )
+        const second = store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'second' } },
+            'local-cancel-timeout-second',
+            Date.now() - 1_000,
+        )
+
+        const release = service.releaseMatureScheduledMessages(Date.now())
+        await materializeStarted
+        const cancel = service.cancelQueuedMessage(session.id, first.id)
+        await cancelStarted
+        resolveMaterialization([attachment])
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(cliEmitted).toHaveLength(0)
+        resolveCancelAck()
+
+        await expect(cancel).resolves.toEqual({ status: 'busy', localId: first.localId! })
+        await release
+        expect(cliEmitted).toHaveLength(0)
+        expect(store.messages.lookupQueuedMessage(session.id, first.id).status).toBe('queued')
+        expect(store.messages.lookupQueuedMessage(session.id, second.id).status).toBe('queued')
+    })
+
     it('cleans the CLI upload when cancelling after scheduled attachment materialization', async () => {
         const store = makeStore()
         const session = makeSession(store, 'sched-cancel-after-materialize')
