@@ -319,6 +319,10 @@ function normalizeSearchableMarkdownChunks(chunks: readonly string[]): string | 
         children?: readonly unknown[]
     }): string => {
         if (node.type === 'break') return ' '
+        // The chat renderer drops raw HTML, so indexing node.value here would
+        // make an HTML comment searchable and surface it in snippets with no
+        // rendered text to highlight.
+        if (node.type === 'html') return ''
         if (typeof node.value === 'string') return node.value
 
         let rendered = ''

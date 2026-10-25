@@ -189,6 +189,14 @@ describe('extractSearchableMessageText', () => {
         expect(text?.length).toBeLessThanOrEqual(32)
     })
 
+    test('does not index hidden HTML comments', () => {
+        // The renderer omits these, so a hit would have nothing to highlight.
+        expect(extractSearchableMessageText({
+            role: 'user',
+            content: { type: 'text', text: 'visible text <!-- hidden phrase -->' }
+        })?.text).not.toContain('hidden phrase')
+    })
+
     test('indexes Claude assistant prose sent as a plain string content', () => {
         // Rendered via normalizeAgent's string branch; it must reach search too.
         expect(extractSearchableMessageText({
