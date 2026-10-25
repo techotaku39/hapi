@@ -581,6 +581,7 @@ export default function FilesPage() {
                                     history.clearQuery()
                                     searchInputRef.current?.focus()
                                 }}
+                                onMouseDown={(event) => { if (event.button === 0) event.preventDefault() }}
                                 className="absolute inset-y-0 right-10 flex items-center rounded p-0.5 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
                                 title={t('sessions.search.clear')}
                                 aria-label={t('sessions.search.clear')}
