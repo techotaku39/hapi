@@ -65,7 +65,7 @@ export const VISIBLE_WINDOW_SIZE = 400
 export const HISTORY_WINDOW_SIZE = 600
 export const INITIAL_PAGE_SIZE = 20
 const AGENT_RUN_WINDOW_SIZE = 800
-const OLDER_LOAD_WINDOW_SIZE = 800
+export const OLDER_LOAD_WINDOW_SIZE = 800
 const PAGE_SIZE = 200
 const CACHED_REENTRY_PAGE_SIZE = 20
 // ponytail: fixed budget suggested in #2045, not field-measured; tune from load timings.
@@ -1163,11 +1163,45 @@ export async function fetchOlderMessages(
                 regularLimit: OLDER_LOAD_WINDOW_SIZE
             })
             historyVersion = nextHistoryVersion
+            // Prepend trimming drops rows from the newest end. If that evicted
+            // part of the context window, the forward cursor would still point
+            // past what is retained and reading forward would skip the gap, so
+            // clamp it back to the newest retained contiguous row.
+            const forwardCursor = readPosition(
+                previous.contextNewestAt,
+                previous.contextNewestSeq
+            )
+            const retainedNewest = derivePosition(
+                merged.messages.filter((message) => (
+                    !isQueuedForInvocation(message) && !optimisticMessage(message)
+                )),
+                'newest'
+            )
+            const clampedCursor = forwardCursor && retainedNewest
+                && comparePosition(retainedNewest, forwardCursor) < 0
+                ? retainedNewest
+                : forwardCursor
+            // An older page must not move the session head. mergeIntoWindow
+            // falls back to the retained boundary when a before-page carries
+            // no snapshot head, which would otherwise make the window look
+            // caught up with itself.
+            const head = forwardCursor
+                ? readPosition(previous.newestPositionAt, previous.newestPositionSeq)
+                : readPosition(merged.newestPositionAt, merged.newestPositionSeq)
             return buildState(merged, {
                 hasMore: response.page.hasMore,
                 epoch: response.page.epoch,
                 oldestPositionAt: response.page.nextBeforeAt,
                 oldestPositionSeq: response.page.nextBeforeSeq,
+                ...(forwardCursor && head ? {
+                    newestPositionAt: head.at,
+                    newestPositionSeq: head.seq
+                } : {}),
+                contextNewestAt: clampedCursor?.at ?? previous.contextNewestAt,
+                contextNewestSeq: clampedCursor?.seq ?? previous.contextNewestSeq,
+                hasMoreNewer: clampedCursor !== null
+                    && head !== null
+                    && comparePosition(clampedCursor, head) < 0,
                 isLoadingMore: false,
                 historyVersion,
                 warning: null

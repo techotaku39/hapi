@@ -9,6 +9,7 @@ import {
     appendOptimisticMessage,
     clearMessageWindow,
     fetchOlderMessages,
+    OLDER_LOAD_WINDOW_SIZE,
     getMessageWindowState,
     getQueuedReconcileCandidateLocalIds,
     ingestIncomingMessages,
@@ -1953,6 +1954,60 @@ describe('reading forward from a context window', () => {
         // Without excluding the queued row the cursor would jump to 1001 and
         // report caught-up, stranding messages 41-100.
         expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+    })
+
+    it('clamps the forward cursor when older loading evicts newer rows', async () => {
+        const id = sessionId('context-forward-evicted')
+        const target = makeAgentMessage({ id: 'target', seq: 1_000, at: 1_000_000 })
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+        api.getMessageContext = vi.fn(async () => contextResponse([
+            target,
+            makeAgentMessage({ id: 'ctx-newest', seq: 1_020, at: 1_020_000 })
+        ], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 1_000_000,
+            nextBeforeSeq: 1_000,
+            snapshotHeadAt: 2_000_000,
+            snapshotHeadSeq: 2_000,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+
+        // An older page large enough to push the context rows out of the window.
+        const older = Array.from({ length: OLDER_LOAD_WINDOW_SIZE }, (_, index) => (
+            makeAgentMessage({
+                id: `older-${index}`,
+                seq: index + 1,
+                at: (index + 1) * 1_000
+            })
+        ))
+        getMessages.mockResolvedValueOnce(beforeResponse(older, {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 1_000,
+            nextBeforeSeq: 1
+        }))
+        await fetchOlderMessages(api, id)
+
+        const state = getMessageWindowState(id)
+        expect(state.messages.some((message) => message.id === 'ctx-newest')).toBe(false)
+        expect(state.hasMoreNewer).toBe(true)
+
+        // Forward loading must resume from what is retained, not from 1020.
+        getMessages.mockResolvedValueOnce(afterResponse([], {
+            epoch: 7,
+            hasMore: true,
+            nextAfterAt: 1_500_000,
+            nextAfterSeq: 1_500,
+            snapshotHeadAt: 2_000_000,
+            snapshotHeadSeq: 2_000
+        }))
+        await fetchNewerMessages(api, id)
+        const forwardCall = getMessages.mock.calls.at(-1)?.[1] as { afterSeq?: number }
+        expect(forwardCall?.afterSeq).toBeLessThan(1_020)
     })
 
     it('refuses to page forward when there is nothing ahead', async () => {
