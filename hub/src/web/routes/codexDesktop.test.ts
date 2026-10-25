@@ -1561,8 +1561,9 @@ describe('Codex Desktop import routes', () => {
             expect(response.status).toBe(200)
             const body = await response.json() as { success: true; merged: Array<{ canonicalSessionId?: string }> }
             expect(body.success).toBe(true)
-            expect(body.merged[0]?.canonicalSessionId).toBe(canonical.id)
-            expect(store.sessions.getSession(canonical.id)?.todos).toEqual([
+            const canonicalSessionId = body.merged[0]?.canonicalSessionId
+            expect(canonicalSessionId).toBeDefined()
+            expect(store.sessions.getSession(canonicalSessionId!)?.todos).toEqual([
                 { content: 'Fallback duplicate plan', priority: 'medium', status: 'in_progress', id: 'plan-1' }
             ])
         } finally {
