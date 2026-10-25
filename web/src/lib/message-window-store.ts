@@ -630,7 +630,12 @@ function mergeIntoWindow(
         })
     }
     const forwardCursor = readPosition(previous.contextNewestAt, previous.contextNewestSeq)
-    if (forwardCursor) {
+    // A hit already inside the rendered window skips loadMessageContext, so it
+    // has no cursor yet. Once older paging trims newer rows off such a
+    // search-locked window those messages become unreachable, so seed the
+    // cursor here from what is retained.
+    const searchLocked = messageWindowTargetLocks.has(previous.sessionId)
+    if (forwardCursor || searchLocked) {
         // A context window deliberately keeps the authoritative session head
         // in newestPosition*. Replacing it with the retained boundary (as the
         // ordinary tail case does below) would make forward reading believe it
@@ -643,10 +648,11 @@ function mergeIntoWindow(
             )),
             'newest'
         )
-        const clamped = contiguousNewest
-            && comparePosition(contiguousNewest, forwardCursor) < 0
+        const clamped = !forwardCursor
             ? contiguousNewest
-            : forwardCursor
+            : contiguousNewest && comparePosition(contiguousNewest, forwardCursor) < 0
+                ? contiguousNewest
+                : forwardCursor
         const head = readPosition(previous.newestPositionAt, previous.newestPositionSeq)
         return buildState(next, {
             requiresLatestReset: true,

@@ -2205,6 +2205,40 @@ describe('reading forward from a context window', () => {
             .toEqual({ kind: 'stopped', reason: 'exhausted' })
     })
 
+    it('seeds the forward cursor when older paging trims a search-locked window', async () => {
+        const id = sessionId('context-forward-already-loaded')
+        // A hit already inside the rendered window: loadMessageContext is
+        // skipped, so there is no cursor, but the search lock is held.
+        sessionStorage.setItem(`hapi:message-window:v2:${id}`, JSON.stringify({
+            messages: Array.from({ length: 700 }, (_, i) => makeAgentMessage({
+                id: `row-${i}`, seq: i + 100, at: (i + 100) * 1_000
+            })),
+            hasMore: true,
+            oldestPositionAt: 100_000,
+            oldestPositionSeq: 100,
+            newestPositionAt: 799_000,
+            newestPositionSeq: 799,
+            epoch: 7,
+            requiresLatestReset: false
+        }))
+        setMessageViewMode(id, 'history')
+        setMessageWindowTargetLock(id, true)
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(false)
+
+        // Older paging prepends enough rows to push the newer end out.
+        const getMessages = vi.fn().mockResolvedValueOnce(beforeResponse(
+            Array.from({ length: 400 }, (_, i) => makeAgentMessage({
+                id: `older-${i}`, seq: i + 1, at: (i + 1) * 100
+            })),
+            { epoch: 7, hasMore: true, nextBeforeAt: 100, nextBeforeSeq: 1 }
+        ))
+        await fetchOlderMessages(createApi(getMessages), id)
+
+        // The trimmed-away newer rows must stay reachable by reading forward.
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+        setMessageWindowTargetLock(id, false)
+    })
+
     it('refuses to page forward when there is nothing ahead', async () => {
         const id = sessionId('context-forward-exhausted')
         const getMessages = vi.fn()

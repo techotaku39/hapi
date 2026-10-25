@@ -953,13 +953,43 @@ export function HappyThread(props: {
     // A coalesced context (streamed cards, collapsed tool groups) can render
     // shorter than the viewport. Then scrollTop never moves, no scroll event
     // fires, and the reader is stranded with no way to ask for the next page.
+    //
+    // Keyed on the *applied* runtime version as well: replacing an overflowing
+    // window with a short context would otherwise measure the previous DOM,
+    // return, and never run again because nothing else changes. A resize
+    // observer covers late layout shifts for the same reason.
     useEffect(() => {
         if (props.hasMoreNewerMessages !== true) return
         const viewport = viewportRef.current
         if (!viewport) return
-        if (viewport.scrollHeight - viewport.clientHeight > 2) return
-        requestForwardPageRef.current()
-    }, [props.hasMoreNewerMessages, props.historyVersion, props.messagesVersion])
+
+        let frame = 0
+        const check = () => {
+            if (props.hasMoreNewerMessages !== true) return
+            if (viewport.scrollHeight - viewport.clientHeight > 2) return
+            requestForwardPageRef.current()
+        }
+        const schedule = () => {
+            cancelAnimationFrame(frame)
+            frame = requestAnimationFrame(check)
+        }
+
+        schedule()
+        const observer = new ResizeObserver(schedule)
+        observer.observe(viewport)
+        const content = viewport.firstElementChild
+        if (content) observer.observe(content)
+
+        return () => {
+            cancelAnimationFrame(frame)
+            observer.disconnect()
+        }
+    }, [
+        props.hasMoreNewerMessages,
+        props.historyVersion,
+        props.messagesVersion,
+        appliedHistoryVersion
+    ])
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
