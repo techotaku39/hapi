@@ -122,6 +122,20 @@ test('clearing the field cancels pending recording and cleared history stays emp
     expect((await history(page)).sessions).toEqual([])
 })
 
+test('file search clear restores focus and outside clicks dismiss history', async ({ page }) => {
+    await page.goto(fixture)
+    await optIn(page)
+    await go(page, 'Files')
+    const input = page.getByPlaceholder('Search files')
+    await input.fill('README')
+    await input.press('Enter')
+    await page.getByRole('button', { name: 'Clear search', exact: true }).click()
+    await expect(input).toBeFocused()
+    await expect(recent(page)).toBeVisible()
+    await page.getByRole('button', { name: 'Refresh filesystem view' }).click()
+    await expect(recent(page)).toHaveCount(0)
+})
+
 test('composition Enter does not save fragments; completed input and outline close do', async ({ page }) => {
     await page.goto(fixture)
     await optIn(page)

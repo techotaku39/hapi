@@ -577,7 +577,10 @@ export default function FilesPage() {
                         {searchQuery ? (
                             <button
                                 type="button"
-                                onClick={history.clearQuery}
+                                onClick={() => {
+                                    history.clearQuery()
+                                    searchInputRef.current?.focus()
+                                }}
                                 className="absolute inset-y-0 right-10 flex items-center rounded p-0.5 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
                                 title={t('sessions.search.clear')}
                                 aria-label={t('sessions.search.clear')}
