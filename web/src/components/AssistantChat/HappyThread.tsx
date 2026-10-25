@@ -1182,6 +1182,13 @@ export function HappyThread(props: {
                 pending.scrollHeight = viewport.scrollHeight
             }
 
+            // Same hazard for a pending forward page: restoring the anchor
+            // captured when the request started would drag the user back to
+            // where they were before they scrolled away.
+            if (pendingForwardAnchorRef.current) {
+                pendingForwardAnchorRef.current = captureScrollAnchor(viewport)
+            }
+
             const needsCoverage = needsViewportCoverageRef.current()
             if (!needsCoverage) {
                 // Older pages retain the oldest side of the bounded window.

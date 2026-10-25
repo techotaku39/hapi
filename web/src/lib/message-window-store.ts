@@ -629,6 +629,34 @@ function mergeIntoWindow(
             oldestPositionSeq: oldest?.seq ?? next.oldestPositionSeq
         })
     }
+    const forwardCursor = readPosition(previous.contextNewestAt, previous.contextNewestSeq)
+    if (forwardCursor) {
+        // A context window deliberately keeps the authoritative session head
+        // in newestPosition*. Replacing it with the retained boundary (as the
+        // ordinary tail case does below) would make forward reading believe it
+        // had caught up with itself. Clamp the forward cursor instead, so any
+        // caller that trims from the newest end — older pages and live SSE
+        // alike — stays consistent.
+        const contiguousNewest = derivePosition(
+            kept.filter((message) => (
+                !isQueuedForInvocation(message) && !optimisticMessage(message)
+            )),
+            'newest'
+        )
+        const clamped = contiguousNewest
+            && comparePosition(contiguousNewest, forwardCursor) < 0
+            ? contiguousNewest
+            : forwardCursor
+        const head = readPosition(previous.newestPositionAt, previous.newestPositionSeq)
+        return buildState(next, {
+            requiresLatestReset: true,
+            contextNewestAt: clamped?.at ?? previous.contextNewestAt,
+            contextNewestSeq: clamped?.seq ?? previous.contextNewestSeq,
+            hasMoreNewer: clamped !== null
+                && head !== null
+                && comparePosition(clamped, head) < 0
+        })
+    }
     const newest = derivePosition(kept, 'newest')
     next = buildState(next, {
         requiresLatestReset: true,
@@ -1163,45 +1191,14 @@ export async function fetchOlderMessages(
                 regularLimit: OLDER_LOAD_WINDOW_SIZE
             })
             historyVersion = nextHistoryVersion
-            // Prepend trimming drops rows from the newest end. If that evicted
-            // part of the context window, the forward cursor would still point
-            // past what is retained and reading forward would skip the gap, so
-            // clamp it back to the newest retained contiguous row.
-            const forwardCursor = readPosition(
-                previous.contextNewestAt,
-                previous.contextNewestSeq
-            )
-            const retainedNewest = derivePosition(
-                merged.messages.filter((message) => (
-                    !isQueuedForInvocation(message) && !optimisticMessage(message)
-                )),
-                'newest'
-            )
-            const clampedCursor = forwardCursor && retainedNewest
-                && comparePosition(retainedNewest, forwardCursor) < 0
-                ? retainedNewest
-                : forwardCursor
-            // An older page must not move the session head. mergeIntoWindow
-            // falls back to the retained boundary when a before-page carries
-            // no snapshot head, which would otherwise make the window look
-            // caught up with itself.
-            const head = forwardCursor
-                ? readPosition(previous.newestPositionAt, previous.newestPositionSeq)
-                : readPosition(merged.newestPositionAt, merged.newestPositionSeq)
+            // Cursor clamping and head preservation now happen inside
+            // mergeIntoWindow, so every path that trims from the newest end
+            // behaves the same.
             return buildState(merged, {
                 hasMore: response.page.hasMore,
                 epoch: response.page.epoch,
                 oldestPositionAt: response.page.nextBeforeAt,
                 oldestPositionSeq: response.page.nextBeforeSeq,
-                ...(forwardCursor && head ? {
-                    newestPositionAt: head.at,
-                    newestPositionSeq: head.seq
-                } : {}),
-                contextNewestAt: clampedCursor?.at ?? previous.contextNewestAt,
-                contextNewestSeq: clampedCursor?.seq ?? previous.contextNewestSeq,
-                hasMoreNewer: clampedCursor !== null
-                    && head !== null
-                    && comparePosition(clampedCursor, head) < 0,
                 isLoadingMore: false,
                 historyVersion,
                 warning: null

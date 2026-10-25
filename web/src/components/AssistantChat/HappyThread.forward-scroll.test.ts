@@ -25,6 +25,17 @@ describe('forward history load scroll anchoring', () => {
         expect(forwardBranch).toContain('pendingForwardAnchorRef.current =')
     })
 
+    it('refreshes the pending anchor while the user scrolls during a load', () => {
+        const scrollHandler = source.slice(
+            source.indexOf('const pending = pendingScrollRef.current'),
+            source.indexOf('const needsCoverage = needsViewportCoverageRef.current()')
+        )
+
+        // Restoring the start-of-request anchor would drag a user who scrolled
+        // away back to where they were.
+        expect(scrollHandler).toContain('pendingForwardAnchorRef.current = captureScrollAnchor(viewport)')
+    })
+
     it('restores that anchor once the loaded history version renders', () => {
         const restoreEffect = source.slice(
             source.indexOf('const forwardAnchor = pendingForwardAnchorRef.current'),

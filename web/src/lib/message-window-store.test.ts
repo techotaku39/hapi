@@ -2010,6 +2010,51 @@ describe('reading forward from a context window', () => {
         expect(forwardCall?.afterSeq).toBeLessThan(1_020)
     })
 
+    it('keeps the session head when live updates trim the history window', async () => {
+        const id = sessionId('context-forward-sse-trim')
+        const target = makeAgentMessage({ id: 'target', seq: 800, at: 800_000 })
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 800_000,
+            nextBeforeSeq: 800,
+            snapshotHeadAt: 2_000_000,
+            snapshotHeadSeq: 2_000,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        // Enough live rows to overflow the window and force a prepend trim,
+        // which used to replace the session head with the retained boundary.
+        ingestIncomingMessages(id, Array.from({ length: 620 }, (_, index) => (
+            makeAgentMessage({
+                id: `live-${index}`,
+                seq: 900 + index,
+                at: (900 + index) * 1_000
+            })
+        )))
+
+        // The real head is 2000, so a page that reports more remaining must
+        // not be treated as caught up.
+        // The trim leaves a retained boundary near seq 1498. A forward page
+        // landing past that but short of the real head at 2000 is exactly
+        // where a clobbered head would wrongly report caught-up.
+        getMessages.mockResolvedValueOnce(afterResponse([], {
+            epoch: 7,
+            hasMore: true,
+            nextAfterAt: 1_600_000,
+            nextAfterSeq: 1_600,
+            snapshotHeadAt: 2_000_000,
+            snapshotHeadSeq: 2_000
+        }))
+        const outcome = await fetchNewerMessages(api, id)
+
+        expect(outcome.kind).toBe('loaded')
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+    })
+
     it('refuses to page forward when there is nothing ahead', async () => {
         const id = sessionId('context-forward-exhausted')
         const getMessages = vi.fn()
