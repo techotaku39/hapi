@@ -198,7 +198,9 @@ export function createAttachmentAdapter(
         async remove(attachment: Attachment): Promise<void> {
             cancelledAttachmentIds.add(attachment.id)
             const pending = attachment as PendingUploadAttachment
-            await deleteUpload(pending.path, pending.attachmentId, pending.uploadSessionId)
+            // The composer waits for remove() before dropping the chip. Remote
+            // cleanup is best effort and must not delay that local update.
+            void deleteUpload(pending.path, pending.attachmentId, pending.uploadSessionId)
         },
 
         async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
