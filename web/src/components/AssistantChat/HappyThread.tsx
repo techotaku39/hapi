@@ -234,6 +234,17 @@ export function shouldCancelInitialScrollSettling(
         && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX
 }
 
+/**
+ * Anchor ids are rendered DOM ids (`hapi-message-<kind>:<messageId>[:n]`).
+ * Recover the raw message id so the store can protect that row from trimming.
+ */
+function anchorMessageIdFromAnchor(anchor: ScrollAnchor | null): string | null {
+    if (!anchor) return null
+    const withoutPrefix = anchor.id.replace(/^hapi-message-/, '')
+    const parts = withoutPrefix.split(':')
+    return parts.length > 1 ? parts[1]! : null
+}
+
 export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null {
     const viewportRect = viewport.getBoundingClientRect()
     const messages = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
@@ -678,7 +689,7 @@ export function HappyThread(props: {
     isLoadingMoreMessages: boolean
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
     /** Walk a context window one page forward; resolves true once caught up. */
-    onLoadNewer?: () => Promise<boolean>
+    onLoadNewer?: (preserveMessageId?: string | null) => Promise<boolean>
     onCancelLoadMore: () => void
     unseenCount: number
     rawMessagesCount: number
@@ -1104,11 +1115,16 @@ export function HappyThread(props: {
                 if (hasMoreNewerRef.current && !loadingNewerRef.current && onLoadNewerRef.current) {
                     loadingNewerRef.current = true
                     const forwardViewport = viewportRef.current
-                    pendingForwardAnchorRef.current = forwardViewport
+                    const forwardAnchor = forwardViewport
                         ? captureScrollAnchor(forwardViewport)
                         : null
-                    void onLoadNewerRef.current()
-                        .finally(() => { loadingNewerRef.current = false })
+                    pendingForwardAnchorRef.current = forwardAnchor
+                    // Hand the anchored row to the store so trimming cannot
+                    // evict it while the page is in flight; the refreshed
+                    // anchor is the one that matters if the reader moved.
+                    void onLoadNewerRef.current(
+                        anchorMessageIdFromAnchor(pendingForwardAnchorRef.current ?? forwardAnchor)
+                    ).finally(() => { loadingNewerRef.current = false })
                 }
                 return
             }

@@ -2055,6 +2055,84 @@ describe('reading forward from a context window', () => {
         expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
     })
 
+    it('follows the head the response reports when the session grew', async () => {
+        const id = sessionId('context-forward-grown-head')
+        const target = makeAgentMessage({ id: 'target', seq: 1_800, at: 1_800_000 })
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 1_800_000,
+            nextBeforeSeq: 1_800,
+            snapshotHeadAt: 2_000_000,
+            snapshotHeadSeq: 2_000,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        // The session grew past the head recorded at context load, and the
+        // page says so. Reaching the old head must not end forward reading.
+        getMessages.mockResolvedValueOnce(afterResponse([], {
+            epoch: 7,
+            hasMore: true,
+            nextAfterAt: 2_000_000,
+            nextAfterSeq: 2_000,
+            snapshotHeadAt: 2_001_000,
+            snapshotHeadSeq: 2_001
+        }))
+        const outcome = await fetchNewerMessages(api, id)
+
+        expect(outcome.kind).toBe('loaded')
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+    })
+
+    it('keeps the anchored row when a forward page would trim it away', async () => {
+        const id = sessionId('context-forward-anchor-kept')
+        const target = makeAgentMessage({ id: 'target', seq: 1, at: 1_000 })
+        const getMessages = vi.fn()
+        const api = createApi(getMessages)
+        api.getMessageContext = vi.fn(async () => contextResponse([
+            target,
+            ...Array.from({ length: 599 }, (_, index) => makeAgentMessage({
+                id: `ctx-${index}`,
+                seq: index + 2,
+                at: (index + 2) * 1_000
+            }))
+        ], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 1_000,
+            nextBeforeSeq: 1,
+            snapshotHeadAt: 9_000_000,
+            snapshotHeadSeq: 9_000,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        // A full page arrives while the reader sits on the oldest row.
+        getMessages.mockResolvedValueOnce(afterResponse(
+            Array.from({ length: 200 }, (_, index) => makeAgentMessage({
+                id: `fwd-${index}`,
+                seq: 1_000 + index,
+                at: (1_000 + index) * 1_000
+            })),
+            {
+                epoch: 7,
+                hasMore: true,
+                nextAfterAt: 1_199_000,
+                nextAfterSeq: 1_199,
+                snapshotHeadAt: 9_000_000,
+                snapshotHeadSeq: 9_000
+            }
+        ))
+        await fetchNewerMessages(api, id, { preserveMessageId: 'target' })
+
+        // Without the guard the oldest rows are trimmed and the reader is
+        // dropped somewhere else entirely.
+        expect(getMessageWindowState(id).messages.some((m) => m.id === 'target')).toBe(true)
+    })
+
     it('refuses to page forward when there is nothing ahead', async () => {
         const id = sessionId('context-forward-exhausted')
         const getMessages = vi.fn()

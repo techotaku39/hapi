@@ -1374,7 +1374,16 @@ export async function loadMessageContext(
  */
 export async function fetchNewerMessages(
     api: ApiClient,
-    sessionId: string
+    sessionId: string,
+    options: {
+        /**
+         * Row the reader is currently anchored to. Forward paging trims from
+         * the old end, so without this a reader who scrolled back into the
+         * oldest rows would have their anchor evicted and be dropped at a
+         * different message.
+         */
+        preserveMessageId?: string | null
+    } = {}
 ): Promise<NewerLoadOutcome> {
     const initial = getState(sessionId)
     if (initial.isSyncingTail || initial.isLoadingMore) {
@@ -1419,8 +1428,19 @@ export async function fetchNewerMessages(
             if (previous.olderGeneration !== generation) return previous
             const merged = mergeMessages(previous.messages, retained)
             // Trim from the old end: the reader is moving forward, so the
-            // newly appended rows are the ones that must survive.
-            const { kept } = trimPreservingQueued(merged, HISTORY_WINDOW_SIZE, 'append')
+            // newly appended rows are the ones that must survive — unless the
+            // reader is anchored in the rows that would go, in which case keep
+            // the window longer rather than moving them.
+            const anchorIndex = options.preserveMessageId
+                ? merged.findIndex((message) => (
+                    message.id === options.preserveMessageId
+                    || message.localId === options.preserveMessageId
+                ))
+                : -1
+            const trimLimit = anchorIndex >= 0
+                ? Math.max(HISTORY_WINDOW_SIZE, merged.length - anchorIndex)
+                : HISTORY_WINDOW_SIZE
+            const { kept } = trimPreservingQueued(merged, trimLimit, 'append')
             added = kept.length - previous.messages.length
             // Advance from the page's own boundary rather than the merged
             // window: an SSE row appended at the live head would otherwise
@@ -1429,12 +1449,23 @@ export async function fetchNewerMessages(
                 response.page.nextAfterAt,
                 response.page.nextAfterSeq
             ) ?? derivePosition(retained, 'newest') ?? after
-            const head = readPosition(previous.newestPositionAt, previous.newestPositionSeq)
             const oldest = derivePosition(kept, 'oldest')
+            // The session can grow after the context was loaded, so trust the
+            // head this response reports over the one recorded back then. A
+            // page that says there is more is never "caught up", whatever an
+            // older head would imply.
+            const responseHead = pagePosition(
+                response.page.snapshotHeadAt,
+                response.page.snapshotHeadSeq
+            )
+            const recordedHead = readPosition(
+                previous.newestPositionAt,
+                previous.newestPositionSeq
+            )
+            const head = responseHead && recordedHead
+                ? (comparePosition(responseHead, recordedHead) > 0 ? responseHead : recordedHead)
+                : responseHead ?? recordedHead
             const caughtUp = !response.page.hasMore
-                || (contextNewest !== null
-                    && head !== null
-                    && comparePosition(contextNewest, head) >= 0)
             return buildState(previous, {
                 messages: kept,
                 isLoadingMore: false,
@@ -1445,6 +1476,8 @@ export async function fetchNewerMessages(
                 oldestPositionSeq: oldest?.seq ?? previous.oldestPositionSeq,
                 contextNewestAt: contextNewest?.at ?? previous.contextNewestAt,
                 contextNewestSeq: contextNewest?.seq ?? previous.contextNewestSeq,
+                // Keep the freshest head so later comparisons do not regress.
+                ...(head ? { newestPositionAt: head.at, newestPositionSeq: head.seq } : {}),
                 hasMoreNewer: !caughtUp,
                 historyVersion: previous.historyVersion + 1,
                 warning: null
