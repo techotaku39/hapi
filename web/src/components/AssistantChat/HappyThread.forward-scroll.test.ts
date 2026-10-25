@@ -16,13 +16,27 @@ describe('forward history load scroll anchoring', () => {
     const source = readFileSync(resolve(__dirname, 'HappyThread.tsx'), 'utf8')
 
     it('captures a scroll anchor before requesting a newer page', () => {
-        const forwardBranch = source.slice(
-            source.indexOf('if (hasMoreNewerRef.current'),
-            source.indexOf('onLoadNewerRef.current()')
+        const trigger = source.slice(
+            source.indexOf('requestForwardPageRef.current = () => {'),
+            source.indexOf('.finally(() => { loadingNewerRef.current = false })')
         )
 
-        expect(forwardBranch).toContain('captureScrollAnchor')
-        expect(forwardBranch).toContain('pendingForwardAnchorRef.current =')
+        expect(trigger).toContain('captureScrollAnchor')
+        expect(trigger).toContain('pendingForwardAnchorRef.current =')
+        // The protected row must be resolved when the page lands, not now.
+        expect(trigger).toContain('() => anchorMessageIdFromAnchor(pendingForwardAnchorRef.current)')
+    })
+
+    it('also requests a page when the context renders shorter than the viewport', () => {
+        // No scroll event ever fires in that case, so the scroll handler alone
+        // would strand the reader.
+        const effect = source.slice(
+            source.indexOf('if (props.hasMoreNewerMessages !== true) return'),
+            source.indexOf('}, [props.hasMoreNewerMessages,')
+        )
+
+        expect(effect).toContain('scrollHeight - viewport.clientHeight')
+        expect(effect).toContain('requestForwardPageRef.current()')
     })
 
     it('refreshes the pending anchor while the user scrolls during a load', () => {

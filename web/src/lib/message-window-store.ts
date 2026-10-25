@@ -728,6 +728,10 @@ function applyLatestResponse(
         newestPositionSeq: newest?.seq ?? null,
         tailRevision: previous.tailRevision + 1,
         requiresLatestReset: false,
+        // An authoritative latest window replaces the context entirely.
+        ...(options.replaceServerRows
+            ? { contextNewestAt: null, contextNewestSeq: null, hasMoreNewer: false }
+            : {}),
         isLoadingMore: options.replaceServerRows ? false : previous.isLoadingMore,
         olderGeneration: options.replaceServerRows
             ? previous.olderGeneration + 1
@@ -997,7 +1001,14 @@ function enterTailMode(previous: InternalState): InternalState {
         oldestPositionAt: oldest?.at ?? null,
         oldestPositionSeq: oldest?.seq ?? null,
         newestPositionAt: forceLatest ? null : previous.newestPositionAt,
-        newestPositionSeq: forceLatest ? null : previous.newestPositionSeq
+        newestPositionSeq: forceLatest ? null : previous.newestPositionSeq,
+        // The context window is being left behind; its forward cursor must not
+        // outlive it, or a later hit that is already inside the latest window
+        // would page from the old historical position and splice disconnected
+        // messages in ahead of the tail.
+        contextNewestAt: null,
+        contextNewestSeq: null,
+        hasMoreNewer: false
     })
 }
 

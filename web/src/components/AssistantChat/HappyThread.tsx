@@ -901,6 +901,7 @@ export function HappyThread(props: {
     // CSS disables browser scroll anchoring, so without restoring an anchor
     // the unchanged scrollTop lands ~200 messages later.
     const pendingForwardAnchorRef = useRef<ScrollAnchor | null>(null)
+    const requestForwardPageRef = useRef<() => void>(() => {})
     const onLoadNewerRef = useRef(props.onLoadNewer)
     const loadingNewerRef = useRef(false)
     const searchTargetInputKeyRef = useRef<string | null>(null)
@@ -932,6 +933,33 @@ export function HappyThread(props: {
     useEffect(() => {
         onLoadNewerRef.current = props.onLoadNewer
     }, [props.onLoadNewer])
+
+    useEffect(() => {
+        requestForwardPageRef.current = () => {
+            if (!hasMoreNewerRef.current || loadingNewerRef.current) return
+            const load = onLoadNewerRef.current
+            if (!load) return
+            loadingNewerRef.current = true
+            const viewport = viewportRef.current
+            pendingForwardAnchorRef.current = viewport ? captureScrollAnchor(viewport) : null
+            // Resolved when the page is applied, so a reader who scrolled
+            // during the request keeps the row they are on rather than the
+            // one they started from.
+            void load(() => anchorMessageIdFromAnchor(pendingForwardAnchorRef.current))
+                .finally(() => { loadingNewerRef.current = false })
+        }
+    }, [])
+
+    // A coalesced context (streamed cards, collapsed tool groups) can render
+    // shorter than the viewport. Then scrollTop never moves, no scroll event
+    // fires, and the reader is stranded with no way to ask for the next page.
+    useEffect(() => {
+        if (props.hasMoreNewerMessages !== true) return
+        const viewport = viewportRef.current
+        if (!viewport) return
+        if (viewport.scrollHeight - viewport.clientHeight > 2) return
+        requestForwardPageRef.current()
+    }, [props.hasMoreNewerMessages, props.historyVersion, props.messagesVersion])
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
@@ -1132,23 +1160,7 @@ export function HappyThread(props: {
                 // end of the loaded context rather than the end of the
                 // conversation. Pull the next page forward instead of
                 // stranding the reader (tiann/hapi#1598 review).
-                if (hasMoreNewerRef.current && !loadingNewerRef.current && onLoadNewerRef.current) {
-                    loadingNewerRef.current = true
-                    const forwardViewport = viewportRef.current
-                    const forwardAnchor = forwardViewport
-                        ? captureScrollAnchor(forwardViewport)
-                        : null
-                    pendingForwardAnchorRef.current = forwardAnchor
-                    // Hand the anchored row to the store so trimming cannot
-                    // evict it while the page is in flight; the refreshed
-                    // anchor is the one that matters if the reader moved.
-                    // Resolved when the page is applied, so a reader who
-                    // scrolled during the request keeps the row they are on
-                    // rather than the one they started from.
-                    void onLoadNewerRef.current(
-                        () => anchorMessageIdFromAnchor(pendingForwardAnchorRef.current)
-                    ).finally(() => { loadingNewerRef.current = false })
-                }
+                requestForwardPageRef.current()
                 return
             }
             atBottomRef.current = atBottom

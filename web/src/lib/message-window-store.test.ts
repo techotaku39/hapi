@@ -2180,6 +2180,31 @@ describe('reading forward from a context window', () => {
         expect(getMessageWindowState(id).messages.some((m) => m.id === 'target')).toBe(true)
     })
 
+    it('drops the forward cursor when the window returns to the tail', async () => {
+        const id = sessionId('context-forward-tail-return')
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const api = createApi(vi.fn(async () => latestResponse([])))
+        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
+
+        setMessageViewMode(id, 'tail')
+
+        // Otherwise a later hit already inside the latest window would page
+        // from the stale historical cursor and splice in disconnected rows.
+        expect(getMessageWindowState(id).hasMoreNewer).toBe(false)
+        expect(await fetchNewerMessages(api, id))
+            .toEqual({ kind: 'stopped', reason: 'exhausted' })
+    })
+
     it('refuses to page forward when there is nothing ahead', async () => {
         const id = sessionId('context-forward-exhausted')
         const getMessages = vi.fn()
