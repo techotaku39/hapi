@@ -220,6 +220,8 @@ export class MessageService {
     private readonly scheduledAttachmentDeliveryGenerations = new Map<string, number>()
     /** A deferred materialization has not emitted its row to the CLI yet. */
     private readonly materializingScheduledMessageKeys = new Set<string>()
+    /** Cancellation has priority over a retry whose materialization is pending. */
+    private readonly cancellingScheduledMessageKeys = new Set<string>()
     /** Keep mature delivery FIFO per session without blocking unrelated sessions. */
     private readonly matureReleaseInFlightSessions = new Set<string>()
 
@@ -735,6 +737,7 @@ export class MessageService {
         if (!message) throw new Error('Queued message disappeared after lookup')
         const isDispatching = lookup.status === 'dispatching'
         const isIndeterminate = lookup.status === 'indeterminate'
+        const materializingKey = `${sessionId}:${resolvedId}`
 
         if (!localId) {
             // No localId — row exists but has no cancel path; treat as cancelled.
@@ -747,22 +750,43 @@ export class MessageService {
         // A live dispatch is not cancellable by timeout. Convert it to the
         // durable unknown state and require a second explicit resolution.
         if (isDispatching) {
-            const ackResult = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
-            if (ackResult === 'consumed') {
-                return await this.recordConsumedAcknowledgement(sessionId, localId)
+            const cancellationPending = this.materializingScheduledMessageKeys.has(materializingKey)
+            if (cancellationPending) this.cancellingScheduledMessageKeys.add(materializingKey)
+            try {
+                const ackResult = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
+                if (ackResult === 'consumed') {
+                    return await this.recordConsumedAcknowledgement(sessionId, localId)
+                }
+                if (cancellationPending && (ackResult === 'removed' || ackResult === 'not-found')) {
+                    const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+                    if (deleted) {
+                        await this.releaseCancelledScheduledAttachment(sessionId, message)
+                        this.forgetScheduledMatureNotified([localId])
+                        this.publisher.emit({ type: 'message-cancelled', sessionId, messageId, localId })
+                        return { status: 'cancelled', localId }
+                    }
+                    const settled = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
+                    if (settled.status === 'invoked') {
+                        await this.releaseInvokedScheduledAttachment(sessionId, message)
+                        return settled
+                    }
+                    if (settled.status === 'absent') return { status: 'cancelled', localId }
+                }
+                // The native request may have reached the agent while the cancel
+                // round-trip was pending. Never delete a live dispatch; hold it
+                // as unknown and require an explicit retry or discard.
+                const changed = this.store.messages.setMessagesDeliveryState(sessionId, [localId], 'indeterminate')
+                if (changed === 0) {
+                    const settled = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
+                    if (settled.status === 'invoked') return settled
+                    if (settled.status === 'absent') return { status: 'cancelled', localId }
+                } else {
+                    this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [localId] })
+                }
+                return { status: 'busy', localId }
+            } finally {
+                if (cancellationPending) this.cancellingScheduledMessageKeys.delete(materializingKey)
             }
-            // The native request may have reached the agent while the cancel
-            // round-trip was pending. Never delete a live dispatch; hold it as
-            // unknown and let the user explicitly retry or discard afterwards.
-            const changed = this.store.messages.setMessagesDeliveryState(sessionId, [localId], 'indeterminate')
-            if (changed === 0) {
-                const settled = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
-                if (settled.status === 'invoked') return settled
-                if (settled.status === 'absent') return { status: 'cancelled', localId }
-            } else {
-                this.publisher.emit({ type: 'messages-indeterminate', sessionId, localIds: [localId] })
-            }
-            return { status: 'busy', localId }
         }
 
         // An indeterminate steer is never converted to invoked by a cancel
@@ -827,36 +851,40 @@ export class MessageService {
         // response from the CLI must not turn the row into an invoked message.
         // Delete it directly and let the materializer's post-await state check
         // suppress its stale snapshot when the RPC eventually resolves.
-        const materializingKey = `${sessionId}:${resolvedId}`
         if (this.materializingScheduledMessageKeys.has(materializingKey)) {
-            const ack = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
-            if (ack === 'consumed') {
-                return await this.recordConsumedAcknowledgement(sessionId, localId)
-            }
-            // While materialization is pending the update has not reached the
-            // CLI queue yet, so `not-found` means it was never enqueued and a
-            // clean cancellation can proceed. Keep ambiguous/in-flight
-            // outcomes fail-closed.
-            if (ack !== 'removed' && ack !== 'not-found') return { status: 'busy', localId }
+            this.cancellingScheduledMessageKeys.add(materializingKey)
+            try {
+                const ack = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
+                if (ack === 'consumed') {
+                    return await this.recordConsumedAcknowledgement(sessionId, localId)
+                }
+                // While materialization is pending the update has not reached
+                // the CLI queue yet, so `not-found` means it was never
+                // enqueued and a clean cancellation can proceed. Keep
+                // ambiguous/in-flight outcomes fail-closed.
+                if (ack !== 'removed' && ack !== 'not-found') return { status: 'busy', localId }
 
-            const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
-            if (deleted) {
-                await this.releaseCancelledScheduledAttachment(sessionId, message)
-                this.forgetScheduledMatureNotified([localId])
-                this.publisher.emit({
-                    type: 'message-cancelled',
-                    sessionId,
-                    messageId,
-                    localId,
-                })
-                return { status: 'cancelled', localId }
+                const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
+                if (deleted) {
+                    await this.releaseCancelledScheduledAttachment(sessionId, message)
+                    this.forgetScheduledMatureNotified([localId])
+                    this.publisher.emit({
+                        type: 'message-cancelled',
+                        sessionId,
+                        messageId,
+                        localId,
+                    })
+                    return { status: 'cancelled', localId }
+                }
+                const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
+                if (recheck.status === 'invoked') {
+                    await this.releaseInvokedScheduledAttachment(sessionId, message)
+                    return recheck
+                }
+                if (recheck.status === 'absent') return { status: 'cancelled', localId }
+            } finally {
+                this.cancellingScheduledMessageKeys.delete(materializingKey)
             }
-            const recheck = this.store.messages.lookupQueuedMessage(sessionId, resolvedId)
-            if (recheck.status === 'invoked') {
-                await this.releaseInvokedScheduledAttachment(sessionId, message)
-                return recheck
-            }
-            if (recheck.status === 'absent') return { status: 'cancelled', localId }
         }
 
         // Phase 2a: if no CLI socket is currently in the session room, the CLI is
@@ -1020,6 +1048,12 @@ export class MessageService {
             // delivery outcome must suppress the stale retry and release any
             // staged CLI upload that was cached while the await was pending.
             const current = this.store.messages.lookupQueuedMessage(sessionId, message.id)
+            if (materializingKey && this.cancellingScheduledMessageKeys.has(materializingKey)) {
+                const staged = this.scheduledAttachmentDeliveryCache.get(materializingKey)
+                this.scheduledAttachmentDeliveryCache.delete(materializingKey)
+                if (staged) await this.cleanupMaterializedScheduledAttachments(sessionId, staged)
+                return { status: 'retry-unavailable', localId: message.localId }
+            }
             if (current.status !== 'dispatching') {
                 const staged = materializingKey
                     ? this.scheduledAttachmentDeliveryCache.get(materializingKey)

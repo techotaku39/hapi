@@ -892,6 +892,10 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
                 resolveMaterialization = resolve
             })
             let ackCount = 0
+            let cancelAckStarted!: () => void
+            const cancelStarted = new Promise<void>((resolve) => { cancelAckStarted = resolve })
+            let resolveCancelAck!: (removed: boolean) => void
+            const cancelAck = new Promise<boolean>((resolve) => { resolveCancelAck = resolve })
             let retriedUpdate: unknown
             const deletedMaterializedPaths: string[] = []
             const io = {
@@ -900,8 +904,11 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
                         timeout: () => ({
                             emit: (_event: string, data: unknown, callback: AckCallback) => {
                                 ackCount += 1
-                                if (ackCount <= 3) {
+                                if (ackCount === 1) {
                                     callback(null, [{ removed: true }])
+                                } else if (ackCount === 2) {
+                                    cancelAckStarted()
+                                    void cancelAck.then((removed) => callback(null, [{ removed }] ))
                                 } else {
                                     retriedUpdate = data
                                     callback(null, [{ removed: false, accepted: true } as any])
@@ -935,17 +942,17 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
 
             const retry = service.retryIndeterminateMessage(session.id, message.id)
             await started
-            await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({
-                status: 'busy',
-                localId: message.localId,
-            })
-            await expect(service.cancelQueuedMessage(session.id, message.id)).resolves.toMatchObject({
+            const cancel = service.cancelQueuedMessage(session.id, message.id)
+            await cancelStarted
+            resolveMaterialization([])
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            resolveCancelAck(false)
+            await expect(cancel).resolves.toMatchObject({
                 status: 'cancelled',
                 localId: message.localId,
             })
-            resolveMaterialization([])
 
-            await expect(retry).resolves.toEqual({ status: 'not-found' })
+            await expect(retry).resolves.toEqual({ status: 'retry-unavailable', localId: message.localId! })
             expect(retriedUpdate).toBeUndefined()
             expect(deletedMaterializedPaths).toEqual(['/tmp/cancelled-retry.png'])
             expect(store.messages.lookupQueuedMessage(session.id, message.id).status).toBe('absent')
