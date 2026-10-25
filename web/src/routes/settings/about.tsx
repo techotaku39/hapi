@@ -1,11 +1,12 @@
 import { PROTOCOL_VERSION } from '@hapi/protocol'
-import { getVisibleReleaseNotes, RELEASE_NOTES } from '@/lib/releaseNotes'
+import { getVisibleReleaseNotes, RELEASE_NOTES, type ReleaseLocale } from '@/lib/releaseNotes'
 import { useTranslation } from '@/lib/use-translation'
 import { ChevronRightIcon, SettingsPageContent, SettingsRow, SettingsSection } from '@/components/settings/SettingsPrimitives'
 
 export default function SettingsAboutPage() {
     const { t, locale } = useTranslation()
     const visibleReleaseNotes = getVisibleReleaseNotes(__APP_VERSION__, RELEASE_NOTES)
+    const releaseLocale: ReleaseLocale = locale === 'zh-CN' ? 'zh-CN' : 'en'
     const dateFormatter = new Intl.DateTimeFormat(locale, {
         year: 'numeric',
         month: 'short',
@@ -48,13 +49,13 @@ export default function SettingsAboutPage() {
                         </summary>
                         <div className="border-t border-[var(--app-divider)] px-3 py-3">
                             {release.summary ? (
-                                <p className="mb-4 rounded-lg bg-[var(--app-subtle-bg)] px-3 py-2.5 text-sm leading-relaxed text-[var(--app-hint)]"><span className="relative -top-0.5 mr-0.5 inline-block translate-y-[0.5px] align-middle leading-none sm:hidden" aria-hidden="true">🌟</span><span className="relative -top-0.5 mr-0.5 hidden translate-y-[0.5px] align-middle leading-none sm:inline-block sm:-translate-y-[0.5px]" aria-hidden="true">⭐</span> {release.summary[locale]}</p>
+                                <p className="mb-4 rounded-lg bg-[var(--app-subtle-bg)] px-3 py-2.5 text-sm leading-relaxed text-[var(--app-hint)]"><span className="relative -top-0.5 mr-0.5 inline-block translate-y-[0.5px] align-middle leading-none sm:hidden" aria-hidden="true">🌟</span><span className="relative -top-0.5 mr-0.5 hidden translate-y-[0.5px] align-middle leading-none sm:inline-block sm:-translate-y-[0.5px]" aria-hidden="true">⭐</span> {release.summary[releaseLocale]}</p>
                             ) : null}
                             <div className="space-y-4">
                                 {release.groups.map((releaseGroup, groupIndex) => (
                                     <section key={groupIndex}>
                                         <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                                            <h3 className="text-sm font-semibold text-[var(--app-fg)]">{releaseGroup.title[locale]}</h3>
+                                            <h3 className="text-sm font-semibold text-[var(--app-fg)]">{releaseGroup.title[releaseLocale]}</h3>
                                         </div>
                                         <ul className="space-y-2 text-sm leading-relaxed text-[var(--app-fg)]">
                                             {releaseGroup.changes.map((change, changeIndex) => (
@@ -66,7 +67,7 @@ export default function SettingsAboutPage() {
                                                             : 'relative -top-[1.5px] mr-1.5 inline-flex items-center rounded-md border border-slate-400/30 bg-slate-400/10 px-1.5 py-1 align-middle text-[11px] font-medium leading-none text-slate-600 dark:text-slate-300'}>
                                                         <span className="relative top-px sm:top-[0.5px]">{t('settings.about.releaseNotes.kind.' + change.kind)}</span>
                                                     </span>
-                                                    {change.text[locale]}
+                                                    {change.text[releaseLocale]}
                                                 </li>
                                             ))}
                                         </ul>
