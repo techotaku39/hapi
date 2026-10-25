@@ -1834,7 +1834,7 @@ describe('MessageService.sendMessage with scheduledAt', () => {
                             callback: (err: Error | null, responses: Array<{ removed: boolean }>) => void,
                         ) => {
                             ackCalls += 1
-                            callback(null, [{ removed: true }])
+                            callback(null, [{ removed: false }])
                         }
                     })
                 }),

@@ -833,7 +833,11 @@ export class MessageService {
             if (ack === 'consumed') {
                 return await this.recordConsumedAcknowledgement(sessionId, localId)
             }
-            if (ack !== 'removed') return { status: 'busy', localId }
+            // While materialization is pending the update has not reached the
+            // CLI queue yet, so `not-found` means it was never enqueued and a
+            // clean cancellation can proceed. Keep ambiguous/in-flight
+            // outcomes fail-closed.
+            if (ack !== 'removed' && ack !== 'not-found') return { status: 'busy', localId }
 
             const deleted = this.store.messages.deleteQueuedMessageById(sessionId, resolvedId)
             if (deleted) {
