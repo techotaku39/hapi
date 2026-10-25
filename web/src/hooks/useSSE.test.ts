@@ -300,6 +300,7 @@ describe('reply-clock full-record cache ordering', () => {
 
         act(() => { vi.advanceTimersByTime(20) })
         expect(queryClient.getQueryState(queryKeys.sessions)?.isInvalidated).toBe(true)
+        expect(queryClient.getQueryState(queryKeys.session('session-1'))?.isInvalidated).toBe(true)
         unmount()
     })
 

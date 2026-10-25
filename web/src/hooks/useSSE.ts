@@ -835,6 +835,13 @@ export function useSSE(options: {
                         ?.sessions.find((summary) => summary.id === event.sessionId)
                     if (shouldAcceptSessionRecord(currentDetail, event.data, currentSummary)) {
                         queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), { session: event.data })
+                    } else {
+                        // A newer reply-clock patch can overtake a full record
+                        // that still carries useful metadata/agent fields. Do
+                        // not discard those fields permanently: refetch the
+                        // authoritative detail row instead of merging an
+                        // older snapshot into a newer reply-clock cache.
+                        queueSessionDetailInvalidation(event.sessionId)
                     }
                     const summaryAccepted = upsertSessionSummary(event.data)
                     if (!summaryAccepted) {

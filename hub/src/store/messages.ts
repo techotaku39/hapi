@@ -4,9 +4,12 @@ import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import {
     extractAssistantParentUuid,
+    extractAssistantPlainText,
     extractInjectedTurnUuid,
     isAssistantTextMessage,
     isClaudeInjectedAutoReply,
+    isNoResponseRequestedText,
+    unwrapRoleWrappedRecordEnvelope,
 } from '@hapi/protocol/messages'
 import { z } from 'zod'
 
@@ -68,8 +71,24 @@ function invalidateInjectedTurnUuidCache(db: Database, sessionId: string): void 
     injectedTurnUuidCaches.get(db)?.delete(sessionId)
 }
 
+function isInjectedAutoReplyCandidate(content: unknown): boolean {
+    if (!isAssistantTextMessage(content) || !extractAssistantParentUuid(content)) return false
+    const record = unwrapRoleWrappedRecordEnvelope(content)
+    const text = extractAssistantPlainText(record?.content ?? content)
+    return text !== null && isNoResponseRequestedText(text)
+}
+
+function isVisibleAssistantReplyWithContext(
+    content: unknown,
+    injectedTurnUuids: ReadonlySet<string>
+): boolean {
+    if (!isAssistantTextMessage(content)) return false
+    if (!isInjectedAutoReplyCandidate(content)) return true
+    return !isClaudeInjectedAutoReply(content, injectedTurnUuids)
+}
+
 function prepareAssistantReplyContext(db: Database, sessionId: string, content: unknown): void {
-    if (isAssistantTextMessage(content) && extractAssistantParentUuid(content)) {
+    if (isInjectedAutoReplyCandidate(content)) {
         // Populate the ancestry cache before entering the message write
         // transaction. The first lookup may scan a long legacy transcript,
         // but subsequent live replies only perform a Set membership check.
@@ -78,9 +97,8 @@ function prepareAssistantReplyContext(db: Database, sessionId: string, content: 
 }
 
 export function isVisibleAssistantReply(db: Database, sessionId: string, content: unknown): boolean {
-    if (!isAssistantTextMessage(content)) return false
-    if (!extractAssistantParentUuid(content)) return true
-    return !isClaudeInjectedAutoReply(content, getInjectedTurnUuidCache(db, sessionId))
+    if (!isInjectedAutoReplyCandidate(content)) return isAssistantTextMessage(content)
+    return isVisibleAssistantReplyWithContext(content, getInjectedTurnUuidCache(db, sessionId))
 }
 
 function touchLastAssistantMessageAt(
@@ -375,10 +393,8 @@ export function copyMessagesToSession(
 ): number {
     if (messages.length === 0) return 0
 
-    const hasParentedAssistant = messages.some((message) =>
-        isAssistantTextMessage(message.content) && extractAssistantParentUuid(message.content)
-    )
-    const injectedTurnUuids = hasParentedAssistant
+    const hasInjectedAutoReplyCandidate = messages.some((message) => isInjectedAutoReplyCandidate(message.content))
+    const injectedTurnUuids = hasInjectedAutoReplyCandidate
         ? getInjectedTurnUuidCache(db, sessionId)
         : new Set<string>()
 
@@ -424,7 +440,7 @@ export function copyMessagesToSession(
             })
             if (
                 isAssistantTextMessage(message.content)
-                && !isClaudeInjectedAutoReply(message.content, injectedTurnUuids)
+                && isVisibleAssistantReplyWithContext(message.content, injectedTurnUuids)
             ) {
                 assistantMessages.push({ content: message.content, createdAt })
             }
