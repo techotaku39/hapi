@@ -61,10 +61,8 @@ final class ChatModel {
     private(set) var isJumpingToLatest = false
     private(set) var hasTrimmedTail = false
     private var isAwayFromBottom = false
-    private var resumeAfterInspection = false
     var showsJumpToLatest: Bool {
-        isJumpingToLatest || hasTrimmedTail
-            || (!followsTail && (isAwayFromBottom || resumeAfterInspection))
+        isJumpingToLatest || hasTrimmedTail || (!followsTail && isAwayFromBottom)
     }
     let toolInspection = ToolInspectionState()
     private(set) var visibleSurfaces = Set<String>()
@@ -160,9 +158,12 @@ final class ChatModel {
 
     func releaseSurface(_ id: String) {
         visibleSurfaces.remove(id)
-        Task { [weak self] in
+        // Keep the model alive through the deferred teardown. A replaced
+        // split detail may otherwise deallocate before this task runs, leaving
+        // its SSE client running and the hub's open-chat marker stale.
+        Task { [self] in
             await Task.yield()
-            guard let self, self.visibleSurfaces.isEmpty else { return }
+            guard visibleSurfaces.isEmpty else { return }
             self.stop()
         }
     }
@@ -172,9 +173,8 @@ final class ChatModel {
         jumpTask?.cancel()
         jumpTask = nil
         isJumpingToLatest = false
-        // Closing an inspector must leave an explicit resume action even
-        // when no content has arrived and the reading anchor is at bottom.
-        resumeAfterInspection = true
+        // Pause following/paging without claiming the reader left the bottom.
+        // The latest action still depends on viewport distance or a trimmed tail.
         readingViewportChanged(followsTail: false, needsOlder: false, isAwayFromBottom: isAwayFromBottom)
     }
 
@@ -202,7 +202,9 @@ final class ChatModel {
             case .sessionSuperseded(let sessionId):
                 self.supersededSessionId = sessionId
             case .notice(let message):
-                self.showNotice(message)
+                // Scratchlist failures already have an inline banner with a
+                // retry action. A second toast obscures the same input area.
+                if message != self.interactor.scratchlistError { self.showNotice(message) }
             }
         }
         interactor.activate()
@@ -289,7 +291,6 @@ final class ChatModel {
         let changedMode = self.followsTail != followsTail
         self.followsTail = followsTail
         self.isAwayFromBottom = !followsTail && isAwayFromBottom
-        if followsTail && !hasTrimmedTail { resumeAfterInspection = false }
         viewportNeedsOlder = needsOlder
         if changedMode, !isJumpingToLatest, let controller = chat.windowController {
             if followsTail && hasTrimmedTail { jumpToLatest(); return }
@@ -419,7 +420,6 @@ final class ChatModel {
             guard !Task.isCancelled, self.chat === chat else { return }
             self.followsTail = true
             self.isAwayFromBottom = false
-            self.resumeAfterInspection = false
             self.jumpToLatestToken += 1
         }
     }

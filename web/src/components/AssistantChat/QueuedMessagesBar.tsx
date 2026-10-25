@@ -200,9 +200,11 @@ export function QueuedMessagesBar({
     onEdit,
     onExternalComposerEdit,
     canSteer,
+    compactionPendingMessageIds,
 }: {
     sessionId: string
     api: ApiClient | null
+    compactionPendingMessageIds?: readonly string[]
     /** Current composer schedule, used only to guard an asynchronous edit restore. */
     pendingSchedule: PendingSchedule | null
     /** Monotonic per-session revision; schedule selections win over an async edit restore. */
@@ -355,6 +357,8 @@ export function QueuedMessagesBar({
                         const editText = getQueuedMessageEditText(preview)
                         const hasAttachments = attachmentNames.length > 0
                         const localId = msg.localId ?? msg.id
+                        const waitingForCompaction = msg.deliveryState === 'indeterminate'
+                            && compactionPendingMessageIds?.includes(localId) === true
                         const isPending = cancelMutation.isPending || queuedOperationPending
                         const canCancel = computeCanCancel({ id: msg.id, localId: msg.localId, isPending })
 
@@ -524,8 +528,8 @@ export function QueuedMessagesBar({
                                         </span>
                                     ) : null}
                                     {msg.deliveryState === 'indeterminate' ? (
-                                        <div className="mt-1 text-xs text-[var(--app-warning-text)]">
-                                            {t('queuedMessages.steerOutcomeUnknown')}
+                                        <div className={`mt-1 text-xs ${waitingForCompaction ? 'text-[var(--app-hint)]' : 'text-[var(--app-warning-text)]'}`}>
+                                            {t(waitingForCompaction ? 'queuedMessages.compactionPending' : 'queuedMessages.steerOutcomeUnknown')}
                                         </div>
                                     ) : null}
                                     {hasAttachments ? (
@@ -552,7 +556,7 @@ export function QueuedMessagesBar({
                                     )}
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1">
-                                    {msg.deliveryState === 'indeterminate' ? (
+                                    {msg.deliveryState === 'indeterminate' && !waitingForCompaction ? (
                                         <button
                                             type="button"
                                             aria-label={t('queuedMessages.retryOutcome')}

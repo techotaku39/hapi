@@ -149,8 +149,12 @@ vi.mock('@/components/ChatInput/Autocomplete', () => ({
 }))
 vi.mock('@/components/AssistantChat/StatusBar', () => ({ StatusBar: () => null }))
 vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
+    isComposerPrimaryFillHeight: () => false,
     ComposerButtons: (props: { onSend: () => void }) => (
         <button type="button" onClick={props.onSend}>send</button>
+    ),
+    UnifiedButton: (props: { onSend: () => void }) => (
+        <button type="button" onClick={props.onSend}>unified-send</button>
     ),
 }))
 

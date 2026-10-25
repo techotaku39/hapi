@@ -7,6 +7,10 @@ React Mini App / PWA for monitoring and controlling hapi sessions.
 - Session list with status, pending approvals, todos, and summaries.
 - Chat view with streaming updates and message sending.
 - Permission approval and denial workflows.
+- Codex `request_user_input` choices honor `isOther`: **None of the above**
+  focuses optional notes, supports empty notes, and preserves the canonical
+  wire value across languages. Recorded other answers and notes remain visible
+  in live and historical cards; Pi/MCP forms without the flag are unchanged.
 - Permission mode and model selection.
 - Machine list and remote session spawn.
 - File browser and git status/diff views.
@@ -61,7 +65,12 @@ See `src/router.tsx` for route definitions.
 - Message thread with infinite scroll.
 - Composer for sending messages.
 - Permission mode and model selection for supported agents.
+  Cursor Auto uses CLI Auto for new/resumed sessions configured with Auto. When ACP does not advertise a literal Auto option, the session picker warns that switching back from a concrete model requires a restart; HAPI does not automatically restart an active session.
 - Session abort and handoff controls.
+- Codex **Continue planning** hides the current proposal's action menu locally
+  and focuses the composer without sending a message or replacing its draft.
+  The plan document remains readable; recycled cards stay dismissed and new
+  proposals get fresh action menus.
 - Context size display.
 - Per-session scratchlist (`src/components/AssistantChat/ScratchlistPanel.tsx`)
   - Workbench panel for held notes/drafts; **distinct from the queue**.
