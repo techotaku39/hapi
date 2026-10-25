@@ -125,6 +125,17 @@ describe('assistant reply timestamp', () => {
                 type: 'output',
                 data: {
                     type: 'assistant',
+                    uuid: 'ordinary-turn',
+                    message: { content: [{ type: 'text', text: 'Normal answer.' }] }
+                }
+            }
+        }, undefined, undefined, 2_500)
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
                     parentUuid: 'ordinary-turn',
                     message: { content: [{ type: 'text', text: 'No response requested.' }] }
                 }

@@ -88,6 +88,23 @@ describe('copyMessagesToSession', () => {
                     type: 'output',
                     data: {
                         type: 'assistant',
+                        uuid: 'ordinary-copy-turn',
+                        message: { content: [{ type: 'text', text: 'Normal answer.' }] }
+                    }
+                }
+            },
+            createdAt: 2_500,
+            localId: null,
+            invokedAt: 2_500,
+            scheduledAt: null
+        })
+        store.messages.copyMessageToSession(child.id, {
+            content: {
+                role: 'agent',
+                content: {
+                    type: 'output',
+                    data: {
+                        type: 'assistant',
                         parentUuid: 'ordinary-copy-turn',
                         message: { content: [{ type: 'text', text: 'No response requested.' }] }
                     }

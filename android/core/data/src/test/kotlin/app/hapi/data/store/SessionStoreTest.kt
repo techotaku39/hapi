@@ -249,6 +249,46 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `older full-session event refetches cached detail fields`() = runStoreTest { store, server ->
+        server.enqueueJson(
+            sessionsResponseJson(
+                summary("s1", updatedAt = 9_000, lastAssistantMessageAt = 9_000, lastAssistantMessageVersion = 5)
+            )
+        )
+        store.refresh()
+        val current = session("s1", seq = 5, updatedAt = 9_000, lastAssistantMessageAt = 9_000)
+        store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(current)))
+
+        val refreshed = session(
+            "s1",
+            seq = 6,
+            updatedAt = 12_000,
+            lastAssistantMessageAt = 10_000,
+            metadataVersion = 2,
+        )
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return if (request.path?.startsWith("/api/sessions/s1") == true) {
+                    MockResponse().setResponseCode(200)
+                        .setHeader("Content-Type", "application/json")
+                        .setBody("{\"session\":${fullSessionJson(refreshed)}}")
+                } else {
+                    MockResponse().setResponseCode(200)
+                        .setHeader("Content-Type", "application/json")
+                        .setBody(sessionsResponseJson(summary("s1", updatedAt = 12_000, lastAssistantMessageVersion = 6)))
+                }
+            }
+        }
+
+        val stale = session("s1", seq = 4, updatedAt = 10_000, lastAssistantMessageAt = 1_000)
+        store.applySessionEvent(globalScope, sessionUpdatedEvent("s1", fullSessionJson(stale)))
+
+        val detail = store.sessionDetail("s1").first { it?.seq == 6L }
+        assertEquals(2, detail?.metadataVersion)
+        assertEquals(10_000L, detail?.lastAssistantMessageAt)
+    }
+
+    @Test
     fun `older full-session event cannot rewind a summary below the detail watermark`() = runStoreTest { store, server ->
         server.enqueueJson(
             sessionsResponseJson(

@@ -31,6 +31,7 @@ export class SessionCache {
     private readonly todoBackfillAttemptedSessionIds: Set<string> = new Set()
     private readonly assistantReplyBackfillQueue: string[] = []
     private readonly assistantReplyBackfillQueuedSessionIds: Set<string> = new Set()
+    private readonly injectedTurnPrimeQueuedSessionIds: Set<string> = new Set()
     private readonly deduplicateInProgress: Set<string> = new Set()
     private readonly deduplicatePending: Set<string> = new Set()
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
@@ -207,6 +208,8 @@ export class SessionCache {
         // request-driven cache hydration never block on a full transcript.
         if (!stored.assistantReplyClockBackfilled) {
             this.queueAssistantReplyBackfill(sessionId)
+        } else {
+            this.queueInjectedTurnUuidPrime(sessionId)
         }
 
         const metadata = (() => {
@@ -380,6 +383,7 @@ export class SessionCache {
             for (const message of page) {
                 const injectedTurnUuid = extractInjectedTurnUuid(message.content)
                 if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
+                this.store.messages.rememberTurnUuid(sessionId, message.content)
                 considerAssistantMessage(message.content, message.createdAt)
             }
 
@@ -390,6 +394,8 @@ export class SessionCache {
             await new Promise<void>((resolve) => setTimeout(resolve, 0))
         }
         if (this.assistantReplyBackfillStopped) return false
+
+        this.store.messages.setInjectedTurnUuidCache(sessionId, injectedTurnUuids)
 
         for (const candidate of pendingAutoReplies) {
             if (isClaudeInjectedAutoReply(candidate.content, injectedTurnUuids)) continue
@@ -435,6 +441,38 @@ export class SessionCache {
 
         const current = this.store.sessions.getSession(sessionId)
         return current?.assistantReplyClockBackfilled === false && current.seq !== stored.seq
+    }
+
+    private queueInjectedTurnUuidPrime(sessionId: string): void {
+        if (!this.injectedTurnPrimeQueuedSessionIds.add(sessionId)) return
+        void this.primeInjectedTurnUuids(sessionId).finally(() => {
+            this.injectedTurnPrimeQueuedSessionIds.delete(sessionId)
+        })
+    }
+
+    private async primeInjectedTurnUuids(sessionId: string): Promise<void> {
+        let beforeSeq: number | null = null
+        const injectedTurnUuids = new Set<string>()
+        while (!this.assistantReplyBackfillStopped) {
+            const page = this.store.messages.getMessagesBeforeSeq(
+                sessionId,
+                beforeSeq,
+                ASSISTANT_REPLY_BACKFILL_PAGE_SIZE
+            )
+            for (const message of page) {
+                const injectedTurnUuid = extractInjectedTurnUuid(message.content)
+                if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
+            }
+            if (page.length < ASSISTANT_REPLY_BACKFILL_PAGE_SIZE) break
+            const lastMessage = page.at(-1)
+            if (!lastMessage) break
+            beforeSeq = lastMessage.seq
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        }
+        if (this.assistantReplyBackfillStopped) return
+        if (this.store.sessions.getSession(sessionId)?.assistantReplyClockBackfilled) {
+            this.store.messages.setInjectedTurnUuidCache(sessionId, injectedTurnUuids)
+        }
     }
 
     setSessionPinned(sessionId: string, pinned: boolean): void {
@@ -821,7 +859,13 @@ export class SessionCache {
      */
     recordAssistantMessage(sessionId: string, messageAt: number, content?: unknown): void {
         if (!Number.isFinite(messageAt)) return
-        if (content !== undefined && !this.store.messages.isVisibleAssistantReply(sessionId, content)) return
+        if (content !== undefined) {
+            if (this.store.messages.isAssistantReplyVisibilityUnknown(sessionId, content)) {
+                this.refreshSession(sessionId)
+                return
+            }
+            if (!this.store.messages.isVisibleAssistantReply(sessionId, content)) return
+        }
 
         const stored = this.store.sessions.getSession(sessionId)
         if (!stored) return

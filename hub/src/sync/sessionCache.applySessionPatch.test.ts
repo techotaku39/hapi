@@ -104,6 +104,20 @@ describe('SessionCache.applySessionPatch', () => {
         expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBeNull()
         expect(events.some((event) => event.type === 'session-updated' && event.data?.lastAssistantMessageAt === 2_000)).toBe(false)
 
+        const ordinaryTurn = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    uuid: 'ordinary-turn',
+                    message: { content: [{ type: 'text', text: 'Normal answer.' }] }
+                }
+            }
+        }
+        store.messages.addMessage(session.id, ordinaryTurn, undefined, undefined, 2_500)
+        cache.recordAssistantMessage(session.id, 2_500, ordinaryTurn)
+
         const ordinaryReply = {
             role: 'agent',
             content: {

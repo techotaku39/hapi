@@ -35,9 +35,18 @@ type DbMessageContentRow = {
     content: string | Uint8Array
 }
 
-const injectedTurnUuidCaches = new WeakMap<Database, Map<string, Set<string>>>()
+type InjectedTurnUuidCache = {
+    uuids: Set<string>
+    knownTurnUuids: Set<string>
+    complete: boolean
+}
 
-function getInjectedTurnUuidCache(db: Database, sessionId: string): Set<string> {
+export type AssistantReplyVisibility = 'visible' | 'hidden' | 'unknown' | 'not-assistant'
+
+const ASSISTANT_REPLY_CONTEXT_LIMIT = 200
+const injectedTurnUuidCaches = new WeakMap<Database, Map<string, InjectedTurnUuidCache>>()
+
+function getInjectedTurnUuidCache(db: Database, sessionId: string): InjectedTurnUuidCache {
     let sessionCaches = injectedTurnUuidCaches.get(db)
     if (!sessionCaches) {
         sessionCaches = new Map()
@@ -50,21 +59,63 @@ function getInjectedTurnUuidCache(db: Database, sessionId: string): Set<string> 
         SELECT content
         FROM messages
         WHERE session_id = ?
-        ORDER BY seq ASC
-    `).all(sessionId) as DbMessageContentRow[]
+        ORDER BY seq DESC
+        LIMIT ?
+    `).all(sessionId, ASSISTANT_REPLY_CONTEXT_LIMIT) as DbMessageContentRow[]
     const injectedTurnUuids = new Set<string>()
+    const knownTurnUuids = new Set<string>()
     for (const row of rows) {
-        const injectedTurnUuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
+        const content = decodeMessageContent(row.content)
+        const record = unwrapRoleWrappedRecordEnvelope(content)
+        const messageContent = record?.content
+        const data = isObjectRecord(messageContent) && isObjectRecord(messageContent.data)
+            ? messageContent.data
+            : null
+        if (typeof data?.uuid === 'string' && data.uuid.length > 0) knownTurnUuids.add(data.uuid)
+        const injectedTurnUuid = extractInjectedTurnUuid(content)
         if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
     }
-    sessionCaches.set(sessionId, injectedTurnUuids)
-    return injectedTurnUuids
+    const cache = { uuids: injectedTurnUuids, knownTurnUuids, complete: false }
+    sessionCaches.set(sessionId, cache)
+    return cache
 }
 
-function rememberInjectedTurnUuid(db: Database, sessionId: string, content: unknown): void {
+export function rememberTurnUuid(db: Database, sessionId: string, content: unknown): void {
+    const record = unwrapRoleWrappedRecordEnvelope(content)
+    const messageContent = record?.content
+    const data = isObjectRecord(messageContent) && isObjectRecord(messageContent.data)
+        ? messageContent.data
+        : null
+    const turnUuid = typeof data?.uuid === 'string' && data.uuid.length > 0 ? data.uuid : null
     const injectedTurnUuid = extractInjectedTurnUuid(content)
-    if (!injectedTurnUuid) return
-    injectedTurnUuidCaches.get(db)?.get(sessionId)?.add(injectedTurnUuid)
+    if (!turnUuid && !injectedTurnUuid) return
+    const cache = injectedTurnUuidCaches.get(db)?.get(sessionId)
+        ?? (injectedTurnUuid ? getInjectedTurnUuidCache(db, sessionId) : null)
+    if (!cache) return
+    if (turnUuid) cache.knownTurnUuids.add(turnUuid)
+    if (injectedTurnUuid) cache.uuids.add(injectedTurnUuid)
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null
+}
+
+export function setInjectedTurnUuidCache(
+    db: Database,
+    sessionId: string,
+    injectedTurnUuids: ReadonlySet<string>
+): void {
+    let sessionCaches = injectedTurnUuidCaches.get(db)
+    if (!sessionCaches) {
+        sessionCaches = new Map()
+        injectedTurnUuidCaches.set(db, sessionCaches)
+    }
+    const existing = sessionCaches.get(sessionId)
+    sessionCaches.set(sessionId, {
+        uuids: new Set([...(existing?.uuids ?? []), ...injectedTurnUuids]),
+        knownTurnUuids: new Set(existing?.knownTurnUuids ?? []),
+        complete: true
+    })
 }
 
 function invalidateInjectedTurnUuidCache(db: Database, sessionId: string): void {
@@ -78,27 +129,41 @@ function isInjectedAutoReplyCandidate(content: unknown): boolean {
     return text !== null && isNoResponseRequestedText(text)
 }
 
-function isVisibleAssistantReplyWithContext(
+function classifyAssistantReply(
     content: unknown,
-    injectedTurnUuids: ReadonlySet<string>
-): boolean {
-    if (!isAssistantTextMessage(content)) return false
-    if (!isInjectedAutoReplyCandidate(content)) return true
-    return !isClaudeInjectedAutoReply(content, injectedTurnUuids)
+    cache: InjectedTurnUuidCache
+): AssistantReplyVisibility {
+    if (!isAssistantTextMessage(content)) return 'not-assistant'
+    if (!isInjectedAutoReplyCandidate(content)) return 'visible'
+    const parentUuid = extractAssistantParentUuid(content)
+    if (parentUuid && cache.uuids.has(parentUuid)) return 'hidden'
+    if (parentUuid && cache.knownTurnUuids.has(parentUuid)) return 'visible'
+    return cache.complete ? 'visible' : 'unknown'
 }
 
 function prepareAssistantReplyContext(db: Database, sessionId: string, content: unknown): void {
     if (isInjectedAutoReplyCandidate(content)) {
-        // Populate the ancestry cache before entering the message write
-        // transaction. The first lookup may scan a long legacy transcript,
-        // but subsequent live replies only perform a Set membership check.
+        // Populate a bounded ancestry cache before entering the message write
+        // transaction. An incomplete cache defers the reply-clock decision to
+        // SessionCache's paginated backfill instead of scanning old history
+        // synchronously.
         getInjectedTurnUuidCache(db, sessionId)
     }
 }
 
 export function isVisibleAssistantReply(db: Database, sessionId: string, content: unknown): boolean {
-    if (!isInjectedAutoReplyCandidate(content)) return isAssistantTextMessage(content)
-    return isVisibleAssistantReplyWithContext(content, getInjectedTurnUuidCache(db, sessionId))
+    return getAssistantReplyVisibility(db, sessionId, content) === 'visible'
+}
+
+export function getAssistantReplyVisibility(
+    db: Database,
+    sessionId: string,
+    content: unknown
+): AssistantReplyVisibility {
+    if (!isAssistantTextMessage(content)) return 'not-assistant'
+    if (!isInjectedAutoReplyCandidate(content)) return 'visible'
+    const cache = getInjectedTurnUuidCache(db, sessionId)
+    return classifyAssistantReply(content, cache)
 }
 
 function touchLastAssistantMessageAt(
@@ -107,7 +172,12 @@ function touchLastAssistantMessageAt(
     content: unknown,
     createdAt: number
 ): void {
-    if (!isVisibleAssistantReply(db, sessionId, content) || !Number.isFinite(createdAt)) return
+    const visibility = getAssistantReplyVisibility(db, sessionId, content)
+    if (visibility === 'unknown') {
+        markAssistantReplyClockNeedsBackfill(db, sessionId)
+        return
+    }
+    if (visibility !== 'visible' || !Number.isFinite(createdAt)) return
 
     db.prepare(`
         UPDATE sessions
@@ -134,6 +204,7 @@ function markAssistantReplyClockNeedsBackfill(db: Database, sessionId: string): 
         SET assistant_reply_clock_backfilled = 0,
             seq = seq + 1
         WHERE id = @session_id
+          AND assistant_reply_clock_backfilled = 1
     `).run({
         session_id: sessionId
     })
@@ -194,7 +265,7 @@ export function addImportedMessage(
             local_id: localId,
             invoked_at: stampedAt
         })
-        rememberInjectedTurnUuid(db, sessionId, content)
+        rememberTurnUuid(db, sessionId, content)
         touchLastAssistantMessageAt(db, sessionId, content, stampedAt)
         if (previousHead && stampedAt < previousHead.at) bumpMessageEpoch(db, sessionId)
         const row = prepareCached(db, 'SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
@@ -293,7 +364,7 @@ export function addMessage(
             scheduled_at: scheduledAt ?? null
         })
 
-        rememberInjectedTurnUuid(db, sessionId, content)
+        rememberTurnUuid(db, sessionId, content)
         touchLastAssistantMessageAt(db, sessionId, content, stampedAt)
 
         const positionAt = invokedAt ?? stampedAt
@@ -367,7 +438,7 @@ export function copyMessageToSession(
         delivery_state: message.deliveryState ?? 'queued'
     })
 
-    rememberInjectedTurnUuid(db, sessionId, message.content)
+    rememberTurnUuid(db, sessionId, message.content)
     touchLastAssistantMessageAt(db, sessionId, message.content, createdAt)
 
     const row = prepareCached(db, 'SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
@@ -394,9 +465,10 @@ export function copyMessagesToSession(
     if (messages.length === 0) return 0
 
     const hasInjectedAutoReplyCandidate = messages.some((message) => isInjectedAutoReplyCandidate(message.content))
-    const injectedTurnUuids = hasInjectedAutoReplyCandidate
+    const injectedTurnCache = hasInjectedAutoReplyCandidate
         ? getInjectedTurnUuidCache(db, sessionId)
-        : new Set<string>()
+        : { uuids: new Set<string>(), knownTurnUuids: new Set<string>(), complete: true }
+    let needsBackfill = false
 
     return db.transaction(() => {
         let nextSeq = getMaxSeq(db, sessionId) + 1
@@ -413,8 +485,15 @@ export function copyMessagesToSession(
         )
 
         for (const message of messages) {
+            const record = unwrapRoleWrappedRecordEnvelope(message.content)
+            const messageContent = record?.content
+            const data = isObjectRecord(messageContent) && isObjectRecord(messageContent.data)
+                ? messageContent.data
+                : null
+            const turnUuid = typeof data?.uuid === 'string' && data.uuid.length > 0 ? data.uuid : null
             const injectedTurnUuid = extractInjectedTurnUuid(message.content)
-            if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
+            if (turnUuid) injectedTurnCache.knownTurnUuids.add(turnUuid)
+            if (injectedTurnUuid) injectedTurnCache.uuids.add(injectedTurnUuid)
             const createdAt = Number.isFinite(message.createdAt) ? message.createdAt : Date.now()
             let localId = message.localId
             if (localId) {
@@ -438,11 +517,11 @@ export function copyMessagesToSession(
                 scheduled_at: message.scheduledAt ?? null,
                 delivery_state: message.deliveryState ?? 'queued'
             })
-            if (
-                isAssistantTextMessage(message.content)
-                && isVisibleAssistantReplyWithContext(message.content, injectedTurnUuids)
-            ) {
+            const visibility = classifyAssistantReply(message.content, injectedTurnCache)
+            if (visibility === 'visible') {
                 assistantMessages.push({ content: message.content, createdAt })
+            } else if (visibility === 'unknown') {
+                needsBackfill = true
             }
             nextSeq += 1
         }
@@ -461,6 +540,7 @@ export function copyMessagesToSession(
                 latestAssistantMessage.createdAt
             )
         }
+        if (needsBackfill) markAssistantReplyClockNeedsBackfill(db, sessionId)
         bumpMessageEpoch(db, sessionId)
         return messages.length
     })()

@@ -39,6 +39,9 @@ import {
     copyMessageToSession as copyStoredMessageToSession,
     copyMessagesToSession as copyStoredMessagesToSession,
     isVisibleAssistantReply as isVisibleStoredAssistantReply,
+    getAssistantReplyVisibility as getStoredAssistantReplyVisibility,
+    rememberTurnUuid as rememberStoredTurnUuid,
+    setInjectedTurnUuidCache as setStoredInjectedTurnUuidCache,
     getAllMessages,
     getMessagesBeforeSeq,
     getMessagesAfterSeq,
@@ -102,6 +105,18 @@ export class MessageStore {
 
     isVisibleAssistantReply(sessionId: string, content: unknown): boolean {
         return isVisibleStoredAssistantReply(this.db, sessionId, content)
+    }
+
+    isAssistantReplyVisibilityUnknown(sessionId: string, content: unknown): boolean {
+        return getStoredAssistantReplyVisibility(this.db, sessionId, content) === 'unknown'
+    }
+
+    setInjectedTurnUuidCache(sessionId: string, injectedTurnUuids: ReadonlySet<string>): void {
+        setStoredInjectedTurnUuidCache(this.db, sessionId, injectedTurnUuids)
+    }
+
+    rememberTurnUuid(sessionId: string, content: unknown): void {
+        rememberStoredTurnUuid(this.db, sessionId, content)
     }
 
     getSeqById(sessionId: string, messageId: string): number | null {

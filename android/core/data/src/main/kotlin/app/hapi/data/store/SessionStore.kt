@@ -454,6 +454,7 @@ class SessionStore(
             // The global and per-session SSE pipes are delivered on separate
             // coroutines. Keep the sequence check inside the atomic update so
             // an older full record cannot pass a stale pre-read and write last.
+            var rejectedAsStale = false
             _details.update { current ->
                 val cached = current[sessionId]
                 val summaryVersion = _sessions.value
@@ -462,11 +463,13 @@ class SessionStore(
                     ?: 0L
                 val watermark = maxOf(cached?.seq ?: 0L, summaryVersion)
                 if (full.seq < watermark) {
+                    rejectedAsStale = true
                     current
                 } else {
                     current + (sessionId to full)
                 }
             }
+            if (rejectedAsStale) scheduleDetailRefresh(sessionId)
             upsertSummary(full)
             return
         }
@@ -625,17 +628,21 @@ class SessionStore(
         for (summary in summaries) {
             val detail = _details.value[summary.id] ?: continue
             val watermark = summary.lastAssistantMessageVersion ?: 0L
-            if (detail.seq >= watermark || !detailRefreshQueued.add(summary.id)) continue
-            scope.launch {
-                try {
-                    loadSessionDetail(summary.id)
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (_: Exception) {
-                    // A later SSE event or manual refresh retries the detail.
-                } finally {
-                    detailRefreshQueued.remove(summary.id)
-                }
+            if (detail.seq < watermark) scheduleDetailRefresh(summary.id)
+        }
+    }
+
+    private fun scheduleDetailRefresh(sessionId: String) {
+        if (!_details.value.containsKey(sessionId) || !detailRefreshQueued.add(sessionId)) return
+        scope.launch {
+            try {
+                loadSessionDetail(sessionId)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // A later SSE event or manual refresh retries the detail.
+            } finally {
+                detailRefreshQueued.remove(sessionId)
             }
         }
     }
