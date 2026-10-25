@@ -329,6 +329,13 @@ public final class SessionListStore: SessionListStoring {
             )
             if full.seq >= watermark {
                 details[full.id] = full
+            } else if details[sessionId] != nil {
+                // A newer reply-clock patch may have overtaken a full record
+                // that still contains changed metadata or agent fields.
+                // Refresh the cached detail instead of discarding those fields.
+                Task { @MainActor [weak self] in
+                    _ = try? await self?.loadSessionDetail(sessionId)
+                }
             }
             upsertSummary(full)
         case .patch(let patch) where patch != SessionPatch():

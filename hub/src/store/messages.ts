@@ -118,6 +118,10 @@ export function setInjectedTurnUuidCache(
     })
 }
 
+export function isInjectedTurnUuidCacheComplete(db: Database, sessionId: string): boolean {
+    return injectedTurnUuidCaches.get(db)?.get(sessionId)?.complete === true
+}
+
 function invalidateInjectedTurnUuidCache(db: Database, sessionId: string): void {
     injectedTurnUuidCaches.get(db)?.delete(sessionId)
 }
@@ -174,7 +178,7 @@ function touchLastAssistantMessageAt(
 ): void {
     const visibility = getAssistantReplyVisibility(db, sessionId, content)
     if (visibility === 'unknown') {
-        markAssistantReplyClockNeedsBackfill(db, sessionId)
+        requestAssistantReplyClockBackfill(db, sessionId)
         return
     }
     if (visibility !== 'visible' || !Number.isFinite(createdAt)) return
@@ -199,6 +203,17 @@ function touchLastAssistantMessageAt(
 // entire transcript while holding SQLite's write lock.
 function markAssistantReplyClockNeedsBackfill(db: Database, sessionId: string): void {
     invalidateInjectedTurnUuidCache(db, sessionId)
+    db.prepare(`
+        UPDATE sessions
+        SET assistant_reply_clock_backfilled = 0,
+            seq = seq + 1
+        WHERE id = @session_id
+    `).run({
+        session_id: sessionId
+    })
+}
+
+function requestAssistantReplyClockBackfill(db: Database, sessionId: string): void {
     db.prepare(`
         UPDATE sessions
         SET assistant_reply_clock_backfilled = 0,

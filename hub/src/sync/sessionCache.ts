@@ -208,7 +208,7 @@ export class SessionCache {
         // request-driven cache hydration never block on a full transcript.
         if (!stored.assistantReplyClockBackfilled) {
             this.queueAssistantReplyBackfill(sessionId)
-        } else {
+        } else if (!this.store.messages.isInjectedTurnUuidCacheComplete(sessionId)) {
             this.queueInjectedTurnUuidPrime(sessionId)
         }
 

@@ -200,6 +200,33 @@ struct SessionListStoreTests {
         #expect(store.sessions.first?.lastAssistantMessageVersion == 5)
     }
 
+    @Test func olderFullSessionEventRefetchesCachedDetailFields() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(
+            storeSummary("s1", updatedAt: 9_000, lastAssistantMessageAt: 9_000, lastAssistantMessageVersion: 5)
+        ))
+        try await store.refresh()
+
+        let current = storeSession("s1", seq: 5, updatedAt: 9_000, lastAssistantMessageAt: 9_000)
+        store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: fullSessionJSON(current)))
+
+        let refreshed = storeSession(
+            "s1",
+            seq: 6,
+            updatedAt: 12_000,
+            lastAssistantMessageAt: 10_000,
+            metadataVersion: 2
+        )
+        await performer.enqueue(json: try sessionResponseJSON(refreshed))
+
+        let stale = storeSession("s1", seq: 4, updatedAt: 10_000, lastAssistantMessageAt: 1_000)
+        store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: fullSessionJSON(stale)))
+
+        try await expectEventually { store.detail(for: "s1")?.seq == 6 }
+        #expect(store.detail(for: "s1")?.metadataVersion == 2)
+        #expect(store.detail(for: "s1")?.lastAssistantMessageAt == 10_000)
+    }
+
     @Test func olderFullSessionEventCannotRewindSummaryBelowDetailWatermark() async throws {
         let (performer, store) = try makeStore()
         await performer.enqueue(json: try sessionsResponseJSON(

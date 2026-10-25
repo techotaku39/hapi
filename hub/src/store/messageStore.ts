@@ -40,6 +40,7 @@ import {
     copyMessagesToSession as copyStoredMessagesToSession,
     isVisibleAssistantReply as isVisibleStoredAssistantReply,
     getAssistantReplyVisibility as getStoredAssistantReplyVisibility,
+    isInjectedTurnUuidCacheComplete as isStoredInjectedTurnUuidCacheComplete,
     rememberTurnUuid as rememberStoredTurnUuid,
     setInjectedTurnUuidCache as setStoredInjectedTurnUuidCache,
     getAllMessages,
@@ -113,6 +114,10 @@ export class MessageStore {
 
     setInjectedTurnUuidCache(sessionId: string, injectedTurnUuids: ReadonlySet<string>): void {
         setStoredInjectedTurnUuidCache(this.db, sessionId, injectedTurnUuids)
+    }
+
+    isInjectedTurnUuidCacheComplete(sessionId: string): boolean {
+        return isStoredInjectedTurnUuidCacheComplete(this.db, sessionId)
     }
 
     rememberTurnUuid(sessionId: string, content: unknown): void {
