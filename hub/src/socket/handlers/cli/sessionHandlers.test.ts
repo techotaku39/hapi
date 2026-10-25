@@ -53,6 +53,37 @@ function reasoningTextOf(message: { content: unknown }): string {
 }
 
 describe('cli session handlers', () => {
+    it('applies background snapshots as state before ordinary message ingest and replay deduplication', () => {
+        const store = new Store(':memory:')
+        try {
+            const session = store.sessions.getOrCreateSession('background-snapshot', { flavor: 'claude' }, null, 'default')
+            const socket = new FakeSocket()
+            const background = mock(), progress = mock(), publish = mock()
+            registerSessionHandlers(socket as unknown as CliSocketWithData, {
+                store, resolveSessionAccess: () => ({ ok: true, value: session }), emitAccessError() {},
+                onBackgroundTaskCount: background, onAgentProgress: progress, onWebappEvent: publish
+            })
+            const snapshot = (tasks: unknown[]) => socket.trigger('message', {
+                sid: session.id, localId: 'background-snapshot', message: { role: 'agent',
+                    content: { type: 'output', data: { type: 'system', subtype: 'background_tasks_changed', tasks } } }
+            })
+            snapshot([{ id: 'task' }])
+            snapshot([{ id: 'task' }])
+            snapshot([])
+            expect(background.mock.calls).toEqual([[session.id, 1], [session.id, 1], [session.id, 0]])
+            expect(store.messages.getAllMessages(session.id)).toEqual([])
+            expect(progress).not.toHaveBeenCalled()
+            expect(publish).not.toHaveBeenCalled()
+            expect(socket.roomEvents).toEqual([])
+            const frame = { sid: session.id, localId: 'reply', message: { role: 'agent',
+                content: { type: AGENT_MESSAGE_PAYLOAD_TYPE, data: { type: 'message', message: 'done' } } } }
+            socket.trigger('message', frame)
+            socket.trigger('message', frame)
+            expect(store.messages.getAllMessages(session.id)).toHaveLength(1)
+            expect(progress).toHaveBeenCalledTimes(1)
+            expect(publish).toHaveBeenCalledTimes(1)
+        } finally { store.close() }
+    })
     it('does not repeat message side effects when native history replays a stored localId', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('history-replay', { flavor: 'codex' }, null, 'default')
