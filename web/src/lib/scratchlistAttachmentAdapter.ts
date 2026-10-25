@@ -195,8 +195,9 @@ export function createScratchlistAttachmentAdapter(
             cancelledAttachmentIds.add(attachment.id)
             const pending = attachment as PendingScratchlistAttachment
             const hubId = pending.hubAttachment?.id
+            // Let the composer drop the chip while best-effort cleanup runs.
             if (hubId) {
-                await api.deleteScratchlistAttachment(sessionId, hubId).catch(() => {})
+                void api.deleteScratchlistAttachment(sessionId, hubId).catch(() => {})
                 return
             }
             // A durable chat attachment can be moved into scratchlist mode
@@ -208,7 +209,7 @@ export function createScratchlistAttachmentAdapter(
             }
             // Chat-path chip attached before scratchlist mode was enabled (#1226).
             if (pending.path && !isHubScratchlistAttachmentPath(pending.path)) {
-                await api.deleteUploadFile(sessionId, pending.path).catch(() => {})
+                void api.deleteUploadFile(sessionId, pending.path).catch(() => {})
             }
         },
 
