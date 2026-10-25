@@ -1923,11 +1923,22 @@ describe('reading forward from a context window', () => {
         expect(getMessages.mock.calls[1]?.[1]).toMatchObject({ afterAt: 60_000, afterSeq: 60 })
     })
 
-    it('keeps forward loading available when a queued prompt is pending', async () => {
+    it('keeps forward loading available when the context carries a queued prompt', async () => {
         const id = sessionId('context-forward-queued')
         const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        // The hub appends pending prompts to context responses out-of-band;
+        // they carry a real seq at the session head and must not be mistaken
+        // for the bounded window's own pagination boundary.
+        const queued = makeUserMessage({
+            id: 'queued-server',
+            localId: 'queued-server',
+            seq: 1_001,
+            createdAt: 1_001_000,
+            invokedAt: null,
+            status: 'queued'
+        })
         const api = createApi(vi.fn(async () => latestResponse([])))
-        api.getMessageContext = vi.fn(async () => contextResponse([target], {
+        api.getMessageContext = vi.fn(async () => contextResponse([target, queued], {
             epoch: 7,
             hasMore: false,
             nextBeforeAt: 40_000,
@@ -1937,16 +1948,10 @@ describe('reading forward from a context window', () => {
             targetMessageId: 'target'
         }))
 
-        // An out-of-band queued prompt sits past the head in the merged window.
-        appendOptimisticMessage(id, makeUserMessage({
-            id: 'queued-1',
-            localId: 'queued-1',
-            createdAt: 999_000,
-            invokedAt: null,
-            status: 'sending'
-        }))
         await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
 
+        // Without excluding the queued row the cursor would jump to 1001 and
+        // report caught-up, stranding messages 41-100.
         expect(getMessageWindowState(id).hasMoreNewer).toBe(true)
     })
 

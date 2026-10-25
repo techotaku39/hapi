@@ -1283,11 +1283,16 @@ export async function loadMessageContext(
             // The window stops well short of the head. Keep newestPosition* on
             // the head for tail sync, and track the window's own newest row
             // separately so the reader can page forward across the gap.
-            // Derive from the context page itself. `kept` also holds queued
-            // prompts and rows that arrived over SSE while the request was in
-            // flight; either would push the cursor past the contiguous window
-            // and strand the messages in between.
-            const contextNewest = derivePosition(retained, 'newest')
+            // Derive from the contiguous context rows only. `kept` also holds
+            // rows that arrived over SSE while the request was in flight, and
+            // the hub deliberately appends pending prompts to the context
+            // response out-of-band ("pending rows must not change the bounded
+            // context's pagination cursor", messageService.ts). Either would
+            // push the cursor past the window and strand the history between.
+            const contiguous = retained.filter((message) => (
+                !isQueuedForInvocation(message) && !optimisticMessage(message)
+            ))
+            const contextNewest = derivePosition(contiguous, 'newest')
             const snapshotHead = pagePosition(
                 response.page.snapshotHeadAt,
                 response.page.snapshotHeadSeq
