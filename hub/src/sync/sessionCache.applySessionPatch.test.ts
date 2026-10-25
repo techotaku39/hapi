@@ -55,6 +55,73 @@ describe('SessionCache.applySessionPatch', () => {
         store.close()
     })
 
+    it('does not broadcast injected no-response sentinels after backfill', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession(
+            'live-hidden-claude-reply',
+            { path: '/tmp' },
+            null,
+            'default'
+        )
+        const injectedUuid = 'injected-live-turn'
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: injectedUuid,
+                    isSidechain: true,
+                    message: { content: '<system-reminder>internal</system-reminder>' }
+                }
+            }
+        }, undefined, undefined, 1_000)
+
+        const db = (store as unknown as { db: import('bun:sqlite').Database }).db
+        db.prepare(`
+            UPDATE sessions
+            SET assistant_reply_clock_backfilled = 1,
+                last_assistant_message_at = NULL
+            WHERE id = ?
+        `).run(session.id)
+
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+        cache.refreshSession(session.id)
+        const sentinel = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: injectedUuid,
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }
+        store.messages.addMessage(session.id, sentinel, undefined, undefined, 2_000)
+        cache.recordAssistantMessage(session.id, 2_000, sentinel)
+        expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBeNull()
+        expect(events.some((event) => event.type === 'session-updated' && event.data?.lastAssistantMessageAt === 2_000)).toBe(false)
+
+        const ordinaryReply = {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'ordinary-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }
+        store.messages.addMessage(session.id, ordinaryReply, undefined, undefined, 3_000)
+        cache.recordAssistantMessage(session.id, 3_000, ordinaryReply)
+        expect(cache.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
+        cache.stop()
+        store.close()
+    })
+
     it('backfills the reply clock from legacy transcript rows without blocking refresh', async () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession(

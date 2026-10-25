@@ -2,7 +2,12 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { isAssistantTextMessage } from '@hapi/protocol/messages'
+import {
+    extractAssistantParentUuid,
+    extractInjectedTurnUuid,
+    isAssistantTextMessage,
+    isClaudeInjectedAutoReply,
+} from '@hapi/protocol/messages'
 import { z } from 'zod'
 
 import { getLiveReasoningStreamId } from '@hapi/protocol/messages'
@@ -23,13 +28,41 @@ type DbMessageRow = {
     delivery_state: string | null
 }
 
+type DbMessageContentRow = {
+    content: string | Uint8Array
+}
+
+const ASSISTANT_REPLY_CONTEXT_LIMIT = 200
+
+function getRecentInjectedTurnUuids(db: Database, sessionId: string): Set<string> {
+    const rows = prepareCached(db, `
+        SELECT content
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY seq DESC
+        LIMIT ?
+    `).all(sessionId, ASSISTANT_REPLY_CONTEXT_LIMIT) as DbMessageContentRow[]
+    const injectedTurnUuids = new Set<string>()
+    for (const row of rows) {
+        const injectedTurnUuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
+        if (injectedTurnUuid) injectedTurnUuids.add(injectedTurnUuid)
+    }
+    return injectedTurnUuids
+}
+
+export function isVisibleAssistantReply(db: Database, sessionId: string, content: unknown): boolean {
+    if (!isAssistantTextMessage(content)) return false
+    if (!extractAssistantParentUuid(content)) return true
+    return !isClaudeInjectedAutoReply(content, getRecentInjectedTurnUuids(db, sessionId))
+}
+
 function touchLastAssistantMessageAt(
     db: Database,
     sessionId: string,
     content: unknown,
     createdAt: number
 ): void {
-    if (!isAssistantTextMessage(content) || !Number.isFinite(createdAt)) return
+    if (!isVisibleAssistantReply(db, sessionId, content) || !Number.isFinite(createdAt)) return
 
     db.prepare(`
         UPDATE sessions
@@ -309,7 +342,7 @@ export function copyMessagesToSession(
 
     return db.transaction(() => {
         let nextSeq = getMaxSeq(db, sessionId) + 1
-        let latestAssistantMessage: { content: unknown; createdAt: number } | null = null
+        const assistantMessages: Array<{ content: unknown; createdAt: number }> = []
         const insert = prepareCached(db, `
             INSERT INTO messages (
                 id, session_id, content, created_at, seq, local_id, invoked_at, scheduled_at, delivery_state
@@ -345,13 +378,17 @@ export function copyMessagesToSession(
                 scheduled_at: message.scheduledAt ?? null,
                 delivery_state: message.deliveryState ?? 'queued'
             })
-            if (isAssistantTextMessage(message.content)
-                && (latestAssistantMessage === null || createdAt > latestAssistantMessage.createdAt)) {
-                latestAssistantMessage = { content: message.content, createdAt }
-            }
+            if (isAssistantTextMessage(message.content)) assistantMessages.push({ content: message.content, createdAt })
             nextSeq += 1
         }
 
+        let latestAssistantMessage: { content: unknown; createdAt: number } | null = null
+        for (const message of assistantMessages) {
+            if (!isVisibleAssistantReply(db, sessionId, message.content)) continue
+            if (latestAssistantMessage === null || message.createdAt > latestAssistantMessage.createdAt) {
+                latestAssistantMessage = message
+            }
+        }
         if (latestAssistantMessage !== null) {
             touchLastAssistantMessageAt(
                 db,

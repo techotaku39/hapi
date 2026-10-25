@@ -87,6 +87,52 @@ describe('assistant reply timestamp', () => {
         expect(store.sessions.getSession(session.id)?.updatedAt).toBe(activityAt)
         store.close()
     })
+
+    it('ignores injected Claude no-response sentinels during live ingestion', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'assistant-reply-clock-live-hidden')
+        const injectedUuid = 'injected-live-turn'
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: injectedUuid,
+                    isSidechain: true,
+                    message: { content: '<system-reminder>internal</system-reminder>' }
+                }
+            }
+        }, undefined, undefined, 1_000)
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: injectedUuid,
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }, undefined, undefined, 2_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBeNull()
+
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    parentUuid: 'ordinary-turn',
+                    message: { content: [{ type: 'text', text: 'No response requested.' }] }
+                }
+            }
+        }, undefined, undefined, 3_000)
+        expect(store.sessions.getSession(session.id)?.lastAssistantMessageAt).toBe(3_000)
+        store.close()
+    })
 })
 
 describe('cancelQueuedMessage', () => {

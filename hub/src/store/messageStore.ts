@@ -38,6 +38,7 @@ import {
     moveUninvokedMessages,
     copyMessageToSession as copyStoredMessageToSession,
     copyMessagesToSession as copyStoredMessagesToSession,
+    isVisibleAssistantReply as isVisibleStoredAssistantReply,
     getAllMessages,
     getMessagesBeforeSeq,
     getMessagesAfterSeq,
@@ -97,6 +98,10 @@ export class MessageStore {
 
     getMessagesAfterSeq(sessionId: string, afterSeq: number): StoredMessage[] {
         return getMessagesAfterSeq(this.db, sessionId, afterSeq)
+    }
+
+    isVisibleAssistantReply(sessionId: string, content: unknown): boolean {
+        return isVisibleStoredAssistantReply(this.db, sessionId, content)
     }
 
     getSeqById(sessionId: string, messageId: string): number | null {

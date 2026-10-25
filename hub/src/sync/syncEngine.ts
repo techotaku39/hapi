@@ -500,7 +500,11 @@ export class SyncEngine {
                 this.sessionCache.refreshSession(event.sessionId)
             }
             if (isAssistantTextMessage(event.message.content)) {
-                this.sessionCache.recordAssistantMessage(event.sessionId, event.message.createdAt)
+                this.sessionCache.recordAssistantMessage(
+                    event.sessionId,
+                    event.message.createdAt,
+                    event.message.content
+                )
             }
         }
 

@@ -819,8 +819,9 @@ export class SessionCache {
      * Update the independent sidebar clock for a visible assistant reply.
      * This intentionally leaves `updatedAt` untouched.
      */
-    recordAssistantMessage(sessionId: string, messageAt: number): void {
+    recordAssistantMessage(sessionId: string, messageAt: number, content?: unknown): void {
         if (!Number.isFinite(messageAt)) return
+        if (content !== undefined && !this.store.messages.isVisibleAssistantReply(sessionId, content)) return
 
         const stored = this.store.sessions.getSession(sessionId)
         if (!stored) return
