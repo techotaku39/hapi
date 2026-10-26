@@ -16,10 +16,12 @@ describe('Windows asynchronous tree stop', () => {
     let rows: Row[]
     let kills: Array<{ pid: number; force: boolean; tree: boolean }>
     let onKill: (pid: number, force: boolean) => void
+    let rejectSoft: boolean
     beforeEach(() => {
         Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
         rows = [row(0, 0, null), row(100), row(200, 100)]
         kills = []
+        rejectSoft = false
         onKill = pid => { rows = rows.filter(p => p.ProcessId !== pid) }
         syncMock.mockReset().mockReturnValue({ status: 1, error: new Error('No synchronous probes permitted') })
         execFileMock.mockReset().mockImplementation((file, args, _options, callback) => {
@@ -30,7 +32,7 @@ describe('Windows asynchronous tree stop', () => {
                     const pid = Number(args[args.indexOf('/PID') + 1])
                     kills.push({ pid, force: args.includes('/F'), tree: args.includes('/T') })
                     onKill(pid, args.includes('/F'))
-                    callback(null, '', '')
+                    callback(rejectSoft && !args.includes('/F') ? new Error('Soft termination refused') : null, '', '')
                 }
             })
             return { kill: vi.fn() }
@@ -55,6 +57,48 @@ describe('Windows asynchronous tree stop', () => {
         }
         await expect(killProcessTreeByPid(100, true)).resolves.toBe(true)
         expect(kills.map(k => k.pid)).toEqual([100])
+    })
+
+    it.each(['refused', 'grace-expired'])('force-stops new descendants tree-wide when soft termination is %s', async reason => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+        rejectSoft = reason === 'refused'
+        onKill = (pid, force) => {
+            if (!force) { rows.push(row(300, 100)); return }
+            if (pid === 100 && kills.at(-1)?.tree) rows = [row(0, 0, null)]
+            else rows = rows.filter(p => p.ProcessId !== pid)
+        }
+        const operation = killProcessTreeByPid(100, false)
+        await vi.advanceTimersByTimeAsync(3_000)
+        await expect(operation).resolves.toBe(true)
+        expect(kills).toContainEqual({ pid: 100, force: true, tree: true })
+        expect(rows.some(p => p.ProcessId === 300)).toBe(false)
+    })
+
+    it('does not confirm cleanup if a newly discovered descendant survives forced tree termination', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+        rejectSoft = true
+        onKill = (pid, force) => {
+            if (!force) { rows.push(row(300, 100)); return }
+            if (pid !== 300) rows = rows.filter(p => p.ProcessId !== pid)
+        }
+        const operation = killProcessTreeByPid(100, false)
+        await vi.advanceTimersByTimeAsync(46_000)
+        await expect(operation).resolves.toBe(false)
+        expect(rows.some(p => p.ProcessId === 300)).toBe(true)
+    })
+
+    it('does not force a replacement root or its new children after soft termination', async () => {
+        rejectSoft = true
+        onKill = (pid, force) => {
+            if (!force) {
+                rows = [row(0, 0, null), row(100, 0, 'replacement-root'), row(200, 100), row(300, 100)]
+                return
+            }
+            rows = rows.filter(p => p.ProcessId !== pid)
+        }
+        await expect(killProcessTreeByPid(100, false)).resolves.toBe(true)
+        expect(kills.filter(k => k.force).map(k => k.pid)).toEqual([200])
+        expect(rows.map(p => p.ProcessId)).toContain(300)
     })
 
     it('never treats a failed snapshot as proof of exit', async () => {

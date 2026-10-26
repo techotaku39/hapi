@@ -140,6 +140,41 @@ export async function stopWindowsProcessTree(rootPid: number, force: boolean, re
         }
     }
 
+    if (!force && remaining()) {
+        // A console tree can grow while soft termination is refused or drains.
+        // Capture those descendants before escalation, rather than killing only
+        // the original PIDs and mistaking their exit for complete cleanup.
+        phase = 'escalation-snapshot'; snapshots++
+        const expanded = await readWindowsProcessTable(Math.min(15_000, remaining()))
+        if (!expanded) return finish(false)
+        refresh(expanded)
+        const root = expanded.get(rootPid)
+        if (!root || (rootMarker && root.marker === rootMarker)) {
+            const pending = [rootPid], seen = new Set<number>()
+            while (pending.length) {
+                const pid = pending.shift()!
+                if (seen.has(pid)) continue
+                seen.add(pid)
+                const entry = expanded.get(pid)
+                if (entry && !members.has(pid)) {
+                    members.set(pid, entry.marker)
+                    unresolved.set(pid, entry.marker)
+                }
+                for (const [child, candidate] of expanded) if (child !== pid && candidate.parentPid === pid) pending.push(child)
+            }
+        }
+        // Never tree-kill a replacement root. Recheck once more after the full
+        // snapshot so a slow CIM scan cannot authorize signalling a reused PID.
+        if (unresolved.has(rootPid) && rootMarker && root?.marker === rootMarker) {
+            current = await snapshot()
+            if (!current) return finish(false)
+            refresh(current)
+            if (unresolved.has(rootPid) && current.get(rootPid)?.marker === rootMarker) {
+                await signal(rootPid, true, true)
+            }
+        }
+    }
+
     // /T may miss detached descendants. Recheck each survivor using a COMPLETE
     // snapshot, then signal only its captured generation (without another /T).
     for (const pid of [...unresolved.keys()].reverse()) {
