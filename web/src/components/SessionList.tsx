@@ -1471,6 +1471,9 @@ export function SessionList(props: {
     // "固定会话顺序": the running buckets are status-driven ordering, which
     // contradicts a frozen list — fixed order pauses the feature entirely.
     const effectivePinInProgress = pinInProgressSessions && !fixedSessionOrder
+    // Fixed session order is the stronger ordering preference. Project-count
+    // sorting must not re-rank groups while the fixed-order mode is enabled.
+    const shouldSortProjectsByCount = sessionProjectSortMode === 'count' && !fixedSessionOrder
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const isCombinedPinLayout = effectivePinInProgress
         && pinInProgressSessionsMode === 'combined'
@@ -1624,10 +1627,10 @@ export function SessionList(props: {
     const projectOrder = useSessionProjectOrder(projectKeys)
     const allGroups = useMemo(() => {
         const grouped = groupSessionsByDirectory(allSessions, fixedSessionOrder)
-        return sessionProjectSortMode === 'count'
+        return shouldSortProjectsByCount
             ? sortSessionGroupsBySessionCount(grouped, projectOrder)
             : grouped
-    }, [allSessions, fixedSessionOrder, projectOrder, sessionProjectSortMode])
+    }, [allSessions, fixedSessionOrder, projectOrder, shouldSortProjectsByCount])
     const machineFilters = useMemo(
         () => groupByMachine(allGroups, resolveMachineLabel, fixedSessionOrder),
         [allGroups, fixedSessionOrder, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
@@ -1717,11 +1720,11 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return sessionProjectSortMode === 'count'
+            return shouldSortProjectsByCount
                 ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
                 : grouped
         },
-        [machineFilteredSessions, effectivePinInProgress, fixedSessionOrder, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
+        [machineFilteredSessions, effectivePinInProgress, fixedSessionOrder, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, shouldSortProjectsByCount]
     )
     const combinedActiveGroups = useMemo(
         () => {
@@ -1733,11 +1736,11 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return sessionProjectSortMode === 'count'
+            return shouldSortProjectsByCount
                 ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
                 : grouped
         },
-        [machineFilteredSessions, isCombinedPinLayout, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
+        [machineFilteredSessions, fixedSessionOrder, isCombinedPinLayout, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, shouldSortProjectsByCount]
     )
     const combinedArchivedGroups = useMemo(
         () => {
@@ -1749,11 +1752,11 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
-            return sessionProjectSortMode === 'count'
+            return shouldSortProjectsByCount
                 ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
                 : grouped
         },
-        [machineFilteredSessions, isCombinedPinLayout, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, sessionProjectSortMode]
+        [machineFilteredSessions, fixedSessionOrder, isCombinedPinLayout, projectOrder, projectSessionCounts, searchScoreIndex, hasTextQuery, shouldSortProjectsByCount]
     )
     // Directory groups whose rows all floated to the pinned sections still
     // render an action-only header so copy-path / new-session-in-directory
@@ -1765,10 +1768,10 @@ export function SessionList(props: {
             machineFilteredSessions.filter((session) => !session.globalPinned),
             fixedSessionOrder
         )
-        return sessionProjectSortMode === 'count'
+        return shouldSortProjectsByCount
             ? sortSessionGroupsBySessionCount(grouped, projectOrder, projectSessionCounts)
             : grouped
-    }, [fixedSessionOrder, machineFilteredSessions, projectOrder, projectSessionCounts, sessionProjectSortMode])
+    }, [fixedSessionOrder, machineFilteredSessions, projectOrder, projectSessionCounts, shouldSortProjectsByCount])
     const actionOnlyGroups = useMemo(() => {
         if (!effectivePinInProgress) {
             return []
@@ -1777,10 +1780,10 @@ export function SessionList(props: {
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
     }, [groups, allDirectoryGroups, effectivePinInProgress])
     const countSortedDirectoryGroups = useMemo(
-        () => sessionProjectSortMode === 'count' && !hasTextQuery
+        () => shouldSortProjectsByCount && !hasTextQuery
             ? sortSessionGroupsBySessionCount([...groups, ...actionOnlyGroups], projectOrder, projectSessionCounts)
             : [],
-        [actionOnlyGroups, groups, hasTextQuery, projectOrder, projectSessionCounts, sessionProjectSortMode]
+        [actionOnlyGroups, groups, hasTextQuery, projectOrder, projectSessionCounts, shouldSortProjectsByCount]
     )
     const normalDirectoryKeys = useMemo(
         () => new Set(groups.map((group) => group.key)),
@@ -2683,7 +2686,7 @@ export function SessionList(props: {
                             count: activeSessionTotal,
                             bucketKeys: ['active', 'idle'],
                         })}
-                        {sessionProjectSortMode === 'count' && !hasTextQuery
+                        {shouldSortProjectsByCount && !hasTextQuery
                             ? countSortedDirectoryGroups.map((group) => normalDirectoryKeys.has(group.key)
                                 ? renderDirectoryGroup(group)
                                 : renderActionOnlyGroupHeader(group))

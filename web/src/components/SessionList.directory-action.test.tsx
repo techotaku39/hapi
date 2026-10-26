@@ -18,6 +18,8 @@ afterEach(() => {
     localStorage.removeItem('hapi-pin-in-progress-sessions-mode')
     localStorage.removeItem('hapi-session-project-sort-mode')
     localStorage.removeItem('hapi-session-project-order')
+    localStorage.removeItem('hapi-fixed-session-order')
+    localStorage.removeItem('hapi-show-active-sessions-only')
 })
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -817,6 +819,34 @@ describe('SessionList collapse behavior', () => {
             expect(headers[0]).toHaveAttribute('title', '/work/a')
             expect(headers[1]).toHaveAttribute('title', '/work/b')
         })
+    })
+
+    it('keeps fixed session order ahead of project-count sorting', () => {
+        localStorage.setItem('hapi-fixed-session-order', 'true')
+        localStorage.setItem('hapi-session-project-sort-mode', 'count')
+        const sessions = [
+            makeSession({ id: 'older-a-1', createdAt: 100, updatedAt: 900, metadata: { path: '/work/a', name: 'A' } }),
+            makeSession({ id: 'older-a-2', createdAt: 101, updatedAt: 800, metadata: { path: '/work/a', name: 'A' } }),
+            makeSession({ id: 'older-a-3', createdAt: 102, updatedAt: 700, metadata: { path: '/work/a', name: 'A' } }),
+            makeSession({ id: 'newer-b', createdAt: 200, updatedAt: 100, metadata: { path: '/work/b', name: 'B' } }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        const headers = screen.getAllByTitle(/^\/work\/[ab]$/)
+        expect(headers[0]).toHaveAttribute('title', '/work/b')
+        expect(headers[1]).toHaveAttribute('title', '/work/a')
     })
 
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
