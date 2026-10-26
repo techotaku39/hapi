@@ -1,4 +1,6 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
+import { gfmFromMarkdown } from 'mdast-util-gfm'
+import { gfm } from 'micromark-extension-gfm'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import { isObject } from './utils'
 
@@ -345,7 +347,13 @@ function normalizeSearchableMarkdownChunks(chunks: readonly string[]): string | 
 
     const rendered = chunks.map((chunk) => {
         try {
-            return renderMarkdownNode(fromMarkdown(chunk))
+            // The chat renders with remark-gfm, so parse the same dialect:
+            // without it `~~old~~` keeps its tildes and a search for the
+            // displayed phrase cannot match, and table pipes stay in the index.
+            return renderMarkdownNode(fromMarkdown(chunk, {
+                extensions: [gfm({ singleTilde: false })],
+                mdastExtensions: [gfmFromMarkdown()]
+            }))
         } catch {
             // Keep indexing malformed/incomplete streamed Markdown rather than
             // dropping otherwise visible assistant text.

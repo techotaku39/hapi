@@ -189,6 +189,23 @@ describe('extractSearchableMessageText', () => {
         expect(text?.length).toBeLessThanOrEqual(32)
     })
 
+    test('normalizes GFM strikethrough and tables like the renderer', () => {
+        // `Use ~~old~~ cache` displays as "Use old cache"; the tildes must not
+        // break the indexed phrase.
+        expect(extractSearchableMessageText({
+            role: 'user',
+            content: { type: 'text', text: 'Use ~~old~~ cache' }
+        })?.text).toContain('Use old cache')
+
+        // Table pipes are source markup, not displayed text.
+        const table = extractSearchableMessageText({
+            role: 'user',
+            content: { type: 'text', text: '| key | value |\n| --- | --- |\n| ttl | 30s |' }
+        })?.text
+        expect(table).not.toContain('---')
+        expect(table).toContain('ttl')
+    })
+
     test('does not index hidden HTML comments', () => {
         // The renderer omits these, so a hit would have nothing to highlight.
         expect(extractSearchableMessageText({
