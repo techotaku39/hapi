@@ -127,6 +127,7 @@ export function HappyUserMessage() {
                 copyText={hasText ? text : undefined}
                 messageElementId={elementId}
                 showFork={showFork}
+                allowForkWhileRunning={showHistoricalFork && ctx.metadata?.flavor === 'codex'}
                 showRewind={showRewind}
                 historyActionPending={ctx.historyActionPending}
                 onFork={showCurrentFork

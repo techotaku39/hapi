@@ -1213,14 +1213,14 @@ export class SyncEngine {
         await this.rpcGateway.abortSession(sessionId)
     }
 
-    private assertConversationHistoryIdle(session: Session): void {
+    private assertConversationHistoryIdle(session: Session, allowRunningHistoricalFork = false): void {
         if (!session.active) {
             throw new Error('Session must be active')
         }
         if (session.agentState?.controlledByUser === true && !session.metadata?.capabilities?.concurrentClients) {
             throw new Error('Conversation history actions require a remote session')
         }
-        if (session.thinking) {
+        if (session.thinking && !allowRunningHistoricalFork) {
             throw new Error('Session is busy')
         }
         if (session.metadata?.conversationHistoryDiverged === true) {
@@ -1443,7 +1443,7 @@ export class SyncEngine {
         }
         let source = access.session
         try {
-            this.assertConversationHistoryIdle(source)
+            this.assertConversationHistoryIdle(source, Boolean(messageLocalId) && this.resolveFlavor(source) === 'codex')
         } catch (error) {
             return { type: 'error', message: error instanceof Error ? error.message : String(error) }
         }

@@ -134,6 +134,11 @@ endpoints/tokens never go into HAPI session metadata or SSE.
   sessions: a native mutation plus hub transcript truncation needs a commit
   barrier across every sender. Use **Fork at message** instead. Cuts inside a
   steered turn are rejected; select its first user message.
+- **Fork at message** can branch from a finished historical turn while a later
+  turn is still running. It excludes the selected user message's native turn
+  and all later turns; the source keeps running. The selected turn and retained
+  prefix must have finished, and queued messages or conflicting history actions
+  still block the operation. **Fork current** continues to require an idle session.
 - `--worktree` and unsupported launch flags fail explicitly; create/select the
   working directory before launch. `--oss` requires an explicit
   `--local-provider`. Bare resume pickers use `hapi resume` or the attached TUI.

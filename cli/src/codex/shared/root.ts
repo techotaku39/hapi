@@ -536,10 +536,18 @@ export class SharedCodexRoot {
         });
         rpc.registerHandler(RPC_METHODS.ForkConversation, async raw => {
             const { messageLocalId } = z.object({ messageLocalId: z.string().optional() }).parse(raw);
-            if (this.currentTurn) throw new Error('Session is busy');
+            if (this.currentTurn && !messageLocalId) throw new Error('Session is busy');
             const beforeTurnId = messageLocalId ? this.projection.turnFor(messageLocalId) : undefined;
             if (messageLocalId && !beforeTurnId) throw new Error('No native history point for this message');
-            if (messageLocalId) await this.assertBoundary(messageLocalId, beforeTurnId!);
+            if (messageLocalId) {
+                const thread = await this.assertBoundary(messageLocalId, beforeTurnId!);
+                const turns = (Array.isArray(thread.turns) ? thread.turns : []).map(record);
+                const index = turns.findIndex(turn => turn.id === beforeTurnId);
+                if (index < 0 || turns.slice(0, index + 1).some(turn =>
+                    !['completed', 'interrupted', 'failed'].includes(string(turn.status) ?? ''))) {
+                    throw new Error('Historical fork requires a completed turn and history prefix');
+                }
+            }
             const child = await this.host.create('thread/fork', { ...this.freshParams(), threadId: this.threadId,
                 ...(beforeTurnId ? { beforeTurnId } : {}) }, this);
             await child.initialSettings({ collaborationMode: this.settings.collaborationMode });

@@ -281,6 +281,17 @@ describe('MessageActions', () => {
         expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
     })
 
+    it('allows an eligible historical fork while keeping rewind locked during generation', async () => {
+        auiState.thread.isRunning = true
+        const onFork = vi.fn(async () => {})
+        renderActions({ align: 'end', showFork: true, allowForkWhileRunning: true,
+            showRewind: true, onFork, onRewind: async () => {} })
+        expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Fork' }))
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fork' }))
+        await waitFor(() => expect(onFork).toHaveBeenCalledTimes(1))
+    })
+
     it('keeps the share action visible while the thread is running', () => {
         auiState.thread.isRunning = true
 
