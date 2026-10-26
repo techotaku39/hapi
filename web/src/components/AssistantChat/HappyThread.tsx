@@ -363,6 +363,23 @@ export function findPromptTarget(
     return messages.filter((message) => message.dataset.hapiTurnInput === 'true').at(-1) ?? null
 }
 
+export function capturePromptAnchorState(
+    viewport: HTMLElement | null,
+    messageId: string
+): { current: boolean; nextAnchorId: string | null } {
+    if (!viewport) return { current: false, nextAnchorId: null }
+    const anchor = document.getElementById(getConversationMessageAnchorId(messageId))
+    if (!(anchor instanceof HTMLElement) || !viewport.contains(anchor)) {
+        return { current: false, nextAnchorId: null }
+    }
+    return {
+        current: true,
+        nextAnchorId: anchor.nextElementSibling instanceof HTMLElement
+            ? anchor.nextElementSibling.id
+            : null
+    }
+}
+
 async function findPreviousUserMessageAfterRender(
     viewport: HTMLElement,
     messageId: string,
@@ -1793,33 +1810,49 @@ export function HappyThread(props: {
     }, [])
 
     const handleOutlineSelect = useCallback(async (item: ConversationOutlineItem) => {
+        if (navigationInFlightRef.current) return
+        const runId = navigationRunRef.current
+        const isCancelled = () => navigationRunRef.current !== runId
+        navigationInFlightRef.current = true
+        historyNavigationRef.current = true
+        setIsNavigationInFlight(true)
         initialScrollDeadlineRef.current = 0
         clearInitialScrollTimers()
-        const target = await locateOutlineTargetMessage({
-            targetMessageId: item.targetMessageId,
-            findTarget: (anchorId) => document.getElementById(anchorId),
-            hasMoreMessages: () => hasMoreMessagesRef.current,
-            loadOlderPreservingScroll: loadOlderForOutline
-        })
-        props.onOutlineItemClick?.(item)
-        props.onOutlineOpenChange(false)
-        if (target) {
-            // Closing the outline can restore the mobile composer and change
-            // the viewport height. Let that layout settle before the final
-            // target scroll so the footer does not pull the viewport back to
-            // the tail position.
-            await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
-            markExplicitNavigationAwayFromBottom()
-            const viewport = viewportRef.current
-            if (viewport && viewport.contains(target)) {
-                const viewportRect = viewport.getBoundingClientRect()
-                const targetRect = target.getBoundingClientRect()
-                viewport.scrollTo({
-                    top: Math.max(0, viewport.scrollTop + targetRect.top - viewportRect.top - 16),
-                    behavior: 'smooth'
-                })
-            } else {
-                target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        markExplicitNavigationAwayFromBottom()
+        try {
+            const target = await locateOutlineTargetMessage({
+                targetMessageId: item.targetMessageId,
+                findTarget: (anchorId) => document.getElementById(anchorId),
+                hasMoreMessages: () => hasMoreMessagesRef.current,
+                loadOlderPreservingScroll: loadOlderForOutline
+            })
+            if (isCancelled()) return
+            props.onOutlineItemClick?.(item)
+            props.onOutlineOpenChange(false)
+            if (target) {
+                // Closing the outline can restore the mobile composer and change
+                // the viewport height. Let that layout settle before the final
+                // target scroll so the footer does not pull the viewport back to
+                // the tail position.
+                await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+                if (isCancelled()) return
+                const viewport = viewportRef.current
+                if (viewport && viewport.contains(target)) {
+                    const viewportRect = viewport.getBoundingClientRect()
+                    const targetRect = target.getBoundingClientRect()
+                    viewport.scrollTo({
+                        top: Math.max(0, viewport.scrollTop + targetRect.top - viewportRect.top - 16),
+                        behavior: 'smooth'
+                    })
+                } else {
+                    target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                }
+            }
+        } finally {
+            if (!isCancelled()) {
+                historyNavigationRef.current = false
+                navigationInFlightRef.current = false
+                setIsNavigationInFlight(false)
             }
         }
     }, [loadOlderForOutline, markExplicitNavigationAwayFromBottom, props.onOutlineItemClick, props.onOutlineOpenChange])
@@ -1842,6 +1875,7 @@ export function HappyThread(props: {
     const scrollToPromptForMessage = useCallback(async (
         messageId: string,
         replyToMessageId: string | undefined,
+        assistantAnchorState: { current: boolean; nextAnchorId: string | null },
         isCancelled: () => boolean
     ): Promise<boolean> => {
         if (promptNavigationTimerRef.current !== null) {
@@ -1858,10 +1892,6 @@ export function HappyThread(props: {
         try {
             if (isCancelled()) return false
             if (!viewport) throw new Error('Chat viewport is unavailable')
-            const assistantAnchorState = {
-                current: false,
-                nextAnchorId: null as string | null
-            }
             let loadedOlderHistory = false
             let target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState, replyToMessageId)
             if (isCancelled()) return false
@@ -1907,6 +1937,7 @@ export function HappyThread(props: {
         setIsNavigationInFlight(true)
         clearConversationStartFeedback()
         try {
+            const assistantAnchorState = capturePromptAnchorState(viewportRef.current, messageId)
             // Resolve the prompt through the history-aware path even when its
             // message anchor is already rendered. A direct scroll to the
             // replyToMessageId can race assistant-ui's tail restoration and
@@ -1915,7 +1946,7 @@ export function HappyThread(props: {
                 pendingLoadPromiseRef.current,
                 () => {
                     if (isCancelled()) return false
-                    return scrollToPromptForMessage(messageId, replyToMessageId, isCancelled)
+                    return scrollToPromptForMessage(messageId, replyToMessageId, assistantAnchorState, isCancelled)
                 },
                 () => {
                     if (promptNavigationTimerRef.current !== null) {

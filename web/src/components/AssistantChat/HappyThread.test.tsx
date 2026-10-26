@@ -6,6 +6,7 @@ import {
     ConversationOutlinePanel,
     ConversationStartStatus,
     captureScrollAnchor,
+    capturePromptAnchorState,
     getHistoryCoverageRetryDelay,
     getPullToLoadState,
     getScrollToBottomButtonVisibility,
@@ -226,6 +227,30 @@ describe('assistant prompt lookup', () => {
         `
 
         expect(findPromptTarget(viewport, 'agent-text:answer', assistantAnchorState)?.id)
+            .toBe('hapi-message-user-text:prompt')
+        viewport.remove()
+    })
+
+    it('captures the assistant boundary before a pending prepend can re-key it', () => {
+        const viewport = document.createElement('div')
+        viewport.innerHTML = `
+            <div class="happy-thread-messages">
+                <div id="hapi-message-agent-text:answer"></div>
+                <div id="hapi-message-user-text:later" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
+            </div>
+        `
+        document.body.append(viewport)
+
+        const state = capturePromptAnchorState(viewport, 'agent-text:answer')
+        viewport.innerHTML = `
+            <div class="happy-thread-messages">
+                <div id="hapi-message-user-text:prompt" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
+                <div id="hapi-message-agent-text:older-answer"></div>
+                <div id="hapi-message-user-text:later" data-hapi-message-role="user" data-hapi-turn-input="true"></div>
+            </div>
+        `
+
+        expect(findPromptTarget(viewport, 'agent-text:answer', state)?.id)
             .toBe('hapi-message-user-text:prompt')
         viewport.remove()
     })
