@@ -54,6 +54,21 @@ async function fixture() {
 }
 
 describe('shared Codex projection persisted consumption', () => {
+    it('persists the live round duration before acknowledging it without leaving queued output', async () => {
+        const f = await fixture()
+        try {
+            await f.projection.notification('turn/started', { threadId: 'thread', turn: { id: 'live' } }, undefined, 1_000)
+            await f.projection.notification('turn/completed', { threadId: 'thread', turn: { id: 'live', status: 'completed' } }, undefined, 4_250)
+            expect(f.store.messages.getAllMessages(f.source.id)).toEqual([
+                expect.objectContaining({ localId: 'codex:thread:duration:live', invokedAt: expect.any(Number),
+                    content: { role: 'agent', content: { type: 'output', data: expect.objectContaining({
+                        type: 'turn_duration', turn_id: 'live', durationMs: 3_250
+                    }) } } })
+            ])
+            expect(f.store.messages.getUninvokedLocalMessages(f.source.id)).toEqual([])
+            expect(f.packets).toEqual(['message', 'ack'])
+        } finally { await f.close() }
+    })
     it('consumes an import larger than the SQLite variable limit and preserves pagination and fork availability', async () => {
         const f = await fixture()
         try {

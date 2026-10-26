@@ -293,6 +293,16 @@ describe('shared activation registration', () => {
     });
 });
 
+describe('shared permission modes', () => {
+    it('switches native auto-review on and back to the human reviewer', async () => {
+        const f = await fixture();
+        expect((await f.root.applySettings({ permissionMode: 'autoReview' })).applied.permissionMode).toBe('autoReview');
+        expect(f.root.client).toMatchObject({ settings: { approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite' } } });
+        expect((await f.root.applySettings({ permissionMode: 'default' })).applied.permissionMode).toBe('default');
+        expect(f.root.client).toMatchObject({ settings: { approvalsReviewer: 'user' } });
+    });
+});
+
 describe('shared plan actions', () => {
     it('accepts unmaterialized history only for a proven fresh thread before its first turn', async () => {
         const f = await fixture();

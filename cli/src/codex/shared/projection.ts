@@ -1,3 +1,4 @@
+import { CodexRoundDuration } from '../utils/roundDuration';
 import { createHash } from 'node:crypto';
 import type { ApiSessionClient } from '@/api/apiSession';
 import { normalizeSessionDisplayTitle } from '@/agent/sessionDisplayRename';
@@ -35,6 +36,7 @@ function metadataHasDisplayTitle(metadata: { name?: string; summary?: { text: st
 /** Canonical V2 stream only. Stable message IDs also deduplicate snapshot replay at the hub. */
 export class SharedCodexProjection {
     private converter = new AppServerEventConverter();
+    private readonly roundDuration = new CodexRoundDuration();
     private readonly emitted = new Set<string>();
     private readonly turns = new Map<string, string>();
     private readonly turnModels = new Map<string, string>();
@@ -70,7 +72,7 @@ export class SharedCodexProjection {
         });
     }
 
-    async notification(method: string, params: unknown, modelAtReceipt?: string): Promise<void> {
+    async notification(method: string, params: unknown, modelAtReceipt?: string, receivedAt = Date.now()): Promise<void> {
         const p = record(params);
         const item = record(p.item);
         if (!this.parentThreadId && p.threadId === this.threadId && string(item.id)) {
@@ -91,15 +93,26 @@ export class SharedCodexProjection {
         }
         const consumed = new Set<string>();
         await this.project(method, params, modelAtReceipt, false, consumed);
+        if (p.threadId === this.threadId && !this.parentThreadId) {
+            const turn = record(p.turn);
+            const turnId = string(turn.id);
+            if (method === 'turn/started') this.roundDuration.start(turnId, receivedAt);
+            if (method === 'turn/completed') {
+                const duration = this.roundDuration.finish(turnId, receivedAt, turn.status === 'completed');
+                if (duration) this.send(duration, `duration:${turnId}`, consumed);
+            }
+        }
         if (consumed.size) this.session.emitMessagesConsumed([...consumed]);
     }
 
     private async project(method: string, params: unknown, modelAtReceipt: string | undefined, fromHistory: boolean, consumed: Set<string>): Promise<void> {
-        const send = (body: Record<string, unknown>, key: string) => this.send(body, key, consumed);
         if (method.startsWith('codex/event/')) return;
         const p = record(params);
         const item = record(p.item);
         const turnId = string(p.turnId) ?? string(record(p.turn).id);
+        const send = (body: Record<string, unknown>, key: string) => this.send({
+            ...body, ...(turnId ? { turn_id: turnId } : {})
+        }, key, consumed);
         // Settings may already describe the next turn by the time queued
         // notifications are projected. Never attribute usage to that model.
         if (turnId && method === 'turn/started' && modelAtReceipt && !this.turnModels.has(turnId)) {
@@ -180,8 +193,9 @@ export class SharedCodexProjection {
                 // A proposal is durable content, not a native approval request.
                 send({ type: 'tool-call-result', callId: planId, output: null }, `${key}:result`);
             } else if (event.type === 'plan_update') {
-                send({ type: 'tool-call', name: 'update_plan', callId: 'codex-plan-state', input: { plan: event.plan, source: 'codex' } }, key);
-                send({ type: 'tool-call-result', callId: 'codex-plan-state', output: { plan: event.plan, source: 'codex', status: 'updated' } }, `${key}:result`);
+                const callId = turnId ? `codex-plan-state:${turnId}` : 'codex-plan-state';
+                send({ type: 'tool-call', name: 'update_plan', callId, input: { plan: event.plan, source: 'codex' } }, key);
+                send({ type: 'tool-call-result', callId, output: { plan: event.plan, source: 'codex', status: 'updated' } }, `${key}:result`);
             } else if (event.type === 'generated_image' && typeof event.saved_path === 'string') {
                 const image = await registerGeneratedImageFromPath({ path: event.saved_path, id: createHash('sha256').update(`${this.threadId}:${key}`).digest('hex'), fileName: string(event.file_name) });
                 if (image) send({ type: 'generated-image', imageId: image.id, fileName: image.fileName, mimeType: image.mimeType }, key);
