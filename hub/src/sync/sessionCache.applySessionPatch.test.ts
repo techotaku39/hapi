@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import type { EventPublisher } from './eventPublisher'
@@ -29,6 +29,35 @@ async function waitForAssistantReplyClock(store: Store, sessionId: string) {
 // cache-vs-DB divergence would manifest as ghost notifications, stale
 // pendingRequestsCount, or wrong todos progress in the session list.
 describe('SessionCache.applySessionPatch', () => {
+    it('coalesces refreshes while a paginated injected-turn ancestry prime is in flight', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('prime-once', { path: '/tmp' }, null, 'default')
+        for (let index = 0; index < 450; index += 1) {
+            store.messages.addMessage(session.id, {
+                role: 'user', content: { type: 'text', text: `prompt ${index}` },
+            })
+        }
+        const page = spyOn(store.messages, 'getMessagesBeforeSeq')
+        const cache = new SessionCache(store, createPublisher([]))
+        try {
+            cache.refreshSession(session.id)
+            // A second refresh arrives after the first 200-row page yielded.
+            cache.refreshSession(session.id)
+            for (let attempt = 0; attempt < 100 && !store.messages.isInjectedTurnUuidCacheComplete(session.id); attempt += 1) {
+                await new Promise<void>(resolve => setTimeout(resolve, 1))
+            }
+            expect(store.messages.isInjectedTurnUuidCacheComplete(session.id)).toBe(true)
+            expect(page).toHaveBeenCalledTimes(3)
+            expect(page.mock.calls.map(call => call[1])).toEqual([null, 251, 51])
+            cache.refreshSession(session.id)
+            expect(page).toHaveBeenCalledTimes(3)
+        } finally {
+            cache.stop()
+            page.mockRestore()
+            store.close()
+        }
+    })
+
     it('records assistant reply time without moving the activity clock', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

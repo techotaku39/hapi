@@ -451,7 +451,8 @@ export class SessionCache {
     }
 
     private queueInjectedTurnUuidPrime(sessionId: string): void {
-        if (!this.injectedTurnPrimeQueuedSessionIds.add(sessionId)) return
+        if (this.injectedTurnPrimeQueuedSessionIds.has(sessionId)) return
+        this.injectedTurnPrimeQueuedSessionIds.add(sessionId)
         void this.primeInjectedTurnUuids(sessionId).finally(() => {
             this.injectedTurnPrimeQueuedSessionIds.delete(sessionId)
         })
