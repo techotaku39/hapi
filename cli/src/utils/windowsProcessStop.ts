@@ -175,9 +175,13 @@ export async function stopWindowsProcessTree(rootPid: number, force: boolean, re
         }
     }
 
-    // /T may miss detached descendants. Recheck each survivor using a COMPLETE
-    // snapshot, then signal only its captured generation (without another /T).
-    for (const pid of [...unresolved.keys()].reverse()) {
+    // A missing intermediate process disconnects a survivor from the root's
+    // taskkill /T traversal. Expand each surviving generation's OWN subtree,
+    // including new children, before forcing that subtree and verifying it.
+    const pendingSignals = [...unresolved.keys()].reverse()
+    const scheduled = new Set(pendingSignals)
+    for (let index = 0; index < pendingSignals.length; index++) {
+        const pid = pendingSignals[index]
         if (!unresolved.size) return finish(true)
         if (!remaining()) return finish(false)
         current = await snapshot()
@@ -186,7 +190,33 @@ export async function stopWindowsProcessTree(rootPid: number, force: boolean, re
         if (!unresolved.size) return finish(true)
         const expected = unresolved.get(pid)
         if (!expected || current.get(pid)?.marker !== expected) continue
-        await signal(pid, true, false)
+        phase = 'survivor-subtree-snapshot'; snapshots++
+        const subtree = await readWindowsProcessTable(Math.min(15_000, remaining()))
+        if (!subtree) return finish(false)
+        refresh(subtree)
+        if (!unresolved.has(pid) || subtree.get(pid)?.marker !== expected) continue
+        const descendants = [pid], seen = new Set<number>()
+        while (descendants.length) {
+            const child = descendants.shift()!
+            if (seen.has(child)) continue
+            seen.add(child)
+            const entry = subtree.get(child)
+            if (!entry) continue
+            const captured = members.get(child)
+            if (captured && entry.marker && captured !== entry.marker) continue
+            if (!members.has(child)) {
+                members.set(child, entry.marker)
+                unresolved.set(child, entry.marker)
+            }
+            for (const [next, candidate] of subtree) if (next !== child && candidate.parentPid === child) descendants.push(next)
+        }
+        current = await snapshot()
+        if (!current) return finish(false)
+        refresh(current)
+        if (unresolved.has(pid) && current.get(pid)?.marker === expected) await signal(pid, true, true)
+        for (const child of unresolved.keys()) {
+            if (!scheduled.has(child)) { scheduled.add(child); pendingSignals.push(child) }
+        }
     }
     while (remaining()) {
         current = await snapshot()

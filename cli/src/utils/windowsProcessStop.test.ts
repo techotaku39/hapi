@@ -101,6 +101,34 @@ describe('Windows asynchronous tree stop', () => {
         expect(rows.map(p => p.ProcessId)).toContain(300)
     })
 
+    it.each([false, true])('terminates late descendants behind an exited intermediate process (force=%s)', async force => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+        rows = [row(0, 0, null), row(100), row(200, 100), row(300, 200)]
+        onKill = (pid) => {
+            if (pid === 100) { rows = [row(0, 0, null), row(300, 200), row(400, 300)]; return }
+            if (pid === 300 && kills.at(-1)?.tree) rows = [row(0, 0, null)]
+            else rows = rows.filter(p => p.ProcessId !== pid)
+        }
+        const operation = killProcessTreeByPid(100, force)
+        await vi.advanceTimersByTimeAsync(3_000)
+        await expect(operation).resolves.toBe(true)
+        expect(kills).toContainEqual({ pid: 300, force: true, tree: true })
+        expect(rows.some(p => p.ProcessId === 400)).toBe(false)
+    })
+
+    it('does not confirm a disconnected survivor subtree while its new child remains alive', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+        rows = [row(0, 0, null), row(100), row(200, 100), row(300, 200)]
+        onKill = pid => {
+            if (pid === 100) { rows = [row(0, 0, null), row(300, 200), row(400, 300)]; return }
+            if (pid !== 400) rows = rows.filter(p => p.ProcessId !== pid)
+        }
+        const operation = killProcessTreeByPid(100, true)
+        await vi.advanceTimersByTimeAsync(46_000)
+        await expect(operation).resolves.toBe(false)
+        expect(rows.some(p => p.ProcessId === 400)).toBe(true)
+    })
+
     it('never treats a failed snapshot as proof of exit', async () => {
         execFileMock.mockImplementation((_file, _args, _options, callback) => {
             queueMicrotask(() => callback(new Error('CIM failed'), '', ''))
