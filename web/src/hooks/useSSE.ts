@@ -32,8 +32,9 @@ import {
 import {
     shouldAcceptSessionRecord,
     shouldAcceptSessionSummaryRecord,
-    sortSessionSummaries
+    sortSessionSummaries as sortActivitySessionSummaries
 } from '@/lib/sessionCache'
+import { compareSessionsByOrderKeyDesc } from '@/lib/sessionOrder'
 
 // Pure patch-application rules live in @/lib/sessionPatch (React-free, shared
 // with the fixture generator); re-exported here so hook consumers and existing
@@ -122,6 +123,28 @@ const RECONNECT_JITTER_MS = 500
 const RECONNECT_SLOW_AFTER_ATTEMPTS = 8
 const RECONNECT_SLOW_MAX_DELAY_MS = 300_000
 const INVALIDATION_BATCH_MS = 16
+
+function sortSessionSummaries(left: SessionSummary, right: SessionSummary, fixedOrder = false): number {
+    if (Boolean(left.globalPinned) !== Boolean(right.globalPinned)) {
+        return left.globalPinned ? -1 : 1
+    }
+    if (Boolean(left.pinned) !== Boolean(right.pinned)) {
+        return left.pinned ? -1 : 1
+    }
+    if (fixedOrder) {
+        // "固定会话顺序": updates and status changes must never move a
+        // session — order by creation time only (newest first). Manual pins
+        // still float; activity does not.
+        return compareSessionsByOrderKeyDesc(left, right)
+    }
+    if (left.active !== right.active) {
+        return left.active ? -1 : 1
+    }
+    if (left.active && left.pendingRequestsCount !== right.pendingRequestsCount) {
+        return right.pendingRequestsCount - left.pendingRequestsCount
+    }
+    return sortActivitySessionSummaries(left, right)
+}
 
 function isSessionRecord(value: unknown): value is Session {
     return SessionSchema.safeParse(value).success
@@ -267,6 +290,14 @@ export function useSSE(options: {
     onDisconnect?: (reason: string) => void
     onError?: (error: unknown) => void
     onToast?: (event: ToastEvent) => void
+    /**
+     * "固定会话顺序": when true, the sessions cache keeps a stable
+     * creation-time order instead of re-sorting on activity. Read through a
+     * ref inside the cache upsert/patch paths — it must NOT be a dependency
+     * of the connection effect below (toggling it would tear down the
+     * EventSource).
+     */
+    fixedSessionOrder?: boolean
 }): { subscriptionId: string | null } {
     const queryClient = useQueryClient()
     const onEventRef = useRef(options.onEvent)
@@ -300,6 +331,11 @@ export function useSSE(options: {
     useEffect(() => {
         onEventRef.current = options.onEvent
     }, [options.onEvent])
+
+    const fixedSessionOrderRef = useRef(false)
+    useEffect(() => {
+        fixedSessionOrderRef.current = Boolean(options.fixedSessionOrder)
+    }, [options.fixedSessionOrder])
 
     useEffect(() => {
         onErrorRef.current = options.onError
@@ -514,7 +550,7 @@ export function useSSE(options: {
                 } else {
                     nextSessions.push(summary)
                 }
-                nextSessions.sort(sortSessionSummaries)
+                nextSessions.sort((a, b) => sortSessionSummaries(a, b, fixedSessionOrderRef.current))
                 return { ...previous, sessions: nextSessions }
             })
             return accepted
@@ -604,7 +640,7 @@ export function useSSE(options: {
                     return previous
                 }
                 nextSessions[index] = nextSummary
-                nextSessions.sort(sortSessionSummaries)
+                nextSessions.sort((a, b) => sortSessionSummaries(a, b, fixedSessionOrderRef.current))
                 return { ...previous, sessions: nextSessions }
             })
             return patched

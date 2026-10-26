@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -19,6 +19,7 @@ import {
 } from '@/lib/sessionNavigation'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
+import { SessionContentBoundary } from '@/components/SessionContentBoundary'
 import { SessionList } from '@/components/SessionList'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
@@ -193,6 +194,9 @@ function SessionsPage() {
     )
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    const handleSelectSession = useCallback((sessionId: string) => {
+        navigate(getSessionListSelectionNavigation(sessionId))
+    }, [navigate])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -223,7 +227,7 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId) => navigate(getSessionListSelectionNavigation(sessionId))}
+                        onSelect={handleSelectSession}
                         onNewSession={() => navigate({
                             to: '/sessions/new',
                             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
@@ -331,6 +335,7 @@ function SessionPage() {
         session,
         error: sessionError,
         refetch: refetchSession,
+        isRefreshing: sessionRefreshing,
     } = useSession(api, sessionId)
     const {
         status: cursorChatStoreStatus,
@@ -736,9 +741,10 @@ function SessionPage() {
         })
     }, [navigate, sessionId])
 
+    let sessionFallback: ReactNode = null
     if (!session) {
         if (sessionError) {
-            return (
+            sessionFallback = (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
                     <div className="text-sm font-medium text-[var(--app-fg)]">Session unavailable</div>
                     <div className="max-w-md text-xs text-[var(--app-hint)]">{sessionError}</div>
@@ -760,66 +766,76 @@ function SessionPage() {
                     </div>
                 </div>
             )
+        } else {
+            sessionFallback = (
+                <div className="flex-1 flex items-center justify-center p-4">
+                    <LoadingState label="Loading session…" className="text-sm" />
+                </div>
+            )
         }
-        return (
-            <div className="flex-1 flex items-center justify-center p-4">
-                <LoadingState label="Loading session…" className="text-sm" />
-            </div>
-        )
     }
 
     return (
-        <SessionChat
-            api={api}
-            titleSuggestionAvailable={titleSuggestionAvailable}
-            session={session}
-            cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
-            reopenDisabledReason={cursorReopenDisabledReason}
-            reopenHint={cursorReopenUnverifiedHint}
-            messages={messages}
-            messagesWarning={messagesWarning}
-            hasMoreMessages={messagesHasMore}
-            isSyncingTail={messagesSyncingTail}
-            isLoadingMoreMessages={messagesLoadingMore}
-            isSending={isSending}
-            sendSettlement={sendSettlement}
-            viewMode={messagesViewMode}
-            messagesVersion={messagesVersion}
-            historyVersion={historyVersion}
-            tailRevision={tailRevision}
-            onBack={goBack}
-            onRefresh={refreshSelectedSession}
-            onLoadMore={loadMoreMessages}
-            onCancelLoadMore={cancelLoadMoreMessages}
-            onSend={sendMessage}
-            resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
-            onUploadSessionResolved={handleSessionResolved}
-            onViewModeChange={setViewMode}
-            onRetryMessage={retryMessage}
-            autocompleteSuggestions={getAutocompleteSuggestions}
-            availableSlashCommands={slashCommands}
-            sendError={sendError}
-            onClearSendError={clearSendError}
-            onSuppressSendErrorRestore={suppressSendErrorRestore}
-            initialOutlineOpen={outline}
-            onInitialOutlineConsumed={handleInitialOutlineConsumed}
-            onAbortRestore={(text) => {
-                sendErrorIdRef.current += 1
-                setSendErrors((prev) => ({
-                    ...prev,
-                    [sessionId]: {
-                        id: sendErrorIdRef.current,
-                        text,
-                        message: t('chat.sendError.aborted'),
-                        code: 'abort',
-                        scheduledAt: null,
-                        deliveryMode: 'queue',
-                        mutationStarted: true,
-                        restoreSuppressed: false
-                    }
-                }))
-            }}
-        />
+        <SessionContentBoundary
+            sessionId={sessionId}
+            scope={api}
+            synchronizing={sessionRefreshing}
+            fallback={sessionFallback}
+        >
+            {session ? (
+                <SessionChat
+                    api={api}
+                    titleSuggestionAvailable={titleSuggestionAvailable}
+                    session={session}
+                    cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
+                    reopenDisabledReason={cursorReopenDisabledReason}
+                    reopenHint={cursorReopenUnverifiedHint}
+                    messages={messages}
+                    messagesWarning={messagesWarning}
+                    hasMoreMessages={messagesHasMore}
+                    isSyncingTail={messagesSyncingTail}
+                    isLoadingMoreMessages={messagesLoadingMore}
+                    isSending={isSending}
+                    sendSettlement={sendSettlement}
+                    viewMode={messagesViewMode}
+                    messagesVersion={messagesVersion}
+                    historyVersion={historyVersion}
+                    tailRevision={tailRevision}
+                    onBack={goBack}
+                    onRefresh={refreshSelectedSession}
+                    onLoadMore={loadMoreMessages}
+                    onCancelLoadMore={cancelLoadMoreMessages}
+                    onSend={sendMessage}
+                    resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
+                    onUploadSessionResolved={handleSessionResolved}
+                    onViewModeChange={setViewMode}
+                    onRetryMessage={retryMessage}
+                    autocompleteSuggestions={getAutocompleteSuggestions}
+                    availableSlashCommands={slashCommands}
+                    sendError={sendError}
+                    onClearSendError={clearSendError}
+                    onSuppressSendErrorRestore={suppressSendErrorRestore}
+                    initialOutlineOpen={outline}
+                    onInitialOutlineConsumed={handleInitialOutlineConsumed}
+                    onAbortRestore={(text) => {
+                        sendErrorIdRef.current += 1
+                        setSendErrors((prev) => ({
+                            ...prev,
+                            [sessionId]: {
+                                id: sendErrorIdRef.current,
+                                text,
+                                message: t('chat.sendError.aborted'),
+                                code: 'abort',
+                                scheduledAt: null,
+                                deliveryMode: 'queue',
+                                mutationStarted: true,
+                                restoreSuppressed: false
+                            }
+                        }))
+                    }}
+                />
+            ) : null}
+        </SessionContentBoundary>
     )
 }
 

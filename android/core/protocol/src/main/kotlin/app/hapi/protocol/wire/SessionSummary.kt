@@ -21,6 +21,8 @@ data class SessionSummary(
     val assistantReplyClockBackfilled: Boolean? = null,
     /** Session sequence that supplied lastAssistantMessageAt. */
     val lastAssistantMessageVersion: Long? = null,
+    /** Hub: this session has conversation content (list hides fresh "new session" stubs). */
+    val hasConversationContent: Boolean = false,
     val pinned: Boolean? = null,
     val globalPinned: Boolean? = null,
     val metadata: SessionSummaryMetadata? = null,

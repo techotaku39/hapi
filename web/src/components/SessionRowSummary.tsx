@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ScheduleIcon } from '@/components/icons'
@@ -8,6 +8,8 @@ import { classifySessionAttention } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
+import { getCodexImportedAt, subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import { useTranslation } from '@/lib/use-translation'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
@@ -46,10 +48,31 @@ function getTodoProgress(session: SessionSummary): { completed: number; total: n
     return session.todoProgress
 }
 
-export function getSessionTimeLabel(
-    session: SessionSummary,
+function formatCodexImportedRelativeTime(
+    value: number,
     t: (key: string, params?: Record<string, string | number>) => string
 ): string | null {
+    const ms = value < 1_000_000_000_000 ? value * 1000 : value
+    if (!Number.isFinite(ms)) return null
+    const delta = Date.now() - ms
+    if (delta < 60_000) return t('session.time.importedFromCodex.justNow')
+    const minutes = Math.floor(delta / 60_000)
+    if (minutes < 60) return t('session.time.importedFromCodex.minutesAgo', { n: minutes })
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return t('session.time.importedFromCodex.hoursAgo', { n: hours })
+    const days = Math.floor(hours / 24)
+    if (days < 7) return t('session.time.importedFromCodex.daysAgo', { n: days })
+    return formatRelativeTime(value, t)
+}
+
+export function getSessionTimeLabel(
+    session: SessionSummary,
+    t: (key: string, params?: Record<string, string | number>) => string,
+    importedAt: number | null = null
+): string | null {
+    if (importedAt !== null) {
+        return formatCodexImportedRelativeTime(importedAt, t)
+    }
     return formatRelativeTime(session.lastAssistantMessageAt ?? session.updatedAt, t)
 }
 
@@ -122,7 +145,11 @@ export function SessionRowSummary(props: {
     )
     const attentionId = attentionTooltipIdProp ?? ownedIds.attentionId
     const scheduleId = scheduleTooltipIdProp ?? ownedIds.scheduleId
-    const timeLabel = getSessionTimeLabel(s, t)
+    // Rows are memoized, so the label keeps itself current.
+    useMinuteTick()
+    const codexSessionId = s.metadata?.flavor === 'codex' ? s.metadata?.agentSessionId : null
+    const importedAt = useSyncExternalStore(subscribeCodexImportedSessions, () => getCodexImportedAt(codexSessionId))
+    const timeLabel = getSessionTimeLabel(s, t, importedAt)
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>

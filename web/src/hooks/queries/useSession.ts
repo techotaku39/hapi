@@ -24,6 +24,7 @@ export const SESSION_DETAIL_STALE_TIME_MS = 30_000
 export function useSession(api: ApiClient | null, sessionId: string | null): {
     session: Session | null
     isLoading: boolean
+    isRefreshing: boolean
     error: string | null
     notFound: boolean
     refetch: () => Promise<unknown>
@@ -109,6 +110,9 @@ export function useSession(api: ApiClient | null, sessionId: string | null): {
     return {
         session: isBelowListWatermark ? null : cachedSession ?? null,
         isLoading: query.isLoading,
+        // Existing content may remain mounted while detail catches up, but
+        // callers must not treat the older record as authoritative data.
+        isRefreshing: isBelowListWatermark && !query.error,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load session' : null,
         notFound: isSessionNotFoundError(query.error) && !query.isFetching,
         refetch: query.refetch,

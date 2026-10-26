@@ -58,6 +58,10 @@ export type SessionSummary = {
     assistantReplyClockBackfilled?: boolean
     /** Session sequence carrying the reply clock; gates dual-SSE stale records/patches. */
     lastAssistantMessageVersion?: number
+    /** Epoch ms when the session was created. Drives the fixed-order session
+     *  list sort. Optional because summaries from an older hub lack it —
+     *  consumers fall back to `updatedAt` via the session-order key. */
+    createdAt?: number
     pinned?: boolean
     globalPinned?: boolean
     metadata: SessionSummaryMetadata | null
@@ -240,6 +244,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         lastAssistantMessageAt: session.lastAssistantMessageAt ?? null,
         assistantReplyClockBackfilled: session.assistantReplyClockBackfilled ?? true,
         lastAssistantMessageVersion: session.seq,
+        createdAt: session.createdAt,
         pinned: session.pinned ?? false,
         globalPinned: session.globalPinned ?? false,
         metadata: toSessionSummaryMetadata(session.metadata),

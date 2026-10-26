@@ -170,6 +170,7 @@ object SummaryPatching {
         lastAssistantMessageAt = session.lastAssistantMessageAt,
         assistantReplyClockBackfilled = session.assistantReplyClockBackfilled,
         lastAssistantMessageVersion = session.seq,
+        hasConversationContent = session.hasConversationContent,
         pinned = session.pinned ?: false,
         globalPinned = session.globalPinned ?: false,
         metadata = toSessionSummaryMetadata(session.metadata),
