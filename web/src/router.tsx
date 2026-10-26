@@ -192,6 +192,27 @@ function SessionsPage() {
     useSelectedSessionSeen(selectedSessionId, selectedSession?.updatedAt)
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    const handleSelectSession = useCallback((
+        sessionId: string,
+        targetMessageId?: string,
+        targetMessageQuery?: string
+    ) => {
+        // A content-search hit carries the message it matched, so the session
+        // opens on that message rather than the tail.
+        if (targetMessageId) {
+            navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId },
+                search: {
+                    messageId: targetMessageId,
+                    ...(targetMessageQuery ? { messageQuery: targetMessageQuery } : {})
+                },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+            })
+            return
+        }
+        navigate(getSessionListSelectionNavigation(sessionId))
+    }, [navigate])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -222,20 +243,7 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId, targetMessageId, targetMessageQuery) => {
-                            if (targetMessageId) {
-                                return navigate({
-                                    to: '/sessions/$sessionId',
-                                    params: { sessionId },
-                                    search: {
-                                        messageId: targetMessageId,
-                                        ...(targetMessageQuery ? { messageQuery: targetMessageQuery } : {})
-                                    },
-                                    ...PRESERVE_SESSION_SIDEBAR_SCROLL,
-                                })
-                            }
-                            return navigate(getSessionListSelectionNavigation(sessionId))
-                        }}
+                        onSelect={handleSelectSession}
                         onNewSession={() => navigate({
                             to: '/sessions/new',
                             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
