@@ -68,6 +68,10 @@ export function getNavigationFeedback(
     return { status: conversationStartStatus, kind: 'conversationStart' }
 }
 
+export function getPromptNavigationCompletionStatus(loadedOlderHistory: boolean): NavigationStatus {
+    return loadedOlderHistory ? 'success' : 'idle'
+}
+
 type HistoryLoaderState = {
     runId: number
     phase: 'idle' | 'loading' | 'backoff' | 'awaiting-render'
@@ -1809,12 +1813,14 @@ export function HappyThread(props: {
                 current: false,
                 nextAnchorId: null as string | null
             }
+            let loadedOlderHistory = false
             let target = await findPreviousUserMessageAfterRender(viewport, messageId, assistantAnchorState, replyToMessageId)
             if (isCancelled()) return false
             while (!target && hasMoreMessagesRef.current) {
                 const loaded = await loadOlderForNavigation()
                 if (isCancelled()) return false
                 if (!loaded) throw new Error('Could not load older messages')
+                loadedOlderHistory = true
                 // assistant-ui applies the expanded external message list in
                 // its own render pass. Wait for the new anchors instead of
                 // treating a successfully loaded page as an immediate miss.
@@ -1824,8 +1830,11 @@ export function HappyThread(props: {
             if (isCancelled()) return false
             if (!target) throw new Error('No preceding user message found')
             target.scrollIntoView({ block: 'start', behavior: 'smooth' })
-            setPromptNavigationStatus('success')
-            promptNavigationTimerRef.current = window.setTimeout(() => setPromptNavigationStatus('idle'), 1400)
+            const completionStatus = getPromptNavigationCompletionStatus(loadedOlderHistory)
+            setPromptNavigationStatus(completionStatus)
+            if (completionStatus === 'success') {
+                promptNavigationTimerRef.current = window.setTimeout(() => setPromptNavigationStatus('idle'), 1400)
+            }
             return true
         } catch (error) {
             if (isCancelled()) return false

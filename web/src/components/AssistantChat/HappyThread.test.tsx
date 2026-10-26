@@ -14,6 +14,7 @@ import {
     findPromptTarget,
     findPreviousUserMessage,
     getNavigationFeedback,
+    getPromptNavigationCompletionStatus,
     getScrollIntent,
     loadOlderForNavigationWithRetry,
     loadAllOlderMessages,
@@ -94,6 +95,11 @@ describe('ConversationStartStatus', () => {
 })
 
 describe('navigation feedback priority', () => {
+    it('only announces prompt completion after loading older history', () => {
+        expect(getPromptNavigationCompletionStatus(false)).toBe('idle')
+        expect(getPromptNavigationCompletionStatus(true)).toBe('success')
+    })
+
     it('shows the prompt status while conversation-start feedback is still settling', () => {
         expect(getNavigationFeedback('success', 'loading')).toEqual({
             status: 'loading',
