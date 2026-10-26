@@ -10,6 +10,7 @@ import { useAuthSource } from '@/hooks/useAuthSource'
 import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
 import { useSessionReadSync } from '@/hooks/useSessionReadSync'
+import { useFixedSessionOrder } from '@/hooks/useFixedSessionOrder'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useReconnectingState } from '@/hooks/useReconnectingState'
 import { useSyncingState } from '@/hooks/useSyncingState'
@@ -409,6 +410,9 @@ function AppInner() {
     )
     const sseEnabled = Boolean(api && token)
     const showReconnectingBanner = sseDisconnected && !isSyncing
+    // "固定会话顺序": read once here and threaded into both useSSE instances
+    // — either subscription can upsert into the shared sessions cache.
+    const { fixedSessionOrder } = useFixedSessionOrder()
 
     const { subscriptionId: globalSubscriptionId } = useSSE({
         enabled: sseEnabled,
@@ -419,7 +423,8 @@ function AppInner() {
         onConnect: handleSseConnect,
         onDisconnect: handleSseDisconnect,
         onEvent: handleGlobalSseEvent,
-        onToast: handleToast
+        onToast: handleToast,
+        fixedSessionOrder
     })
 
     const { subscriptionId: sessionSubscriptionId } = useSSE({
@@ -429,7 +434,8 @@ function AppInner() {
         subscription: sessionEventSubscription ?? undefined,
         scope: 'full',
         onConnect: handleSessionSseConnect,
-        onEvent: handleSseEvent
+        onEvent: handleSseEvent,
+        fixedSessionOrder
     })
 
     useVisibilityReporter({

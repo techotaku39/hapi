@@ -68,6 +68,7 @@ describe('SessionList mark all as read', () => {
         configureSessionReadSync('pending-hub', vi.fn())
         renderSessionList([makeSession({ id: 'loading', updatedAt: 1000, metadata: { path: '/work', name: 'Loading state' } })])
         expect(screen.queryByRole('button', { name: 'Mark all as read (1)' })).toBeNull()
+        fireEvent.click(screen.getByTitle('/work'))
         const row = screen.getByRole('button', { name: /Loading state/ })
         fireEvent.contextMenu(row, { clientX: 100, clientY: 100 })
         expect(screen.queryByRole('menuitem', { name: 'Mark as unread' })).toBeNull()

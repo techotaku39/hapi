@@ -1,6 +1,13 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import type { SessionReadState } from '../../shared/src/sessionReadState'
 
+async function expandFixtureGroup(page: Page) {
+    const group = page.getByTitle('/read-sync-fixture', { exact: true })
+    await expect(group).toBeVisible()
+    const panel = group.locator('..').locator(':scope > .collapsible-panel')
+    if (await panel.getAttribute('data-open') === null) await group.click()
+}
+
 test.describe('session read state across isolated devices', () => {
     test.skip(process.env.HAPI_LIVE !== '1' || !process.env.HAPI_READ_SYNC_TEST_URL,
         'Set HAPI_LIVE=1 and HAPI_READ_SYNC_TEST_URL for an explicitly isolated seeded Hub')
@@ -39,6 +46,7 @@ test.describe('session read state across isolated devices', () => {
             }, { url: baseUrl, access: accessToken })
             const page = await context.newPage()
             await page.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded' })
+            await expandFixtureGroup(page)
             const row = page.locator('button.session-list-item').filter({ hasText: 'Read sync C' })
             await expect(row).toBeVisible()
             await context.setOffline(true)
@@ -49,6 +57,7 @@ test.describe('session read state across isolated devices', () => {
             await context.setOffline(false)
             const reopened = await context.newPage()
             await reopened.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded' })
+            await expandFixtureGroup(reopened)
             await expect.poll(async () => (await readState())?.manualUnreadAt, { timeout: 75000 }).toBe(session.updatedAt)
             await expect(reopened.locator('button.session-list-item').filter({ hasText: 'Read sync C' })
                 .locator('span.rounded-full[class*="--app-link"]')).toBeVisible()
@@ -105,6 +114,7 @@ test.describe('session read state across isolated devices', () => {
             const page = await context.newPage()
             page.setDefaultTimeout(15000)
             await page.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded', timeout: 30000 })
+            await expandFixtureGroup(page)
             await expect(row(page, 'A')).toBeVisible()
             return { page, context }
         }
@@ -130,12 +140,14 @@ test.describe('session read state across isolated devices', () => {
             await expect(unread(mobile.page, 'A')).toHaveCount(0)
             await expect.poll(() => badge(mobile.page)).toBe(2)
             await desktop.page.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded', timeout: 30000 })
+            await expandFixtureGroup(desktop.page)
             await markUnread(desktop.page, 'A')
             await expect(unread(mobile.page, 'A')).toBeVisible()
             await expect.poll(() => badge(mobile.page)).toBe(3)
             await expect.poll(async () => (await snapshots()).find(s => s.sessionId === 'read-sync-fixture-a')?.manualUnreadAt).not.toBeNull()
 
             await mobile.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
+            await expandFixtureGroup(mobile.page)
             await expect(unread(mobile.page, 'A')).toBeVisible()
             await desktop.page.getByRole('button', { name: /Mark all as read/ }).click()
             const dialog = desktop.page.getByRole('dialog')
@@ -153,6 +165,7 @@ test.describe('session read state across isolated devices', () => {
             await desktop.context.setOffline(false)
             await expect(unread(desktop.page, 'B')).toBeVisible()
             await desktop.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
+            await expandFixtureGroup(desktop.page)
             await expect(unread(desktop.page, 'B')).toBeVisible()
             await expect(unread(desktop.page, 'A')).toHaveCount(0)
             await mobile.page.getByRole('button', { name: 'Unread only', exact: true }).click()
