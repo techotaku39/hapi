@@ -12,6 +12,7 @@ import {
     sortSessionsBySearchRelevance,
 } from '@/lib/sessionListSearch'
 import { useLongPress } from '@/hooks/useLongPress'
+import { useProjectGroupCollapse } from '@/hooks/useProjectGroupCollapse'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
@@ -466,21 +467,6 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
         })
 }
 
-
-export function expandSelectedSessionCollapseOverrides(
-    overrides: Map<string, boolean>,
-    group: { key: string }
-): Map<string, boolean> {
-    // Keep auto-expanded paths open after selection moves so content above the
-    // clicked row does not collapse and displace the sidebar viewport.
-    if (overrides.get(group.key) === false) {
-        return overrides
-    }
-
-    const next = new Map(overrides)
-    next.set(group.key, false)
-    return next
-}
 
 function groupByMachine(
     groups: SessionGroup[],
@@ -1364,6 +1350,7 @@ export function SessionList(props: {
     machineLabelsById?: Record<string, string>
     machinesById?: Record<string, Machine>
     selectedSessionId?: string | null
+    collapseStorageKey?: string | null
 }) {
     const { t } = useTranslation()
     const {
@@ -1622,9 +1609,8 @@ export function SessionList(props: {
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
     }, [groups, allDirectoryGroups, pinInProgressSessions])
-    const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
-        () => new Map()
-    )
+    const collapseStorageKey = props.collapseStorageKey ?? null
+    const { collapseOverrides, setManualCollapse, revealGroup } = useProjectGroupCollapse(collapseStorageKey)
     const [runningSectionCollapsed, setRunningSectionCollapsed] = useState(false)
     const [activeSectionCollapsed, setActiveSectionCollapsed] = useState(false)
     const [pinnedSectionCollapsed, setPinnedSectionCollapsed] = useState(false)
@@ -1640,11 +1626,9 @@ export function SessionList(props: {
     }
 
     const toggleGroup = (groupKey: string, isCollapsed: boolean) => {
-        setCollapseOverrides(prev => {
-            const next = new Map(prev)
-            next.set(groupKey, !isCollapsed)
-            return next
-        })
+        // Filtering forces groups open; do not save an invisible toggle.
+        if (isFiltering) return
+        setManualCollapse(groupKey, !isCollapsed)
     }
 
     // Per-group reveal cap for paginated session previews. Absent = the configured
@@ -1947,6 +1931,9 @@ export function SessionList(props: {
     // session-list refresh (for example tool-call updates from a running selected
     // session) reopens a path the user just collapsed.
     useEffect(() => {
+        // Search reveals matches temporarily. It must not reset the selection
+        // guard or replace a manual collapse when that group reappears.
+        if (isFiltering) return
         if (!selectedSessionId) {
             autoExpandedSelectedSessionKeyRef.current = null
             return
@@ -1968,33 +1955,12 @@ export function SessionList(props: {
             return
         }
 
-        const autoExpandKey = `${selectedSessionId}::${group.key}`
+        const autoExpandKey = JSON.stringify([collapseStorageKey, selectedSessionId, group.key])
         if (autoExpandedSelectedSessionKeyRef.current === autoExpandKey) return
         autoExpandedSelectedSessionKeyRef.current = autoExpandKey
 
-        setCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
-    }, [selectedSessionId, groups])
-
-    // Clean up stale collapse overrides
-    useEffect(() => {
-        setCollapseOverrides(prev => {
-            if (prev.size === 0) return prev
-            const next = new Map(prev)
-            const knownKeys = new Set<string>()
-            for (const g of allGroups) {
-                knownKeys.add(g.key)
-                knownKeys.add(`sessions::${g.key}`)
-            }
-            let changed = false
-            for (const key of next.keys()) {
-                if (!knownKeys.has(key)) {
-                    next.delete(key)
-                    changed = true
-                }
-            }
-            return changed ? next : prev
-        })
-    }, [allGroups])
+        revealGroup(group.key)
+    }, [selectedSessionId, groups, isFiltering, collapseStorageKey, revealGroup])
 
     // Clean up reveal caps for groups that no longer exist.
     useEffect(() => {

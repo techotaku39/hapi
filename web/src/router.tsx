@@ -30,6 +30,7 @@ import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
+import { getProjectGroupCollapseStorageKey } from '@/hooks/useProjectGroupCollapse'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -136,7 +137,8 @@ function SettingsIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, baseUrl, titleSuggestionAvailable = false } = useAppContext()
+    const { api, baseUrl, token, titleSuggestionAvailable = false } = useAppContext()
+    const collapseStorageKey = useMemo(() => getProjectGroupCollapseStorageKey(baseUrl, token), [baseUrl, token])
     const navigate = useNavigate()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
@@ -217,7 +219,8 @@ function SessionsPage() {
                         </div>
                     ) : null}
                     <SessionList
-                        key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
+                        key={JSON.stringify([collapseStorageKey, initializedHub === baseUrl])}
+                        collapseStorageKey={collapseStorageKey}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
                         onSelect={(sessionId) => navigate(getSessionListSelectionNavigation(sessionId))}
