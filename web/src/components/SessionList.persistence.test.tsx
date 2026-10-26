@@ -192,4 +192,25 @@ describe('SessionList manual project preferences', () => {
         fireEvent.click(header())
         expect(isOpen()).toBe(false)
     })
+
+    it('preserves manual preferences and fixed ordering when fixed order disables in-progress pinning', () => {
+        localStorage.setItem('hapi-fixed-session-order', 'true')
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        const sessions = [
+            { ...session('older'), createdAt: 100, updatedAt: 999, active: true },
+            { ...session('newer'), createdAt: 200, updatedAt: 1 },
+        ]
+        const view = render(list({ sessions }))
+        expect(screen.queryByTitle('In progress')).toBeNull()
+        expect(isOpen()).toBe(true)
+        const project = header().nextElementSibling!
+        expect(Array.from(project.querySelectorAll('button')).slice(0, 2).map(button => button.textContent))
+            .toEqual([expect.stringContaining('newer'), expect.stringContaining('older')])
+        fireEvent.click(header())
+        view.unmount()
+        const reopened = render(list({ sessions }))
+        expect(isOpen()).toBe(false)
+        reopened.rerender(list({ sessions: sessions.map(item => ({ ...item, updatedAt: 2000 })) }))
+        expect(isOpen()).toBe(false)
+    })
 })
