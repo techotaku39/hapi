@@ -1801,12 +1801,27 @@ export function HappyThread(props: {
             hasMoreMessages: () => hasMoreMessagesRef.current,
             loadOlderPreservingScroll: loadOlderForOutline
         })
-        if (target) {
-            target.scrollIntoView({ block: 'start', behavior: 'smooth' })
-            markExplicitNavigationAwayFromBottom()
-        }
         props.onOutlineItemClick?.(item)
         props.onOutlineOpenChange(false)
+        if (target) {
+            // Closing the outline can restore the mobile composer and change
+            // the viewport height. Let that layout settle before the final
+            // target scroll so the footer does not pull the viewport back to
+            // the tail position.
+            await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+            markExplicitNavigationAwayFromBottom()
+            const viewport = viewportRef.current
+            if (viewport && viewport.contains(target)) {
+                const viewportRect = viewport.getBoundingClientRect()
+                const targetRect = target.getBoundingClientRect()
+                viewport.scrollTo({
+                    top: Math.max(0, viewport.scrollTop + targetRect.top - viewportRect.top - 16),
+                    behavior: 'smooth'
+                })
+            } else {
+                target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+            }
+        }
     }, [loadOlderForOutline, markExplicitNavigationAwayFromBottom, props.onOutlineItemClick, props.onOutlineOpenChange])
 
     const clearConversationStartFeedback = useCallback(() => {
