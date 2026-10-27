@@ -13,6 +13,10 @@ import {
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
+import {
+    getSessionListSelectionNavigation,
+    PRESERVE_SESSION_SIDEBAR_SCROLL,
+} from '@/lib/sessionNavigation'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
@@ -47,7 +51,8 @@ import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer
 import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
 import { inactiveSessionCanResume, resolveCursorReopenGate } from '@/lib/sessionResume'
-import { initializeSessionLastSeen, markSessionSeen } from '@/lib/sessionLastSeen'
+import { initializeSessionLastSeen } from '@/lib/sessionLastSeen'
+import { useSelectedSessionSeen } from '@/hooks/useSelectedSessionSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
@@ -87,26 +92,6 @@ function BackIcon(props: { className?: string }) {
             className={props.className}
         >
             <polyline points="15 18 9 12 15 6" />
-        </svg>
-    )
-}
-
-function PlusIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
     )
 }
@@ -151,7 +136,7 @@ function SettingsIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, baseUrl } = useAppContext()
+    const { api, baseUrl, titleSuggestionAvailable = false } = useAppContext()
     const navigate = useNavigate()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
@@ -202,20 +187,19 @@ function SessionsPage() {
         initializeSessionLastSeen(baseUrl, sessions)
         setInitializedHub(baseUrl)
     }, [baseUrl, error, isLoading, sessions])
-    useEffect(() => {
-        if (!selectedSessionId || !selectedSession) {
-            return
-        }
-        markSessionSeen(selectedSessionId, selectedSession.updatedAt)
-    }, [selectedSessionId, selectedSession?.updatedAt])
+    useSelectedSessionSeen(selectedSessionId, selectedSession?.updatedAt)
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    const handleSelectSession = useCallback((sessionId: string) => {
+        navigate(getSessionListSelectionNavigation(sessionId))
+    }, [navigate])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
             search: args.machineId
                 ? { directory: args.directory, machineId: args.machineId }
-                : { directory: args.directory }
+                : { directory: args.directory },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate])
 
@@ -223,7 +207,10 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
+                // min-w-0: without it, shrink-0 toolbar icons inflate the flex
+                // item's min-content past --sidebar-w and the shed never sees a
+                // tight budget (#2039 desktop overflow past the split).
+                className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} min-w-0 w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
@@ -236,19 +223,23 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId) => navigate({
-                            to: '/sessions/$sessionId',
-                            params: { sessionId },
+                        onSelect={handleSelectSession}
+                        onNewSession={() => navigate({
+                            to: '/sessions/new',
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         })}
-                        onNewSession={() => navigate({ to: '/sessions/new' })}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        renderHeader={false}
-                        headerActions={(
-                            <div className="flex items-center gap-2">
-                                {canBrowse && (
+                        // Keep ranks: new 4, unread lens 5, settings 6,
+                        // mark-all 7, browse 8. Higher sheds into More first (#2039).
+                        renderHeader
+                        toolbarExtras={[
+                            ...(canBrowse ? [{
+                                id: 'browse',
+                                keep: 8,
+                                node: (
                                     <button
                                         type="button"
                                         onClick={() => navigate({ to: '/browse' })}
@@ -257,26 +248,25 @@ function SessionsPage() {
                                     >
                                         <FolderOpenIcon className="h-5 w-5" />
                                     </button>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({ to: '/settings' })}
-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                    title={t('settings.title')}
-                                >
-                                    <SettingsIcon className="h-5 w-5" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({ to: '/sessions/new' })}
-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
-                                    title={t('sessions.new')}
-                                >
-                                    <PlusIcon className="h-5 w-5" />
-                                </button>
-                            </div>
-                        )}
+                                )
+                            }] : []),
+                            {
+                                id: 'settings',
+                                keep: 6,
+                                node: (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate({ to: '/settings' })}
+                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        title={t('settings.title')}
+                                    >
+                                        <SettingsIcon className="h-5 w-5" />
+                                    </button>
+                                )
+                            }
+                        ]}
                         api={api}
+                        titleSuggestionAvailable={titleSuggestionAvailable}
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
                     />
@@ -329,7 +319,7 @@ function classifySendError(
 }
 
 function SessionPage() {
-    const { api } = useAppContext()
+    const { api, titleSuggestionAvailable = false } = useAppContext()
     const { t } = useTranslation()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
@@ -360,6 +350,7 @@ function SessionPage() {
         viewMode: messagesViewMode,
         messagesVersion,
         historyVersion,
+        tailRevision,
         setViewMode,
     } = useMessages(api, sessionId)
 
@@ -444,7 +435,8 @@ function SessionPage() {
                         () => navigate({
                             to: '/sessions/$sessionId',
                             params: { sessionId: result.sessionId },
-                            replace: true
+                            replace: true,
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         }),
                     )
                 }
@@ -557,7 +549,8 @@ function SessionPage() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: resolvedSessionId },
-            replace: true
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
         if (api) {
             void refreshSessionDetailPreservingActive(
@@ -727,9 +720,11 @@ function SessionPage() {
         getSlashSuggestions,
     ])
 
-    const refreshSelectedSession = useCallback(() => {
-        void refetchSession()
-        void refetchMessages()
+    const refreshSelectedSession = useCallback(async () => {
+        await Promise.all([
+            refetchSession(),
+            refetchMessages(),
+        ])
     }, [refetchMessages, refetchSession])
 
     const handleInitialOutlineConsumed = useCallback(() => {
@@ -737,6 +732,7 @@ function SessionPage() {
             to: '/sessions/$sessionId',
             params: { sessionId },
             replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessionId])
 
@@ -775,6 +771,7 @@ function SessionPage() {
     return (
         <SessionChat
             api={api}
+            titleSuggestionAvailable={titleSuggestionAvailable}
             session={session}
             cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
             reopenDisabledReason={cursorReopenDisabledReason}
@@ -789,6 +786,7 @@ function SessionPage() {
             viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}
+            tailRevision={tailRevision}
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
@@ -855,7 +853,8 @@ function SessionDetailRoute() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: supersedingSessionId },
-            replace: true
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, session, sessionId, supersedingSessionId])
 
@@ -863,7 +862,11 @@ function SessionDetailRoute() {
         if (!sessionNotFound) {
             return
         }
-        navigate({ to: '/sessions', replace: true })
+        navigate({
+            to: '/sessions',
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
     }, [navigate, sessionNotFound, sessionId])
 
     if (sessionNotFound) {
@@ -890,7 +893,10 @@ function NewSessionPage() {
         if (shareTransferId) {
             void deleteShareTransfer(shareTransferId)
         }
-        navigate({ to: '/sessions' })
+        navigate({
+            to: '/sessions',
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
     }, [navigate, shareTransferId])
 
     const handleSuccess = useCallback((sessionId: string) => {
@@ -899,12 +905,17 @@ function NewSessionPage() {
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
-        navigate({ to: '/sessions', replace: true })
+        navigate({
+            to: '/sessions',
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
         // Then navigate to new session
         requestAnimationFrame(() => {
             navigate({
                 to: '/sessions/$sessionId',
                 params: { sessionId },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
             })
         })
     }, [navigate, queryClient, shareTransferId])

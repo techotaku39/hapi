@@ -8,6 +8,7 @@ import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
 import { Children, isValidElement, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react'
 import { useComposerToolbarLayout, type ComposerToolbarItemId, type ComposerToolbarLayout } from '@/hooks/useComposerToolbarLayout'
+import { useNarrowViewport } from '@/hooks/useNarrowViewport'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
 
 function ToolbarItemSlot(props: { item: ComposerToolbarItemId; children: ReactNode }) {
@@ -45,12 +46,13 @@ function ChevronIcon() {
     return <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 3.75L5 6.25L7.5 3.75" /></svg>
 }
 
-function VoiceAssistantIcon() {
+function VoiceAssistantIcon(props: { size?: number }) {
+    const size = props.size ?? 18
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
+            width={size}
+            height={size}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -66,6 +68,71 @@ function VoiceAssistantIcon() {
             <path d="M20 11v2" />
         </svg>
     )
+}
+
+/**
+ * Primary composer control fills the collapsed card height (Quest / touch).
+ * Empty → giant voice/dictate; draft → giant Send. Draft voice stays a
+ * compact toolbar circle (no width stolen from the text column).
+ * Expanded editor: stay compact — fill-height would become a full-shell strip.
+ */
+export function isComposerPrimaryFillHeight(args: {
+    canSend: boolean
+    voiceEnabled: boolean
+    voiceStatus: ConversationStatus
+    routesToScratchlist?: boolean
+    expanded?: boolean
+}): boolean {
+    if (args.expanded) return false
+    if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return true
+    if (args.routesToScratchlist) return true
+    if (args.canSend) return true
+    if (args.voiceEnabled) return true
+    // Disabled grey Send when empty + voice off — still fill so layout does not jump.
+    return true
+}
+
+/** Empty idle voice/dictate — FUE + morph target (not the fill-height gate). */
+export function isLargeEmptyVoicePrimary(args: {
+    canSend: boolean
+    voiceEnabled: boolean
+    voiceStatus: ConversationStatus
+    routesToScratchlist?: boolean
+}): boolean {
+    if (args.canSend) return false
+    if (args.routesToScratchlist) return false
+    if (!args.voiceEnabled) return false
+    if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return false
+    return true
+}
+
+/**
+ * When draft steals the primary for Send, keep voice/dictate reachable via the
+ * compact toolbar DictationButton (under the text — does not eat composer width).
+ */
+export function shouldShowDraftVoiceButton(args: {
+    canSend: boolean
+    voiceEnabled: boolean
+    voiceStatus: ConversationStatus
+    /** Mirror UnifiedButton: scratchlist routing owns Send; do not start voice. */
+    routesToScratchlist?: boolean
+}): boolean {
+    if (!args.canSend || !args.voiceEnabled) return false
+    if (args.routesToScratchlist) return false
+    if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return false
+    return true
+}
+
+export function unifiedButtonSizeClass(fillHeight: boolean): string {
+    // Fill the composer card column: fixed width, stretch height, soft square.
+    // Compact remains for isolated toolbar previews / legacy callers.
+    return fillHeight
+        ? 'h-full min-h-14 w-16 self-stretch rounded-none rounded-r-[20px]'
+        : 'h-8 w-8 rounded-full'
+}
+
+export function draftVoiceCompanionSizeClass(): string {
+    return 'h-full min-h-14 w-12 self-stretch rounded-none'
 }
 
 function SpeakerIcon(props: { muted?: boolean }) {
@@ -341,12 +408,12 @@ export function ComposerToolbarItemPreview(props: { item: ComposerToolbarItemId;
             case 'voiceMic': return <SpeakerIcon />
             case 'scratchlist': return <ScratchlistToggleIcon />
             case 'schedule': return <ScheduleIcon className="h-[18px] w-[18px]" />
-            case 'piModel':
-            case 'piThinking':
+            case 'model':
+            case 'effort':
                 return <><span className="max-w-24 truncate text-xs font-medium">{props.label}</span><ChevronIcon /></>
         }
     })()
-    const isTextControl = props.item === 'piModel' || props.item === 'piThinking'
+    const isTextControl = props.item === 'model' || props.item === 'effort'
     return (
         <span
             className={`flex h-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 ${isTextControl ? 'gap-1 px-3' : 'w-8'}`}
@@ -437,6 +504,66 @@ function ScratchlistToggleButton(props: {
     )
 }
 
+/**
+ * TerminalButton — just-in-time FUE for terminal → agent (#2011).
+ *
+ * The terminal icon is the only composer entry into the session PTY, so it
+ * carries the discovery tip for To agent / Selection to agent. First click
+ * shows the explainer only: navigating away would unmount this button (and
+ * the callout) before the operator could read it. Got it acknowledges and
+ * then performs the navigation they originally wanted.
+ */
+function TerminalButton(props: {
+    label: string
+    onTerminal: () => void
+    disabled: boolean
+}) {
+    const { t } = useTranslation()
+    const fue = useFue('composer-terminal-to-agent')
+    const buttonRef = useRef<HTMLButtonElement>(null)
+
+    return (
+        <>
+            <button
+                ref={buttonRef}
+                type="button"
+                aria-label={props.label}
+                title={props.label}
+                className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => {
+                    if (fue.status !== 'acknowledged') {
+                        fue.engage()
+                        return
+                    }
+                    props.onTerminal()
+                }}
+                disabled={props.disabled}
+            >
+                <TerminalIcon />
+                {fue.status !== 'acknowledged' ? (
+                    <FueDot
+                        pulsing={fue.status === 'unseen'}
+                        ariaLabel={t('fue.newFeatureDot')}
+                    />
+                ) : null}
+            </button>
+            {fue.status === 'engaging' ? (
+                <FueCallout
+                    title={t('terminal.toAgent.fueTitle')}
+                    body={t('terminal.toAgent.fueBody')}
+                    onDismiss={() => {
+                        fue.dismiss()
+                        props.onTerminal()
+                    }}
+                    dismissLabel={t('fue.gotIt')}
+                    closeAriaLabel={t('fue.closeAriaLabel')}
+                    anchorRef={buttonRef}
+                />
+            ) : null}
+        </>
+    )
+}
+
 function StopIcon() {
     return (
         <svg
@@ -478,6 +605,11 @@ export function UnifiedButton(props: {
     onVoiceToggle: () => void
     voiceLabel?: string
     /**
+     * When true, stretch to the composer card height (beside input + toolbar).
+     * Default true — Quest / touch need a full-height primary control.
+     */
+    fillHeight?: boolean
+    /**
      * When true, the send button repaints amber and the aria-label
      * announces "Send to scratchlist" instead of "Send message". The
      * actual routing happens in SessionChat's wrapped onSend - the
@@ -497,6 +629,8 @@ export function UnifiedButton(props: {
     const isVoiceActive = isConnecting || isConnected
     const hasText = props.canSend
     const routesToScratchlist = props.routesToScratchlist ?? false
+    const fillHeight = props.fillHeight ?? true
+    const iconSize = fillHeight ? 28 : 18
 
     const handleClick = () => {
         if (isVoiceActive) {
@@ -532,7 +666,7 @@ export function UnifiedButton(props: {
         className = 'bg-black text-white'
         ariaLabel = t('composer.send')
     } else if (props.voiceEnabled) {
-        icon = <VoiceAssistantIcon />
+        icon = <VoiceAssistantIcon size={iconSize} />
         className = 'bg-black text-white'
         ariaLabel = props.voiceLabel ?? t('composer.voice')
     } else {
@@ -559,7 +693,9 @@ export function UnifiedButton(props: {
             disabled={isDisabled}
             aria-label={ariaLabel}
             title={ariaLabel}
-            className={`ml-1 flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+            data-testid="composer-unified-button"
+            data-size={fillHeight ? 'fill' : 'compact'}
+            className={`flex ${unifiedButtonSizeClass(fillHeight)} items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
         >
             {icon}
         </button>
@@ -567,32 +703,51 @@ export function UnifiedButton(props: {
 }
 
 export function DictationButton(props: {
-    enabled: boolean
+    /**
+     * When false, hide. When true/omitted, show whenever a draft steals Send
+     * from the primary (assistant voice and dictation modes).
+     */
+    enabled?: boolean
     canSend: boolean
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
     controlsDisabled: boolean
     onVoiceToggle: () => void
+    /** Override aria/title (dictate vs voice assistant). */
+    voiceLabel?: string
+    /** Flush companion beside fill-height Send (HappyComposer omitPrimary). */
+    variant?: 'toolbar' | 'companion'
+    routesToScratchlist?: boolean
 }) {
     const { t } = useTranslation()
-    if (
-        !props.enabled
-        || !props.canSend
-        || !props.voiceEnabled
-        || props.voiceStatus === 'connecting'
-        || props.voiceStatus === 'connected'
-    ) return null
+    if (props.enabled === false) return null
+    if (!shouldShowDraftVoiceButton({
+        canSend: props.canSend,
+        voiceEnabled: props.voiceEnabled,
+        voiceStatus: props.voiceStatus,
+        routesToScratchlist: props.routesToScratchlist,
+    })) return null
+
+    const label = props.voiceLabel ?? t('composer.dictate')
+    const companion = props.variant === 'companion'
+    const iconSize = companion ? 24 : 18
 
     return (
         <button
             type="button"
             onClick={props.onVoiceToggle}
             disabled={props.controlsDisabled}
-            aria-label={t('composer.dictate')}
-            title={t('composer.dictate')}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={label}
+            title={label}
+            data-testid="composer-draft-voice-button"
+            data-variant={companion ? 'companion' : 'toolbar'}
+            className={
+                companion
+                    ? `flex ${draftVoiceCompanionSizeClass()} items-center justify-center bg-black text-white transition-colors hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-50`
+                    : 'flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50'
+            }
         >
-            <VoiceAssistantIcon />
+            <VoiceAssistantIcon size={iconSize} />
         </button>
     )
 }
@@ -602,6 +757,7 @@ export function ComposerButtons(props: {
     controlsDisabled: boolean
     showSettingsButton: boolean
     settingsButtonRef?: Ref<HTMLButtonElement>
+    settingsDisabled?: boolean
     onSettingsToggle: () => void
     expanded: boolean
     onExpandedToggle: () => void
@@ -632,15 +788,17 @@ export function ComposerButtons(props: {
     // The composer must surface that constraint at UI time so the user never
     // builds a submission the hub will reject — see hub/web/routes/messages.ts.
     hasAttachments?: boolean
-    // Pi-specific toolbar buttons
-    piModelLabel?: string
-    piModelDisabled?: boolean
-    piModelOpen?: boolean
-    onPiModelToggle?: () => void
-    piThinkingLabel?: string
-    piThinkingDisabled?: boolean
-    piThinkingOpen?: boolean
-    onPiThinkingToggle?: () => void
+    // Generic model/effort value buttons
+    modelValueLabel?: string
+    modelValueButtonRef?: Ref<HTMLButtonElement>
+    modelValueDisabled?: boolean
+    modelValueOpen?: boolean
+    onModelValueToggle?: () => void
+    effortValueLabel?: string
+    effortValueButtonRef?: Ref<HTMLButtonElement>
+    effortValueDisabled?: boolean
+    effortValueOpen?: boolean
+    onEffortValueToggle?: () => void
     // Scratchlist drawer toggle. When `onScratchlistToggle` is provided, a
     // notepad icon appears next to the schedule-send icon. Click toggles
     // composer-send-routing between chat and scratchlist; SessionChat owns
@@ -648,9 +806,26 @@ export function ComposerButtons(props: {
     scratchlistMode?: boolean
     scratchlistCount?: number
     onScratchlistToggle?: () => void
+    /**
+     * When true, omit UnifiedButton — HappyComposer places it in a
+     * full-height column beside the input + toolbar.
+     */
+    omitPrimaryButton?: boolean
 }) {
     const { t } = useTranslation()
     const { layout } = useComposerToolbarLayout()
+    const isNarrowViewport = useNarrowViewport()
+    // Narrow viewports collapse the model/effort value buttons into the settings
+    // sheet, so the gear must stay reachable even when a persisted layout hides
+    // it (otherwise no session-settings trigger remains). Wide layouts keep
+    // honoring the user's hidden choice.
+    const effectiveLayout: ComposerToolbarLayout = isNarrowViewport && layout.hidden.includes('settings')
+        ? {
+            ...layout,
+            hidden: layout.hidden.filter((item) => item !== 'settings'),
+            left: [...layout.left, 'settings'],
+        }
+        : layout
     const isVoiceConnected = props.voiceStatus === 'connected'
     const [showSchedulePicker, setShowSchedulePicker] = useState(false)
     const scheduleButtonRef = useRef<HTMLButtonElement>(null)
@@ -666,7 +841,7 @@ export function ComposerButtons(props: {
                 className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 style={{ justifyContent: toolbarJustifyContent }}
             >
-                <OrderedToolbarItems layout={layout}>
+                <OrderedToolbarItems layout={effectiveLayout}>
                 <ToolbarItemSlot item="attachment">
                 <ComposerPrimitive.AddAttachment
                     aria-label={t('composer.attach')}
@@ -687,7 +862,7 @@ export function ComposerButtons(props: {
                         title={t('composer.settings')}
                         className="settings-button flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]"
                         onClick={props.onSettingsToggle}
-                        disabled={props.controlsDisabled}
+                        disabled={props.settingsDisabled ?? props.controlsDisabled}
                     >
                         <SettingsIcon />
                     </button>
@@ -701,41 +876,43 @@ export function ComposerButtons(props: {
                 />
                 </ToolbarItemSlot>
 
-                <ToolbarItemSlot item="piModel">
-                {props.piModelLabel ? (
+                <ToolbarItemSlot item="model">
+                {props.modelValueLabel ? (
                     <button
+                        ref={props.modelValueButtonRef}
                         type="button"
-                        aria-label={props.piModelLabel}
-                        title={props.piModelLabel}
+                        aria-label={props.modelValueLabel}
+                        title={props.modelValueLabel}
                         className={`flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium transition-colors ${
-                            props.piModelOpen
+                            props.modelValueOpen
                                 ? 'bg-[var(--app-secondary-bg)] text-[var(--app-link)]'
                                 : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
                         }`}
-                        onClick={props.onPiModelToggle}
-                        disabled={props.piModelDisabled}
+                        onClick={props.onModelValueToggle}
+                        disabled={props.modelValueDisabled}
                     >
-                        {props.piModelLabel}
+                        {props.modelValueLabel}
                         <ChevronIcon />
                     </button>
                 ) : null}
                 </ToolbarItemSlot>
 
-                <ToolbarItemSlot item="piThinking">
-                {props.piThinkingLabel ? (
+                <ToolbarItemSlot item="effort">
+                {props.effortValueLabel ? (
                     <button
+                        ref={props.effortValueButtonRef}
                         type="button"
-                        aria-label={props.piThinkingLabel}
-                        title={props.piThinkingLabel}
+                        aria-label={props.effortValueLabel}
+                        title={props.effortValueLabel}
                         className={`flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium transition-colors ${
-                            props.piThinkingOpen
+                            props.effortValueOpen
                                 ? 'bg-[var(--app-secondary-bg)] text-[var(--app-link)]'
                                 : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
                         }`}
-                        onClick={props.onPiThinkingToggle}
-                        disabled={props.piThinkingDisabled}
+                        onClick={props.onEffortValueToggle}
+                        disabled={props.effortValueDisabled}
                     >
-                        {props.piThinkingLabel}
+                        {props.effortValueLabel}
                         <ChevronIcon />
                     </button>
                 ) : null}
@@ -743,16 +920,11 @@ export function ComposerButtons(props: {
 
                 <ToolbarItemSlot item="terminal">
                 {props.showTerminalButton ? (
-                    <button
-                        type="button"
-                        aria-label={props.terminalLabel}
-                        title={props.terminalLabel}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-                        onClick={props.onTerminal}
+                    <TerminalButton
+                        label={props.terminalLabel}
+                        onTerminal={props.onTerminal}
                         disabled={props.terminalDisabled}
-                    >
-                        <TerminalIcon />
-                    </button>
+                    />
                 ) : null}
                 </ToolbarItemSlot>
 
@@ -870,34 +1042,47 @@ export function ComposerButtons(props: {
                 </OrderedToolbarItems>
             </div>
 
+            {/*
+              Draft voice/dictate: compact circle in the toolbar row (under text).
+              Primary column stays a single fill-height Send/voice control so we
+              do not steal horizontal space from the composer.
+            */}
             <DictationButton
-                enabled={props.dictationEnabled ?? false}
+                enabled={props.voiceEnabled}
                 canSend={props.canSend}
                 voiceEnabled={props.voiceEnabled}
                 voiceStatus={props.voiceStatus}
                 controlsDisabled={props.controlsDisabled}
                 onVoiceToggle={props.onVoiceToggle}
-            />
-
-            <UnifiedButton
-                canSend={props.canSend}
-                voiceStatus={props.voiceStatus}
-                voiceEnabled={props.voiceEnabled}
-                controlsDisabled={props.controlsDisabled}
-                onSend={props.onSend}
-                onVoiceToggle={props.onVoiceToggle}
-                voiceLabel={props.dictationEnabled ? t('composer.dictate') : undefined}
-                /*
-                 * Derived, NOT raw scratchlistMode. Mirror SessionChat's
-                 * shouldRouteToScratchlist: amber + "Send to scratchlist"
-                 * whenever mode is on and there is no pending schedule.
-                 * Attachments route to scratchlist too (hub upload adapter).
-                 */
+                voiceLabel={props.dictationEnabled ? t('composer.dictate') : t('composer.voice')}
                 routesToScratchlist={
                     (props.scratchlistMode ?? false)
                     && props.pendingSchedule == null
                 }
             />
+
+            {props.omitPrimaryButton ? null : (
+                <UnifiedButton
+                    canSend={props.canSend}
+                    voiceStatus={props.voiceStatus}
+                    voiceEnabled={props.voiceEnabled}
+                    controlsDisabled={props.controlsDisabled}
+                    onSend={props.onSend}
+                    onVoiceToggle={props.onVoiceToggle}
+                    voiceLabel={props.dictationEnabled ? t('composer.dictate') : undefined}
+                    fillHeight={false}
+                    /*
+                     * Derived, NOT raw scratchlistMode. Mirror SessionChat's
+                     * shouldRouteToScratchlist: amber + "Send to scratchlist"
+                     * whenever mode is on and there is no pending schedule.
+                     * Attachments route to scratchlist too (hub upload adapter).
+                     */
+                    routesToScratchlist={
+                        (props.scratchlistMode ?? false)
+                        && props.pendingSchedule == null
+                    }
+                />
+            )}
         </div>
     )
 }

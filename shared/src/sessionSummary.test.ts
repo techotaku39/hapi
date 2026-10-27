@@ -69,6 +69,10 @@ describe('getPendingRequestKinds', () => {
 })
 
 describe('toSessionSummary', () => {
+    it('carries createdAt for the fixed-order list sort', () => {
+        expect(toSessionSummary(makeSession({ createdAt: 1_234 })).createdAt).toBe(1_234)
+    })
+
     it('includes the pinned state', () => {
         expect(toSessionSummary(makeSession({ pinned: true })).pinned).toBe(true)
         expect(toSessionSummary(makeSession({ globalPinned: true })).globalPinned).toBe(true)
@@ -100,6 +104,19 @@ describe('toSessionSummary', () => {
         }))
 
         expect(summary.metadata?.agentSessionId).toBe('cursor-session-1')
+    })
+
+    it('does not claim a native resume token for fresh-only DSH ACP', () => {
+        const summary = toSessionSummary(makeSession({
+            metadata: {
+                path: '/proj',
+                host: 'local',
+                flavor: 'dsh',
+                codexSessionId: 'stale-codex-id'
+            }
+        }))
+
+        expect(summary.metadata?.agentSessionId).toBeUndefined()
     })
 
     it('does not fall back to a stale cross-agent id for a known flavor', () => {

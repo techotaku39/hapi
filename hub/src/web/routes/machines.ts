@@ -1,5 +1,6 @@
 import {
     MACHINE_DISPLAY_NAME_MAX_LENGTH,
+    MACHINE_CAPABILITIES,
     MachineListDirectoryRequestSchema,
     MachinePathsExistsRequestSchema,
     RenameMachineRequestSchema,
@@ -75,18 +76,28 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (machine instanceof Response) {
             return machine
         }
+        if (!machine.metadata?.capabilities?.includes(MACHINE_CAPABILITIES.AgentAvailability)) {
+            return c.json({
+                type: 'error' as const,
+                message: 'This runner must be upgraded before creating sessions',
+                code: 'runner_upgrade_required' as const,
+            })
+        }
 
         const body = await c.req.json().catch(() => null)
         const parsed = SpawnSessionRequestSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
-        if (parsed.data.agent === 'agy' && parsed.data.startingMode === 'remote') {
-            return c.json({ error: 'AGY only supports PTY mode' }, 400)
+        if (
+            (parsed.data.agent === 'agy' || parsed.data.agent === 'dsh')
+            && parsed.data.startingMode
+            && parsed.data.startingMode !== 'remote'
+        ) {
+            return c.json({ error: `${parsed.data.agent.toUpperCase()} only supports remote mode` }, 400)
         }
-        const startingMode = parsed.data.agent === 'agy'
-            ? 'pty'
-            : parsed.data.startingMode
+        const startingMode = parsed.data.startingMode
+        const namespace = c.get('namespace')
 
         const result = await engine.spawnSession(
             machineId,
@@ -104,9 +115,33 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             undefined,
             parsed.data.collaborationMode,
             parsed.data.copilotAgentMode,
-            startingMode
+            startingMode,
+            namespace
         )
         return c.json(result)
+    })
+
+    app.get('/machines/:id/agent-availability', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) return c.json({ error: 'Not connected' }, 503)
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) return machine
+        if (!machine.metadata?.capabilities?.includes(MACHINE_CAPABILITIES.AgentAvailability)) {
+            return c.json({
+                error: 'This runner must be upgraded before creating sessions',
+                code: 'runner_upgrade_required',
+            }, 409)
+        }
+
+        try {
+            return c.json(await engine.getAgentAvailability(machineId))
+        } catch (error) {
+            return c.json({
+                error: error instanceof Error ? error.message : 'Failed to inspect Agent availability',
+            }, 500)
+        }
     })
 
     app.post('/machines/:id/list-directory', async (c) => {
@@ -159,8 +194,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            const exists = await engine.checkPathsExist(machineId, uniquePaths)
-            return c.json({ exists })
+            return c.json(await engine.checkPathsExist(machineId, uniquePaths))
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to check paths' }, 500)
         }
@@ -179,12 +213,66 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            const result = await engine.listAgyModelsForMachine(machineId)
+            const result = await engine.listAgyModelsForMachine(machineId, {
+                refresh: c.req.query('refresh') === 'true'
+            })
             return c.json(result)
         } catch (error) {
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Agy models'
+            }, 500)
+        }
+    })
+
+    app.get('/machines/:id/dsh-models', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        try {
+            return c.json(await engine.listDshModelsForMachine(machineId))
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list DSH models'
+            }, 500)
+        }
+    })
+
+    app.get('/machines/:id/pi-models', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        try {
+            const result = await engine.listPiModelsForMachine(machineId)
+            return c.json(result)
+        } catch (error) {
+            if (error instanceof RpcTargetMissingError) {
+                return c.json({
+                    success: false,
+                    error: error.message,
+                    code: RPC_TARGET_MISSING_ERROR_CODE
+                }, 503)
+            }
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Pi models'
             }, 500)
         }
     })
@@ -247,6 +335,36 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
     })
 
+    app.get('/machines/:id/opencode-model-variants', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        try {
+            const result = await engine.listOpencodeModelVariantsForMachine(machineId, c.req.query('cwd') || null)
+            return c.json(result)
+        } catch (error) {
+            if (error instanceof RpcTargetMissingError) {
+                return c.json({
+                    success: false,
+                    error: error.message,
+                    code: RPC_TARGET_MISSING_ERROR_CODE
+                }, 503)
+            }
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list OpenCode model variants'
+            }, 500)
+        }
+    })
+
     app.get('/machines/:id/grok-models', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {
@@ -268,6 +386,31 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Grok models'
+            }, 500)
+        }
+    })
+
+    app.get('/machines/:id/kimi-models', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) return machine
+
+        const cwd = (c.req.query('cwd') ?? '').trim()
+        if (!cwd) {
+            return c.json({ success: false, error: 'cwd query parameter is required' }, 400)
+        }
+
+        try {
+            return c.json(await engine.listKimiModelsForCwd(machineId, cwd))
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Kimi models'
             }, 500)
         }
     })

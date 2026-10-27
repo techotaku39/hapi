@@ -116,6 +116,19 @@ describe('generatedImages', () => {
         clearGeneratedImages()
     })
 
+    it('preserves the source extension when a custom file name omits one', () => {
+        const file = registerGeneratedImage({
+            id: 'test-zip-with-title',
+            path: '/tmp/plan-a.zip',
+            fileName: 'Cursor Plan A Markdown 导出',
+            mimeType: 'application/octet-stream',
+            bytes: Buffer.from('PK\\x03\\x04')
+        })
+
+        expect(file.fileName).toBe('Cursor Plan A Markdown 导出.zip')
+        clearGeneratedImages()
+    })
+
     it('snapshots image bytes at registration time', () => {
         const source = Buffer.from('original image bytes')
         const image = registerGeneratedImage({
@@ -157,9 +170,9 @@ describe('generatedImages', () => {
         clearGeneratedImages()
     })
 
-    it('registers images from ACP base64 image blocks after MIME sniffing', async () => {
+    it('registers images from ACP base64 image blocks synchronously after MIME sniffing', () => {
         const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00])
-        const image = await registerGeneratedImageFromAcpBlock({
+        const image = registerGeneratedImageFromAcpBlock({
             type: 'image',
             mimeType: 'image/png',
             data: pngHeader.toString('base64')
@@ -173,11 +186,11 @@ describe('generatedImages', () => {
     it('rejects oversized base64 before allocating a decoded buffer', async () => {
         const oversized = 'A'.repeat(MAX_GENERATED_IMAGE_BASE64_CHARS + 1)
         expect(decodeGeneratedImageBase64(oversized)).toBeNull()
-        await expect(registerGeneratedImageFromAcpBlock({
+        expect(registerGeneratedImageFromAcpBlock({
             type: 'image',
             mimeType: 'image/png',
             data: oversized,
-        })).resolves.toBeNull()
+        })).toBeNull()
     })
 
     it('ignores URI-only ACP image blocks that would read local disk without a permission prompt', async () => {
@@ -186,15 +199,15 @@ describe('generatedImages', () => {
         const path = join(dir, 'secret.png')
         writeFileSync(path, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]))
 
-        await expect(registerGeneratedImageFromAcpBlock({
+        expect(registerGeneratedImageFromAcpBlock({
             type: 'image',
             uri: `file://${path}`
-        })).resolves.toBeNull()
+        })).toBeNull()
 
-        await expect(registerGeneratedImageFromAcpBlock({
+        expect(registerGeneratedImageFromAcpBlock({
             type: 'image',
             url: path
-        })).resolves.toBeNull()
+        })).toBeNull()
     })
 
     it('registers images from local file paths in ACP uri blocks', async () => {
@@ -237,7 +250,7 @@ describe('generatedImages', () => {
         expect(safeAcpFileName('file:///tmp/photos/icon.png')).toBe('icon.png')
 
         const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00])
-        const image = await registerGeneratedImageFromAcpBlock({
+        const image = registerGeneratedImageFromAcpBlock({
             type: 'image',
             mimeType: 'image/png',
             data: pngHeader.toString('base64'),

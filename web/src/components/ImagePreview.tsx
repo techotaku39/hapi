@@ -38,6 +38,9 @@ export function ImagePreview(props: {
     imageStyle?: CSSProperties
     caption?: ReactNode
     galleryId?: string
+    onTriggerPointerDown?: (event: PointerEvent<HTMLButtonElement>) => void
+    onTriggerContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void
+    onTriggerClick?: (event: MouseEvent<HTMLButtonElement>) => void
 }) {
     const [viewerOpen, setViewerOpen] = useState(false)
     const [previewImages, setPreviewImages] = useState<PreviewImage[]>([])
@@ -75,6 +78,17 @@ export function ImagePreview(props: {
         setPreviewIndex(index >= 0 ? index : 0)
         setViewerOpen(true)
     }, [props.galleryId])
+
+    const handleTriggerPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+        props.onTriggerPointerDown?.(event)
+        stopEvent(event)
+    }, [props.onTriggerPointerDown, stopEvent])
+
+    const handleTriggerClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+        props.onTriggerClick?.(event)
+        if (event.defaultPrevented) return
+        openViewer(event)
+    }, [openViewer, props.onTriggerClick])
 
     const updateScale = useCallback((next: number | ((current: number) => number)) => {
         setScale((current) => {
@@ -259,15 +273,19 @@ export function ImagePreview(props: {
         <>
             <button
                 type="button"
-                onPointerDown={stopEvent}
+                onPointerDown={handleTriggerPointerDown}
                 onMouseDown={stopEvent}
                 onTouchStart={stopEvent}
-                onClick={openViewer}
+                onContextMenu={props.onTriggerContextMenu}
+                onClick={handleTriggerClick}
                 data-image-preview-trigger=""
                 data-image-preview-file-name={props.fileName}
                 data-image-preview-label={props.label}
                 data-image-preview-gallery={props.galleryId ?? ''}
-                className={props.buttonClassName ?? 'group flex min-h-[18rem] w-full items-center justify-center overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-left'}
+                // Contain the absolute sr-only filename inside this trigger.
+                // Otherwise it can escape the chat viewport and make the app
+                // root scroll when history navigation calls scrollIntoView.
+                className={`relative ${props.buttonClassName ?? 'group flex min-h-[18rem] w-full items-center justify-center overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-left'}`}
                 title="Click to zoom"
             >
                 <img
@@ -287,6 +305,8 @@ export function ImagePreview(props: {
                     role="dialog"
                     aria-modal="true"
                     aria-label={activePreview.label}
+                    // Keep preview gestures from starting an ancestor's attachment drag.
+                    onPointerDown={stopEvent}
                 >
                     <div className="flex items-center gap-2 border-b border-white/10 bg-black/50 px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.5rem)]">
                         <div className="min-w-0 flex-1 truncate text-sm font-medium">{activePreview.fileName}</div>

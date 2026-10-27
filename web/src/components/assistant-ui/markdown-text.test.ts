@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { unified } from 'unified'
+import { unified, type PluggableList } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkRehype from 'remark-rehype'
 import { toHtml } from 'hast-util-to-html'
@@ -8,8 +8,11 @@ import remarkNonHttpsAutolink from '@/lib/remark-non-https-autolink'
 import remarkStripCjkAutolink from '@/lib/remark-strip-cjk-autolink'
 import {
     MARKDOWN_PLUGINS,
+    MARKDOWN_PLUGINS_STANDALONE,
+    MARKDOWN_PLUGINS_STANDALONE_WITH_BREAKS,
     MARKDOWN_PLUGINS_WITH_BREAKS,
     MARKDOWN_REHYPE_PLUGINS,
+    isExternalHttpHref,
 } from '@/components/assistant-ui/markdown-text'
 
 describe('MARKDOWN_PLUGINS integration', () => {
@@ -30,15 +33,37 @@ describe('MARKDOWN_PLUGINS integration', () => {
     })
 })
 
-function render(markdown: string): string {
+function render(markdown: string, plugins: PluggableList = MARKDOWN_PLUGINS): string {
     const processor = unified()
         .use(remarkParse)
-        .use(MARKDOWN_PLUGINS)
+        .use(plugins)
         .use(remarkRehype)
         .use(MARKDOWN_REHYPE_PLUGINS)
     const tree = processor.runSync(processor.parse(markdown))
     return toHtml(tree as never)
 }
+
+describe('MARKDOWN_PLUGINS — GFM strikethrough', () => {
+    const pluginVariants = [
+        ['default', MARKDOWN_PLUGINS],
+        ['standalone', MARKDOWN_PLUGINS_STANDALONE],
+        ['with breaks', MARKDOWN_PLUGINS_WITH_BREAKS],
+        ['standalone with breaks', MARKDOWN_PLUGINS_STANDALONE_WITH_BREAKS],
+    ] as const
+
+    it.each(pluginVariants)(
+        'keeps a single tilde literal in terminal prompts (%s)',
+        (_, plugins) => {
+            const terminalPrompt = 'ims@ims-dev-1:~$ ls\ndev\nims@ims-dev-1:~$'
+            const html = render(terminalPrompt, plugins)
+
+            expect(html).not.toContain('<del>')
+            expect(html).toContain('ims@ims-dev-1:~$ ls')
+            expect(html).toContain('ims@ims-dev-1:~$')
+            expect(render('status: ~~removed~~', plugins)).toContain('<del>removed</del>')
+        }
+    )
+})
 
 describe('MARKDOWN_PLUGINS — currency prose vs KaTeX', () => {
     // Regression: prose with multiple "$N" amounts must NOT be eaten by KaTeX.
@@ -71,5 +96,37 @@ describe('MARKDOWN_PLUGINS — currency prose vs KaTeX', () => {
         const md = "Before\n\n$$\nE = mc^2\n$$\n\nAfter"
         const html = render(md)
         expect(html).toContain('class="katex"')
+    })
+})
+
+describe('isExternalHttpHref', () => {
+    it('is true for http/https links', () => {
+        expect(isExternalHttpHref('https://example.com')).toBe(true)
+        expect(isExternalHttpHref('http://example.com/path?q=1#frag')).toBe(true)
+        expect(isExternalHttpHref('HTTPS://Example.com')).toBe(true)
+    })
+
+    it('is false for relative/SPA hrefs', () => {
+        expect(isExternalHttpHref('/settings')).toBe(false)
+        expect(isExternalHttpHref('./foo')).toBe(false)
+        expect(isExternalHttpHref('#section')).toBe(false)
+        expect(isExternalHttpHref('?q=1')).toBe(false)
+        expect(isExternalHttpHref('/path:colon')).toBe(false)
+    })
+
+    it('is false for non-http(s) schemes', () => {
+        expect(isExternalHttpHref('mailto:a@b.com')).toBe(false)
+        expect(isExternalHttpHref('vscode://file/foo')).toBe(false)
+        expect(isExternalHttpHref('javascript:alert(1)')).toBe(false)
+    })
+
+    it('is false for Windows drive paths (single-letter scheme, not http/https)', () => {
+        expect(isExternalHttpHref('C:\\Users\\ian\\file.txt')).toBe(false)
+    })
+
+    it('is false for empty/nullish input', () => {
+        expect(isExternalHttpHref('')).toBe(false)
+        expect(isExternalHttpHref(null)).toBe(false)
+        expect(isExternalHttpHref(undefined)).toBe(false)
     })
 })

@@ -22,6 +22,7 @@ import {
   PING_PEER_TOOL_DESCRIPTION,
   SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation';
+import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools';
 
 const DEFAULT_TOOL_NAMES = ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
 
@@ -36,6 +37,11 @@ function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string>
     } else if (a === '--tools' && i + 1 < argv.length) {
       toolNames = new Set(argv[i + 1].split(',').map((name) => name.trim()).filter(Boolean));
       i++;
+    } else if (a === '--hapi-session-id' && i + 1 < argv.length) {
+      // Orphan-reap stamp only (#2003); consume so the value is not left as a stray argv token.
+      i++;
+    } else if (a.startsWith('--hapi-session-id=')) {
+      // `--hapi-session-id=<uuid>` form — nothing further to consume.
     }
   }
   return { url, toolNames };
@@ -45,6 +51,13 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
   try {
     // Resolve target HTTP MCP URL
     const { url: urlFromArgs, toolNames } = parseArgs(argv);
+
+    // HAPI_DISABLE_PEER_TOOLS=1: drop peer tools even when explicitly listed,
+    // so a wrapped agent cannot re-enable them via a stale --tools value.
+    if (isPeerToolsDisabled()) {
+      for (const name of PEER_TOOL_NAMES) toolNames.delete(name);
+    }
+
     const baseUrl = urlFromArgs || process.env.HAPI_HTTP_MCP_URL || '';
 
     if (!baseUrl) {
@@ -110,15 +123,15 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
 
 
     const displayImageInputSchema: z.ZodTypeAny = z.object({
-      path: z.string().describe('Local filesystem path of the image to display to the user'),
-      title: z.string().optional().describe('Optional display title or filename for the image'),
+      path: z.string().describe('Absolute filesystem path of the local image to display to the human user. This file is sent for user display, not provided to the model for image inspection'),
+      title: z.string().optional().describe('Optional display title or filename shown to the human user'),
     });
 
     if (toolNames.has('display_image')) {
       server.registerTool<any, any>(
         'display_image',
         {
-          description: `Display a local image file inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
+          description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
           title: 'Display Image',
           inputSchema: displayImageInputSchema,
         },

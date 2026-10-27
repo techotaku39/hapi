@@ -79,6 +79,7 @@ describe('FilePage markdown preview', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         window.localStorage.clear()
+        window.sessionStorage.clear()
     })
 
     it('renders markdown preview by default and toggles to source', async () => {
@@ -113,5 +114,50 @@ describe('FilePage markdown preview', () => {
         await waitFor(() => {
             expect(screen.getByTestId('markdown-preview')).toBeInTheDocument()
         })
+    })
+
+    it('uses the shared code-wrap preference for the source preview', async () => {
+        window.localStorage.setItem('hapi-code-wrap', '1')
+        renderWithProviders()
+
+        await waitFor(() => {
+            expect(screen.getByTestId('markdown-preview')).toBeInTheDocument()
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('code')).toHaveTextContent('# Heading')
+        })
+        const sourceCode = screen.getByRole('code')
+        const sourcePre = sourceCode.closest('pre')
+        const wrapToggle = screen.getByRole('button', { pressed: true })
+
+        expect(wrapToggle).toBeInTheDocument()
+        expect(sourcePre).toHaveStyle({ whiteSpace: 'pre-wrap', wordBreak: 'break-word' })
+
+        fireEvent.click(wrapToggle)
+
+        expect(screen.getByRole('button', { pressed: false })).toBeInTheDocument()
+        expect(sourcePre).toHaveStyle({ whiteSpace: 'pre' })
+        expect(window.localStorage.getItem('hapi-code-wrap')).toBeNull()
+    })
+
+    it('preserves the file preview scroll position across route remounts', async () => {
+        const firstRender = renderWithProviders()
+
+        await waitFor(() => {
+            expect(screen.getByTestId('markdown-preview')).toBeInTheDocument()
+        })
+        const firstScrollRegion = document.querySelector('[data-hapi-file-scroll="true"]') as HTMLElement
+        expect(firstScrollRegion).not.toBeNull()
+        firstScrollRegion.scrollTop = 123
+        firstRender.unmount()
+
+        renderWithProviders()
+        await waitFor(() => {
+            expect(screen.getByTestId('markdown-preview')).toBeInTheDocument()
+        })
+        const secondScrollRegion = document.querySelector('[data-hapi-file-scroll="true"]') as HTMLElement
+        expect(secondScrollRegion.scrollTop).toBe(123)
     })
 })

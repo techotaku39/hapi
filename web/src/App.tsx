@@ -9,19 +9,25 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthSource } from '@/hooks/useAuthSource'
 import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
+import { useFixedSessionOrder } from '@/hooks/useFixedSessionOrder'
+import { useSessions } from '@/hooks/queries/useSessions'
 import { useReconnectingState } from '@/hooks/useReconnectingState'
 import { useSyncingState } from '@/hooks/useSyncingState'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
+import { refreshAllAgyCatalogs } from '@/lib/agyCatalogAnnouncement'
 import { AppContextProvider } from '@/lib/app-context'
-import { clearMessageWindow, syncTailMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, rewindMessageWindow, syncTailMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
+import { translateInputRequestTitle } from '@/lib/input-request-toast'
 import { VoiceProvider } from '@/lib/voice-context'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
 import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
+import { canUseAppBadging, useAppBadge } from '@/hooks/useAppBadge'
+import { useAppBadgePreference } from '@/hooks/useAppBadgePreference'
 import { reconcileQueuedStateAfterConnect } from '@/lib/queued-state-reconciliation'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
@@ -66,11 +72,32 @@ function AppInner() {
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
     const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
     const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
+    const [titleSuggestionAvailable, setTitleSuggestionAvailable] = useState(false)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
     const router = useRouter()
     const { addToast } = useToast()
+
+    useEffect(() => {
+        let cancelled = false
+        setTitleSuggestionAvailable(false)
+        if (!api) return () => { cancelled = true }
+
+        void api.getHealth()
+            .then((health) => {
+                if (!cancelled) {
+                    setTitleSuggestionAvailable(health.capabilities?.titleSuggestion === true)
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setTitleSuggestionAvailable(false)
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [api])
 
     useEffect(() => {
         const tg = getTelegramWebApp()
@@ -170,6 +197,20 @@ function AppInner() {
     const isFirstConnectRef = useRef(true)
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
+    const { appBadgeEnabled: appBadgePreferenceEnabled } = useAppBadgePreference()
+    const appBadgeEnabled = Boolean(api && token && appBadgePreferenceEnabled && canUseAppBadging())
+    const {
+        sessions: appBadgeSessions,
+        isLoading: appBadgeSessionsLoading,
+        error: appBadgeSessionsError,
+    } = useSessions(api, { enabled: appBadgeEnabled })
+    useAppBadge({
+        enabled: appBadgeEnabled,
+        scope: baseUrl,
+        sessions: appBadgeSessions,
+        isLoading: appBadgeSessionsLoading,
+        hasError: Boolean(appBadgeSessionsError),
+    })
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
 
     useEffect(() => {
@@ -258,7 +299,8 @@ function AppInner() {
             // freshness window on `useSession`, a previously-viewed session that
             // received updates during the SSE gap would otherwise serve stale
             // cached data on remount.  See tiann/hapi#884.
-            queryClient.invalidateQueries({ queryKey: ['session'] })
+            queryClient.invalidateQueries({ queryKey: ['session'] }),
+            refreshAllAgyCatalogs(queryClient)
         ]
         const refreshMessages = (selectedSessionId && api)
             ? syncTailMessages(api, selectedSessionId)
@@ -289,7 +331,11 @@ function AppInner() {
         if (!api || event.sessionId !== selectedSessionId) {
             return
         }
-        clearMessageWindow(event.sessionId)
+        if (event.reason === 'rewind' && event.truncateFromLocalId) {
+            rewindMessageWindow(event.sessionId, event.truncateFromLocalId)
+        } else {
+            clearMessageWindow(event.sessionId)
+        }
         void syncTailMessages(api, event.sessionId)
     }, [api, selectedSessionId])
 
@@ -310,6 +356,10 @@ function AppInner() {
     const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()
+        const inputTitle = translateInputRequestTitle(normalizedTitle, t)
+        if (inputTitle) {
+            return { title: inputTitle, body: normalizedBody }
+        }
 
         if (normalizedTitle === 'Ready for input') {
             const waitingMatch = normalizedBody.match(/^(.+)\s+is waiting in\s+(.+)$/i)
@@ -368,6 +418,9 @@ function AppInner() {
     )
     const sseEnabled = Boolean(api && token)
     const showReconnectingBanner = sseDisconnected && !isSyncing
+    // "固定会话顺序": read once here and threaded into both useSSE instances
+    // — either subscription can upsert into the shared sessions cache.
+    const { fixedSessionOrder } = useFixedSessionOrder()
 
     const { subscriptionId: globalSubscriptionId } = useSSE({
         enabled: sseEnabled,
@@ -378,7 +431,8 @@ function AppInner() {
         onConnect: handleSseConnect,
         onDisconnect: handleSseDisconnect,
         onEvent: () => {},
-        onToast: handleToast
+        onToast: handleToast,
+        fixedSessionOrder
     })
 
     const { subscriptionId: sessionSubscriptionId } = useSSE({
@@ -388,7 +442,8 @@ function AppInner() {
         subscription: sessionEventSubscription ?? undefined,
         scope: 'full',
         onConnect: handleSessionSseConnect,
-        onEvent: handleSseEvent
+        onEvent: handleSseEvent,
+        fixedSessionOrder
     })
 
     useVisibilityReporter({
@@ -482,7 +537,7 @@ function AppInner() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, baseUrl }}>
+        <AppContextProvider value={{ api, token, baseUrl, titleSuggestionAvailable }}>
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}

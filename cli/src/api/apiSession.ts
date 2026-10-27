@@ -1,3 +1,4 @@
+type QueueCancelResult = boolean | 'in-flight' | 'indeterminate' | 'consumed'
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { io, type Socket } from 'socket.io-client'
@@ -9,7 +10,7 @@ import { apiValidationError } from '@/utils/errorUtils'
 import { AsyncLock } from '@/utils/lock'
 import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
-import { extractUserRequest } from '@/agy/utils/agySessionScanner'
+import { extractUserRequest } from '@/agy/utils/agyMessageText'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from "@hapi/protocol"
 import type { SessionEndReason } from '@hapi/protocol'
 import type { ClientToServerEvents, ServerToClientEvents, TerminalOutputPayload, Update } from '@hapi/protocol'
@@ -36,7 +37,7 @@ import type {
 import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessageSchema } from './types'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
-import { cleanupUploadDir } from '../modules/common/handlers/uploads'
+import { cleanupUploadDir, preserveUploadDirOnExit } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
@@ -231,6 +232,17 @@ function hasSameJsonValue(left: unknown, right: unknown): boolean {
 }
 
 export class ApiSessionClient extends EventEmitter {
+    private reconnectHandler: (() => void) | null = null
+    onReconnect(handler: (() => void) | null): void { this.reconnectHandler = handler }
+    /** When false, socket.io must not keep the CLI immortal after hub archive (#1910). */
+    private allowReconnect = true
+    /**
+     * Latch for hub-archived EXIT (#1911 criterion 6). Bootstrap may apply
+     * hub-archived via updateMetadata CAS before flavor runners call
+     * registerKillSessionHandler; EventEmitter does not replay past emits, so
+     * the handler must read this synchronously at registration.
+     */
+    hubArchived = false
     private readonly token: string
     readonly sessionId: string
     private metadata: Metadata | null
@@ -241,11 +253,14 @@ export class ApiSessionClient extends EventEmitter {
     private pendingMessages: { message: UserMessage; localId?: string }[] = []
     private pendingHubPromptEchoes: { text: string; localIds: string[] }[] = []
     private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
-    private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
+    private cancelQueuedMessageCallback: ((localId: string) => QueueCancelResult | Promise<QueueCancelResult>) | null = null
+    private retryQueuedMessageCallback: ((localId: string) => boolean | Promise<boolean>) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
     private backfillInFlight: Promise<void> | null = null
     private needsBackfill = false
     private hasConnectedOnce = false
+    // Replayed on (re)connect: a volatile heartbeat sent while disconnected is dropped (#2053).
+    private latestKeepAlive: Omit<Parameters<ClientToServerEvents['session-alive']>[0], 'sid' | 'time'> | null = null
     readonly rpcHandlerManager: RpcHandlerManager
     private readonly terminalManager: TerminalManager
     private agentTerminalResize: ((cols: number, rows: number) => void) | null = null
@@ -328,15 +343,26 @@ export class ApiSessionClient extends EventEmitter {
             logger.debug('Socket connected successfully')
             this.awaitingMaterializedConnection = false
             this.rpcHandlerManager.onSocketConnect(this.socket)
-            if (this.hasConnectedOnce) {
+            const isReconnect = this.hasConnectedOnce
+            if (isReconnect) {
                 this.needsBackfill = true
             }
-            void this.backfillIfNeeded()
+            // Hub may have archived while we were offline (KillSession miss +
+            // no live update-session). On reconnect, reconcile metadata before
+            // message backfill so hub-archived can stop reconnect immortality (#1910).
+            const afterMeta = isReconnect
+                ? this.reconcileSessionMetadata()
+                : Promise.resolve()
+            void afterMeta.finally(() => {
+                void this.backfillIfNeeded()
+            })
             this.hasConnectedOnce = true
+            this.reconnectHandler?.()
             this.socket.emit('session-alive', {
                 sid: this.sessionId,
                 time: Date.now(),
-                thinking: false
+                thinking: false,
+                ...this.latestKeepAlive
             })
         })
 
@@ -348,6 +374,13 @@ export class ApiSessionClient extends EventEmitter {
             logger.debug('[API] Socket disconnected:', reason)
             this.rpcHandlerManager.onSocketDisconnect()
             this.terminalManager.closeAll()
+            if (!this.allowReconnect) {
+                try {
+                    this.socket.io.opts.reconnection = false
+                    this.socket.disconnect()
+                } catch { /* already tearing down */ }
+                return
+            }
             if (this.hasConnectedOnce) {
                 this.needsBackfill = true
             }
@@ -421,7 +454,7 @@ export class ApiSessionClient extends EventEmitter {
             this.agentTerminalActive = false
         }))
 
-        this.socket.on('update', (data: Update, ack?: (response: { removed: boolean }) => void) => {
+        this.socket.on('update', async (data: Update, ack?: (response: { removed: boolean; inFlight?: boolean; indeterminate?: boolean; accepted?: boolean; consumed?: boolean }) => void) => {
             try {
                 if (!data.body) return
 
@@ -430,23 +463,49 @@ export class ApiSessionClient extends EventEmitter {
                     return
                 }
 
+                if (data.body.t === 'retry-queued-message') {
+                    // Explicit user retry: release any held in-memory
+                    // reservation and bypass the normal message-id dedup.
+                    let accepted = true
+                    if (data.body.localId && this.cancelQueuedMessageCallback) {
+                        const cancellation = this.cancelQueuedMessageCallback(data.body.localId)
+                        const cancelled = cancellation instanceof Promise ? await cancellation : cancellation
+                        accepted = cancelled !== 'in-flight' && cancelled !== 'consumed'
+                        if (cancelled === 'indeterminate') {
+                            accepted = await this.retryQueuedMessageCallback?.(data.body.localId) === true
+                        }
+                        if (cancelled === 'consumed') {
+                            ack?.({ removed: false, accepted: false, consumed: true })
+                            return
+                        }
+                    }
+                    if (accepted) {
+                        this.handleIncomingMessage(data.body.message, true)
+                    }
+                    ack?.({ removed: false, accepted })
+                    return
+                }
+
                 if (data.body.t === 'cancel-queued-message') {
-                    const removed = (data.body.localId && this.cancelQueuedMessageCallback)
+                    const cancellation = (data.body.localId && this.cancelQueuedMessageCallback)
                         ? this.cancelQueuedMessageCallback(data.body.localId)
                         : false
-                    ack?.({ removed })
+                    const result = cancellation instanceof Promise ? await cancellation : cancellation
+                    // 'in-flight' = the row is inside an async steer: not
+                    // removed, but also NOT consumed — the hub must neither
+                    // delete it nor stamp invoked_at.
+                    ack?.({
+                        removed: result === true,
+                        inFlight: result === 'in-flight',
+                        indeterminate: result === 'indeterminate',
+                        consumed: result === 'consumed'
+                    })
                     return
                 }
 
                 if (data.body.t === 'update-session') {
                     if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
-                        const parsed = MetadataSchema.safeParse(data.body.metadata.value)
-                        if (parsed.success) {
-                            this.metadata = parsed.data
-                        } else {
-                            logger.debug('[API] Ignoring invalid metadata update', { version: data.body.metadata.version })
-                        }
-                        this.metadataVersion = data.body.metadata.version
+                        this.applyRemoteMetadata(data.body.metadata.version, data.body.metadata.value)
                     }
                     if (data.body.agentState && data.body.agentState.version > this.agentStateVersion) {
                         const next = data.body.agentState.value
@@ -468,6 +527,11 @@ export class ApiSessionClient extends EventEmitter {
                 this.emit('message', data.body)
             } catch (error) {
                 logger.debug('[SOCKET] [UPDATE] [ERROR] Error handling update', { error })
+                // A failed asynchronous native cancellation is not permission
+                // for the hub's best-effort path to delete a possibly live row.
+                if (data.body?.t === 'cancel-queued-message' || data.body?.t === 'retry-queued-message') {
+                    ack?.({ removed: false, accepted: false, indeterminate: true })
+                }
             }
         })
 
@@ -665,8 +729,12 @@ export class ApiSessionClient extends EventEmitter {
         }
     }
 
-    onCancelQueuedMessage(callback: (localId: string) => boolean): void {
+    onCancelQueuedMessage(callback: (localId: string) => QueueCancelResult | Promise<QueueCancelResult>): void {
         this.cancelQueuedMessageCallback = callback
+    }
+
+    onRetryQueuedMessage(callback: (localId: string) => boolean | Promise<boolean>): void {
+        this.retryQueuedMessageCallback = callback
     }
 
     private enqueueUserMessage(message: UserMessage, localId?: string): void {
@@ -733,8 +801,12 @@ export class ApiSessionClient extends EventEmitter {
         return true
     }
 
-    private handleIncomingMessage(message: { id?: string; seq?: number; localId?: string | null; content: unknown }): void {
-        if (!this.incomingFilter.accept({ id: message.id, seq: message.seq })) {
+    private handleIncomingMessage(
+        message: { id?: string; seq?: number; localId?: string | null; content: unknown },
+        force = false
+    ): void {
+        const accepted = this.incomingFilter.accept({ id: message.id, seq: message.seq })
+        if (!force && !accepted) {
             return
         }
 
@@ -743,7 +815,10 @@ export class ApiSessionClient extends EventEmitter {
             // User messages mirrored from a local agent transcript are history,
             // not new remote input. Keep them in the incoming filter above so
             // reconnect backfill still advances and deduplicates correctly.
-            if (userResult.data.meta?.sentFrom === 'cli') {
+            if (userResult.data.meta?.sentFrom === 'cli'
+                && !(userResult.data.meta.isNativeQueuedMessage === true
+                    && this.metadata?.capabilities?.concurrentClients === true
+                    && message.localId)) {
                 return
             }
             this.enqueueUserMessage(userResult.data, message.localId ?? undefined)
@@ -763,6 +838,63 @@ export class ApiSessionClient extends EventEmitter {
         } catch (error) {
             logger.debug('[API] Backfill failed', error)
             this.needsBackfill = true
+        }
+    }
+
+    /**
+     * Apply a remote metadata snapshot (Socket.IO update-session or reconnect
+     * REST reconcile). Advances metadataVersion and emits hub-archived when
+     * the hub flipped lifecycle while this CLI was unreachable.
+     */
+    private applyRemoteMetadata(version: number, value: unknown): void {
+        if (version <= this.metadataVersion) return
+        const parsed = MetadataSchema.safeParse(value)
+        if (!parsed.success) {
+            logger.debug('[API] Ignoring invalid metadata update', { version })
+            this.metadataVersion = version
+            return
+        }
+        const wasHubArchived = this.metadata?.lifecycleState === 'archived'
+            && this.metadata?.archivedBy === 'hub'
+        this.metadata = parsed.data
+        this.metadataVersion = version
+        // #1910: hub may archive via metadata when KillSession cannot reach
+        // this CLI. Stop reconnect immortality and let runners exit instead
+        // of sitting as PPID=1 orphans.
+        if (!wasHubArchived
+            && parsed.data.lifecycleState === 'archived'
+            && parsed.data.archivedBy === 'hub') {
+            this.noteHubArchived()
+        }
+    }
+
+    private noteHubArchived(): void {
+        this.hubArchived = true
+        this.allowReconnect = false
+        try {
+            this.socket.io.opts.reconnection = false
+        } catch { /* socket may be mid-teardown */ }
+        this.emit('hub-archived')
+    }
+
+    /** Fetch current hub metadata after reconnect; apply hub-archived if set. */
+    private async reconcileSessionMetadata(): Promise<void> {
+        try {
+            const response = await axios.get(
+                `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}`,
+                {
+                    headers: buildHubRequestHeaders({
+                        Authorization: `Bearer ${this.token}`,
+                        'Content-Type': 'application/json'
+                    }),
+                    timeout: 15_000
+                }
+            )
+            const session = response.data?.session
+            if (!session || typeof session.metadataVersion !== 'number') return
+            this.applyRemoteMetadata(session.metadataVersion, session.metadata)
+        } catch (error) {
+            logger.debug('[API] Session metadata reconcile failed', error)
         }
     }
 
@@ -974,7 +1106,7 @@ export class ApiSessionClient extends EventEmitter {
         })
     }
 
-    sendUserMessage(text: string, meta?: MessageMeta): void {
+    sendUserMessage(text: string, meta?: MessageMeta, localId?: string): void {
         if (!text) {
             return
         }
@@ -994,17 +1126,23 @@ export class ApiSessionClient extends EventEmitter {
         this.emitOrQueue(() => {
             this.socket.emit('message', {
                 sid: this.sessionId,
-                message: content
+                message: content,
+                localId
             })
+            if (localId) this.socket.emit('messages-consumed', { sid: this.sessionId, localIds: [localId] })
         })
         this.notifyUserActivity()
+    }
+
+    syncNativeQueuedMessage(localId: string, text: string | null): void {
+        this.emitOrQueue(() => this.socket.emit('native-queue-message', { sid: this.sessionId, localId, text }))
     }
 
     notifyUserActivity(): void {
         void this.materialize()
     }
 
-    sendAgentMessage(body: unknown): void {
+    sendAgentMessage(body: unknown, localId?: string): void {
         const content = {
             role: 'agent',
             content: {
@@ -1018,8 +1156,10 @@ export class ApiSessionClient extends EventEmitter {
         this.emitOrQueue(() => {
             this.socket.emit('message', {
                 sid: this.sessionId,
-                message: content
+                message: content,
+                localId
             })
+            if (localId) this.socket.emit('messages-consumed', { sid: this.sessionId, localIds: [localId] })
         })
     }
 
@@ -1042,6 +1182,13 @@ export class ApiSessionClient extends EventEmitter {
         // Carries the exact in-flight prompt text the web should restore.
         type: 'abort-restore'
         text: string
+    } | {
+        // Structured result of Pi's compact RPC: the web chat renders the
+        // summary as a dedicated block instead of a small status line.
+        type: 'compact-summary'
+        summary: string
+        tokensBefore?: number
+        estimatedTokensAfter?: number
     }, id?: string): void {
         const content = {
             role: 'agent',
@@ -1057,7 +1204,7 @@ export class ApiSessionClient extends EventEmitter {
                 sid: this.sessionId,
                 message: content
             })
-        }, event.type === 'message' || event.type === 'error' ? 'lossless' : 'droppable')
+        }, event.type === 'message' || event.type === 'error' || event.type === 'compact-summary' ? 'lossless' : 'droppable')
     }
 
     emitAgentTerminalOutput(data: string): void {
@@ -1134,7 +1281,7 @@ export class ApiSessionClient extends EventEmitter {
 
     keepAlive(
         thinking: boolean,
-        mode: 'local' | 'remote',
+        mode: 'local' | 'remote' | undefined,
         runtime?: {
             permissionMode?: SessionPermissionMode
             model?: SessionModel
@@ -1145,15 +1292,14 @@ export class ApiSessionClient extends EventEmitter {
             copilotAgentMode?: import('@hapi/protocol').CopilotAgentMode
         }
     ): void {
-        if (this.state !== 'active') {
+        this.latestKeepAlive = { thinking, mode, ...(runtime ?? {}) }
+        if (this.state !== 'active' || !this.socket.connected) {
             return
         }
         this.socket.volatile.emit('session-alive', {
             sid: this.sessionId,
             time: Date.now(),
-            thinking,
-            mode,
-            ...(runtime ?? {})
+            ...this.latestKeepAlive
         })
     }
 
@@ -1167,7 +1313,7 @@ export class ApiSessionClient extends EventEmitter {
         }, 'droppable')
     }
 
-    emitMessagesConsumed(localIds: string[], options?: { clearQueuedThinkingGrace?: boolean }): void {
+    emitMessagesConsumed(localIds: string[], options?: { clearQueuedThinkingGrace?: boolean; steered?: boolean }): void {
         if (localIds.length === 0) return
         // `clearQueuedThinkingGrace` is an opt-in signal for the hub to drop
         // the 15s queued-thinking grace immediately. Only synchronous handlers
@@ -1175,19 +1321,53 @@ export class ApiSessionClient extends EventEmitter {
         // inside `onUserMessage`) should set it — normal queue drains still
         // need the grace so the spinner doesn't flicker between drain and
         // backend.prompt start.
-        const payload: { sid: string; localIds: string[]; clearQueuedThinkingGrace?: boolean } = {
+        const payload: {
+            sid: string
+            localIds: string[]
+            clearQueuedThinkingGrace?: boolean
+            steered?: boolean
+        } = {
             sid: this.sessionId,
             localIds
         }
         if (options?.clearQueuedThinkingGrace) {
             payload.clearQueuedThinkingGrace = true
         }
+        if (options?.steered) {
+            payload.steered = true
+        }
         this.emitOrQueue(() => this.socket.emit('messages-consumed', payload))
     }
 
-    sendSessionDeath(reason?: SessionEndReason): void {
+    /** Persist the durable pre-dispatch/restore state with a hub ACK. */
+    async setSteerDeliveryState(localIds: string[], state: 'queued' | 'dispatching'): Promise<boolean> {
+        if (localIds.length === 0 || this.state !== 'active') return false
+        try {
+            const response = await this.socket.timeout(5_000).emitWithAck('messages-steer-state', {
+                sid: this.sessionId,
+                localIds,
+                state
+            })
+            return response?.ok === true
+        } catch (error) {
+            logger.debug('[API] Failed to persist steer delivery state', error)
+            return false
+        }
+    }
+
+    /** Persist a steer whose transport completed ambiguously; no consumed ACK. */
+    emitSteerIndeterminate(localIds: string[]): void {
+        if (localIds.length === 0) return
+        this.emitOrQueue(() => this.socket.emit('messages-indeterminate', {
+            sid: this.sessionId,
+            localIds
+        }))
+    }
+
+    sendSessionDeath(reason?: SessionEndReason, options?: { preserveUploads?: boolean }): void {
         if (this.state === 'active') {
-            void cleanupUploadDir(this.sessionId)
+            if (options?.preserveUploads) preserveUploadDirOnExit(this.sessionId)
+            else void cleanupUploadDir(this.sessionId)
         }
         this.emitOrQueue(() => {
             this.socket.emit('session-end', { sid: this.sessionId, time: Date.now(), reason })
@@ -1206,6 +1386,13 @@ export class ApiSessionClient extends EventEmitter {
         }
         this.metadataLock.inLock(async () => {
             await backoff(async () => {
+                // #1911 M1 criterion 6: hub-archived → EXIT (same as applyRemoteMetadata).
+                if (this.metadata?.lifecycleState === 'archived' && this.metadata.archivedBy === 'hub') {
+                    this.noteHubArchived()
+                    logger.debug('[API] Skipping metadata update; session hub-archived')
+                    return
+                }
+
                 const current = this.metadata ?? ({} as Metadata)
                 const updated = handler(current)
 
@@ -1215,26 +1402,55 @@ export class ApiSessionClient extends EventEmitter {
                     metadata: updated
                 }) as unknown
 
-                applyVersionedAck(answer, {
-                    valueKey: 'metadata',
-                    parseValue: (value) => {
-                        const parsed = MetadataSchema.safeParse(value)
-                        return parsed.success ? parsed.data : null
-                    },
-                    applyValue: (value) => {
-                        this.metadata = value
-                    },
-                    applyVersion: (version) => {
-                        this.metadataVersion = version
-                    },
-                    logInvalidValue: (context, version) => {
-                        const suffix = context === 'success' ? 'ack' : 'version-mismatch ack'
-                        logger.debug(`[API] Ignoring invalid metadata value from ${suffix}`, { version })
-                    },
-                    invalidResponseMessage: 'Invalid update-metadata response',
-                    errorMessage: 'Metadata update failed',
-                    versionMismatchMessage: 'Metadata version mismatch'
-                })
+                try {
+                    applyVersionedAck(answer, {
+                        valueKey: 'metadata',
+                        parseValue: (value) => {
+                            const parsed = MetadataSchema.safeParse(value)
+                            return parsed.success ? parsed.data : null
+                        },
+                        applyValue: (value) => {
+                            // Route success+preserve (and mismatch) through the same
+                            // hub-archived detector as applyRemoteMetadata so the CLI
+                            // exits rather than booting against an archived row.
+                            const wasHubArchived = this.metadata?.lifecycleState === 'archived'
+                                && this.metadata?.archivedBy === 'hub'
+                            this.metadata = value
+                            if (
+                                !wasHubArchived
+                                && value?.lifecycleState === 'archived'
+                                && value?.archivedBy === 'hub'
+                            ) {
+                                this.noteHubArchived()
+                            }
+                        },
+                        applyVersion: (version) => {
+                            this.metadataVersion = version
+                        },
+                        logInvalidValue: (context, version) => {
+                            const suffix = context === 'success' ? 'ack' : 'version-mismatch ack'
+                            logger.debug(`[API] Ignoring invalid metadata value from ${suffix}`, { version })
+                        },
+                        invalidResponseMessage: 'Invalid update-metadata response',
+                        errorMessage: 'Metadata update failed',
+                        versionMismatchMessage: 'Metadata version mismatch'
+                    })
+                } catch (error) {
+                    // True version races still throw; if hub archived mid-flight,
+                    // applied metadata is archived — exit, do not spin.
+                    if (this.metadata?.lifecycleState === 'archived' && this.metadata.archivedBy === 'hub') {
+                        this.noteHubArchived()
+                        return
+                    }
+                    throw error
+                }
+
+                // Success+preserve terminates backoff without throw; ensure EXIT
+                // if ack applied hub-archived (detector above already fired).
+                if (this.metadata?.lifecycleState === 'archived' && this.metadata.archivedBy === 'hub') {
+                    this.noteHubArchived()
+                    return
+                }
             })
         })
     }

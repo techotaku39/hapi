@@ -19,6 +19,9 @@
     --app-chat-user-fg: #24292f;
     --app-chat-user-chip-bg: #DBEAFE;
     --app-chat-user-chip-fg: #1447E6;
+    --app-chat-user-chip-action-bg: #1d4ed8;
+    --app-chat-user-chip-action-fg: #bfdbfe;
+    --app-chat-user-chip-action-hover-fg: #fecaca;
     --app-tool-card-bg: #f2f4f6;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #e9edf2;
@@ -99,6 +102,9 @@
     --app-chat-user-fg: #f5f7fa;
     --app-chat-user-chip-bg: rgba(37, 99, 235, 0.22);
     --app-chat-user-chip-fg: #93c5fd;
+    --app-chat-user-chip-action-bg: #171f32;
+    --app-chat-user-chip-action-fg: #7088aa;
+    --app-chat-user-chip-action-hover-fg: #f87171;
     --app-tool-card-bg: #2b2f34;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #343a41;
@@ -177,6 +183,9 @@
     --app-chat-user-fg: #f5f7fa;
     --app-chat-user-chip-bg: rgba(78, 161, 255, 0.18);
     --app-chat-user-chip-fg: #8fc4ff;
+    --app-chat-user-chip-action-bg: #0d1428;
+    --app-chat-user-chip-action-fg: #7088aa;
+    --app-chat-user-chip-action-hover-fg: #f87171;
     --app-tool-card-bg: #0e0e10;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #161618;
@@ -323,6 +332,93 @@ html:has(.chat-scroll-y) #root {
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
+}
+
+/* Keep only the two primary session surfaces visually quiet while idle.
+ * Preserve scrollbar width/gutters so hiding the thumb cannot shift content. */
+.scrollbar-auto-hide {
+    transition: scrollbar-color 300ms ease-out;
+}
+
+.scrollbar-auto-hide::-webkit-scrollbar-thumb {
+    transition: background-color 300ms ease-out;
+}
+
+.scrollbar-auto-hide:not([data-scrollbar-visible="true"]):not(:focus-within) {
+    scrollbar-color: transparent transparent;
+}
+
+.scrollbar-auto-hide:not([data-scrollbar-visible="true"]):not(:focus-within)::-webkit-scrollbar-thumb {
+    background-color: transparent;
+}
+
+.scrollbar-auto-hide:not([data-scrollbar-visible="true"]):not(:focus-within)::-webkit-scrollbar-thumb:hover {
+    background-color: var(--app-scrollbar-thumb-hover);
+}
+
+.scrollbar-auto-hide-container {
+    position: relative;
+}
+
+.transient-scrollbar-fallback {
+    display: none;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 10;
+    width: 10px;
+    /* Stale thumb geometry during resize must not create outer scrollbars. */
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.transient-scrollbar-fallback-left {
+    left: 0;
+}
+
+.transient-scrollbar-fallback-right {
+    right: 0;
+}
+
+.transient-scrollbar-fallback-thumb {
+    position: absolute;
+    top: 0;
+    left: 3px;
+    width: 4px;
+    min-height: 24px;
+    border-radius: 999px;
+    background-color: var(--app-scrollbar-thumb);
+    opacity: 0;
+    transition: opacity 300ms ease-out;
+}
+
+.transient-scrollbar-fallback[data-visible="true"] .transient-scrollbar-fallback-thumb {
+    opacity: 1;
+}
+
+@media (hover: none) and (pointer: coarse) {
+    /* Mobile browsers may paint native overlay scrollbars outside the CSS
+     * transition pipeline. Keep the native hit area, but use the fallback
+     * thumb for the animated visual. */
+    .scrollbar-auto-hide {
+        scrollbar-color: transparent transparent;
+    }
+
+    .scrollbar-auto-hide::-webkit-scrollbar-thumb {
+        background-color: transparent;
+    }
+
+    .transient-scrollbar-fallback {
+        display: block;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scrollbar-auto-hide,
+    .scrollbar-auto-hide::-webkit-scrollbar-thumb,
+    .transient-scrollbar-fallback-thumb {
+        transition-duration: 0s;
+    }
 }
 
 /* On touch-first devices, keep the chat scrollbar from shifting centered content. */
@@ -662,4 +758,27 @@ html[data-theme="oled"] .shiki span:not([data-line-number]) {
 .tsqd-open-btn-container {
   bottom: 50% !important;
   transform: translateY(50%);
+}
+
+/* Composer attachment controls stay discoverable on touch, but stay quiet
+   until the attachment is targeted on mouse-driven layouts. */
+@media (hover: hover) and (pointer: fine) {
+  .hapi-composer-attachment-control {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+
+  [data-hapi-composer-attachment-id]:hover .hapi-composer-attachment-control,
+  [data-hapi-composer-attachment-id]:focus-within .hapi-composer-attachment-control,
+  [data-hapi-composer-attachment-dragging] .hapi-composer-attachment-control {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .hapi-composer-attachment-control.hapi-composer-attachment-file-control {
+    opacity: 1;
+    pointer-events: auto;
+    transition: none;
+  }
 }

@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { getEventPresentation, formatMessageTimestamp, formatOutlineTimestamp, formatResetTime } from './presentation'
+import { getEventPresentation, formatDuration, formatMessageTimestamp, formatOutlineTimestamp, formatResetTime } from './presentation'
+
+describe('formatDuration', () => {
+    it('keeps sub-minute durations at one decimal place', () => {
+        expect(formatDuration(59_900)).toBe('59.9s')
+    })
+
+    it('omits zero seconds for an exact minute', () => {
+        expect(formatDuration(60_000)).toBe('1m')
+    })
+
+    it('keeps non-zero minute and second components', () => {
+        expect(formatDuration(537_000)).toBe('8m 57s')
+    })
+
+    it('rounds fractional seconds across minute and hour boundaries', () => {
+        expect(formatDuration(119_500)).toBe('2m')
+        expect(formatDuration(3_599_500)).toBe('1h')
+        expect(formatDuration(3_601_000)).toBe('1h 1s')
+    })
+
+    it('uses hours and omits zero trailing components', () => {
+        expect(formatDuration(3_600_000)).toBe('1h')
+        expect(formatDuration(3_661_000)).toBe('1h 1m 1s')
+    })
+})
 
 describe('formatOutlineTimestamp', () => {
     it('shows only the time for same-day messages', () => {
@@ -233,6 +258,27 @@ describe('getEventPresentation — thread goals', () => {
         expect(result.text).toBe('Goal limited by budget · 4k / 5k')
     })
 
+    it.each([
+        ['blocked', 'Goal blocked'],
+        ['usageLimited', 'Goal limited by usage']
+    ] as const)('formats %s goal status', (status, expected) => {
+        const result = getEventPresentation({
+            type: 'thread-goal-updated',
+            goal: {
+                threadId: 'thread-1',
+                objective: 'ship goal support',
+                status,
+                tokenBudget: null,
+                tokensUsed: 0,
+                timeUsedSeconds: 0,
+                createdAt: 1,
+                updatedAt: 2
+            }
+        })
+
+        expect(result.text).toBe(expected)
+    })
+
     it('formats goal clear events', () => {
         const result = getEventPresentation({ type: 'thread-goal-cleared', threadId: 'thread-1' })
 
@@ -249,6 +295,20 @@ describe('getEventPresentation — recap (away_summary)', () => {
 
         expect(result.icon).toBe('💭')
         expect(result.text).toBe('recap: Building the login flow, next: wire up the submit handler.')
+    })
+})
+
+describe('getEventPresentation — compact-summary', () => {
+    it('keeps the label short (the chat renders the full summary as a block)', () => {
+        const result = getEventPresentation({
+            type: 'compact-summary',
+            summary: '## Goal\nLong summary content',
+            tokensBefore: 1000,
+            estimatedTokensAfter: 120
+        })
+
+        expect(result.icon).toBe('📦')
+        expect(result.text).toBe('Context compacted')
     })
 })
 

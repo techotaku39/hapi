@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import type { FileSearchItem, GitFileStatus } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
 import { DirectoryTree } from '@/components/SessionFiles/DirectoryTree'
+import { FileActionMenu } from '@/components/FileActionMenu'
+import { useFileMenuTrigger } from '@/hooks/useFileMenuTrigger'
+import type { AnchoredMenuPoint } from '@/hooks/useAnchoredMenu'
+import { appendFileReferenceToComposerDraft } from '@/lib/file-composer'
+import { resolveAbsoluteFilePath } from '@/lib/file-path'
 import { SessionHeader } from '@/components/SessionHeader'
 import { LoadingState } from '@/components/LoadingState'
 import { useAppContext } from '@/lib/app-context'
@@ -63,6 +69,29 @@ function SortIcon() {
 }
 
 const DIRECTORY_SORT_STORAGE_KEY = 'hapi-directory-sort'
+const FILES_TAB_STORAGE_KEY = 'hapi-files-tab'
+
+type FilesTab = 'changes' | 'directories'
+
+function readFilesTab(): FilesTab {
+    try {
+        const value = localStorage.getItem(FILES_TAB_STORAGE_KEY)
+        if (value === 'changes' || value === 'directories') {
+            return value
+        }
+    } catch {
+        // Use the default when storage is unavailable.
+    }
+    return 'changes'
+}
+
+function persistFilesTab(tab: FilesTab): void {
+    try {
+        localStorage.setItem(FILES_TAB_STORAGE_KEY, tab)
+    } catch {
+        // Tab switching still works when storage is unavailable.
+    }
+}
 
 function readDirectorySort(): DirectorySort {
     try {
@@ -233,15 +262,20 @@ function LineChanges(props: { added: number; removed: number }) {
 function GitFileRow(props: {
     file: GitFileStatus
     onOpen: () => void
+    onOpenMenu: (point: AnchoredMenuPoint) => void
     showDivider: boolean
 }) {
     const { t } = useTranslation()
     const subtitle = getProjectRootLabel(props.file.filePath, t)
+    const rowHandlers = useFileMenuTrigger({
+        onOpen: props.onOpen,
+        onOpenMenu: props.onOpenMenu,
+    })
 
     return (
         <button
             type="button"
-            onClick={props.onOpen}
+            {...rowHandlers}
             className={`flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] transition-colors ${props.showDivider ? 'border-b border-[var(--app-divider)]' : ''}`}
         >
             <FileIcon fileName={props.file.fileName} size={22} />
@@ -260,10 +294,15 @@ function GitFileRow(props: {
 function SearchResultRow(props: {
     file: FileSearchItem
     onOpen: () => void
+    onOpenMenu: (point: AnchoredMenuPoint) => void
     showDivider: boolean
 }) {
     const { locale } = useTranslation()
     const metadata = formatFileMetadata(props.file.size, props.file.modified, locale)
+    const rowHandlers = useFileMenuTrigger({
+        onOpen: props.onOpen,
+        onOpenMenu: props.onOpenMenu,
+    })
     const icon = props.file.fileType === 'file'
         ? <FileIcon fileName={props.file.fileName} size={22} />
         : <FolderIcon className="text-[var(--app-link)]" />
@@ -271,7 +310,7 @@ function SearchResultRow(props: {
     return (
         <button
             type="button"
-            onClick={props.onOpen}
+            {...rowHandlers}
             className={`flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] transition-colors ${props.showDivider ? 'border-b border-[var(--app-divider)]' : ''}`}
         >
             {icon}
@@ -307,7 +346,7 @@ function FileListSkeleton(props: { label: string; rows?: number }) {
 const SCROLL_KEY_PREFIX = 'hapi-dir-scroll-'
 
 export default function FilesPage() {
-    const { api } = useAppContext()
+    const { api, titleSuggestionAvailable = false } = useAppContext()
     const { t, locale } = useTranslation()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
@@ -317,10 +356,16 @@ export default function FilesPage() {
     const { session } = useSession(api, sessionId)
     const scrollRef = useRef<HTMLDivElement>(null)
 
-    const initialTab = search.tab === 'directories' ? 'directories' : 'changes'
-    const [activeTab, setActiveTab] = useState<'changes' | 'directories'>(initialTab)
+    const [activeTab, setActiveTab] = useState<FilesTab>(() => search.tab ?? readFilesTab())
     const [directorySort, setDirectorySort] = useState<DirectorySort>(readDirectorySort)
+    const [fileMenu, setFileMenu] = useState<{ path: string; point: AnchoredMenuPoint } | null>(null)
     const searchQuery = search.query ?? ''
+
+    const openFileMenu = useCallback((path: string, point: AnchoredMenuPoint) => {
+        setFileMenu({ path, point })
+    }, [])
+
+    const closeFileMenu = useCallback(() => setFileMenu(null), [])
 
     const setSearchQuery = useCallback((query: string) => {
         navigate({
@@ -331,6 +376,7 @@ export default function FilesPage() {
                 ...(query ? { query } : {}),
             },
             replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [activeTab, navigate, sessionId])
 
@@ -343,9 +389,16 @@ export default function FilesPage() {
     }, [directorySort])
 
     useEffect(() => {
+        if (search.tab) {
+            setActiveTab(search.tab)
+            persistFilesTab(search.tab)
+        }
+    }, [search.tab])
+
+    useEffect(() => {
         const el = scrollRef.current
         if (!el) return
-        const key = SCROLL_KEY_PREFIX + sessionId
+        const key = `${SCROLL_KEY_PREFIX}${sessionId}:${activeTab}`
         try {
             const saved = sessionStorage.getItem(key)
             if (saved !== null) el.scrollTop = Number(saved)
@@ -360,7 +413,7 @@ export default function FilesPage() {
             }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sessionId])
+    }, [activeTab, sessionId])
 
     const {
         status: gitStatus,
@@ -389,9 +442,19 @@ export default function FilesPage() {
         navigate({
             to: '/sessions/$sessionId/file',
             params: { sessionId },
-            search: fileSearch
+            search: fileSearch,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [activeTab, navigate, searchQuery, sessionId])
+
+    const handleAddFileToComposer = useCallback((path: string) => {
+        appendFileReferenceToComposerDraft(sessionId, path)
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [navigate, sessionId])
 
     const branchLabel = getDetachedBranchLabel(gitStatus?.branch, t)
     const showGitErrorBanner = Boolean(gitError)
@@ -427,8 +490,9 @@ export default function FilesPage() {
         void refetchGit()
     }, [activeTab, queryClient, refetchGit, searchQuery, sessionId])
 
-    const handleTabChange = useCallback((nextTab: 'changes' | 'directories') => {
+    const handleTabChange = useCallback((nextTab: FilesTab) => {
         setActiveTab(nextTab)
+        persistFilesTab(nextTab)
         navigate({
             to: '/sessions/$sessionId/files',
             params: { sessionId },
@@ -437,6 +501,7 @@ export default function FilesPage() {
                 ...(searchQuery ? { query: searchQuery } : {}),
             },
             replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, searchQuery, sessionId])
 
@@ -444,6 +509,7 @@ export default function FilesPage() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessionId])
 
@@ -452,6 +518,7 @@ export default function FilesPage() {
             to: '/sessions/$sessionId',
             params: { sessionId },
             search: { outline: true },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessionId])
 
@@ -473,6 +540,7 @@ export default function FilesPage() {
                 onToggleOutline={handleToggleOutline}
                 outlineActive={false}
                 api={api}
+                titleSuggestionAvailable={titleSuggestionAvailable}
                 onSessionDeleted={goBack}
                 onSessionReopened={async (newSessionId) => {
                     await transferComposerDraftThenNavigate(
@@ -482,6 +550,7 @@ export default function FilesPage() {
                             to: '/sessions/$sessionId/files',
                             params: { sessionId: newSessionId },
                             replace: true,
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         }),
                     )
                 }}
@@ -575,7 +644,11 @@ export default function FilesPage() {
                 </div>
             ) : null}
 
-            <div ref={scrollRef} className="app-scroll-y flex-1 min-h-0">
+            <div
+                ref={scrollRef}
+                data-hapi-session-files-scroll="true"
+                className="app-scroll-y flex-1 min-h-0"
+            >
                 <div className="mx-auto w-full max-w-content">
                     {showGitErrorBanner && activeTab === 'changes' ? (
                         <div className="border-b border-[var(--app-divider)] bg-amber-500/10 px-3 py-2 text-xs text-[var(--app-hint)]">
@@ -598,6 +671,7 @@ export default function FilesPage() {
                                         key={file.fullPath}
                                         file={file}
                                         onOpen={() => handleOpenFile(file.fullPath)}
+                                        onOpenMenu={(point) => openFileMenu(file.fullPath, point)}
                                         showDivider={index < sortedSearchResults.length - 1}
                                     />
                                 ))}
@@ -610,6 +684,7 @@ export default function FilesPage() {
                             sessionId={sessionId}
                             rootLabel={rootLabel}
                             onOpenFile={(path) => handleOpenFile(path)}
+                            onRequestFileMenu={openFileMenu}
                             sort={directorySort}
                         />
                     ) : gitLoading ? (
@@ -626,6 +701,7 @@ export default function FilesPage() {
                                             key={`staged-${file.fullPath}-${index}`}
                                             file={file}
                                             onOpen={() => handleOpenFile(file.fullPath, file.isStaged)}
+                                            onOpenMenu={(point) => openFileMenu(file.fullPath, point)}
                                             showDivider={index < gitStatus.stagedFiles.length - 1 || gitStatus.unstagedFiles.length > 0}
                                         />
                                     ))}
@@ -642,6 +718,7 @@ export default function FilesPage() {
                                             key={`unstaged-${file.fullPath}-${index}`}
                                             file={file}
                                             onOpen={() => handleOpenFile(file.fullPath, file.isStaged)}
+                                            onOpenMenu={(point) => openFileMenu(file.fullPath, point)}
                                             showDivider={index < gitStatus.unstagedFiles.length - 1}
                                         />
                                     ))}
@@ -663,6 +740,17 @@ export default function FilesPage() {
                     )}
                 </div>
             </div>
+
+            <FileActionMenu
+                isOpen={fileMenu !== null}
+                onClose={closeFileMenu}
+                relativePath={fileMenu?.path ?? ''}
+                absolutePath={resolveAbsoluteFilePath(session.metadata?.path, fileMenu?.path ?? '')}
+                anchorPoint={fileMenu?.point ?? { x: 0, y: 0 }}
+                onAddToComposer={() => {
+                    if (fileMenu) handleAddFileToComposer(fileMenu.path)
+                }}
+            />
         </div>
     )
 }

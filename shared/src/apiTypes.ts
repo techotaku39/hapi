@@ -26,6 +26,11 @@ export type CreateOrLoadMachineRequest = z.infer<typeof CreateOrLoadMachineReque
 
 export const CreateOrLoadSessionRequestSchema = z.object({
     id: z.string().uuid().optional(),
+    /**
+     * When true with `id`, bind a hub-preallocated stub (overwrite tag/metadata)
+     * instead of create/getOrCreate. Rejects non-stub rows (#1911 adopt).
+     */
+    adopt: z.boolean().optional(),
     tag: z.string().min(1),
     metadata: z.unknown(),
     agentState: z.unknown().nullable().optional(),
@@ -33,6 +38,14 @@ export const CreateOrLoadSessionRequestSchema = z.object({
     modelReasoningEffort: z.string().optional(),
     effort: z.string().optional(),
     machine: CreateOrLoadMachineRequestSchema.optional()
+}).superRefine((value, ctx) => {
+    if (value.adopt === true && !value.id) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'adopt requires id',
+            path: ['id'],
+        })
+    }
 })
 
 export type CreateOrLoadSessionRequest = z.infer<typeof CreateOrLoadSessionRequestSchema>
@@ -130,7 +143,12 @@ export type MachinesResponse = { machines: Machine[] }
 
 export type SpawnResponse =
     | { type: 'success'; sessionId: string }
-    | { type: 'error'; message: string }
+    | {
+        type: 'error'
+        message: string
+        code?: 'agent_unavailable' | 'runner_upgrade_required' | 'outside_workspace_roots'
+        agent?: z.infer<typeof AgentFlavorSchema>
+    }
 
 export const SessionPermissionModeRequestSchema = z.object({
     mode: PermissionModeSchema
@@ -176,6 +194,11 @@ export const CodexImportedMessageSchema = z.union([
     z.object({
         role: z.literal('agent'),
         content: z.object({ type: z.literal('codex'), data: z.unknown() }),
+        meta: z.object({ sentFrom: z.literal('cli') })
+    }),
+    z.object({
+        role: z.literal('agent'),
+        content: z.object({ type: z.literal('event'), data: z.unknown() }),
         meta: z.object({ sentFrom: z.literal('cli') })
     })
 ])
@@ -315,6 +338,18 @@ export const RenameSessionRequestSchema = z.object({
 })
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
+
+export const UpdateSessionSummaryRequestSchema = z.object({
+    text: z.string().trim().min(1).max(255)
+})
+
+export type UpdateSessionSummaryRequest = z.infer<typeof UpdateSessionSummaryRequestSchema>
+
+export const SessionTitleSuggestionResponseSchema = z.object({
+    title: z.string().min(1).max(255)
+})
+
+export type SessionTitleSuggestionResponse = z.infer<typeof SessionTitleSuggestionResponseSchema>
 
 export const SetSessionPinnedRequestSchema = z.object({
     mode: z.enum(['none', 'project', 'global'])
@@ -536,6 +571,18 @@ export type ForkConversationResponse = {
     sessionId: string
 }
 
+export const ImplementCodexPlanRequestSchema = z.object({
+    planId: z.string().min(1)
+})
+
+export type ImplementCodexPlanRequest = z.infer<typeof ImplementCodexPlanRequestSchema>
+
+export type ImplementCodexPlanResult = { ok: true } | {
+    ok: false
+    code: 'stale_plan' | 'unavailable' | 'indeterminate' | 'failed'
+    error: string
+}
+
 export const RewindConversationRequestSchema = z.object({
     messageLocalId: z.string().min(1)
 })
@@ -549,9 +596,15 @@ export type RewindConversationResponse = {
 /** CLI → hub RPC result for native fork (before HAPI child binding). */
 export type ForkConversationRpcResult = {
     nativeSessionId: string
+    /** Shared runtimes bind the child themselves; hub must not spawn another engine. */
+    sessionId?: string
     /** When true, hub must spawn with --fork-session (Claude). */
     forkSession?: boolean
 }
+
+export type RewindConversationErrorCode =
+    | 'ambiguous_native_boundary'
+    | 'ambiguous_native_boundary_fork_safe'
 
 export type RewindConversationRpcResult = {
     success: true
@@ -566,6 +619,7 @@ export type RewindConversationRpcResult = {
 } | {
     success: false
     error: string
+    code?: RewindConversationErrorCode
     /** Native state is unchanged, cancelled, or was restored exactly. */
     outcome: 'rejected' | 'cancelled' | 'source_restored'
 }
@@ -578,6 +632,7 @@ export type QueuedStateRequest = z.infer<typeof QueuedStateRequestSchema>
 
 export type QueuedStateResponse = {
     queuedLocalIds: string[]
+    indeterminateLocalIds?: string[]
     invokedLocalMessages: Array<{
         localId: string
         invokedAt: number
@@ -614,6 +669,21 @@ export const MachinePathsExistsRequestSchema = z.object({
 })
 
 export type MachinePathsExistsRequest = z.infer<typeof MachinePathsExistsRequestSchema>
+
+export const AgentAvailabilityReasonSchema = z.enum(['not_found', 'invalid_configuration'])
+export type AgentAvailabilityReason = z.infer<typeof AgentAvailabilityReasonSchema>
+
+export const AgentAvailabilityEntrySchema = z.object({
+    agent: AgentFlavorSchema,
+    available: z.boolean(),
+    reason: AgentAvailabilityReasonSchema.optional()
+})
+export type AgentAvailabilityEntry = z.infer<typeof AgentAvailabilityEntrySchema>
+
+export const AgentAvailabilityResponseSchema = z.object({
+    agents: z.array(AgentAvailabilityEntrySchema)
+})
+export type AgentAvailabilityResponse = z.infer<typeof AgentAvailabilityResponseSchema>
 
 export const AuthRequestSchema = z.union([
     z.object({ initData: z.string() }),
@@ -698,6 +768,8 @@ export type MachineListDirectoryResponse = {
 
 export type PathExistsResponse = {
     exists: Record<string, boolean>
+    /** Requested paths rejected by the runner's configured workspace roots. */
+    outsideWorkspaceRoots?: string[]
 }
 
 export type MachinePathsExistsResponse = PathExistsResponse
@@ -737,11 +809,36 @@ export type OpencodeModelsResponse = {
 
 export type ListOpencodeModelsResponse = OpencodeModelsResponse
 
+/** Variant values keyed by `providerId/modelId` from the OpenCode server catalog. */
+export type OpencodeModelVariantsResponse = {
+    success: boolean
+    variants?: Record<string, string[]>
+    error?: string
+}
+
 export type GrokModelSummary = {
     modelId: string
     name?: string
     reasoningEfforts?: GrokReasoningEffortOption[]
 }
+
+export type DshModelSummary = {
+    modelId: string
+    name?: string
+}
+
+/**
+ * DeepSeek Harness model discovery. Model ids are opaque ACP config-option
+ * values — for dsh 0.2.x they are JSON-encoded `["provider","model"]` tuples —
+ * and must be sent back verbatim when switching.
+ */
+export type DshModelsResponse = {
+    success: boolean
+    availableModels?: DshModelSummary[]
+    currentModelId?: string | null
+    error?: string
+}
+export type ListDshModelsResponse = DshModelsResponse
 
 export type GrokReasoningEffortOption = {
     value: string
@@ -772,6 +869,22 @@ export type CopilotModelsResponse = {
 
 export type ListCopilotModelsResponse = CopilotModelsResponse
 
+export type KimiModelSummary = {
+    /** Kimi model alias as used by `--model` / `session/set_model`. */
+    modelId: string
+    name?: string
+    provider?: string
+}
+
+export type KimiModelsResponse = {
+    success: boolean
+    availableModels?: KimiModelSummary[]
+    currentModelId?: string | null
+    error?: string
+}
+
+export type ListKimiModelsResponse = KimiModelsResponse
+
 export type GrokReasoningEffortResponse = {
     success: boolean
     options?: GrokReasoningEffortOption[]
@@ -788,6 +901,10 @@ export type OpencodeReasoningEffortResponse = {
     success: boolean
     options?: OpencodeReasoningEffortOption[]
     currentValue?: string | null
+    /** Backend-side model the options belong to — lets clients detect a pending model switch. */
+    currentModelId?: string | null
+    /** Concrete backend model requested by the session, including a resolved Default selection. */
+    targetModelId?: string | null
     error?: string
 }
 
@@ -807,7 +924,15 @@ export type ListAgyModelsResponse = AgyModelsResponse
 
 export type CursorModelSummary = OpencodeModelSummary
 
-export type CursorModelsResponse = OpencodeModelsResponse
+export type CursorModelsResponse = OpencodeModelsResponse & {
+    /**
+     * True when ACP advertised Cursor's parameterized model picker: bare model bases
+     * plus separate `fast` / `thought_level` config options. The ACP apply path
+     * expresses variant CLI skus through those options, so variant rows stay valid
+     * even when the catalog itself carries no bracket wire ids.
+     */
+    parameterized?: boolean
+}
 
 export type ListCursorModelsResponse = CursorModelsResponse
 

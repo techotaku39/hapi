@@ -1,12 +1,14 @@
 /**
  * Dedicated loopback HTTP server for receiving agent lifecycle hooks.
  *
- * Claude uses it for SessionStart; Codex also forwards selected tool hooks.
+ * Claude forwards lifecycle events and local permissions; Codex forwards
+ * selected lifecycle/tool events as observers only.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { logger } from '@/ui/logger';
+import { LOCAL_PERMISSION_TIMEOUT_SECONDS, PermissionRequestHookSchema, type PermissionRequestHook, type LocalPermissionDecision } from './localPermissionProtocol';
 
 /**
  * Data received from Claude's SessionStart hook.
@@ -24,8 +26,8 @@ export interface SessionHookData {
 }
 
 /**
- * Data received from Claude's PreToolUse hook. claude sends this
- * before every tool call so we can bridge the approval to the web.
+ * Legacy PreToolUse gate payload. Local Claude now sends PreToolUse through
+ * the lifecycle route and uses PermissionRequest for interactive approval.
  *
  * Also handles agy (Antigravity CLI) payloads which use camelCase:
  *   claude: { tool_name, tool_input, tool_use_id, hook_event_name, ... }
@@ -63,28 +65,11 @@ export function extractToolUseId(data: PreToolUseHookData): string | undefined {
     return data.tool_use_id ?? (data.conversationId ? `${data.conversationId}:${data.stepIdx ?? 0}` : undefined);
 }
 
-/** Decision returned to claude for a PreToolUse tool call. Never 'ask' (would stall the CLI). */
+/** Decision shape for the legacy PreToolUse gate, also consumed by agy. */
 export interface PreToolUseDecision {
     permissionDecision: 'allow' | 'deny';
     reason?: string;
     updatedInput?: Record<string, unknown>;
-}
-
-/**
- * Data received from agy's PreInvocation hook — fires before every model
- * call, regardless of tool use (unlike PreToolUse, which only fires when a
- * tool actually runs). HAPI uses this ONLY for brain UUID discovery; there is
- * no `toolCall` field on this event at all.
- */
-export interface AgyPreInvocationHookData {
-    conversationId?: string;
-    invocationNum?: number;
-    initialNumSteps?: number;
-    modelName?: string;
-    transcriptPath?: string;
-    artifactDirectoryPath?: string;
-    workspacePaths?: string[];
-    [key: string]: unknown;
 }
 
 export interface HookServerOptions {
@@ -93,16 +78,11 @@ export interface HookServerOptions {
     /**
      * Called for each PreToolUse hook (PTY mode). Resolves with the allow/deny
      * decision once the user answers; may legitimately take minutes. When
-     * omitted, tool calls are allowed (no-op), matching --yolo behavior.
+     * omitted, no decision is made. Observation must never grant permission.
      */
     onPreToolUse?: (data: PreToolUseHookData) => Promise<PreToolUseDecision>;
-    /**
-     * Called for each agy PreInvocation hook (discovery-only, fail-open). No
-     * decision is awaited — the route always responds 200 immediately,
-     * mirroring the forwarder's fail-open contract for this event. When
-     * omitted, the route still responds 200 (discovery is best-effort).
-     */
-    onAgyPreInvocation?: (data: AgyPreInvocationHookData) => void;
+    /** Main local session's native dialog remains available during this wait. */
+    onPermissionRequest?: (data: PermissionRequestHook, signal: AbortSignal) => Promise<LocalPermissionDecision | null>;
     /** Optional token to require for hook requests. */
     token?: string;
 }
@@ -132,8 +112,64 @@ export async function startHookServer(options: HookServerOptions): Promise<HookS
     const hookToken = options.token || randomBytes(16).toString('hex');
 
     return new Promise((resolve, reject) => {
+        const permissionRequests = new Set<AbortController>();
         const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
             const requestPath = req.url?.split('?')[0];
+            if (req.method === 'POST' && requestPath === '/hook/permission-request') {
+                if (readHookToken(req) !== hookToken) {
+                    res.writeHead(401).end('unauthorized');
+                    req.resume();
+                    return;
+                }
+                const controller = new AbortController();
+                permissionRequests.add(controller);
+                const onClose = () => { if (!res.writableEnded) controller.abort(); };
+                res.once('close', onClose);
+                const bodyTimeout = setTimeout(() => req.destroy(), 5000);
+                const decisionTimeout = setTimeout(() => controller.abort(), LOCAL_PERMISSION_TIMEOUT_SECONDS * 1000);
+                try {
+                    const chunks: Buffer[] = [];
+                    let size = 0;
+                    for await (const chunk of req) {
+                        size += (chunk as Buffer).length;
+                        if (size > 2 * 1024 * 1024) {
+                            res.writeHead(413).end('hook payload too large');
+                            req.resume();
+                            return;
+                        }
+                        chunks.push(chunk as Buffer);
+                    }
+                    clearTimeout(bodyTimeout);
+                    const parsed = PermissionRequestHookSchema.safeParse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+                    if (!parsed.success) {
+                        res.writeHead(400).end('invalid permission request');
+                        return;
+                    }
+                    if (controller.signal.aborted) return;
+                    const canceled = new Promise<null>(resolveCanceled => {
+                        controller.signal.addEventListener('abort', () => resolveCanceled(null), { once: true });
+                    });
+                    const decision = await Promise.race([
+                        options.onPermissionRequest?.(parsed.data, controller.signal) ?? Promise.resolve(null),
+                        canceled
+                    ]);
+                    if (!res.destroyed && !res.writableEnded) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(decision ?? {}));
+                    }
+                } catch (error) {
+                    logger.debug('[hookServer] Local permission bridge failed; retaining native prompt', error);
+                    controller.abort();
+                    if (!res.destroyed && !res.writableEnded) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
+                    }
+                } finally {
+                    clearTimeout(bodyTimeout);
+                    clearTimeout(decisionTimeout);
+                    res.removeListener('close', onClose);
+                    permissionRequests.delete(controller);
+                }
+                return;
+            }
             if (req.method === 'POST' && requestPath === '/hook/session-start') {
                 const providedToken = readHookToken(req);
                 if (providedToken !== hookToken) {
@@ -252,10 +288,10 @@ export async function startHookServer(options: HookServerOptions): Promise<HookS
                         return;
                     }
 
-                    // No handler wired → allow (matches --yolo no-op behavior).
-                    const decision: PreToolUseDecision = options.onPreToolUse
+                    // No handler wired means no permission decision, not approval.
+                    const decision = options.onPreToolUse
                         ? await options.onPreToolUse(data)
-                        : { permissionDecision: 'allow' };
+                        : {};
 
                     if (!res.headersSent && !res.writableEnded) {
                         res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(decision));
@@ -273,50 +309,13 @@ export async function startHookServer(options: HookServerOptions): Promise<HookS
             }
 
             if (req.method === 'POST' && requestPath === '/hook/agy-pre-invocation') {
-                const providedToken = readHookToken(req);
-                if (providedToken !== hookToken) {
-                    logger.debug('[hookServer] Unauthorized agy-pre-invocation request');
-                    res.writeHead(401, { 'Content-Type': 'text/plain' }).end('unauthorized');
-                    req.resume();
-                    return;
-                }
-
-                // Fail-open route: this event carries discovery only, never a
-                // decision the CLI blocks on. Every branch below responds 200
-                // immediately (auth failure is the only exception — that is a
-                // security boundary, not a discovery failure).
-                try {
-                    const chunks: Buffer[] = [];
-                    for await (const chunk of req) {
-                        chunks.push(chunk as Buffer);
-                    }
-                    const body = Buffer.concat(chunks).toString('utf-8');
-
-                    let data: AgyPreInvocationHookData = {};
-                    try {
-                        const parsed = JSON.parse(body);
-                        if (parsed && typeof parsed === 'object') {
-                            data = parsed as AgyPreInvocationHookData;
-                        }
-                    } catch (parseError) {
-                        logger.debug('[hookServer] Failed to parse agy-pre-invocation data (proceeding with empty data):', parseError);
-                    }
-
-                    try {
-                        options.onAgyPreInvocation?.(data);
-                    } catch (error) {
-                        logger.debug('[hookServer] Error dispatching agy-pre-invocation hook:', error);
-                    }
-
-                    if (!res.headersSent && !res.writableEnded) {
-                        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
-                    }
-                } catch (error) {
-                    logger.debug('[hookServer] Error handling agy-pre-invocation hook:', error);
-                    if (!res.headersSent && !res.writableEnded) {
-                        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
-                    }
-                }
+                // agy's PreInvocation discovery hook was removed with the PTY
+                // transport (agy is headless-only now; the conversation id comes
+                // from the stream-json init envelope). Respond 200 so stale hook
+                // configs (a leftover .agents/hooks.json in a workspace) never
+                // block agy with a connection error.
+                res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
+                req.resume();
                 return;
             }
 
@@ -337,6 +336,7 @@ export async function startHookServer(options: HookServerOptions): Promise<HookS
                 port,
                 token: hookToken,
                 stop: () => {
+                    for (const controller of permissionRequests) controller.abort();
                     server.close();
                     logger.debug('[hookServer] Stopped');
                 }

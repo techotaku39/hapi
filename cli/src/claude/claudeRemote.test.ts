@@ -109,6 +109,53 @@ describe('claudeRemote async message handling', () => {
         }
     });
 
+    it('waits for async onReady work before completing the result stream', async () => {
+        const querySpy = vi.spyOn(claudeSdk, 'query').mockImplementation(queryMock as typeof claudeSdk.query);
+        const { claudeRemote } = await import('./claudeRemote');
+        const releaseReady = deferred<void>();
+        queryMock.mockReturnValueOnce(createAsyncStream([
+            { type: 'result', subtype: 'success' } as unknown as SDKMessage
+        ]));
+
+        let nextCallCount = 0;
+        let readyStarted = false;
+        let settled = false;
+        try {
+            const runPromise = claudeRemote({
+                sessionId: 'session-1',
+                path: process.cwd(),
+                mcpServers: {},
+                claudeEnvVars: {},
+                claudeArgs: [],
+                allowedTools: [],
+                hookSettingsPath: '/tmp/hook.json',
+                canCallTool: async () => ({ behavior: 'allow', updatedInput: {} }),
+                nextMessage: async () => nextCallCount++ === 0
+                    ? { message: 'Review this project', mode: { permissionMode: 'default' } }
+                    : null,
+                onReady: async () => {
+                    readyStarted = true;
+                    await releaseReady.promise;
+                },
+                isAborted: () => false,
+                onSessionFound: () => {},
+                onMessage: () => {}
+            });
+            void runPromise.finally(() => { settled = true; });
+
+            await waitFor(() => readyStarted);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(settled).toBe(false);
+
+            releaseReady.resolve();
+            await runPromise;
+        } finally {
+            releaseReady.resolve();
+            queryMock.mockReset();
+            querySpy.mockRestore();
+        }
+    });
+
     it('continues consuming assistant messages even when next user message is pending', async () => {
         const querySpy = vi.spyOn(claudeSdk, 'query').mockImplementation(queryMock as typeof claudeSdk.query);
         const { claudeRemote } = await import('./claudeRemote');
@@ -363,7 +410,9 @@ describe('claudeRemote /compact result reporting', () => {
                     }
                     return null;
                 },
-                onReady: () => {},
+                onReady: (completionEvent) => {
+                    if (completionEvent) completionEvents.push(completionEvent);
+                },
                 isAborted: () => false,
                 onSessionFound: () => {},
                 onMessage: () => {},
@@ -422,4 +471,87 @@ describe('claudeRemote /compact result reporting', () => {
 
         expect(completionEvents).toEqual(['Compaction started', 'Compaction completed']);
     }, 15_000);
+
+    it('hands compact completion to the ready phase so the result carrier can flush first', async () => {
+        const querySpy = vi.spyOn(claudeSdk, 'query').mockImplementation(queryMock as typeof claudeSdk.query);
+        const { claudeRemote } = await import('./claudeRemote');
+        const wireOrder: string[] = [];
+        const queued: string[] = [];
+        queryMock.mockReturnValueOnce(createAsyncStream([resultMessage]));
+
+        let nextCallCount = 0;
+        try {
+            await claudeRemote({
+                sessionId: 'session-1', path: process.cwd(), mcpServers: {}, claudeEnvVars: {},
+                claudeArgs: [], allowedTools: [], hookSettingsPath: '/tmp/hook.json',
+                canCallTool: async () => ({ behavior: 'allow', updatedInput: {} }),
+                nextMessage: async () => nextCallCount++ === 0
+                    ? { message: '/compact', mode: { permissionMode: 'default' } }
+                    : null,
+                onReady: (completionEvent) => {
+                    wireOrder.push(...queued.splice(0));
+                    if (completionEvent) wireOrder.push(completionEvent);
+                    wireOrder.push('ready');
+                },
+                isAborted: () => false,
+                onSessionFound: () => {},
+                onMessage: (message) => {
+                    if (message.type === 'result') queued.push('result');
+                },
+                onCompletionEvent: (message) => {
+                    if (message !== 'Compaction started') wireOrder.push(message);
+                }
+            });
+        } finally {
+            queryMock.mockReset();
+            querySpy.mockRestore();
+        }
+
+        expect(wireOrder).toEqual(['result', 'Compaction completed', 'ready']);
+    }, 15_000);
+});
+
+describe('claudeRemote native permission mode', () => {
+    // A process launched natively in acceptEdits/bypassPermissions never calls
+    // canCallTool, so switching the session back to Default mid-session would
+    // silently keep auto-approving tools.
+    it.each([
+        ['default', 'default'],
+        ['acceptEdits', 'default'],
+        ['bypassPermissions', 'default'],
+        ['plan', 'plan'],
+        ['auto', 'auto'],
+    ] as const)('launches Claude for %s with --permission-mode %s', async (sessionMode, nativeMode) => {
+        const querySpy = vi.spyOn(claudeSdk, 'query').mockImplementation(queryMock as typeof claudeSdk.query);
+        const { claudeRemote } = await import('./claudeRemote');
+        queryMock.mockReturnValueOnce(createAsyncStream([
+            { type: 'result', subtype: 'success' } as unknown as SDKMessage
+        ]));
+
+        let nextCallCount = 0;
+        try {
+            await claudeRemote({
+                sessionId: 'session-1',
+                path: process.cwd(),
+                mcpServers: {},
+                claudeEnvVars: {},
+                claudeArgs: [],
+                allowedTools: [],
+                hookSettingsPath: '/tmp/hook.json',
+                canCallTool: async () => ({ behavior: 'allow', updatedInput: {} }),
+                nextMessage: async () => nextCallCount++ === 0
+                    ? { message: 'A', mode: { permissionMode: sessionMode } }
+                    : null,
+                onReady: () => {},
+                isAborted: () => false,
+                onSessionFound: () => {},
+                onMessage: () => {}
+            });
+
+            expect(queryMock.mock.calls[0][0].options.permissionMode).toBe(nativeMode);
+        } finally {
+            queryMock.mockReset();
+            querySpy.mockRestore();
+        }
+    });
 });

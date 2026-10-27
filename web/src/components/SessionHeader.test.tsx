@@ -40,7 +40,7 @@ function baseSession(overrides: Partial<Session> = {}): Session {
     }
 }
 
-function renderHeader(session: Session, extra?: { serviceTier?: string | null }) {
+function renderHeader(session: Session, extra?: { serviceTier?: string | null; titleSuggestionAvailable?: boolean }) {
     return render(
         <QueryClientProvider client={new QueryClient()}>
             <ToastProvider>
@@ -48,9 +48,22 @@ function renderHeader(session: Session, extra?: { serviceTier?: string | null })
                     <SessionHeader
                         session={session}
                         serviceTier={extra?.serviceTier}
+                        titleSuggestionAvailable={extra?.titleSuggestionAvailable}
                         onBack={vi.fn()}
                         api={null}
                     />
+                </I18nProvider>
+            </ToastProvider>
+        </QueryClientProvider>
+    )
+}
+
+function renderHeaderWithApi(session: Session, api: ApiClient) {
+    return render(
+        <QueryClientProvider client={new QueryClient()}>
+            <ToastProvider>
+                <I18nProvider>
+                    <SessionHeader session={session} onBack={vi.fn()} api={api} />
                 </I18nProvider>
             </ToastProvider>
         </QueryClientProvider>
@@ -82,6 +95,65 @@ describe('resolveSessionHeaderMachineLabel', () => {
 })
 
 describe('SessionHeader', () => {
+    it('does not offer manual Codex sync while the HAPI session is active', () => {
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            syncCodexSession: vi.fn()
+        } as unknown as ApiClient
+
+        renderHeaderWithApi(baseSession({
+            active: true,
+            metadata: { flavor: 'codex', path: '/repo', host: 'machine', codexSessionId: 'codex-thread-1' }
+        }), api)
+
+        fireEvent.click(screen.getByRole('button', { name: /More/ }))
+        expect(screen.queryByRole('menuitem', { name: /Sync Codex/ })).toBeNull()
+    })
+
+    it('keeps manual Codex sync available for an inactive imported thread', () => {
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            syncCodexSession: vi.fn()
+        } as unknown as ApiClient
+
+        renderHeaderWithApi(baseSession({
+            active: false,
+            metadata: { flavor: 'codex', path: '/repo', host: 'machine', codexSessionId: 'codex-thread-1' }
+        }), api)
+
+        fireEvent.click(screen.getByRole('button', { name: /More/ }))
+        expect(screen.getByRole('menuitem', { name: /Sync Codex/ })).toBeInTheDocument()
+    })
+
+    it('hides title generation when the Hub does not advertise the capability', () => {
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] })
+        } as unknown as ApiClient
+
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={baseSession()}
+                            onBack={vi.fn()}
+                            api={api}
+                            titleSuggestionAvailable={false}
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByTitle('More actions'))
+        fireEvent.click(screen.getByRole('menuitem', { name: /Rename/ }))
+
+        expect(screen.queryByRole('button', { name: 'Generate' })).not.toBeInTheDocument()
+    })
+
     it('manually syncs an inactive Pi session through its owning machine', async () => {
         const importPiSessions = vi.fn().mockResolvedValue({
             success: true,
@@ -270,6 +342,31 @@ describe('SessionHeader', () => {
             expect(screen.getByTestId('session-header-age')).toHaveTextContent(/1m ago|1分钟前/)
         } finally {
             vi.useRealTimers()
+        }
+    })
+
+    it('anchors the action menu to the center of the More actions trigger', () => {
+        renderHeader(baseSession())
+
+        const moreButton = screen.getByTitle('More actions')
+        const getBoundingClientRect = vi.spyOn(moreButton, 'getBoundingClientRect').mockReturnValue({
+            bottom: 64,
+            height: 32,
+            left: 100,
+            right: 132,
+            top: 32,
+            width: 32,
+            x: 100,
+            y: 32,
+            toJSON: () => ({})
+        } as DOMRect)
+
+        try {
+            fireEvent.click(moreButton)
+
+            expect(screen.getByRole('menu').parentElement).toHaveStyle({ left: '116px' })
+        } finally {
+            getBoundingClientRect.mockRestore()
         }
     })
 

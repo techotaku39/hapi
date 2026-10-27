@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthProxyRedirectError } from './authProxy'
 import { ApiClient, ApiError } from './client'
 
 describe('ApiClient error mapping', () => {
@@ -57,6 +58,25 @@ describe('ApiClient error mapping', () => {
         }
     })
 
+    it('preserves the structured ambiguous-boundary code for Rewind fallbacks', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({
+                    error: 'Rewind is unavailable for this Codex history',
+                    code: 'ambiguous_native_boundary_fork_safe',
+                    hydrateFailed: false
+                }),
+                { status: 409, statusText: 'Conflict' }
+            )
+        )
+
+        const api = new ApiClient('test-token')
+        await expect(api.rewindConversation('session-1', 'local-1')).rejects.toMatchObject({
+            status: 409,
+            code: 'ambiguous_native_boundary_fork_safe'
+        })
+    })
+
     it('passes the 422 missing-metadata body through unchanged so the UI can show the missing fields', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(
@@ -80,6 +100,32 @@ describe('ApiClient error mapping', () => {
         }
     })
 
+    it('returns export warnings and sends explicit confirmation for large exports', async () => {
+        const warning = {
+            type: 'warning',
+            count: 20_001,
+            limit: 20_000,
+            estimatedBytes: 12_345_678
+        }
+        const payload = {
+            schemaVersion: 2,
+            exportedAt: 1_762_000_000_000,
+            session: { id: 'session-1' },
+            messages: [],
+            scratchlist: []
+        }
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify(warning), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getSessionExport('session-1')).resolves.toEqual(warning)
+        await expect(api.getSessionExport('session-1', { force: true })).resolves.toEqual(payload)
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session-1/export')
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/sessions/session-1/export?force=true')
+    })
+
     it('loads the Cursor chat store status for the selected session', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(JSON.stringify({ onDisk: false, store: null }), { status: 200 })
@@ -91,6 +137,54 @@ describe('ApiClient error mapping', () => {
             store: null
         })
         expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%20cursor/cursor-chat-store')
+    })
+
+    it('generates a title and saves the summary through separate session endpoints', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ title: 'Generated title' }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.suggestSessionTitle('session /?#')).resolves.toEqual({ title: 'Generated title' })
+        await api.updateSessionSummary('session /?#', 'Generated title')
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%20%2F%3F%23/title-suggestion')
+        expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/sessions/session%20%2F%3F%23/summary')
+        expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+            method: 'PATCH',
+            body: JSON.stringify({ text: 'Generated title' })
+        })
+    })
+
+    it('reads the Hub title suggestion capability', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            status: 'ok',
+            protocolVersion: 1,
+            capabilities: { titleSuggestion: true }
+        }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getHealth()).resolves.toEqual({
+            status: 'ok',
+            protocolVersion: 1,
+            capabilities: { titleSuggestion: true }
+        })
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/health')
+    })
+
+    it('asks the machine to re-probe agy only when the caller forces a refresh', async () => {
+        fetchMock.mockImplementation(() => Promise.resolve(
+            new Response(JSON.stringify({ success: true, availableModels: [] }), { status: 200 })
+        ))
+
+        const api = new ApiClient('test-token')
+        await api.getMachineAgyModels('machine-1')
+        await api.getMachineAgyModels('machine-1', { refresh: true })
+
+        expect(fetchMock.mock.calls[0][0]).toContain('/api/machines/machine-1/agy-models')
+        expect(fetchMock.mock.calls[0][0]).not.toContain('refresh')
+        expect(fetchMock.mock.calls[1][0]).toContain('/api/machines/machine-1/agy-models?refresh=true')
     })
 
     it('lists and imports Pi sessions through the selected machine', async () => {
@@ -234,5 +328,89 @@ describe('ApiClient error mapping', () => {
         expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/voice/transcription/credentials')
         expect(init?.method).toBe('PUT')
         expect(init?.body).toBe(JSON.stringify({ openai: 'sk-test' }))
+    })
+})
+
+describe('ApiClient Kimi session model discovery', () => {
+    let originalFetch: typeof globalThis.fetch
+    let fetchMock: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+        originalFetch = globalThis.fetch
+        fetchMock = vi.fn()
+        globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
+    })
+
+    afterEach(() => {
+        globalThis.fetch = originalFetch
+    })
+
+    it('requests the running session instead of the machine kimi-models endpoint', async () => {
+        const catalog = {
+            success: true,
+            availableModels: [
+                { modelId: 'GLM-5.3-flash', name: 'thehive / GLM-5.3-flash', provider: 'thehive' }
+            ],
+            currentModelId: 'GLM-5.3-flash'
+        }
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(catalog), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getSessionKimiModels('session/1')).resolves.toEqual(catalog)
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%2F1/kimi-models')
+    })
+})
+
+describe('ApiClient auth proxy redirect', () => {
+    let originalFetch: typeof globalThis.fetch
+    let fetchMock: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+        originalFetch = globalThis.fetch
+        fetchMock = vi.fn()
+        globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
+    })
+
+    afterEach(() => {
+        globalThis.fetch = originalFetch
+    })
+
+    const opaqueRedirect = () => ({ type: 'opaqueredirect', status: 0, ok: false }) as Response
+
+    // Every hub call site must classify an auth-proxy redirect instead of
+    // surfacing the browser's opaque `Failed to fetch`.
+    const callSites: Array<{ name: string; run: (api: ApiClient) => Promise<unknown> }> = [
+        { name: 'authenticate', run: (api) => api.authenticate({ accessToken: 'token' }) },
+        { name: 'bind', run: (api) => api.bind({ initData: 'init', accessToken: 'token' }) },
+        { name: 'getSessions', run: (api) => api.getSessions() },
+        {
+            name: 'getGeneratedImageBlob',
+            run: (api) => api.getGeneratedImageBlob('session-1', 'image-1')
+        },
+        { name: 'migrateCursorSessionToAcp', run: (api) => api.migrateCursorSessionToAcp('session-1') },
+        {
+            name: 'fetchScratchlistAttachmentBlob',
+            run: (api) => api.fetchScratchlistAttachmentBlob('session-1', 'attachment-1')
+        }
+    ]
+
+    it.each(callSites)('$name rejects with AuthProxyRedirectError', async ({ run }) => {
+        fetchMock
+            .mockResolvedValueOnce(opaqueRedirect())
+            .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+        const api = new ApiClient('test-token', { baseUrl: 'https://hub.example' })
+        await expect(run(api)).rejects.toBeInstanceOf(AuthProxyRedirectError)
+    })
+
+    it('getGeneratedImageBlob rejects with AuthProxyRedirectError on the 304 cache re-read', async () => {
+        fetchMock
+            .mockResolvedValueOnce({ type: 'basic', status: 304, ok: false } as Response)
+            .mockResolvedValueOnce(opaqueRedirect())
+            .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+        const api = new ApiClient('test-token', { baseUrl: 'https://hub.example' })
+        await expect(api.getGeneratedImageBlob('session-1', 'image-1')).rejects.toBeInstanceOf(AuthProxyRedirectError)
+        expect(fetchMock.mock.calls[1][1]).toMatchObject({ cache: 'force-cache', redirect: 'manual' })
     })
 })

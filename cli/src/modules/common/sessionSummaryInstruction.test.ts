@@ -9,6 +9,11 @@ import {
     withSessionSummaryInstruction
 } from './sessionSummaryInstruction'
 
+const USER_LANGUAGE_INSTRUCTION = [
+    'Use the language used by the user in the current conversation for the',
+    'human-readable "action" and "summary" values.'
+].join('\n')
+
 describe('sessionSummaryInstruction', () => {
     afterEach(() => {
         resetSessionSummaryContractForTests()
@@ -49,6 +54,22 @@ describe('sessionSummaryInstruction', () => {
         expect(body.toLowerCase()).toContain('session tracking')
         expect(body.toLowerCase()).not.toContain('overseer')
         expect(body.toLowerCase()).not.toContain('surveillance')
+    })
+
+    it('limits summaries to the final answer while preserving language and footer guidance', () => {
+        applyHubSessionSummaryContract(true)
+        const body = sessionSummaryInstructionOrEmpty({})
+        expect(body).toContain('At the end of each turn, append exactly one')
+        expect(body).toContain('final answer only')
+        expect(body).toContain('Do not emit this line in commentary, progress updates, or before tool calls.')
+        expect(body).toContain(USER_LANGUAGE_INSTRUCTION)
+        expect(body).not.toContain('End every response')
+    })
+
+    it('preserves the exact machine-readable footer format', () => {
+        expect(SESSION_SUMMARY_CONTRACT_LINE).toBe(
+            'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}'
+        )
     })
 
     it('appends to an existing base prompt when enabled', () => {

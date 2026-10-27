@@ -32,6 +32,7 @@ export interface InitializeResponse {
 }
 
 export interface ModelListParams {
+    cursor?: string;
     includeHidden?: boolean;
 }
 
@@ -127,6 +128,20 @@ export interface ThreadStartResponse {
         id: string;
     };
     model: string;
+    [key: string]: unknown;
+}
+
+export interface ConfigReadParams {
+    cwd?: string | null;
+    includeLayers?: boolean;
+}
+
+export interface ConfigReadResponse {
+    config: {
+        model_context_window?: number | null;
+        model_auto_compact_token_limit?: number | null;
+        [key: string]: unknown;
+    };
     [key: string]: unknown;
 }
 
@@ -295,6 +310,18 @@ export interface ThreadRollbackResponse {
     [key: string]: unknown;
 }
 
+export interface TurnSteerParams {
+    threadId: string;
+    input: UserInput[];
+    expectedTurnId: string;
+    clientUserMessageId?: string | null;
+}
+
+export interface TurnSteerResponse {
+    turnId: string;
+    [key: string]: unknown;
+}
+
 export interface ThreadCompactStartParams {
     threadId: string;
 }
@@ -303,7 +330,13 @@ export interface ThreadCompactStartResponse {
     [key: string]: unknown;
 }
 
-export type ThreadGoalStatus = 'active' | 'paused' | 'budgetLimited' | 'complete';
+export type ThreadGoalStatus =
+    | 'active'
+    | 'paused'
+    | 'budgetLimited'
+    | 'usageLimited'
+    | 'blocked'
+    | 'complete';
 
 export interface ThreadGoal {
     threadId: string;

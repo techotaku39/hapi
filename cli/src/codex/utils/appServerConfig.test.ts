@@ -15,6 +15,29 @@ describe('appServerConfig', () => {
         return `${developerInstructions}\n\n${codexCollaborationSpawnAgentInstructions}`;
     };
 
+    it('preserves Codex built-in base instructions by omitting the default override', () => {
+        const params = buildThreadStartParams({
+            cwd: '/workspace/project',
+            mode: { permissionMode: 'default', collaborationMode: 'default' },
+            mcpServers
+        });
+
+        expect(params).not.toHaveProperty('baseInstructions');
+        expect(params.developerInstructions).toBe(codexSystemPrompt);
+    });
+
+    it('keeps an explicit base instruction override separate from HAPI developer instructions', () => {
+        const params = buildThreadStartParams({
+            cwd: '/workspace/project',
+            mode: { permissionMode: 'default', collaborationMode: 'default' },
+            mcpServers,
+            baseInstructions: 'Custom base instructions.'
+        });
+
+        expect(params.baseInstructions).toBe('Custom base instructions.');
+        expect(params.developerInstructions).toBe(codexSystemPrompt);
+    });
+
     it('applies CLI overrides when permission mode is default', () => {
         const params = buildThreadStartParams({
             cwd: '/workspace/project',
@@ -26,7 +49,7 @@ describe('appServerConfig', () => {
         expect(params.cwd).toBe('/workspace/project');
         expect(params.sandbox).toBe('danger-full-access');
         expect(params.approvalPolicy).toBe('never');
-        expect(params.baseInstructions).toBe(codexSystemPrompt);
+        expect(params.baseInstructions).toBeUndefined();
         expect(params.developerInstructions).toBe(codexSystemPrompt);
         expect(params.config).toEqual({
             'mcp_servers.hapi': {
@@ -76,6 +99,40 @@ describe('appServerConfig', () => {
                 }
             },
             developer_instructions: codexSystemPrompt
+        });
+    });
+
+    it('preserves user MCP transport fields when building thread config', () => {
+        const params = buildThreadStartParams({
+            cwd: '/workspace/project',
+            mode: { permissionMode: 'default', collaborationMode: 'default' },
+            mcpServers: {
+                'package-manager': {
+                    command: 'uvx',
+                    args: ['example-mcp', 'serve'],
+                    env: { EXAMPLE_TOKEN: 'from-process-environment' }
+                },
+                remote: {
+                    url: 'https://example.test/mcp',
+                    bearer_token_env_var: 'REMOTE_MCP_TOKEN'
+                },
+                hapi: {
+                    command: 'node',
+                    args: ['mcp']
+                }
+            }
+        });
+
+        expect(params.config).toMatchObject({
+            'mcp_servers.package-manager': {
+                command: 'uvx',
+                args: ['example-mcp', 'serve'],
+                env: { EXAMPLE_TOKEN: 'from-process-environment' }
+            },
+            'mcp_servers.remote': {
+                url: 'https://example.test/mcp',
+                bearer_token_env_var: 'REMOTE_MCP_TOKEN'
+            }
         });
     });
 
@@ -129,7 +186,7 @@ describe('appServerConfig', () => {
         });
     });
 
-    it('concatenates custom developer instructions after base instructions', () => {
+    it('concatenates custom developer instructions after HAPI instructions without overriding base instructions', () => {
         const params = buildThreadStartParams({
             cwd: '/workspace/project',
             mode: { permissionMode: 'default', collaborationMode: 'default' },
@@ -137,7 +194,7 @@ describe('appServerConfig', () => {
             developerInstructions: 'Only respond in Chinese.'
         });
 
-        expect(params.baseInstructions).toBe(codexSystemPrompt);
+        expect(params.baseInstructions).toBeUndefined();
         expect(params.developerInstructions).toBe(`${codexSystemPrompt}\n\nOnly respond in Chinese.`);
         expect(params.config).toEqual({
             'mcp_servers.hapi': {
@@ -162,6 +219,23 @@ describe('appServerConfig', () => {
             },
             developer_instructions: codexSystemPrompt,
             model_reasoning_effort: 'ultra'
+        });
+    });
+
+    it('passes effective Codex context management settings via thread config', () => {
+        const params = buildThreadStartParams({
+            cwd: '/workspace/project',
+            mode: { permissionMode: 'default', collaborationMode: 'default' },
+            mcpServers,
+            contextManagementConfig: {
+                modelContextWindow: 400_000,
+                modelAutoCompactTokenLimit: 300_000
+            }
+        });
+
+        expect(params.config).toMatchObject({
+            model_context_window: 400_000,
+            model_auto_compact_token_limit: 300_000
         });
     });
 

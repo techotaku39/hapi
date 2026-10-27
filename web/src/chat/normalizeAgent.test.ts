@@ -2,6 +2,29 @@ import { describe, expect, it } from 'vitest'
 import { normalizeAgentRecord } from '@/chat/normalizeAgent'
 
 describe('normalizeAgentRecord — agentTimestamp exposure', () => {
+    it.each(['blocked', 'usageLimited'] as const)('preserves %s Codex goal status', (status) => {
+        const normalized = normalizeAgentRecord('goal-row', null, 1, {
+            type: 'codex',
+            data: {
+                type: 'thread_goal_updated',
+                thread_id: 'thread-1',
+                goal: {
+                    threadId: 'thread-1',
+                    objective: 'finish the task',
+                    status
+                }
+            }
+        })
+
+        expect(normalized).toMatchObject({
+            role: 'event',
+            content: {
+                type: 'thread-goal-updated',
+                goal: { status }
+            }
+        })
+    })
+
     it('preserves a wire text message id as its snapshot stream id', () => {
         const normalized = normalizeAgentRecord('message-row-1', null, 1, {
             type: 'codex',
@@ -207,5 +230,77 @@ describe('normalizeAgentRecord — agentTimestamp exposure', () => {
         })
 
         expect(normalized).toMatchObject({ role: 'agent', agentTimestamp: null })
+    })
+})
+
+describe('normalizeAgentRecord — imported pi compact-summary (codex envelope)', () => {
+    it('maps an imported compaction summary to the compact-summary agent event', () => {
+        const normalized = normalizeAgentRecord('pi-compact-1', null, 1, {
+            type: 'codex',
+            data: {
+                type: 'compact-summary',
+                summary: '## Goal\ncondensed context'
+            }
+        })
+
+        expect(normalized).toMatchObject({
+            role: 'event',
+            content: {
+                type: 'compact-summary',
+                summary: '## Goal\ncondensed context'
+            }
+        })
+        expect((normalized as { content: { tokensBefore?: number } }).content.tokensBefore).toBeUndefined()
+    })
+})
+
+describe('normalizeAgentRecord — Codex usage provenance', () => {
+    it('preserves the Codex marker and model on token-count events', () => {
+        const normalized = normalizeAgentRecord('codex-token-count', null, 1, {
+            type: 'codex',
+            data: {
+                type: 'token_count',
+                flavor: 'codex',
+                model: 'gpt-5.4',
+                info: {
+                    last_token_usage: { input_tokens: 321, output_tokens: 12 },
+                    model_context_window: 200_000
+                }
+            }
+        })
+
+        expect(normalized).toMatchObject({
+            role: 'event',
+            content: {
+                type: 'token-count',
+                provider: 'codex',
+                model: 'gpt-5.4'
+            },
+            usage: { input_tokens: 321, output_tokens: 12 }
+        })
+    })
+})
+
+
+describe('persisted Codex duration provenance', () => {
+    it('accepts an observed zero-duration Codex turn', () => {
+        expect(normalizeAgentRecord('duration', null, 1, { type: 'codex', data: {
+            type: 'turn_duration', flavor: 'codex', turn_id: 'turn', durationMs: 0
+        } })).toMatchObject({ role: 'event', content: { type: 'turn-duration', durationMs: 0, turnId: 'turn' } })
+    })
+    it.each([{ scope_role: 'child' }, { scopeRole: 'child' }, { scope: { role: 'child' } }])('rejects child timing with scope %j', scope => {
+        expect(normalizeAgentRecord('duration', null, 1, { type: 'codex', data: {
+            type: 'turn_duration', flavor: 'codex', turn_id: 'turn', durationMs: 123, ...scope
+        } })).toBeNull()
+    })
+    it.each([-1, NaN, Infinity, '123', undefined])('rejects invalid duration %s', durationMs => {
+        expect(normalizeAgentRecord('duration', null, 1, { type: 'codex', data: {
+            type: 'turn_duration', flavor: 'codex', turn_id: 'turn', durationMs
+        } })).toBeNull()
+    })
+    it('rejects imported history even when it carries a duration', () => {
+        expect(normalizeAgentRecord('duration', null, 1, { type: 'codex', data: {
+            type: 'turn_duration', flavor: 'codex', turn_id: 'turn', durationMs: 123, hapiUsageScope: 'imported-history'
+        } })).toBeNull()
     })
 })

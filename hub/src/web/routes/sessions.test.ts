@@ -60,13 +60,17 @@ function createApp(session: Session, opts?: {
     resumeSession?: (sessionId: string, namespace: string, resumeOpts?: { permissionMode?: string }) => Promise<{ type: string; sessionId?: string; message?: string; code?: string }>
     reopenSession?: (sessionId: string, namespace: string) => Promise<ReopenResultMock>
     listSlashCommands?: SyncEngine['listSlashCommands']
-    getSessionExport?: (sessionId: string, session: Session) => unknown
+    getSessionExport?: (sessionId: string, session: Session, options?: { force?: boolean }) => unknown
     sessionExists?: boolean
     archiveSession?: (sessionId: string) => Promise<void>
     getCursorChatStoreStatus?: SyncEngine['getCursorChatStoreStatus']
     listCodexModelsForSession?: SyncEngine['listCodexModelsForSession']
     forkConversation?: SyncEngine['forkConversation']
+    clearConversation?: SyncEngine['clearConversation']
+    implementCodexPlan?: SyncEngine['implementCodexPlan']
     rewindConversation?: SyncEngine['rewindConversation']
+    suggestSessionTitle?: SyncEngine['suggestSessionTitle']
+    updateSessionSummary?: SyncEngine['updateSessionSummary']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
     setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
 }) {
@@ -114,6 +118,17 @@ function createApp(session: Session, opts?: {
         options: [{ value: 'low', name: 'Low' }],
         currentValue: 'low'
     })
+    const listKimiModelsForSession = async () => ({
+        success: true,
+        availableModels: [
+            {
+                modelId: 'GLM-5.3-flash',
+                name: 'thehive / GLM-5.3-flash',
+                provider: 'thehive'
+            }
+        ],
+        currentModelId: 'GLM-5.3-flash'
+    })
     const resumeSession = opts?.resumeSession ?? (async (sessionId: string) => ({ type: 'success', sessionId }))
     const reopenSession = opts?.reopenSession ?? (async (sessionId: string) => ({
         type: 'success' as const,
@@ -136,6 +151,7 @@ function createApp(session: Session, opts?: {
         listOpencodeReasoningEffortOptionsForSession,
         listGrokModelsForSession,
         listGrokReasoningEffortOptionsForSession,
+        listKimiModelsForSession,
         resumeSession,
         reopenSession,
         getCursorChatStoreStatus: opts?.getCursorChatStoreStatus ?? (async () => ({
@@ -160,7 +176,11 @@ function createApp(session: Session, opts?: {
             commands: []
         })),
         forkConversation: opts?.forkConversation ?? (async () => ({ type: 'success', sessionId: 'child-1' })),
-        rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' }))
+        clearConversation: opts?.clearConversation,
+        implementCodexPlan: opts?.implementCodexPlan,
+        rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
+        suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
+        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {})
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -174,6 +194,127 @@ function createApp(session: Session, opts?: {
 }
 
 describe('sessions routes', () => {
+    it('dispatches plan implementation using the authenticated namespace and returns stale/unknown outcomes', async () => {
+        const session = createSession({ metadata: { path: '/tmp', host: 'test', flavor: 'codex', capabilities: { concurrentClients: true } } })
+        const calls: unknown[] = []
+        let result: Awaited<ReturnType<SyncEngine['implementCodexPlan']>> = { ok: true }
+        const { app } = createApp(session, { implementCodexPlan: async (...args) => { calls.push(args); return result } })
+        const post = () => app.request('/api/sessions/session-1/codex/plan/implement', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: 'plan' })
+        })
+        expect((await post()).status).toBe(200)
+        expect(calls).toEqual([['session-1', 'default', 'plan']])
+        result = { ok: false, code: 'stale_plan', error: 'Old plan' }
+        expect((await post()).status).toBe(409)
+        result = { ok: false, code: 'indeterminate', error: 'Unknown result' }
+        expect((await post()).status).toBe(503)
+    })
+
+    it('does not dispatch plan actions with an invalid body, inactive session or unsupported runtime', async () => {
+        for (const [active, shared, body, expected] of [
+            [true, true, {}, 400], [false, true, { planId: 'plan' }, 409], [true, false, { planId: 'plan' }, 409]
+        ] as const) {
+            let called = false
+            const { app } = createApp(createSession({ active, metadata: { path: '/tmp', host: 'test', flavor: 'codex', capabilities: { concurrentClients: shared } } }), {
+                implementCodexPlan: async () => { called = true; return { ok: true } }
+            })
+            const response = await app.request('/api/sessions/session-1/codex/plan/implement', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            })
+            expect(response.status).toBe(expected)
+            expect(called).toBe(false)
+        }
+    })
+
+    it('reports a lost plan RPC reply as indeterminate', async () => {
+        const { app } = createApp(createSession({ metadata: { path: '/tmp', host: 'test', flavor: 'codex', capabilities: { concurrentClients: true } } }), {
+            implementCodexPlan: async () => { throw new Error('timeout') }
+        })
+        const response = await app.request('/api/sessions/session-1/codex/plan/implement', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: 'plan' })
+        })
+        expect(response.status).toBe(503)
+        expect(await response.json()).toMatchObject({ ok: false, code: 'indeterminate' })
+    })
+
+    it.each([true, false])('clears shared sessions after resuming only when inactive (active: %s)', async active => {
+        const calls: string[] = []
+        const { app } = createApp(createSession({ active, permissionMode: 'read-only', metadata: {
+            path: '/tmp/project', host: 'localhost', flavor: 'codex', capabilities: { concurrentClients: true }
+        } }), {
+            resumeSession: async (id, namespace, opts) => {
+                calls.push('resume')
+                expect([id, namespace, opts]).toEqual(['session-1', 'default', { permissionMode: 'read-only' }])
+                return { type: 'success', sessionId: 'resumed-session' }
+            },
+            clearConversation: async (id, namespace) => {
+                calls.push('clear')
+                expect([id, namespace]).toEqual([active ? 'session-1' : 'resumed-session', 'default'])
+                return { sessionId: 'new-root' }
+            }
+        })
+        const response = await app.request('/api/sessions/session-1/clear', { method: 'POST' })
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ sessionId: 'new-root' })
+        expect(calls).toEqual(active ? ['clear'] : ['resume', 'clear'])
+    })
+
+    it('does not clear or retry when resume fails', async () => {
+        let clears = 0
+        const { app } = createApp(createSession({ active: false, metadata: {
+            path: '/tmp/project', host: 'localhost', flavor: 'codex', capabilities: { concurrentClients: true }
+        } }), {
+            resumeSession: async () => ({ type: 'error', code: 'no_machine_online', message: 'No Runner online' }),
+            clearConversation: async () => { clears++; return { sessionId: 'unexpected' } }
+        })
+        const response = await app.request('/api/sessions/session-1/clear', { method: 'POST' })
+        expect(response.status).toBe(503)
+        expect(await response.json()).toEqual({ error: 'No Runner online', code: 'no_machine_online' })
+        expect(clears).toBe(0)
+    })
+    it('generates a title suggestion without changing session metadata', async () => {
+        const suggest = async (sessionId: string) => {
+            expect(sessionId).toBe('session-1')
+            return 'Generated title'
+        }
+        const { app } = createApp(createSession(), { suggestSessionTitle: suggest })
+
+        const response = await app.request('/api/sessions/session-1/title-suggestion', { method: 'POST' })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ title: 'Generated title' })
+    })
+
+    it('writes generated titles through the summary metadata endpoint', async () => {
+        const updates: Array<[string, string]> = []
+        const { app } = createApp(createSession(), {
+            updateSessionSummary: async (sessionId, text) => {
+                updates.push([sessionId, text])
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/summary', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: '  Generated title  ' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(updates).toEqual([['session-1', 'Generated title']])
+    })
+
+    it('rejects an empty summary', async () => {
+        const { app } = createApp(createSession())
+
+        const response = await app.request('/api/sessions/session-1/summary', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: '   ' })
+        })
+
+        expect(response.status).toBe(400)
+    })
+
     it('updates the persisted pin mode', async () => {
         const calls: Array<[string, 'none' | 'project' | 'global']> = []
         const { app } = createApp(createSession(), {
@@ -312,23 +453,69 @@ describe('sessions routes', () => {
         expect(body.messages.map((message) => message.id)).toEqual(['msg-1', 'msg-2'])
     })
 
-    it('returns 413 when the export exceeds the hard message cap', async () => {
+    it('returns a structured warning instead of rejecting an export above the message threshold', async () => {
+        const session = createSession()
+        const warning = {
+            type: 'warning' as const,
+            count: 20_001,
+            limit: 20_000,
+            estimatedBytes: 12_345_678
+        }
+        const { app } = createApp(session, {
+            getSessionExport: () => warning
+        })
+
+        const response = await app.request('/api/sessions/session-1/export')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(warning)
+    })
+
+    it('passes an explicit force confirmation through for the complete export', async () => {
+        const session = createSession()
+        let receivedOptions: { force?: boolean } | undefined
+        const payload = {
+            schemaVersion: 2 as const,
+            exportedAt: 1_762_000_000_000,
+            session,
+            messages: [],
+            scratchlist: []
+        }
+        const { app } = createApp(session, {
+            getSessionExport: (_sessionId, _session, options) => {
+                receivedOptions = options
+                return { type: 'success', payload }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/export?force=true')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(payload)
+        expect(receivedOptions).toEqual({ force: true })
+    })
+
+    it('returns structured 413 details for exports over the resource limit', async () => {
         const session = createSession()
         const { app } = createApp(session, {
             getSessionExport: () => ({
                 type: 'too-large',
                 count: 20_001,
-                limit: 20_000
+                estimatedBytes: 104_857_601,
+                maxBytes: 104_857_600
             })
         })
 
-        const response = await app.request('/api/sessions/session-1/export')
+        const response = await app.request('/api/sessions/session-1/export?force=true')
 
         expect(response.status).toBe(413)
         expect(await response.json()).toEqual({
-            error: 'Session export too large',
+            type: 'too-large',
+            error: 'Session export exceeds the resource limit',
+            code: 'session_export_too_large',
             count: 20_001,
-            limit: 20_000
+            estimatedBytes: 104_857_601,
+            maxBytes: 104_857_600
         })
     })
 
@@ -824,6 +1011,40 @@ describe('sessions routes', () => {
         })
     })
 
+    it('returns the Kimi catalog for an active Kimi session over its own connection', async () => {
+        const session = createSession({
+            metadata: { path: '/tmp/project', host: 'localhost', flavor: 'kimi' }
+        })
+        const { app } = createApp(session)
+
+        const response = await app.request('/api/sessions/session-1/kimi-models')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: true,
+            availableModels: [
+                {
+                    modelId: 'GLM-5.3-flash',
+                    name: 'thehive / GLM-5.3-flash',
+                    provider: 'thehive'
+                }
+            ],
+            currentModelId: 'GLM-5.3-flash'
+        })
+    })
+
+    it('rejects kimi-models for non-Kimi sessions', async () => {
+        const { app } = createApp(createSession())
+
+        const response = await app.request('/api/sessions/session-1/kimi-models')
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({
+            success: false,
+            error: 'Kimi models are only available for Kimi sessions'
+        })
+    })
+
     it('rejects opencode-reasoning-effort-options for non-OpenCode sessions', async () => {
         const { app } = createApp(createSession())
 
@@ -927,6 +1148,24 @@ describe('sessions routes', () => {
         expect(applySessionConfigCalls).toEqual([
             ['session-1', { permissionMode: 'plan' }]
         ])
+    })
+
+    it('rejects Safe Yolo for shared sessions', async () => {
+        const session = createSession({
+            active: false,
+            metadata: { path: '/tmp/project', host: 'localhost', flavor: 'codex', capabilities: { concurrentClients: true } }
+        })
+        const { app, applySessionConfigCalls } = createApp(session)
+
+        const response = await app.request('/api/sessions/session-1/permission-mode', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ mode: 'safe-yolo' })
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Safe Yolo is not available for shared sessions' })
+        expect(applySessionConfigCalls).toEqual([])
     })
 
     it('applies permission mode changes for inactive sessions', async () => {
@@ -1241,6 +1480,32 @@ describe('sessions routes', () => {
             expect(await response.json()).toEqual({ ok: true })
         })
 
+        // tiann/hapi#1820: 'idle' is a live lifecycle. Once a keepalive-only
+        // session finally loses its socket it must stay archivable, exactly
+        // like a stale 'running' row — comparing against the 'running'
+        // literal here would strand it behind a 409.
+        it('archives an inactive session left in the keepalive-idle lifecycle', async () => {
+            const calls: string[] = []
+            const session = createSession({
+                active: false,
+                metadata: {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'cursor',
+                    lifecycleState: 'idle'
+                }
+            })
+            const { app } = createApp(session, {
+                archiveSession: async (sessionId: string) => { calls.push(sessionId) }
+            })
+
+            const response = await app.request('/api/sessions/session-1/archive', { method: 'POST' })
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ ok: true })
+            expect(calls).toEqual(['session-1'])
+        })
+
         it('returns 2xx and skips archiveSession when the row is already archived (idempotent)', async () => {
             let called = false
             const session = createSession({
@@ -1397,6 +1662,37 @@ describe('sessions routes', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ success: true })
         expect(calls).toEqual([{ sessionId: 'session-1', messageLocalId: 'local-2' }])
+    })
+
+    it('returns a structured ambiguous-boundary code for deterministic rewind rejection', async () => {
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                capabilities: { conversationHistory: { rewindToMessage: true } }
+            }
+        })
+        const { app } = createApp(session, {
+            rewindConversation: async () => ({
+                type: 'error',
+                message: 'Rewind is unavailable for this Codex history',
+                code: 'ambiguous_native_boundary_fork_safe'
+            })
+        })
+
+        const response = await app.request('/api/sessions/session-1/rewind', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ messageLocalId: 'local-2' })
+        })
+
+        expect(response.status).toBe(409)
+        expect(await response.json()).toEqual({
+            error: 'Rewind is unavailable for this Codex history',
+            code: 'ambiguous_native_boundary_fork_safe',
+            hydrateFailed: false
+        })
     })
 
     it('rejects rewind without messageLocalId', async () => {

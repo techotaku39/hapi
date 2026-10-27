@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import type {
+    AgyModelSummary,
     AttachmentMetadata,
     CodexCollaborationMode,
+    CodexModelSummary,
     CopilotAgentMode,
     DecryptedMessage,
     PermissionMode,
@@ -31,6 +35,10 @@ import {
 } from '@/lib/codexModelCapabilities'
 import { createSerialAsyncQueue } from '@/lib/serialAsyncQueue'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
+import {
+    isDictateHotkeyBlockedTarget,
+    isDictateToggleHotkey,
+} from '@/lib/composerDictateShortcut'
 import { codexModelAdvertisesFastTier, getEffectiveCodexServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -52,8 +60,9 @@ import {
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
 import type { MessageDeliveryMode } from '@hapi/protocol'
-import type { OlderLoadOutcome } from '@/lib/message-window-store'
+import { isSteeringSupportedForSession } from '@hapi/protocol'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
+import { rewindMessageWindow, type OlderLoadOutcome } from '@/lib/message-window-store'
 import { ShareSeedConsumer } from '@/components/ShareSeedConsumer'
 import {
     createScratchlistAttachmentAdapter,
@@ -86,6 +95,7 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useCursorModels } from '@/hooks/queries/useCursorModels'
 import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
+import { useAgyModels } from '@/hooks/queries/useAgyModels'
 import {
     mergeCursorCliModelSkus,
     resolveCursorBaseFromWire
@@ -103,15 +113,40 @@ import { buildCursorEffortPickerOptionsWithDefaultFirst } from '@/lib/cursorMode
 import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
 import { useGrokModels } from '@/hooks/queries/useGrokModels'
 import { useCopilotModels } from '@/hooks/queries/useCopilotModels'
+import { useKimiModelsForSession } from '@/hooks/queries/useKimiModelsForSession'
+import { useDshModelsForSession } from '@/hooks/queries/useDshModels'
+import { buildKimiSessionModelOptions } from '@/components/NewSession/grokModels'
 import { useGrokReasoningEffortOptions } from '@/hooks/queries/useGrokReasoningEffortOptions'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
+import { queryKeys } from '@/lib/query-keys'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
+
+/**
+ * Query key to invalidate after a successful model switch on an opencode
+ * session, or null for other flavors. The effort-options query caches per
+ * session (not per model), so without invalidation a stale option list from
+ * the previous model survives the switch.
+ */
+export function opencodeEffortOptionsInvalidationKey(
+    agentFlavor: string | null | undefined,
+    sessionId: string
+): readonly unknown[] | null {
+    if (agentFlavor !== 'opencode') {
+        return null
+    }
+    return queryKeys.sessionOpencodeReasoningEffortOptions(sessionId)
+}
+
+export function isRewindForkFallbackError(error: unknown): boolean {
+    return error instanceof ApiError && error.code === 'ambiguous_native_boundary_fork_safe'
+}
 
 export function resolvePiContextWindow(
     models: PiModelSummary[] | undefined,
@@ -126,6 +161,24 @@ export function resolvePiContextWindow(
         : models?.find((candidate) => candidate.modelId === legacyModelId)
 
     return model?.contextWindow
+}
+
+/**
+ * Composer options for an agy session, from the same machine catalog New Session
+ * reads. `undefined` until the machine answers, so the picker falls back to the
+ * built-in list rather than rendering empty.
+ */
+export function buildAgyComposerModelOptions(
+    availableModels: AgyModelSummary[]
+): Array<{ value: string; label: string }> | undefined {
+    if (availableModels.length === 0) {
+        return undefined
+    }
+
+    return availableModels.map((model) => ({
+        value: model.modelId,
+        label: model.name ?? model.modelId
+    }))
 }
 
 export async function applyModelChangeWithReasoningRollback(args: {
@@ -151,6 +204,26 @@ export async function applyModelChangeWithReasoningRollback(args: {
         }
         throw error
     }
+}
+
+export function shouldClearReasoningEffortForModelChange(args: {
+    agentFlavor: string | null | undefined
+    previousModelReasoningEffort: string | null
+    codexModels: readonly CodexModelSummary[]
+    model: SessionModelSelection
+}): boolean {
+    if (!args.previousModelReasoningEffort) {
+        return false
+    }
+    if (args.agentFlavor === 'opencode') {
+        return false
+    }
+    return args.agentFlavor === 'codex'
+        && supportsCodexReasoningEffort(
+            args.codexModels,
+            args.model,
+            args.previousModelReasoningEffort
+        ) === false
 }
 
 /**
@@ -221,6 +294,72 @@ export function isScratchlistHotkeyBlockedTarget(target: EventTarget | null): bo
 }
 
 /**
+ * True when a global select-all shortcut (Ctrl/Cmd+A) should be left to
+ * the browser default: focus is inside the rich composer
+ * (contentEditable), a textarea (the fallback composer), a single-line
+ * input/select, or a modal dialog. In every other case the app takes
+ * over the shortcut because Chromium's SelectAll collapses to an empty
+ * caret when the page contains a contenteditable (the rich composer)
+ * but focus is outside it — plain Ctrl+A would select nothing and
+ * Ctrl+C would copy nothing (see applyGlobalSelectAll).
+ *
+ * Deliberately differs from isScratchlistHotkeyBlockedTarget: textareas
+ * are blocked here (textarea select-all works natively) while the
+ * scratchlist hotkey must keep firing from the composer textarea.
+ *
+ * Pure / exported for unit tests.
+ */
+export function isSelectAllTargetBlocked(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false
+    if (target.closest('[role="dialog"]') !== null) return true
+    if (target instanceof HTMLInputElement) return true
+    if (target instanceof HTMLTextAreaElement) return true
+    if (target instanceof HTMLSelectElement) return true
+    // isContentEditable is the authoritative check in real browsers but
+    // jsdom doesn't implement it; the attribute fallback also covers
+    // `plaintext-only` composers, which is what the rich composer uses
+    // on modern Chromium.
+    if (target.isContentEditable === true) return true
+    const contenteditable = target.getAttribute('contenteditable')
+    return contenteditable !== null && contenteditable !== 'false'
+}
+
+/**
+ * Chromium quirk: when a page contains a contenteditable element (the
+ * rich composer), Ctrl/Cmd+A with focus OUTSIDE the editable collapses
+ * to an empty caret instead of selecting the page — Ctrl+C then copies
+ * nothing. Reproduced in headless and headed Chrome with both
+ * `contenteditable="true"` and `"plaintext-only"`; the bare presence of
+ * the editable root is what breaks SelectAll, while focus inside it
+ * selects the composer text correctly.
+ *
+ * This takes over Ctrl/Cmd+A whenever focus is outside the composer
+ * (see isSelectAllTargetBlocked) and selects the message thread
+ * manually, so select-all + copy restores the expected
+ * "select the conversation" behavior.
+ *
+ * Returns true when the keystroke was handled (preventDefault + range
+ * selection). Pure / exported for unit tests and the Playwright fixture.
+ */
+export function applyGlobalSelectAll(e: KeyboardEvent): boolean {
+    if (e.defaultPrevented || e.repeat) return false
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return false
+    if (e.key !== 'a' && e.key !== 'A') return false
+    if (isSelectAllTargetBlocked(e.target)) return false
+    // The thread container is rendered by HappyThread; its class is the
+    // stable handle between the page-level shortcut and the message DOM.
+    const thread = document.querySelector<HTMLElement>('.happy-thread-messages')
+    if (!thread || !thread.textContent) return false
+    e.preventDefault()
+    const range = document.createRange()
+    range.selectNodeContents(thread)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return true
+}
+
+/**
  * Decide whether a submit should be routed to the per-session scratchlist
  * or to the regular chat send. Scratchlist entries support text and hub-
  * stored attachments; scheduled sends still fall through to chat.
@@ -243,6 +382,14 @@ export function shouldRouteToScratchlist(
     // uploads made before scratchlist mode was enabled still have normal
     // CLI paths; the hub rejects those as scratchlist metadata.
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
+}
+
+export function mergeStagedAttachmentsInOrder(
+    attachments: readonly AttachmentMetadata[],
+    staged: readonly AttachmentMetadata[],
+): AttachmentMetadata[] {
+    const stagedById = new Map(staged.map((attachment) => [attachment.id, attachment]))
+    return attachments.map((attachment) => stagedById.get(attachment.id) ?? attachment)
 }
 
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
@@ -377,6 +524,27 @@ export function buildGoalStateMessages(
     return messages.filter((message) => !isUninvokedScheduledMessage(message))
 }
 
+/**
+ * Keep the latest completed fork boundary available while reading history.
+ * The history window can no longer contain the tail after older pages are
+ * loaded, so recomputing a boundary from that window would either hide the
+ * current Fork action or incorrectly mark an older message as current.
+ * A live tail revision invalidates the remembered boundary until tail view
+ * observes the authoritative current boundary again.
+ */
+export function resolveLatestCompletedBoundaryIdForView(
+    viewMode: 'tail' | 'history',
+    currentTailBoundaryId: string | null,
+    rememberedTailBoundary: { id: string | null; tailRevision: number } | null,
+    currentTailRevision: number
+): string | null {
+    if (viewMode === 'tail') return currentTailBoundaryId
+    if (!rememberedTailBoundary || rememberedTailBoundary.tailRevision !== currentTailRevision) {
+        return null
+    }
+    return rememberedTailBoundary.id
+}
+
 function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
     for (const block of blocks) {
         if (block.kind === 'tool-call') {
@@ -396,6 +564,7 @@ function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
 
 type SessionChatProps = {
     api: ApiClient
+    titleSuggestionAvailable?: boolean
     session: Session
     cursorChatOnDisk?: boolean
     reopenDisabledReason?: string
@@ -410,8 +579,9 @@ type SessionChatProps = {
     viewMode: 'tail' | 'history'
     messagesVersion: number
     historyVersion: number
+    tailRevision: number
     onBack: () => void
-    onRefresh: () => void
+    onRefresh: () => void | Promise<void>
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
     onCancelLoadMore: () => void
     // Returns the accepted mutation's attempt id, or false when
@@ -470,12 +640,17 @@ function SessionChatInner(props: SessionChatProps) {
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
     const navigate = useNavigate()
     const [historyActionPending, setHistoryActionPending] = useState(false)
+    const [rewindForkFallback, setRewindForkFallback] = useState<string | null>(null)
 
     const onForkConversation = useCallback(async (messageLocalId?: string) => {
         setHistoryActionPending(true)
         try {
             const result = await props.api.forkConversation(props.session.id, messageLocalId)
-            await navigate({ to: '/sessions/$sessionId', params: { sessionId: result.sessionId } })
+            await navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId: result.sessionId },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+            })
         } finally {
             setHistoryActionPending(false)
         }
@@ -485,11 +660,29 @@ function SessionChatInner(props: SessionChatProps) {
         setHistoryActionPending(true)
         try {
             await props.api.rewindConversation(props.session.id, messageLocalId)
-            props.onRefresh()
+            // Apply the deterministic local part immediately so the removed
+            // suffix cannot flash back while the authoritative refresh runs.
+            rewindMessageWindow(props.session.id, messageLocalId)
+            await props.onRefresh()
+            // Force the same tail behavior as a successful send after the
+            // refreshed message window has been committed.
+            setForceScrollToken((token) => token + 1)
+        } catch (error) {
+            if (isRewindForkFallbackError(error)) {
+                setRewindForkFallback(messageLocalId)
+                return
+            }
+            throw error
         } finally {
             setHistoryActionPending(false)
         }
     }, [props.api, props.onRefresh, props.session.id])
+
+    const onRewindForkFallback = useCallback(async () => {
+        if (!rewindForkFallback) return
+        await onForkConversation(rewindForkFallback)
+        setRewindForkFallback(null)
+    }, [onForkConversation, rewindForkFallback])
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(
         props.session,
@@ -505,8 +698,13 @@ function SessionChatInner(props: SessionChatProps) {
     const canViewAgentTerminal =
         props.session.metadata?.startingMode === 'pty' && props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
+    const focusComposerRef = useRef<(() => void) | null>(null)
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
+    const [rememberedTailBoundary, setRememberedTailBoundary] = useState<{
+        id: string | null
+        tailRevision: number
+    } | null>(null)
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const uploadDraftSnapshotRef = useRef<{ text: string; attachments: AttachmentDraftInput[] }>({
         text: '',
@@ -527,6 +725,7 @@ function SessionChatInner(props: SessionChatProps) {
     const enqueueCursorModelApply = useMemo(() => createSerialAsyncQueue(), [])
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
     const scratchlist = useHubScratchlist(props.session.id, props.api)
+    const queryClient = useQueryClient()
     const { sessions: allSessions } = useSessions(props.api)
     const resolveSessionMentionTooltip = useCallback((id: string, title: string) => {
         const hit = allSessions.find((s) => s.id === id) ?? null
@@ -573,6 +772,7 @@ function SessionChatInner(props: SessionChatProps) {
         if (isScratchlistParking) return
         setScratchlistMode((m) => !m)
     }, [isScratchlistParking])
+    const dictateHotkeyRef = useRef<(() => void) | null>(null)
     /**
      * Global keyboard shortcut: Ctrl/Cmd + Shift + S toggles scratchlist
      * mode (open/close drawer + flip composer routing).
@@ -606,6 +806,36 @@ function SessionChatInner(props: SessionChatProps) {
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
     }, [isScratchlistParking])
+    /**
+     * Global keyboard shortcut: Ctrl/Cmd + Shift + D toggles composer
+     * dictation (Settings → Voice mode: dictation) or voice assistant,
+     * using the same effective toggle as the mic / dictate buttons in
+     * HappyComposer. Skipped for dialog / single-line input targets;
+     * rich composer input is allowed (see isDictateHotkeyBlockedTarget).
+     */
+    useEffect(() => {
+        const onKeyDown = (e: globalThis.KeyboardEvent) => {
+            if (e.repeat) return
+            if (!isDictateToggleHotkey(e)) return
+            if (isDictateHotkeyBlockedTarget(e.target)) return
+            const invoke = dictateHotkeyRef.current
+            if (!invoke) return
+            e.preventDefault()
+            invoke()
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [])
+    /**
+     * Global select-all takeover: see applyGlobalSelectAll. Bound at
+     * window scope because the broken case is focus on the page body /
+     * message thread, which never routes keydown through the composer or
+     * the thread viewport.
+     */
+    useEffect(() => {
+        window.addEventListener('keydown', applyGlobalSelectAll)
+        return () => window.removeEventListener('keydown', applyGlobalSelectAll)
+    }, [])
     /**
      * onSend wrapper: when scratchlist mode is on AND the submission is
      * not scheduled, route to scratchlist (text and/or hub attachments).
@@ -716,15 +946,15 @@ function SessionChatInner(props: SessionChatProps) {
             const list = attachments ?? []
             const hubItems = list.filter((att) => isHubScratchlistAttachmentPath(att.path))
             if (hubItems.length > 0) {
-                const normalItems = list.filter((att) => !isHubScratchlistAttachmentPath(att.path))
                 const staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,
                     props.session.id,
                     hubItems,
                 )
+                const ordered = mergeStagedAttachmentsInOrder(list, staged)
                 const accepted = await props.onSend(
                     text,
-                    [...normalItems, ...staged],
+                    ordered,
                     scheduledAt,
                     deliveryMode,
                 )
@@ -737,12 +967,34 @@ function SessionChatInner(props: SessionChatProps) {
                 }
                 return accepted
             }
+            if (!scratchlistMode && scheduledAt == null && !attachments?.length
+                && props.session.metadata?.capabilities?.concurrentClients && /^\/(clear|new)\s*$/.test(text.trim())) {
+                const result = await props.api.clearConversation(props.session.id)
+                await navigate({ to: '/sessions/$sessionId', params: { sessionId: result.sessionId }, ...PRESERVE_SESSION_SIDEBAR_SCROLL })
+                return { attemptId: null }
+            }
             return props.onSend(text, attachments, scheduledAt, deliveryMode)
         },
-        [props.onSend, props.api, props.session.id, scratchlist, scratchlistMode],
+        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients, navigate, scratchlist, scratchlistMode],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
-    const controlledByUser = props.session.agentState?.controlledByUser === true
+    // The effort-options query is keyed by session only, so a stale option
+    // list from the previous model would survive a switch. Reset when the
+    // session model changes. `session.model` is updated by the hub at REST-ack
+    // time, ahead of the CLI's inline ACP switch — the invalidation alone
+    // would refetch the old model's options, and the hook's pending-switch
+    // polling (currentModelId mismatch) is what actually converges the picker.
+    // The key is built inside the effect: computing it during render yields a
+    // fresh array every render, and putting that in the deps would invalidate
+    // on every streaming re-render.
+    const sessionModel = props.session.model
+    const sessionId = props.session.id
+    useEffect(() => {
+        const effortInvalidationKey = opencodeEffortOptionsInvalidationKey(agentFlavor, sessionId)
+        if (!effortInvalidationKey || sessionModel === undefined) return
+        void queryClient.resetQueries({ queryKey: effortInvalidationKey, exact: true })
+    }, [agentFlavor, sessionId, sessionModel, queryClient])
+    const controlledByUser = props.session.agentState?.controlledByUser === true && !props.session.metadata?.capabilities?.concurrentClients
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
     const codexModelsState = useCodexModels({
         api: props.api,
@@ -789,7 +1041,8 @@ function SessionChatInner(props: SessionChatProps) {
     const opencodeReasoningEffortState = useOpencodeReasoningEffortOptions({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'opencode' && props.session.active
+        enabled: agentFlavor === 'opencode' && props.session.active,
+        sessionModel: props.session.model
     })
     const opencodeModelOptions = useMemo(() => {
         if (agentFlavor !== 'opencode') {
@@ -846,6 +1099,38 @@ function SessionChatInner(props: SessionChatProps) {
         enabled: agentFlavor === 'cursor' && props.session.active
     })
     const sessionMachineId = props.session.metadata?.machineId ?? null
+    // A running session discovers its models over its own connection (kimi
+    // provider list --json), so this works without a background runner;
+    // switching itself still goes through the existing ACP setModel path.
+    const kimiModelsState = useKimiModelsForSession({
+        api: props.api,
+        sessionId: props.session.id,
+        enabled: agentFlavor === 'kimi' && props.session.active
+    })
+    const kimiModelOptions = useMemo(() => (
+        agentFlavor === 'kimi' && kimiModelsState.availableModels.length > 0
+            ? buildKimiSessionModelOptions(kimiModelsState.availableModels)
+            : undefined
+    ), [agentFlavor, kimiModelsState.availableModels])
+    // dsh exposes its catalog through ACP config options (Zed-style grouped
+    // provider/model tuples flattened server-side into opaque value strings);
+    // switching rides the generic session config rail like kimi/agy.
+    const dshModelsState = useDshModelsForSession({
+        api: props.api,
+        sessionId: props.session.id,
+        enabled: agentFlavor === 'dsh' && props.session.active
+    })
+    const dshModelOptions = useMemo(() => (
+        agentFlavor === 'dsh' && dshModelsState.availableModels.length > 0
+            ? [
+                { value: null, label: 'Default' },
+                ...dshModelsState.availableModels.map((model) => ({
+                    value: model.modelId,
+                    label: model.name ?? model.modelId
+                }))
+            ]
+            : undefined
+    ), [agentFlavor, dshModelsState.availableModels])
     const machineCursorModelsState = useCursorModelsForMachine({
         api: props.api,
         machineId: sessionMachineId,
@@ -867,7 +1152,8 @@ function SessionChatInner(props: SessionChatProps) {
             machineModels: machineCursorModelsState.availableModels,
             cliModelSkus: sessionCliModelSkus,
             sessionModel: props.session.model,
-            sessionCurrentModelId: cursorModelsState.currentModelId
+            sessionCurrentModelId: cursorModelsState.currentModelId,
+            autoRestartLabel: t('session.modelChange.cursorAutoRestart')
         })
     }, [
         agentFlavor,
@@ -875,8 +1161,22 @@ function SessionChatInner(props: SessionChatProps) {
         cursorModelsState.currentModelId,
         machineCursorModelsState.availableModels,
         sessionCliModelSkus,
-        props.session.model
+        props.session.model,
+        t
     ])
+    const agyModelsState = useAgyModels({
+        api: props.api,
+        machineId: sessionMachineId,
+        enabled: agentFlavor === 'agy' && props.session.active && Boolean(sessionMachineId)
+    })
+    // Options only: the composer has no surface for a catalog warning, so a
+    // machine whose sign-in has lapsed shows its last known list here and New
+    // Session is where that gets explained.
+    const agyModelOptions = useMemo(() => (
+        agentFlavor === 'agy'
+            ? buildAgyComposerModelOptions(agyModelsState.availableModels)
+            : undefined
+    ), [agentFlavor, agyModelsState.availableModels])
     const piModelsState = usePiModels({
         api: props.api,
         sessionId: props.session.id,
@@ -1211,7 +1511,12 @@ function SessionChatInner(props: SessionChatProps) {
     // Fork-current must compare against assistant-ui message ids (`kind:id`),
     // not raw hub message ids — MessageActions receive the rendered card id,
     // and adjacent assistant blocks join under the first block's id.
-    const latestCompletedBoundaryId = useMemo(() => {
+    //
+    // Calculate the boundary from the tail window, then remember it while the
+    // operator reads history. Otherwise changing viewMode to `history` hides
+    // a valid current Fork action, and loading older pages can make the last
+    // visible historical message look like the current fork boundary.
+    const currentTailBoundaryId = useMemo(() => {
         if (props.viewMode !== 'tail') return null
         return findLatestCompletedBoundaryId(
             visibleBlocks,
@@ -1219,6 +1524,22 @@ function SessionChatInner(props: SessionChatProps) {
             props.session.activeTurnStartedAt ?? null
         )
     }, [props.viewMode, props.session.activeTurnStartedAt, props.session.thinking, visibleBlocks])
+
+    useEffect(() => {
+        if (props.viewMode !== 'tail') return
+        setRememberedTailBoundary((previous) => (
+            previous?.id === currentTailBoundaryId && previous.tailRevision === props.tailRevision
+                ? previous
+                : { id: currentTailBoundaryId, tailRevision: props.tailRevision }
+        ))
+    }, [currentTailBoundaryId, props.tailRevision, props.viewMode])
+
+    const latestCompletedBoundaryId = resolveLatestCompletedBoundaryIdForView(
+        props.viewMode,
+        currentTailBoundaryId,
+        rememberedTailBoundary,
+        props.tailRevision
+    )
 
     const isLatestCompletedBoundary = useCallback((messageId: string) => {
         return latestCompletedBoundaryId === messageId
@@ -1275,13 +1596,12 @@ function SessionChatInner(props: SessionChatProps) {
     // Model mode change handler
     const handleModelChange = useCallback(async (model: SessionModelSelection) => {
         const previousModelReasoningEffort = props.session.modelReasoningEffort
-        const shouldClearReasoningEffort = agentFlavor === 'codex'
-            && Boolean(previousModelReasoningEffort)
-            && supportsCodexReasoningEffort(
-                codexModelsState.models,
-                model,
-                previousModelReasoningEffort
-            ) === false
+        const shouldClearReasoningEffort = shouldClearReasoningEffortForModelChange({
+            agentFlavor,
+            previousModelReasoningEffort,
+            codexModels: codexModelsState.models,
+            model
+        })
 
         try {
             await applyModelChangeWithReasoningRollback({
@@ -1397,7 +1717,8 @@ function SessionChatInner(props: SessionChatProps) {
         setOutlineOpen(false)
         navigate({
             to: '/sessions/$sessionId/files',
-            params: { sessionId: props.session.id }
+            params: { sessionId: props.session.id },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, props.session.id])
 
@@ -1408,7 +1729,8 @@ function SessionChatInner(props: SessionChatProps) {
     const handleViewTerminal = useCallback(() => {
         navigate({
             to: '/sessions/$sessionId/terminal',
-            params: { sessionId: props.session.id }
+            params: { sessionId: props.session.id },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, props.session.id])
 
@@ -1432,6 +1754,7 @@ function SessionChatInner(props: SessionChatProps) {
     // turn, so explicit or retry-safe queue intents never stick to later
     // ordinary sends.
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
+    const attachmentOrderRef = useRef<string[]>([])
     const restoredSendErrorIdRef = useRef<number | null>(null)
 
     useEffect(() => {
@@ -1568,9 +1891,13 @@ function SessionChatInner(props: SessionChatProps) {
         blocks: visibleBlocks,
         messagesVersion: props.messagesVersion,
         historyVersion: props.historyVersion,
+        viewMode: props.viewMode,
+        isSyncingTail: props.isSyncingTail,
+        isLoadingMore: props.isLoadingMoreMessages,
         isSending: props.isSending,
         isRunning: props.session.thinking || hasRunningChildAgent,
         onSendMessage: handleSend,
+        attachmentOrderRef,
         onAbort: handleAbort,
         attachmentAdapter,
         allowSendWhenInactive: true,
@@ -1591,6 +1918,7 @@ function SessionChatInner(props: SessionChatProps) {
                 onToggleTerminal={canViewAgentTerminal ? () => setTerminalVisible(v => !v) : undefined}
                 terminalActive={terminalVisible}
                 api={props.api}
+                titleSuggestionAvailable={props.titleSuggestionAvailable}
                 canReopen={inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
                 reopenHint={props.reopenHint}
@@ -1602,7 +1930,8 @@ function SessionChatInner(props: SessionChatProps) {
                         () => navigate({
                             to: '/sessions/$sessionId',
                             params: { sessionId: newSessionId },
-                            replace: true
+                            replace: true,
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         }),
                     )
                 }}
@@ -1618,7 +1947,7 @@ function SessionChatInner(props: SessionChatProps) {
             )}
 
             {sessionInactive ? (
-                <div className="mx-auto w-full max-w-content bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
+                <div className="mx-auto w-full max-w-content bg-[var(--app-subtle-bg)] p-3 text-center text-sm text-[var(--app-hint)]">
                     {inactiveCanResume
                         ? t('session.inactive.autoResume')
                         : t('session.inactive.cannotResume')}
@@ -1654,6 +1983,7 @@ function SessionChatInner(props: SessionChatProps) {
                         disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
+                        onContinuePlan={() => focusComposerRef.current?.()}
                         historyActionPending={historyActionPending}
                         onForkConversation={controlledByUser ? undefined : onForkConversation}
                         onRewindConversation={controlledByUser ? undefined : onRewindConversation}
@@ -1721,6 +2051,9 @@ function SessionChatInner(props: SessionChatProps) {
                             ) : null}
                             <QueuedMessagesBar
                                 sessionId={props.session.id}
+                                compactionPendingMessageIds={agentFlavor === 'codex' && props.session.active
+                                    && props.session.agentState?.steeringActive === true
+                                    ? props.session.agentState.codexCompactionPendingMessageIds ?? undefined : undefined}
                                 api={props.api}
                                 pendingSchedule={pendingSchedule}
                                 pendingScheduleRevision={pendingScheduleRevision}
@@ -1728,17 +2061,23 @@ function SessionChatInner(props: SessionChatProps) {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
-                                canSteer={agentFlavor === 'pi' && props.session.thinking && !controlledByUser}
+                                canSteer={isSteeringSupportedForSession(props.session.metadata)
+                                    && (agentFlavor === 'pi'
+                                        ? props.session.thinking
+                                        : props.session.agentState?.steeringActive === true)
+                                    && !controlledByUser}
                             />
                         </div>
 
                         <HappyComposer
+                        focusInputRef={focusComposerRef}
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
                         canRestoreAttachments={props.session.active}
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
+                        attachmentOrderRef={attachmentOrderRef}
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
@@ -1753,6 +2092,7 @@ function SessionChatInner(props: SessionChatProps) {
                         modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
                         effort={props.session.effort}
                         agentFlavor={agentFlavor}
+                        concurrentClients={props.session.metadata?.capabilities?.concurrentClients}
                         availableModelOptions={
                             agentFlavor === 'codex'
                                 ? codexModelOptions
@@ -1770,12 +2110,18 @@ function SessionChatInner(props: SessionChatProps) {
                                             ? grokModelOptions
                                         : agentFlavor === 'copilot'
                                             ? copilotModelOptions
-                                        // Pi uses its own provider-qualified picker (piModels prop).
-                                        // Feeding piModelOptions here would make the generic Ctrl/Cmd+M
+                                            : agentFlavor === 'kimi'
+                                                ? kimiModelOptions
+                                            : agentFlavor === 'agy'
+                                                ? agyModelOptions
+                                            : agentFlavor === 'dsh'
+                                                ? dshModelOptions
+                                        // Pi gets its provider-qualified model list from the piModels prop;
+                                        // feeding piModelOptions here would make the generic Ctrl/Cmd+M
                                         // cycler (getNextModelForFlavor) post a bare modelId string,
                                         // which loses the provider and can pick the wrong cached
                                         // match or throw in runPi. undefined makes the shortcut a no-op
-                                        // so Pi model changes go through the dedicated picker only.
+                                        // so Pi model changes go through the settings sheet only.
                                         : undefined
                         }
                         piModels={piModels}
@@ -1914,6 +2260,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onScratchlistToggle={handleScratchlistToggle}
                         onParkScratchlist={onParkScratchlist}
                         onScratchlistParkingChange={setIsScratchlistParking}
+                        dictateHotkeyRef={dictateHotkeyRef}
                         sendError={props.sendError ?? null}
                         onClearSendError={handleClearSendError}
                         onSuppressSendErrorRestore={props.onSuppressSendErrorRestore}
@@ -1934,6 +2281,19 @@ function SessionChatInner(props: SessionChatProps) {
                     onReadyChange={setVoiceBackendReady}
                 />
             )}
+
+            <ConfirmDialog
+                isOpen={rewindForkFallback !== null}
+                onClose={() => {
+                    if (!historyActionPending) setRewindForkFallback(null)
+                }}
+                title={t('message.rewind.fallbackTitle')}
+                description={t('message.rewind.fallbackDescription')}
+                confirmLabel={t('message.rewind.fallbackFork')}
+                confirmingLabel={t('message.rewind.fallbackForking')}
+                isPending={historyActionPending}
+                onConfirm={onRewindForkFallback}
+            />
         </div>
     )
 }

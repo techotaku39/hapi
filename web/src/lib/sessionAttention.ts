@@ -16,13 +16,20 @@ export function sessionIsUnread(
 
 export function classifySessionAttention(
     summary: SessionSummary,
-    options: { selected: boolean; lastSeenAt: number }
+    options: { selected: boolean; lastSeenAt: number; manualUnreadAt?: number | null }
 ): SessionAttention | null {
-    if (options.selected || summary.thinking) {
+    if (options.selected) {
+        return options.manualUnreadAt === summary.updatedAt
+            ? { kind: 'unread' }
+            : null
+    }
+
+    if (summary.thinking) {
         return null
     }
 
-    const pendingRequestKinds = Array.isArray(summary.pendingRequestKinds)
+    // Requests left on an archived session can no longer be answered.
+    const pendingRequestKinds = summary.active && Array.isArray(summary.pendingRequestKinds)
         ? summary.pendingRequestKinds
         : []
 
