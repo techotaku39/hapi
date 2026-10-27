@@ -159,6 +159,28 @@ E = mc^2
         expect(screen.getByRole('link', { name: 'Email' })).toHaveAttribute('href', 'mailto:help@example.com')
     })
 
+    it('preserves session reference router navigation in standalone previews', () => {
+        render(
+            <I18nProvider>
+                <MarkdownRenderer
+                    standalone
+                    content={'[Session](/sessions/session-42)'}
+                    filePreview={{
+                        api: {} as ApiClient,
+                        sessionId: 'session-1',
+                        filePath: 'notes/notes-01.md',
+                    }}
+                />
+            </I18nProvider>
+        )
+
+        fireEvent.click(screen.getByRole('link', { name: 'Session' }))
+        expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
+            to: '/sessions/$sessionId',
+            params: { sessionId: 'session-42' },
+        }))
+    })
+
     it('preserves local image state across parent rerenders', async () => {
         const readSessionFile = vi.fn(async () => ({
             success: true,

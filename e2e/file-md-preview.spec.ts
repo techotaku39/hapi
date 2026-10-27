@@ -38,4 +38,10 @@ test.describe('file markdown preview e2e', () => {
         await page.getByRole('link', { name: 'Related note' }).click()
         await expect(page.getByTestId('file-target-route')).toBeVisible()
     })
+
+    test('routes session references through memory history', async ({ page }) => {
+        await page.goto('/e2e-fixtures/file-md-preview-fixture.html')
+        await page.getByRole('link', { name: 'Session reference' }).click()
+        await expect(page.getByTestId('session-target-route')).toBeVisible()
+    })
 })

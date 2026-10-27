@@ -567,13 +567,14 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
 }
 
 function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessionId: string }) {
+    const { targetSessionId, ...anchorProps } = props
     const navigate = useNavigate()
-    const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
+    const rel = anchorProps.target === '_blank' ? (anchorProps.rel ?? 'noreferrer') : anchorProps.rel
     // Preserve Vite BASE_URL for copy / open-in-new-tab (SPA click uses navigate).
     const href = buildSessionReferencePath(props.targetSessionId)
 
     const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-        props.onClick?.(event)
+        anchorProps.onClick?.(event)
         if (event.defaultPrevented) return
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
@@ -587,7 +588,7 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
 
     return (
         <a
-            {...props}
+            {...anchorProps}
             href={href}
             rel={rel}
             onClick={handleClick}

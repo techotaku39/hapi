@@ -22,6 +22,8 @@ const SAMPLE_MARKDOWN = `# Teams and channels
 
 [Related note](error-notes.md)
 
+[Session reference](/sessions/session-42)
+
 ![Page 001](images/page-001.png)
 
 | Channel | Purpose |
@@ -100,6 +102,10 @@ function FileTargetRoute() {
     return <div data-testid="file-target-route">Opened sibling Markdown file</div>
 }
 
+function SessionTargetRoute() {
+    return <div data-testid="session-target-route">Opened session reference</div>
+}
+
 const rootRoute = createRootRoute({ component: Outlet })
 const fixtureRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -111,8 +117,13 @@ const fileTargetRoute = createRoute({
     path: '/sessions/$sessionId/file',
     component: FileTargetRoute,
 })
+const sessionTargetRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/sessions/$sessionId',
+    component: SessionTargetRoute,
+})
 const router = createRouter({
-    routeTree: rootRoute.addChildren([fixtureRoute, fileTargetRoute]),
+    routeTree: rootRoute.addChildren([fixtureRoute, fileTargetRoute, sessionTargetRoute]),
     history: createMemoryHistory({ initialEntries: ['/'] }),
 })
 
