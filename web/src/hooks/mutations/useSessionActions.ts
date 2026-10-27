@@ -1,4 +1,4 @@
-import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, SessionResponse, SessionsResponse } from '@/types/api'
@@ -32,13 +32,9 @@ export function useSessionActions(
     updateSessionSummary: (text: string) => Promise<void>
     setPinMode: (mode: 'none' | 'project' | 'global') => Promise<void>
     deleteSession: () => Promise<void>
-    isArchiving: boolean
     isPending: boolean
 } {
     const queryClient = useQueryClient()
-    // Header and list can each observe the same session, and a list row can
-    // remount after the inactive event. Keep archive progress per session.
-    const isArchiving = useIsMutating({ mutationKey: sessionArchiveMutationKey(sessionId), exact: true }) > 0
 
     const markSessionActiveInCache = (targetSessionId: string) => {
         // 中文注释：恢复/重开接口成功后，session-alive SSE 可能已经先到或稍后才到。
@@ -303,8 +299,7 @@ export function useSessionActions(
         updateSessionSummary: summaryMutation.mutateAsync,
         setPinMode: pinMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
-        isArchiving,
-        isPending: isArchiving || abortMutation.isPending
+        isPending: abortMutation.isPending
             || archiveMutation.isPending
             || reopenMutation.isPending
             || switchMutation.isPending

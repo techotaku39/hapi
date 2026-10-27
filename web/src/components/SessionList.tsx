@@ -1024,7 +1024,7 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending, isArchiving } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -1189,11 +1189,11 @@ function SessionItem(props: {
             {deleteOpen ? (
                 <DeleteSessionDialog
                     isOpen={true}
+                    sessionId={s.id}
                     onClose={() => setDeleteOpen(false)}
                     description={t('dialog.delete.description', { name: sessionName })}
                     onConfirm={deleteSession}
                     isPending={isPending}
-                    isArchiving={isArchiving}
                 />
             ) : null}
         </>

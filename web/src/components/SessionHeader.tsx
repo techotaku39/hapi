@@ -3,7 +3,7 @@ import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
-import { sessionModelMutationKey, useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { sessionArchiveMutationKey, sessionModelMutationKey, useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
@@ -226,11 +226,13 @@ export function SessionHeader(props: {
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending, isArchiving } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending: isActionPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
     )
+    const isArchiving = useIsMutating({ mutationKey: sessionArchiveMutationKey(session.id), exact: true }) > 0
+    const isPending = isActionPending || isArchiving
     const [reopenError, setReopenError] = useState<string | null>(null)
 
     const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
@@ -579,6 +581,7 @@ export function SessionHeader(props: {
 
             <DeleteSessionDialog
                 isOpen={deleteOpen}
+                sessionId={session.id}
                 onClose={() => setDeleteOpen(false)}
                 description={
                     scratchlistCount > 0
@@ -592,7 +595,6 @@ export function SessionHeader(props: {
                 }
                 onConfirm={handleDelete}
                 isPending={isPending}
-                isArchiving={isArchiving}
             />
         </>
     )
