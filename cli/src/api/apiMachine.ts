@@ -45,6 +45,10 @@ import {
     type ListGrokModelsForCwdResponse
 } from '../modules/common/grokModels'
 import {
+    listDshModelsForMachine,
+    type ListDshModelsForMachineResponse
+} from '../modules/common/dshModels'
+import {
     listCopilotModelsForCwd,
     type ListCopilotModelsForCwdRequest,
     type ListCopilotModelsForCwdResponse
@@ -70,7 +74,10 @@ export { normalizeWindowsDriveRoot } from './machinePathPolicy'
 
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
-    stopSession: (sessionId: string) => Promise<'stopped' | 'already_gone' | 'still_alive'>
+    stopSession: (
+        sessionId: string,
+        opts?: { processStartMarker?: string }
+    ) => Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'>
     requestShutdown: () => void
 }
 
@@ -296,6 +303,15 @@ export class ApiMachineClient {
             }
         )
 
+        // DSH models are machine-global, so unlike the cwd-scoped probes above
+        // this handler takes no parameters.
+        this.rpcHandlerManager.registerHandler<undefined, ListDshModelsForMachineResponse>(
+            RPC_METHODS.ListDshModelsForMachine,
+            async () => {
+                return await listDshModelsForMachine()
+            }
+        )
+
         this.rpcHandlerManager.registerHandler<ListCopilotModelsForCwdRequest, ListCopilotModelsForCwdResponse>(
             RPC_METHODS.ListCopilotModelsForCwd,
             async (params) => {
@@ -401,7 +417,7 @@ export class ApiMachineClient {
 
     setRPCHandlers({ spawnSession, stopSession, requestShutdown }: MachineRpcHandlers): void {
         this.rpcHandlerManager.registerHandler(RPC_METHODS.SpawnHappySession, async (params: any) => {
-            const { directory, sessionId, existingSessionId, resumeSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, collaborationMode, copilotAgentMode, token, sessionType, worktreeName, startingMode, forkSession } = params || {}
+            const { directory, sessionId, existingSessionId, reservedSessionId, resumeSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, collaborationMode, copilotAgentMode, token, sessionType, worktreeName, startingMode, forkSession } = params || {}
 
             if (!directory) {
                 throw new Error('Directory is required')
@@ -413,6 +429,8 @@ export class ApiMachineClient {
                     type: 'error',
                     errorMessage: 'Directory is outside this machine\'s workspace roots',
                     code: 'outside_workspace_roots',
+                    // Pre-exec: no OS child — hub must delete the prealloc stub (#1911).
+                    childStarted: false,
                 }
             }
 
@@ -420,6 +438,7 @@ export class ApiMachineClient {
                 directory,
                 sessionId,
                 existingSessionId,
+                reservedSessionId,
                 resumeSessionId,
                 machineId,
                 approvedNewDirectoryCreation,
@@ -456,12 +475,15 @@ export class ApiMachineClient {
         })
 
         this.rpcHandlerManager.registerHandler(RPC_METHODS.StopSession, async (params: any) => {
-            const { sessionId } = params || {}
+            const { sessionId, processStartMarker } = params || {}
             if (!sessionId) {
                 throw new Error('Session ID is required')
             }
 
-            const status = await stopSession(sessionId)
+            const status = await stopSession(
+                sessionId,
+                typeof processStartMarker === 'string' ? { processStartMarker } : undefined
+            )
             return { status }
         })
 

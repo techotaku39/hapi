@@ -26,6 +26,11 @@ export type CreateOrLoadMachineRequest = z.infer<typeof CreateOrLoadMachineReque
 
 export const CreateOrLoadSessionRequestSchema = z.object({
     id: z.string().uuid().optional(),
+    /**
+     * When true with `id`, bind a hub-preallocated stub (overwrite tag/metadata)
+     * instead of create/getOrCreate. Rejects non-stub rows (#1911 adopt).
+     */
+    adopt: z.boolean().optional(),
     tag: z.string().min(1),
     metadata: z.unknown(),
     agentState: z.unknown().nullable().optional(),
@@ -33,6 +38,14 @@ export const CreateOrLoadSessionRequestSchema = z.object({
     modelReasoningEffort: z.string().optional(),
     effort: z.string().optional(),
     machine: CreateOrLoadMachineRequestSchema.optional()
+}).superRefine((value, ctx) => {
+    if (value.adopt === true && !value.id) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'adopt requires id',
+            path: ['id'],
+        })
+    }
 })
 
 export type CreateOrLoadSessionRequest = z.infer<typeof CreateOrLoadSessionRequestSchema>
@@ -808,6 +821,24 @@ export type GrokModelSummary = {
     name?: string
     reasoningEfforts?: GrokReasoningEffortOption[]
 }
+
+export type DshModelSummary = {
+    modelId: string
+    name?: string
+}
+
+/**
+ * DeepSeek Harness model discovery. Model ids are opaque ACP config-option
+ * values — for dsh 0.2.x they are JSON-encoded `["provider","model"]` tuples —
+ * and must be sent back verbatim when switching.
+ */
+export type DshModelsResponse = {
+    success: boolean
+    availableModels?: DshModelSummary[]
+    currentModelId?: string | null
+    error?: string
+}
+export type ListDshModelsResponse = DshModelsResponse
 
 export type GrokReasoningEffortOption = {
     value: string

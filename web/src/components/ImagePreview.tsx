@@ -307,7 +307,10 @@ export function ImagePreview(props: {
                 data-image-preview-label={props.label}
                 data-image-preview-gallery={props.galleryId ?? ''}
                 data-image-preview-file-size={props.fileSize !== undefined ? String(props.fileSize) : undefined}
-                className={props.buttonClassName ?? 'group flex min-h-[18rem] w-full items-center justify-center overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-left'}
+                // Contain the absolute sr-only filename inside this trigger.
+                // Otherwise it can escape the chat viewport and make the app
+                // root scroll when history navigation calls scrollIntoView.
+                className={`relative ${props.buttonClassName ?? 'group flex min-h-[18rem] w-full items-center justify-center overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-left'}`}
                 title="Click to zoom"
             >
                 <img
@@ -327,6 +330,8 @@ export function ImagePreview(props: {
                     role="dialog"
                     aria-modal="true"
                     aria-label={activePreview.label}
+                    // Keep preview gestures from starting an ancestor's attachment drag.
+                    onPointerDown={stopEvent}
                 >
                     <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-black/50 px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] max-sm:gap-1">
                         <button
