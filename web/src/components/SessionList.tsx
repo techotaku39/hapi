@@ -400,11 +400,15 @@ export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSes
 export function filterUnreadSessionsOnly(
     sessions: SessionSummary[],
     selectedSessionId: string | null | undefined,
-    getLastSeenAt: (sessionId: string) => number
+    getLastSeenAt: (sessionId: string) => number,
+    getManualUnreadAt: (sessionId: string) => number | null = () => null,
 ): SessionSummary[] {
     return sessions.filter(session =>
         session.id === selectedSessionId
-        || sessionIsUnread(session, { lastSeenAt: getLastSeenAt(session.id) })
+        || sessionIsUnread(session, {
+            lastSeenAt: getLastSeenAt(session.id),
+            manualUnreadAt: getManualUnreadAt(session.id)
+        })
     )
 }
 
@@ -1628,7 +1632,8 @@ export function SessionList(props: {
         return filterUnreadSessionsOnly(
             visibleSessions,
             selectedSessionId,
-            id => lastSeenById[id] ?? 0
+            id => lastSeenById[id] ?? 0,
+            getSessionManualUnreadAt
         )
     }, [lastSeenVersion, visibleSessions, selectedSessionId, showUnreadOnly])
     const machineFilteredSessions = useMemo(
