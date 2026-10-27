@@ -138,10 +138,10 @@ The configuration routes in the table above respond `{ok: true}`; apply-failures
 
 | Method & path | Notes |
 |---|---|
-| `GET /api/sessions/:id/codex-models`, `/opencode-models`, `/cursor-models`, `/grok-models`, `/copilot-models`, `/pi-models` | Active session of the matching flavor; 400 otherwise |
+| `GET /api/sessions/:id/codex-models`, `/opencode-models`, `/cursor-models`, `/grok-models`, `/copilot-models`, `/kimi-models`, `/pi-models` | Active session of the matching flavor; 400 otherwise |
 | `GET /api/sessions/:id/opencode-reasoning-effort-options`, `/grok-reasoning-effort-options` | Same pattern |
 | `GET /api/machines/:id/agy-models`, `/pi-models`, `/codex-models`, `/cursor-models` | Machine-level (pre-spawn pickers). `agy-models` takes `?refresh=true` to skip the machine's cached catalog, and may answer `success: true` with an advisory `error` (see [Errors](./errors.md#rpc-wrapped-endpoints)) |
-| `GET /api/machines/:id/opencode-models?cwd=`, `/grok-models?cwd=`, `/copilot-models?cwd=` | `cwd` query required (400 without) |
+| `GET /api/machines/:id/opencode-models?cwd=`, `/grok-models?cwd=`, `/copilot-models?cwd=`, `/kimi-models?cwd=` | `cwd` query required (400 without) |
 
 ### Machines & spawning
 
@@ -166,6 +166,16 @@ the authoritative availability check as part of spawning, covering changes
 after the form-level query without requiring a duplicate client RPC.
 Availability checks executables and static runner configuration only; it does
 not execute the Agent or verify account/login state.
+
+Directory listing and spawning use the same workspace-root policy. With no
+`metadata.workspaceRoots`, paths are unrestricted beyond the runner account's
+filesystem permissions; `metadata.homeDir` is only a suggested starting location.
+Explicit roots restrict both operations, after canonical symlink resolution.
+Listings classify allowed directory symlinks as directories and omit links
+whose targets escape the configured roots. Dot-prefixed entries require
+`includeHidden: true`. Autocomplete clients can suggest known workspace roots
+from metadata while a user types their prefix, without listing a root's
+out-of-bounds parent.
 
 ### Git & files (RPC-wrapped)
 

@@ -160,6 +160,12 @@ struct NewSessionLogicTests {
     }
 
     @Test func windowsDriveAndUNCAutocompletePreserveSeparators() {
+        #expect(NewSessionLogic.directoryAutocompleteQuery(path: "C:\\wo", roots: ["C:\\work"])
+            == .roots(["C:\\work"]))
+        #expect(NewSessionLogic.directoryAutocompleteQuery(path: "\\\\server\\sh", roots: ["\\\\server\\share"])
+            == .roots(["\\\\server\\share"]))
+        #expect(NewSessionLogic.directoryAutocompleteQuery(path: "C:\\work", roots: ["C:\\work"])
+            == .directory(NewSessionLogic.ParentQuery(parent: "C:\\work", prefix: "", separator: "\\")))
         #expect(
             NewSessionLogic.parentQuery(for: "C:\\Users\\pro")
                 == NewSessionLogic.ParentQuery(parent: "C:\\Users", prefix: "pro", separator: "\\")
@@ -273,7 +279,7 @@ struct NewSessionLogicTests {
             NewSessionForm(agent: .codex, permissionMode: .safeYolo)
         )
         #expect(staleMode.permissionMode == .default)
-        #expect(AgentFlavor.codex.launchPermissionModes == [.default, .readOnly, .yolo])
+        #expect(AgentFlavor.codex.launchPermissionModes == [.default, .readOnly, .autoReview, .yolo])
         #expect(NewSessionLogic.sanitizeDraft(NewSessionForm(agent: .kimi, permissionMode: .safeYolo)).permissionMode == .safeYolo)
     }
 

@@ -17,7 +17,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { formatFileMetadata } from '@/lib/file-metadata'
 import { decodeBase64 } from '@/lib/utils'
-import { useTranslation } from '@/lib/use-translation'
+import { useTranslation, type Locale } from '@/lib/use-translation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
@@ -40,7 +40,7 @@ function imageMimeType(fileName: string): string | null {
     return extension ? IMAGE_MIME_BY_EXTENSION[extension] ?? null : null
 }
 
-function formatDate(value: number, locale: 'en' | 'zh-CN'): string {
+function formatDate(value: number, locale: Locale): string {
     return new Intl.DateTimeFormat(locale, {
         year: 'numeric',
         month: '2-digit',

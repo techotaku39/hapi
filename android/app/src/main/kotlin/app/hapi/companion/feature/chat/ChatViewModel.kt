@@ -155,6 +155,8 @@ data class ComposerUiState(
     val isSending: Boolean,
     /** A turn is active: long-press send offers Steer; an empty draft shows Stop. */
     val canSteer: Boolean,
+    /** Local focus intent; does not replace or send the draft. */
+    val focusRequest: Long = 0,
 )
 
 /** One row of the queued-messages bar (uninvoked sends). */
@@ -409,6 +411,14 @@ class ChatViewModel(
     private val queuedOpPending = MutableStateFlow(false)
     private val permissionOverrides = MutableStateFlow<Map<String, PermissionRowOverride>>(emptyMap())
     private val configOpPending = MutableStateFlow(false)
+    private val composerFocusRequest = MutableStateFlow(0L)
+    private data class CodexPlanOperations(
+        val pendingPlanId: String? = null,
+        val implementedPlanIds: Set<String> = emptySet(),
+        val continuedPlanIds: Set<String> = emptySet(),
+        val errors: Map<String, CodexPlanFailure> = emptyMap(),
+    )
+    private val codexPlanOperations = MutableStateFlow(CodexPlanOperations())
 
     private sealed interface CodexModels {
         data object Idle : CodexModels
@@ -480,11 +490,13 @@ class ChatViewModel(
         composerText,
         sendInFlight,
         sessionStateFlow(),
-    ) { text, sending, session ->
+        composerFocusRequest,
+    ) { text, sending, session, focusRequest ->
         ComposerUiState(
             text = text,
             isSending = sending,
             canSteer = session.thinking && session.active,
+            focusRequest = focusRequest,
         )
     }.stateIn(scope, SharingStarted.Eagerly, ComposerUiState(text = "", isSending = false, canSteer = false))
 
@@ -498,6 +510,13 @@ class ChatViewModel(
             }
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** Plan availability updates independently of the transcript pipeline. */
+    val codexPlanActions: StateFlow<CodexPlanActions> = combine(
+        sessionStore.sessionDetail(sessionId), codexPlanOperations, sendInFlight, configOpPending,
+    ) { detail, operations, sending, configuring ->
+        buildCodexPlanActions(detail, operations, sending || configuring)
+    }.stateIn(scope, SharingStarted.Eagerly, CodexPlanActions())
 
     /** Session config sheet model. */
     val config: StateFlow<SessionConfigUi> = combine(
@@ -1442,10 +1461,91 @@ class ChatViewModel(
         }
     }
 
+    // ---------------------------------------------------- Codex plan actions --
+
+    private fun buildCodexPlanActions(
+        detail: Session?, operations: CodexPlanOperations, busy: Boolean,
+    ): CodexPlanActions = CodexPlanActions(
+        proposalId = detail?.agentState?.codexPlanProposalId?.takeIf {
+            detail.active && detail.metadata?.flavor == "codex"
+                && detail.metadata?.capabilities?.concurrentClients == true
+                && it !in operations.implementedPlanIds
+                && it !in operations.continuedPlanIds
+        },
+        pendingPlanId = operations.pendingPlanId,
+        disabled = busy || detail?.thinking == true,
+        errors = operations.errors,
+    )
+
+    // Re-read live inputs for callbacks; a combined StateFlow can lag a UI tap.
+    private fun currentCodexPlanActions() = buildCodexPlanActions(
+        sessionStore.currentDetail(sessionId), codexPlanOperations.value,
+        sendInFlight.value || configOpPending.value,
+    )
+
+    fun implementCodexPlan(planId: String) {
+        val previous = codexPlanOperations.value
+        if (!currentCodexPlanActions().forPlan(planId).canAct) return
+        if (!codexPlanOperations.compareAndSet(previous, previous.copy(
+                pendingPlanId = planId, errors = previous.errors - planId,
+            ))) return
+        scope.launch {
+            try {
+                try {
+                    api.implementCodexPlan(sessionId, planId)
+                    // Acceptance wins over a failed or temporarily stale refresh.
+                    codexPlanOperations.update { it.copy(implementedPlanIds = it.implementedPlanIds + planId) }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Exception) {
+                    val serverMessage = (error as? ApiError)?.body?.let {
+                        runCatching { HapiJson.parseToJsonElement(it).objOrNull?.get("error").stringOrNull }.getOrNull()
+                    }
+                    codexPlanOperations.update {
+                        it.copy(errors = it.errors + (planId to CodexPlanFailure(serverMessage ?: error.message)))
+                    }
+                }
+                // Another client may have consumed/withdrawn the proposal, even
+                // after a failure. Refresh without resubmitting an uncertain POST.
+                try {
+                    sessionStore.loadSessionDetail(sessionId)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    // Keep the last state; SSE/reconnection will refresh later.
+                }
+            } finally {
+                codexPlanOperations.update { it.copy(pendingPlanId = null) }
+            }
+        }
+    }
+
+    fun continueCodexPlan(planId: String) {
+        if (!currentCodexPlanActions().forPlan(planId).canAct) return
+        codexPlanOperations.update {
+            it.copy(continuedPlanIds = it.continuedPlanIds + planId, errors = it.errors - planId)
+        }
+        composerFocusRequest.update { it + 1 }
+    }
+
     // ---------------------------------------------------------------- config --
 
-    /** `POST /permission-mode` with an optimistic detail flip; server truth on error. */
+    /**
+     * Web's terminal-control flag (SessionChat.tsx:996):
+     * `controlledByUser && !concurrentClients` — shared-clients sessions
+     * report the flag but keep remote config switching.
+     */
+    private fun terminalControlled(detail: Session?): Boolean =
+        detail?.agentState?.controlledByUser == true && detail?.metadata?.capabilities?.concurrentClients != true
+
+    /**
+     * `POST /permission-mode` with an optimistic detail flip; server truth on
+     * error. Inactive sessions stay switchable (web parity — the send path
+     * auto-resumes); only copilot sessions under local terminal control lose
+     * the switcher (web withholds the callback, SessionChat.tsx:2159-2163).
+     */
     fun setPermissionMode(mode: PermissionMode) {
+        if (currentFlavor() == "copilot" && terminalControlled(currentDetail())) return
         runConfigChange(
             optimistic = { it.copy(permissionMode = mode.wireId) },
             call = { api.setPermissionMode(sessionId, mode.wireId) },
@@ -1569,7 +1669,7 @@ class ChatViewModel(
         return SessionConfigUi(
             flavor = flavor,
             active = detail?.active ?: summary?.active ?: false,
-            controlledByUser = detail?.agentState?.controlledByUser == true && detail?.metadata?.capabilities?.concurrentClients != true,
+            controlledByUser = terminalControlled(detail),
             permissionMode = detail?.permissionMode,
             permissionModes = PermissionModes.forFlavor(flavor).filter {
                 detail?.metadata?.capabilities?.concurrentClients != true || it != PermissionMode.SafeYolo
