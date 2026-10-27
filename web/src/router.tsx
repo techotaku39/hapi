@@ -207,6 +207,20 @@ function SessionsPage() {
     }, [isSessionsIndex, pathname, sidebarSearch])
     const sidebarHidden = !isSidebarVisible
     const shouldShowSidebar = isSessionsIndex || isSidebarVisible
+    useEffect(() => {
+        // Child routes and in-session actions can navigate without carrying
+        // the parent session search state. Keep the chat-focused URL explicit
+        // while this layout remains hidden so reloads do not restore the rail.
+        if (isSessionsIndex || !sidebarHidden) return
+        const { pathname: currentPathname, search, hash, state } = router.history.location
+        const searchParams = new URLSearchParams(search)
+        if (searchParams.get('sidebar') === 'hidden') return
+        searchParams.set('sidebar', 'hidden')
+        router.history.replace(
+            `${currentPathname}?${searchParams.toString()}${hash}`,
+            state,
+        )
+    }, [isSessionsIndex, pathname, router, sidebarHidden, sidebarSearch])
     const sidebar = useSidebarResize()
     const handleSelectSession = useCallback((sessionId: string) => {
         navigate(getSessionListSelectionNavigation(
