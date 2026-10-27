@@ -4,7 +4,9 @@ import {
     type KeyboardEvent as ReactKeyboardEvent,
     type MouseEvent as ReactMouseEvent,
     type PointerEvent as ReactPointerEvent,
+    createContext,
     useCallback,
+    useContext,
     useEffect,
     useMemo,
     useRef,
@@ -42,6 +44,23 @@ type AttachmentDropTarget = {
     id: string
     position: AttachmentDropPosition
 }
+
+type AttachmentItemContextValue = {
+    dragHandleProps?: AttachmentDragHandleProps
+    attachmentOrderRef?: MutableRefObject<string[]>
+    retryingAttachmentIdsRef?: MutableRefObject<Set<string>>
+    onRetry?: AttachmentRetryHandler
+}
+
+const AttachmentDragHandleContext = createContext<AttachmentItemContextValue | undefined>(undefined)
+
+function SortableAttachmentItem() {
+    const context = useContext(AttachmentDragHandleContext)
+    return <AttachmentItem {...context} />
+}
+
+// Updating drag handlers must not replace the attachment component and reset its image viewer.
+const SORTABLE_ATTACHMENT_COMPONENTS = { Attachment: SortableAttachmentItem }
 
 function findAttachmentDropTarget(clientX: number, clientY: number): AttachmentDropTarget | null {
     if (typeof document.elementsFromPoint !== 'function') return null
@@ -104,18 +123,16 @@ function SortableComposerAttachment(props: SortableComposerAttachmentProps) {
                 onSurfaceContextMenu: handleContextMenu,
                 onSurfaceClick: handleClick,
             },
-        [attachment.name, disabled, handleKeyDown, handlePointerDown],
+        [attachment.name, disabled, handleClick, handleContextMenu, handleKeyDown, handlePointerDown, handleSurfacePointerDown],
     )
-    const AttachmentWithHandle = useCallback(
-        () => (
-            <AttachmentItem
-                dragHandleProps={dragHandleProps}
-                attachmentOrderRef={attachmentOrderRef}
-                retryingAttachmentIdsRef={retryingAttachmentIdsRef}
-                onRetry={onRetry}
-            />
-        ),
-        [attachmentOrderRef, dragHandleProps, onRetry],
+    const attachmentItemContext = useMemo<AttachmentItemContextValue>(
+        () => ({
+            dragHandleProps,
+            attachmentOrderRef,
+            retryingAttachmentIdsRef,
+            onRetry,
+        }),
+        [attachmentOrderRef, dragHandleProps, onRetry, retryingAttachmentIdsRef],
     )
 
     return (
@@ -124,10 +141,12 @@ function SortableComposerAttachment(props: SortableComposerAttachmentProps) {
             data-hapi-composer-attachment-dragging={isDragging || undefined}
             className={isDragging ? 'opacity-60' : undefined}
         >
-            <ComposerPrimitive.AttachmentByIndex
-                index={index}
-                components={{ Attachment: AttachmentWithHandle }}
-            />
+            <AttachmentDragHandleContext.Provider value={attachmentItemContext}>
+                <ComposerPrimitive.AttachmentByIndex
+                    index={index}
+                    components={SORTABLE_ATTACHMENT_COMPONENTS}
+                />
+            </AttachmentDragHandleContext.Provider>
         </div>
     )
 }
