@@ -44,6 +44,7 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
 - `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
 - `hapi inspect-peer <session-id-or-prefix>` - Read-only peer metadata + recent message text (no resume). Prefer this or MCP `inspect_peer` when a user cites `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`. `/sessions/<id>` is a hub path, not a local file. Optional `--limit`.
+- `hapi set-mode <session-id-or-prefix> <mode>` - Change the permission mode of an existing session, like the web permission picker. Active sessions switch immediately; inactive ones use it on next resume. An invalid mode prints the modes allowed for that agent.
 
 The picker lists agents alphabetically by command name. Use Up/Down and Enter
 to choose; Esc or Ctrl-C cancels. It appears on every bare invocation, even
@@ -139,6 +140,14 @@ See `src/ui/doctor.ts`.
 - `hapi hub` - Start the bundled hub (single binary workflow).
 - `hapi server` - Alias for `hapi hub`.
 
+### Codex round timing
+
+Completed live Codex turns persist their duration in the message stream, so Web
+and PWA response details keep the same Round duration after refresh or a cached
+tail reload. Local transcript timing uses the original start and completion
+timestamps; imported history and turns without an observed live start do not
+receive a new duration.
+
 ### Codex MCP servers
 
 Codex sessions keep the MCP servers configured in the user's Codex
@@ -162,14 +171,20 @@ environment automatically.
 
 See `src/configuration.ts` for all options.
 
-DeepSeek Harness ACP uses `dsh-acp-demo` by default. Override the executable or
-its arguments without shell parsing:
+DeepSeek Harness ACP uses the official `dsh` CLI with `--profile acp` by default
+(the ACP profile ships with `@deepseek-ai/dsh` since 0.2.0). Override the
+executable or its arguments without shell parsing:
 
 ```bash
 export HAPI_DSH_ACP_COMMAND=dsh-acp-demo
 export HAPI_DSH_ACP_CONFIG=/path/to/deepseek-harness/examples/acp-agent/cordis.yml
 hapi dsh
 ```
+
+`HAPI_DSH_ACP_CONFIG` maps to `--config` for the configured server. Without
+`HAPI_DSH_ACP_COMMAND` it instead applies to the official CLI, which has no
+`--config` flag — the path is passed as a `--patch` overlay on top of
+`--profile acp`.
 
 For a source checkout, use JSON arguments:
 
@@ -178,13 +193,11 @@ export HAPI_DSH_ACP_COMMAND=pnpm
 export HAPI_DSH_ACP_ARGS_JSON='["--dir", "/path/to/deepseek-harness", "run", "demo:acp"]'
 ```
 
-The current DSH ACP profile supports native persistence through its
-`session/resume` method. HAPI stores the native DSH session id and keeps the Hub
-message history as the transcript source; `session/resume` restores model
-context but does not replay historical updates. The legacy ACP demo may be
-fresh-session-only, in which case HAPI reports the failed resume and starts a
-new session. DSH owns model switching, MCP injection, live tool/reasoning
-telemetry, and the overall permission policy.
+The DSH ACP profile can restore native context through `session/resume` when
+advertised; Hub history remains the transcript source. A legacy server may
+fall back to a fresh session with a visible notice. Model catalogs are exposed
+through `ListDshModels` and selected per turn via `session/set_config_option`.
+DSH owns MCP injection, live tool/reasoning telemetry and permission policy.
 
 ### Required
 
@@ -197,8 +210,8 @@ telemetry, and the overall permission policy.
 - `HAPI_EXPERIMENTAL` - Enable experimental features (true/1/yes).
 - `HAPI_EXTRA_HEADERS_JSON` - JSON object of extra headers to send on CLI → hub requests, e.g. `{"Cookie":"CF_Authorization=..."}`. Can also be set as the `extraHeaders` object in `~/.hapi/settings.json` (environment variable wins).
 - `HAPI_CLAUDE_PATH` - Path to a specific `claude` executable.
-- `HAPI_DSH_ACP_COMMAND` - ACP server executable for `hapi dsh` (default: `dsh-acp-demo`).
-- `HAPI_DSH_ACP_CONFIG` - Optional `dsh-acp-demo --config` path.
+- `HAPI_DSH_ACP_COMMAND` - ACP server executable for `hapi dsh` (default: `dsh` with `--profile acp`).
+- `HAPI_DSH_ACP_CONFIG` - Optional config path for the configured DSH ACP server (`--config` with `HAPI_DSH_ACP_COMMAND`, `--patch` overlay on the default official CLI).
 - `HAPI_DSH_ACP_ARGS_JSON` - Optional JSON array of ACP server arguments.
 - `HAPI_HTTP_MCP_URL` - Default MCP target for `hapi mcp`.
 
@@ -221,7 +234,7 @@ telemetry, and the overall permission policy.
 ### Set for the wrapped agent
 
 - `HAPI_SESSION_ID` - The current HAPI session ID, available inside agent shells. Use it in scripts that target the current conversation without listing sessions.
-- An explicitly configured `HAPI_API_URL` is also made available to agent shells. HAPI does not copy settings-backed `CLI_API_TOKEN` secrets into the agent environment; credentials already present in the parent environment may still be inherited. Web terminal PTYs strip hub secrets.
+- An explicitly configured `HAPI_API_URL` is also made available to agent shells. HAPI does not copy settings-backed `CLI_API_TOKEN` secrets into the agent environment; credentials already present in the parent environment may still be inherited. Web Terminal PTYs (session Terminal button) strip hub secrets and agent-context markers (`HAPI_AGENT_CONTEXT`, `CURSOR_AGENT`, …) and set `HAPI_USER_TERMINAL=1` so operator tools treat that shell as human-facing.
 
 For peer discovery and messaging, use the session's MCP `list_peers`,
 `inspect_peer`, and `ping_peer` tools, or the corresponding CLI commands.
@@ -236,6 +249,13 @@ bun scripts/tooling/hapi-display-image.mjs /absolute/path/to/image.png "optional
 ```
 
 ## Session lifecycle invariants
+
+- Runner waits up to 30 seconds for Codex startup (15 seconds for other agents),
+  overridable with `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS`. A Codex startup deadline
+  returns an unconfirmed result and keeps its process tracked; a late webhook
+  completes the same session. Wait for that row or explicitly stop it rather
+  than creating duplicates. Process exit and explicit stop still clean up the
+  child. The Hub gives Codex spawn RPCs 60 seconds for preflight plus startup.
 
 When changing agent bootstrap, handoff, or shared-session plumbing:
 

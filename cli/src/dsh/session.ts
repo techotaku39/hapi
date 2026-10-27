@@ -12,6 +12,8 @@ export class DshSession extends AgentSessionBase<DshMode> {
         client: ApiSessionClient
         path: string
         logPath: string
+        /** Spawn-time model override (opaque ACP config-option value). */
+        model?: string
         sessionId?: string | null
         messageQueue: MessageQueue2<DshMode>
         onModeChange: (mode: 'local' | 'remote') => void
@@ -23,6 +25,7 @@ export class DshSession extends AgentSessionBase<DshMode> {
             path: opts.path,
             logPath: opts.logPath,
             sessionId: opts.sessionId ?? null,
+            model: opts.model,
             messageQueue: opts.messageQueue,
             onModeChange: opts.onModeChange,
             mode: 'remote',
@@ -37,6 +40,10 @@ export class DshSession extends AgentSessionBase<DshMode> {
         })
         this.startedBy = opts.startedBy
     }
+
+    setModel = (model: string | null): void => {
+        this.model = model;
+    };
 
     sendAgentMessage = (message: unknown): void => {
         this.client.sendAgentMessage(message)
