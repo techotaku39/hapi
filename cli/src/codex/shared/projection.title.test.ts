@@ -122,12 +122,13 @@ describe('shared Codex titles', () => {
         expect(f.update).toHaveBeenCalledTimes(1);
     });
 
-    it('never overwrites an existing summary during a cold history replay', async () => {
+    it('never overwrites an existing display title during a cold history replay', async () => {
         const f = fixture();
         f.update(metadata => ({ ...metadata, summary: { text: 'Existing', updatedAt: 123 } }));
         f.update.mockClear();
         await f.projection.history(history(titleItem('old', 'Old')));
         expect(f.update).not.toHaveBeenCalled();
+        expect(f.metadata().name).toBe('Manual name');
         expect(f.metadata().summary).toEqual({ text: 'Existing', updatedAt: 123 });
     });
 

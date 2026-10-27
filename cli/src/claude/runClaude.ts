@@ -39,6 +39,11 @@ export interface StartOptions {
     claudeArgs?: string[]
     startedBy?: 'runner' | 'terminal'
     existingSessionId?: string
+    /**
+     * Fresh-spawn reserved hub id from `--hapi-session-id` (create/getOrCreate).
+     * Distinct from `existingSessionId` / `--existing-session-id` (reopen).
+     */
+    reservedSessionId?: string
     workingDirectory?: string
     resumeSessionId?: string
 }
@@ -75,7 +80,8 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             workingDirectory,
             agentState: initialState,
             model: initialModel ?? undefined,
-            effort: initialEffort ?? undefined
+            effort: initialEffort ?? undefined,
+            reservedSessionId: options.reservedSessionId
         });
     const { api, session, sessionInfo } = bootstrap;
     logger.debug(`Session created: ${sessionInfo.id}`);
@@ -174,6 +180,12 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
                 }
             }
 
+            // Follow /model switches inside the TUI ("[1m]" kept) for the local
+            // context window; only the local settings file registers this hook.
+            if (currentSession && data.hook_event_name === 'PostModelSwitch' && typeof data.to_model === 'string') {
+                currentSession.localContextModel = data.to_model;
+            }
+
             // Inherit the mode the user picked inside the interactive TUI
             // (shift+tab) so a later local→remote switch keeps it. Only the
             // local settings file registers the hooks that carry
@@ -236,7 +248,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     });
 
     lifecycle.registerProcessHandlers();
-    registerKillSessionHandler(session.rpcHandlerManager, lifecycle);
+    registerKillSessionHandler(session.rpcHandlerManager, lifecycle, session);
     registerLocalHandoffHandler(session.rpcHandlerManager, lifecycle);
 
     const conversationHistory = toConversationHistoryCapabilities(CLAUDE_CONVERSATION_HISTORY)
