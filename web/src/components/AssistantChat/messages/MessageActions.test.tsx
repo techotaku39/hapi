@@ -117,6 +117,18 @@ describe('MessageActions', () => {
         expect(screen.queryByText('Jump to conversation start')).toBeNull()
     })
 
+    it('keeps the conversation-start action when the prompt is already visible', () => {
+        renderActions({
+            align: 'start',
+            onJumpToPrompt: vi.fn(),
+            onJumpToConversationStart: vi.fn(),
+            showPromptNavigation: false
+        })
+
+        expect(screen.queryByRole('button', { name: 'Jump to turn input' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Jump to conversation start' })).toBeInTheDocument()
+    })
+
     it('disables the conversation-start action while history is loading', () => {
         renderActions({
             align: 'start',

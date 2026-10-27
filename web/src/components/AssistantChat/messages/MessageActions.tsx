@@ -29,6 +29,7 @@ type MessageActionsProps = {
     onRewind?: () => Promise<void>
     onJumpToPrompt?: () => void
     onJumpToConversationStart?: () => void
+    showPromptNavigation?: boolean
     isLoadingConversationStart?: boolean
     isLoadingPrompt?: boolean
     isNavigationInFlight?: boolean
@@ -63,6 +64,7 @@ export function MessageActions({
     onRewind,
     onJumpToPrompt,
     onJumpToConversationStart,
+    showPromptNavigation = true,
     isLoadingConversationStart = false,
     isLoadingPrompt = false,
     isNavigationInFlight = false
@@ -135,7 +137,7 @@ export function MessageActions({
                     {align === 'start' && hasMetadata && metadata ? <MessageInfoPopover metadata={metadata} /> : null}
                     {align === 'start' ? <DesktopTimestamp /> : null}
                 </div>
-                {align === 'start' && (onJumpToPrompt || onJumpToConversationStart) ? (
+                {align === 'start' && (onJumpToPrompt && showPromptNavigation || onJumpToConversationStart) ? (
                     <div className="flex h-5 items-center gap-1">
                         {onJumpToConversationStart ? (
                             <NavigationButton
@@ -148,7 +150,7 @@ export function MessageActions({
                                     : <ConversationStartIcon className="h-3.5 w-3.5 -translate-y-px opacity-80" />}
                             </NavigationButton>
                         ) : null}
-                        {onJumpToPrompt ? (
+                        {onJumpToPrompt && showPromptNavigation ? (
                             <NavigationButton
                                 title={t('message.jumpToPrompt')}
                                 onClick={onJumpToPrompt}
