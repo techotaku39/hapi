@@ -6,10 +6,21 @@ import { encodeBase64 } from '@/lib/utils'
 import { MAX_MARKDOWN_IMAGE_BYTES } from '@/lib/markdown-file-assets'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
+const navigate = vi.hoisted(() => vi.fn())
+
+vi.mock('@tanstack/react-router', async () => {
+    const actual = await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
+    return {
+        ...actual,
+        useNavigate: () => navigate,
+    }
+})
+
 describe('MarkdownRenderer', () => {
     afterEach(() => {
         cleanup()
         localStorage.clear()
+        vi.clearAllMocks()
     })
 
     it('renders fenced code blocks with the shared syntax highlighter shell in standalone mode', () => {
@@ -78,6 +89,11 @@ E = mc^2
 
         const link = screen.getByRole('link', { name: 'Related note' })
         expect(link.getAttribute('href')).toContain('/sessions/session-1/file?path=')
+        fireEvent.click(link)
+        expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: 'session-1' },
+        }))
         await waitFor(() => expect(screen.getByRole('img', { name: 'Page' })).toHaveAttribute('src', expect.stringContaining('data:image/png;base64,')))
         expect(readSessionFile).toHaveBeenCalledWith('session-1', 'notes/images/page-001.png', MAX_MARKDOWN_IMAGE_BYTES)
     })

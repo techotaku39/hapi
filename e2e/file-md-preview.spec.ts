@@ -32,4 +32,10 @@ test.describe('file markdown preview e2e', () => {
 
         await page.screenshot({ path: SCREENSHOT_PATH, fullPage: true })
     })
+
+    test('routes relative Markdown links through memory history', async ({ page }) => {
+        await page.goto('/e2e-fixtures/file-md-preview-fixture.html')
+        await page.getByRole('link', { name: 'Related note' }).click()
+        await expect(page.getByTestId('file-target-route')).toBeVisible()
+    })
 })

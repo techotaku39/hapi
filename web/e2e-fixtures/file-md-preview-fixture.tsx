@@ -6,6 +6,7 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { Outlet, createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import type { ApiClient } from '../src/api/client'
 import '../src/index.css'
 import { I18nProvider } from '../src/lib/i18n-context'
@@ -95,12 +96,32 @@ function FileMarkdownPreviewFixture() {
     )
 }
 
+function FileTargetRoute() {
+    return <div data-testid="file-target-route">Opened sibling Markdown file</div>
+}
+
+const rootRoute = createRootRoute({ component: Outlet })
+const fixtureRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/',
+    component: FileMarkdownPreviewFixture,
+})
+const fileTargetRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/sessions/$sessionId/file',
+    component: FileTargetRoute,
+})
+const router = createRouter({
+    routeTree: rootRoute.addChildren([fixtureRoute, fileTargetRoute]),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+})
+
 const rootEl = document.getElementById('root')
 if (rootEl) {
     ReactDOM.createRoot(rootEl).render(
         <React.StrictMode>
             <I18nProvider>
-                <FileMarkdownPreviewFixture />
+                <RouterProvider router={router} />
             </I18nProvider>
         </React.StrictMode>
     )

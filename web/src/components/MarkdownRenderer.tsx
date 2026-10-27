@@ -1,8 +1,9 @@
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import { TextMessagePartProvider } from '@assistant-ui/react'
-import { Children, isValidElement, useEffect, useMemo, useState, type ComponentPropsWithoutRef, type ComponentType, type ReactNode } from 'react'
+import { Children, isValidElement, useEffect, useMemo, useState, type ComponentPropsWithoutRef, type ComponentType, type MouseEvent, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
+import { useNavigate } from '@tanstack/react-router'
 import type { ApiClient } from '@/api/client'
 import {
     MARKDOWN_PLUGINS,
@@ -21,6 +22,7 @@ import { SyntaxHighlighter } from '@/components/assistant-ui/shiki-highlighter'
 import type { CodeHeaderProps, SyntaxHighlighterProps } from '@assistant-ui/react-markdown'
 import { cn, encodeBase64 } from '@/lib/utils'
 import { useOpenExternalLinksInNewTab } from '@/hooks/useOpenExternalLinksInNewTab'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import {
     getMarkdownImageMimeType,
     MAX_MARKDOWN_IMAGE_BYTES,
@@ -97,6 +99,7 @@ function InertStandaloneFileTarget(props: { href: string; children?: ReactNode; 
 function StandaloneFileLink(props: ComponentPropsWithoutRef<'a'> & MarkdownFilePreviewOptions) {
     const { api: _api, filePath, sessionId, workspacePath, href, children, ...anchorProps } = props
     const { openExternalLinksInNewTab } = useOpenExternalLinksInNewTab()
+    const navigate = useNavigate()
     const target = typeof href === 'string'
         ? resolveMarkdownFileLink(filePath, href, { workspacePath })
         : { kind: 'inert', href: '' } as const
@@ -116,6 +119,19 @@ function StandaloneFileLink(props: ComponentPropsWithoutRef<'a'> & MarkdownFileP
     const forceNewTab = openExternalLinksInNewTab && target.kind === 'remote' && isExternalHttpHref(resolvedHref)
     const resolvedTarget = forceNewTab ? '_blank' : anchorProps.target
     const resolvedRel = forceNewTab ? (anchorProps.rel ?? 'noopener noreferrer') : anchorProps.rel
+    const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+        anchorProps.onClick?.(event)
+        if (event.defaultPrevented || target.kind !== 'local') return
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+        event.preventDefault()
+        void navigate({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId },
+            search: { path: encodeBase64(target.path) },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }
 
     return (
         <a
@@ -123,6 +139,7 @@ function StandaloneFileLink(props: ComponentPropsWithoutRef<'a'> & MarkdownFileP
             href={resolvedHref}
             target={resolvedTarget}
             rel={resolvedRel}
+            onClick={handleClick}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', anchorProps.className)}
         >
             {children}
