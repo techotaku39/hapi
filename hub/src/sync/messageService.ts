@@ -1239,7 +1239,7 @@ export class MessageService {
             const inserted = this.store.addMessageForCurrentSession(
                 sessionId,
                 content,
-                payload.localId ?? undefined,
+                payload.localId ?? randomUUID(),
                 payload.scheduledAt ?? null
             )
             const actualSessionId = inserted.sessionId

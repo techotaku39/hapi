@@ -21,6 +21,11 @@ type SessionAttachmentLock = <T>(
     fn: () => Promise<T>,
 ) => Promise<T>
 
+type SessionCacheHooks = {
+    /** Fires after a merge deletes a session row. */
+    onSessionMergedAway?: (oldSessionId: string, newSessionId: string) => void
+}
+
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
     private readonly lastBroadcastAtBySessionId: Map<string, number> = new Map()
@@ -44,9 +49,21 @@ export class SessionCache {
     constructor(
         private readonly store: Store,
         private readonly publisher: EventPublisher,
-        private readonly withAttachmentLocks: SessionAttachmentLock = async (_namespace, _sessionIds, fn) => fn(),
+        withAttachmentLocksOrHooks: SessionAttachmentLock | SessionCacheHooks =
+            async (_namespace, _sessionIds, fn) => fn(),
+        hooks: SessionCacheHooks = {},
     ) {
+        if (typeof withAttachmentLocksOrHooks === 'function') {
+            this.withAttachmentLocks = withAttachmentLocksOrHooks
+            this.hooks = hooks
+        } else {
+            this.withAttachmentLocks = async (_namespace, _sessionIds, fn) => fn()
+            this.hooks = withAttachmentLocksOrHooks
+        }
     }
+
+    private readonly withAttachmentLocks: SessionAttachmentLock
+    private readonly hooks: SessionCacheHooks
 
     getSessions(): Session[] {
         return Array.from(this.sessions.values())
@@ -435,7 +452,7 @@ export class SessionCache {
             && this.store.messages.getImmediateQueuedLocalMessages(session.id).length > 0
 
         session.active = true
-        session.activeAt = Math.max(session.activeAt, t)
+        session.activeAt = Math.max(session.activeAt, hubNow)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
@@ -1525,6 +1542,7 @@ export class SessionCache {
                 this.recordAgentProgress(newSessionId, oldProgressAt)
             }
             this.agentProgressAtBySessionId.delete(oldSessionId)
+            this.hooks.onSessionMergedAway?.(oldSessionId, newSessionId)
         } else {
             this.refreshSession(oldSessionId)
         }
