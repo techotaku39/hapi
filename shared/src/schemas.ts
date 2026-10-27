@@ -62,6 +62,8 @@ export const MetadataSchema = z.object({
     summary: MetadataSummarySchema.optional(),
     // Exact provisional title owned by fork initialization, never a manual name.
     forkTitleSeed: MetadataSummarySchema.optional(),
+    // Claim automatic fork generation once across REST/native readiness/restarts.
+    forkTitleGenerationAttemptedAt: z.number().optional(),
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),
     // Parent HAPI session id when this session was created by message-level fork

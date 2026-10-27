@@ -1026,6 +1026,7 @@ export class SessionCache {
             const session = this.refreshSession(sessionId)
             const metadata = session?.metadata
             if (!session || !metadata || metadata.name?.trim() || metadata.titleLocked === true) return
+            if (metadata.forkTitleGenerationAttemptedAt !== undefined) return
             if (metadata.summary && (metadata.summary.text !== metadata.forkTitleSeed?.text
                 || metadata.summary.updatedAt !== metadata.forkTitleSeed?.updatedAt)) return
             const result = this.store.sessions.updateSessionMetadata(sessionId,
@@ -1034,6 +1035,24 @@ export class SessionCache {
             if (result.result === 'error') return
             if (result.result === 'success') { this.refreshSession(sessionId); return }
         }
+    }
+
+    /** Persistent CAS claim deduplicates native readiness and REST completion. */
+    claimForkTitleGeneration(sessionId: string, expected: { text: string; updatedAt: number } | undefined): boolean {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.refreshSession(sessionId)
+            const metadata = session?.metadata
+            if (!session || !metadata?.forkedFrom || metadata.forkTitleGenerationAttemptedAt !== undefined
+                || metadata.name?.trim() || metadata.titleLocked === true
+                || metadata.summary?.text !== expected?.text || metadata.summary?.updatedAt !== expected?.updatedAt
+                || metadata.forkTitleSeed?.text !== expected?.text || metadata.forkTitleSeed?.updatedAt !== expected?.updatedAt) return false
+            const result = this.store.sessions.updateSessionMetadata(sessionId,
+                { ...metadata, forkTitleGenerationAttemptedAt: Date.now() }, session.metadataVersion, session.namespace,
+                { touchUpdatedAt: false })
+            if (result.result === 'error') return false
+            if (result.result === 'success') { this.refreshSession(sessionId); return true }
+        }
+        return false
     }
 
     /** Only replace the exact fork seed captured before the provider request. */

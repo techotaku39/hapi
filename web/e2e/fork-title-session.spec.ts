@@ -1,6 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { createServer, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { readFile, readdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import { installHapiAuth } from './helpers/hapi-live'
 
 // Run against an isolated Full task environment whose Codex and title provider
@@ -174,5 +177,54 @@ test.describe('fork title (real Hub, Runner and installed Codex)', () => {
         expect(titleRequests[index]!.prompt).not.toContain('LATER INVENTORY TOPIC MUST BE EXCLUDED')
         finish(index, 'Historical payment branch')
         await expect.poll(async () => (await detail(id)).metadata.summary.text).toBe('Historical payment branch')
+    })
+
+    test('generates for the native terminal fork gateway without a REST fork request', async () => {
+        const home = process.env.HAPI_FORK_RUNNER_HOME
+        test.skip(!home, 'Requires the isolated task Runner Home')
+        const registry = join(home!, 'codex-runtimes')
+        const records = await Promise.all((await readdir(registry)).filter(name => name.endsWith('.json'))
+            .map(async name => JSON.parse(await readFile(join(registry, name), 'utf8'))))
+        const runtime = records.find(record => record.sessions?.[sourceId]?.active)
+        expect(runtime).toBeTruthy()
+        const WebSocket = createRequire(join(process.cwd(), '../cli/package.json'))('ws')
+        const socket = new WebSocket(runtime.endpoint, { headers: {
+            Host: 'localhost', Authorization: `Bearer ${runtime.token}`
+        } })
+        let nextId = 0
+        const pending = new Map<number, { resolve: (result: any) => void; reject: (error: Error) => void }>()
+        socket.on('message', (raw: Buffer) => {
+            const message = JSON.parse(raw.toString())
+            const request = pending.get(message.id)
+            if (!request || message.method) return
+            pending.delete(message.id)
+            if (message.error) request.reject(new Error(message.error.message))
+            else request.resolve(message.result)
+        })
+        const request = (method: string, params: unknown) => new Promise<any>((resolve, reject) => {
+            const id = ++nextId
+            pending.set(id, { resolve, reject })
+            socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+        })
+        try {
+            await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+            await request('initialize', { clientInfo: { name: 'hapi-title-test', title: 'Title test', version: '1' },
+                capabilities: { experimentalApi: true } })
+            socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized' }))
+            titleMode = 'hold'
+            const index = titleRequests.length
+            const result = await request('thread/fork', { threadId: runtime.sessions[sourceId].threadId, cwd: directory })
+            await expect.poll(() => titleRequests.length).toBe(index + 1)
+            const sessions = (await (await api.get(`${base}/api/sessions`)).json()).sessions
+            const child = sessions.find((session: any) => session.metadata?.agentSessionId === result.thread.id)
+            expect(child).toBeTruthy()
+            created.push(child.id)
+            const childDetail = await detail(child.id)
+            expect(childDetail.metadata.codexSessionId).toBe(result.thread.id)
+            expect(childDetail.metadata.summary.text).toBe('Fork: Current payment discussion')
+            finish(index, 'Native terminal branch title')
+            await expect.poll(async () => (await detail(child.id)).metadata.summary.text).toBe('Native terminal branch title')
+            expect(titleRequests.length).toBe(index + 1)
+        } finally { socket.terminate() }
     })
 })

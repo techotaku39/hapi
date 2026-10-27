@@ -579,6 +579,9 @@ export class SyncEngine {
     handleSessionReady(payload: { sid: string; time: number }): void {
         this.sessionReadyIds.add(payload.sid)
         const session = this.sessionCache.getSession(payload.sid)
+        if (session?.metadata?.forkedFrom && session.metadata.capabilities?.concurrentClients) {
+            void this.generateForkTitle(payload.sid)
+        }
         if (session?.metadata?.piResumeAttempt) {
             void this.writePiResumeAttempt(payload.sid, session.namespace, null)
                 .then(() => {
@@ -1663,6 +1666,7 @@ export class SyncEngine {
         const expected = metadata.summary
         if (expected && (expected.text !== metadata.forkTitleSeed?.text
             || expected.updatedAt !== metadata.forkTitleSeed?.updatedAt)) return
+        if (!this.sessionCache.claimForkTitleGeneration(sessionId, expected)) return
         try {
             const title = await this.titleSuggestionService.suggestTitle(sessionId)
             if (!this.stopped) await this.sessionCache.updateForkTitle(sessionId, title, expected)

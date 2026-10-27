@@ -217,7 +217,9 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         // new-thread subscription. Subscribe once without changing settings.
         await control.request('thread/resume', { threadId });
         await root.activate(initialOptions);
-        await root.session.flush();
+        // Notify only after fork metadata and replayed transcript are durable.
+        // Native terminal /fork does not pass through the Hub's REST fork path.
+        if (await root.session.flush()) root.session.emitSessionReady();
         await persist();
         await notifyRunnerSessionStarted(root.session.sessionId, root.session.getMetadata() ?? root.bootstrap.metadata);
     };

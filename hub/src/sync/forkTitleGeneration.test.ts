@@ -40,6 +40,33 @@ function fixture(shared = true, childMetadata: Partial<Metadata> = {}, flavor = 
 }
 
 describe('fork title generation', () => {
+    it('generates for a native shared fork readiness event and deduplicates the REST trigger', async () => {
+        const seed = { text: 'Fork: Current title', updatedAt: 1 }
+        const f = fixture(true, { summary: seed, forkTitleSeed: seed })
+        try {
+            let requests = 0
+            let finish!: (title: string) => void
+            f.internal.titleSuggestionService.suggestTitle = async () => {
+                requests++
+                return await new Promise<string>(resolve => { finish = resolve })
+            }
+            f.engine.handleSessionReady({ sid: f.child!.id, time: Date.now() })
+            f.engine.handleSessionReady({ sid: f.child!.id, time: Date.now() })
+            await flush()
+            expect(requests).toBe(1)
+            await f.engine.forkConversation(f.source.id, 'default')
+            expect(requests).toBe(1)
+            const reconnected = new SyncEngine(f.store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+            try {
+                ;(reconnected as any).titleSuggestionService.suggestTitle = async () => { requests++; return 'Duplicate' }
+                reconnected.handleSessionReady({ sid: f.child!.id, time: Date.now() })
+                expect(requests).toBe(1)
+            } finally { reconnected.stop() }
+            finish('Native terminal fork title')
+            await flush()
+            expect(f.engine.getSession(f.child!.id)?.metadata?.summary?.text).toBe('Native terminal fork title')
+        } finally { f.close() }
+    })
     it.each(['manual-name', 'manual-summary', 'locked', 'deleted', 'stopped'])(
         'does not apply an in-flight result after %s', async action => {
             const f = fixture()
