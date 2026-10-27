@@ -907,9 +907,24 @@ describe('ScratchlistDrawer disabled operations', () => {
     })
 
     it('keeps the draft confirmation open when deletion fails', async () => {
-        const onDelete = vi.fn().mockRejectedValue(new Error('delete failed'))
+        let rendered: ReturnType<typeof render>
+        const onDelete = vi.fn(async () => {
+            rendered.rerender(
+                <I18nProvider>
+                    <ScratchlistDrawer
+                        entries={[]}
+                        sessionId={SID}
+                        api={{} as never}
+                        onUpdate={vi.fn()}
+                        onReorder={vi.fn()}
+                        onDelete={onDelete}
+                    />
+                </I18nProvider>,
+            )
+            throw new Error('delete failed')
+        })
 
-        render(
+        rendered = render(
             <I18nProvider>
                 <ScratchlistDrawer
                     entries={[makeEntry({ id: 'failed-delete-entry', text: 'delete me' })]}

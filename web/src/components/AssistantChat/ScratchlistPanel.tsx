@@ -1118,7 +1118,7 @@ function ScratchlistInventory({
         }, 0)
     }, [])
 
-    if (entries.length === 0) {
+    if (entries.length === 0 && deleteRequest === null) {
         return (
             <p className={`${emptyMarginClassName} text-[11px] text-[var(--app-hint)]`}>
                 {t('scratchlist.emptyHint')}
