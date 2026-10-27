@@ -101,6 +101,14 @@ export const MetadataSchema = z.object({
         state: z.enum(['resuming', 'quarantined']),
         machineId: z.string(),
         startedAt: z.number(),
+        // Same durability as piResumeAttempt: clear-before-spawn +
+        // rollbackSafe:false quarantine must not lose archive fields (#1911).
+        archiveSnapshot: z.object({
+            lifecycleState: z.string().optional(),
+            lifecycleStateSince: z.number().optional(),
+            archivedBy: z.string().optional(),
+            archiveReason: z.string().optional(),
+        }).optional(),
     }).optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
@@ -207,6 +215,8 @@ export const AgentStateSchema = z.object({
     controlledByUser: z.boolean().nullish(),
     // Current actionable shared Codex proposal; content remains in the transcript.
     codexPlanProposalId: z.string().nullish(),
+    // Observed dequeue during live context compaction; not a consumption ACK.
+    codexCompactionPendingMessageIds: z.array(z.string()).nullish(),
     // True while the CLI is delivering a queued message into the active turn
     // (Steer). Surfaced so the web can reflect the inject in progress.
     steeringActive: z.boolean().nullish(),

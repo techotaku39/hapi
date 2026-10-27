@@ -11,7 +11,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setSessionHeaderMetadata, setAppBadgeEnabled } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setSessionHeaderMetadata, setAppBadgeEnabled, setFixedSessionOrder } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -23,6 +23,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setVoice: vi.fn(),
     setSessionHeaderMetadata: vi.fn(),
     setAppBadgeEnabled: vi.fn(),
+    setFixedSessionOrder: vi.fn(),
 }))
 
 const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false, sessionSummaryInChat: false })
@@ -85,6 +86,10 @@ vi.mock('@/hooks/useShowActiveSessionsOnly', () => ({
 
 vi.mock('@/hooks/usePinInProgressSessions', () => ({
     usePinInProgressSessions: () => ({ pinInProgressSessions: false, setPinInProgressSessions: vi.fn() }),
+}))
+
+vi.mock('@/hooks/useFixedSessionOrder', () => ({
+    useFixedSessionOrder: () => ({ fixedSessionOrder: false, setFixedSessionOrder }),
 }))
 
 vi.mock('@/hooks/useAppBadgePreference', () => ({
@@ -306,6 +311,10 @@ describe('responsive settings pages', () => {
         fireEvent.click(screen.getByRole('checkbox', { name: 'Agent icon' }))
         expect(setSessionHeaderMetadata).toHaveBeenCalledWith('agentIcon', false)
         expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+        const fixedOrderToggle = screen.getByRole('checkbox', { name: 'Fixed session order' })
+        expect(fixedOrderToggle).not.toBeChecked()
+        fireEvent.click(fixedOrderToggle)
+        expect(setFixedSessionOrder).toHaveBeenCalledWith(true)
     })
 
     it('keeps the session status description visible with its choice group', () => {
