@@ -510,7 +510,11 @@ export default function FilePage() {
                                                 />
                                             </div>
                                         ) : null}
-                                        <MarkdownRenderer content={decodedContent} standalone />
+                                        <MarkdownRenderer
+                                            content={decodedContent}
+                                            standalone
+                                            filePreview={{ api, sessionId, filePath }}
+                                        />
                                     </div>
                                 ) : (
                                     <div

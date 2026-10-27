@@ -1,8 +1,9 @@
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import { TextMessagePartProvider } from '@assistant-ui/react'
-import { Children, isValidElement, useMemo, type ComponentPropsWithoutRef, type ComponentType } from 'react'
+import { Children, isValidElement, useEffect, useMemo, useState, type ComponentPropsWithoutRef, type ComponentType, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
+import type { ApiClient } from '@/api/client'
 import {
     MARKDOWN_PLUGINS,
     MARKDOWN_PLUGINS_STANDALONE,
@@ -17,7 +18,19 @@ import {
 } from '@/components/assistant-ui/markdown-text'
 import { SyntaxHighlighter } from '@/components/assistant-ui/shiki-highlighter'
 import type { CodeHeaderProps, SyntaxHighlighterProps } from '@assistant-ui/react-markdown'
-import { cn } from '@/lib/utils'
+import { cn, encodeBase64 } from '@/lib/utils'
+import {
+    getMarkdownImageMimeType,
+    MAX_MARKDOWN_IMAGE_BYTES,
+    resolveMarkdownFileImage,
+    resolveMarkdownFileLink,
+} from '@/lib/markdown-file-assets'
+
+export interface MarkdownFilePreviewOptions {
+    api: ApiClient
+    sessionId: string
+    filePath: string
+}
 
 interface MarkdownRendererProps {
     content: string
@@ -26,6 +39,8 @@ interface MarkdownRendererProps {
     preserveSingleLineBreaks?: boolean
     /** Render outside assistant-ui thread context (file pane, fixtures). */
     standalone?: boolean
+    /** Resolve local links and images for a standalone file preview. */
+    filePreview?: MarkdownFilePreviewOptions
 }
 
 function StandaloneCode(props: ComponentPropsWithoutRef<'code'>) {
@@ -58,6 +73,146 @@ function StandalonePre(props: ComponentPropsWithoutRef<'pre'>) {
     )
 }
 
+function standaloneFileHref(sessionId: string, filePath: string): string {
+    const baseUrl = (import.meta.env.BASE_URL as string | undefined) ?? '/'
+    const base = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '')
+    const search = new URLSearchParams({ path: encodeBase64(filePath) })
+    return `${base}/sessions/${encodeURIComponent(sessionId)}/file?${search.toString()}`
+}
+
+function InertStandaloneFileTarget(props: { href: string; children?: ReactNode; className?: string }) {
+    return (
+        <span
+            title={props.href}
+            className={cn('aui-md-a-inert text-[var(--app-hint)]', props.className)}
+        >
+            {props.children}
+        </span>
+    )
+}
+
+function StandaloneFileLink(props: ComponentPropsWithoutRef<'a'> & MarkdownFilePreviewOptions) {
+    const { api: _api, filePath, sessionId, href, children, ...anchorProps } = props
+    const target = typeof href === 'string' ? resolveMarkdownFileLink(filePath, href) : { kind: 'inert', href: '' } as const
+
+    if (target.kind === 'inert') {
+        return <InertStandaloneFileTarget href={target.href}>{children}</InertStandaloneFileTarget>
+    }
+
+    const resolvedHref = target.kind === 'local'
+        ? standaloneFileHref(sessionId, target.path)
+        : target.href
+
+    return (
+        <a
+            {...anchorProps}
+            href={resolvedHref}
+            className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', anchorProps.className)}
+        >
+            {children}
+        </a>
+    )
+}
+
+function markdownImageFallback(props: { label?: string; source: string; className?: string }) {
+    return (
+        <span
+            role="img"
+            aria-label={props.label || 'Image unavailable'}
+            title={props.source}
+            data-hapi-markdown-image-fallback="true"
+            className={cn('aui-md-img-fallback my-3 text-[var(--app-hint)]', props.className)}
+        >
+            {props.label || 'Image unavailable'}
+        </span>
+    )
+}
+
+function markdownImageLoading(props: { label?: string; className?: string }) {
+    return (
+        <span
+            role="img"
+            aria-label={props.label || 'Loading image'}
+            data-hapi-markdown-image-loading="true"
+            className={cn('aui-md-img-loading my-3 text-[var(--app-hint)]', props.className)}
+        >
+            {props.label || 'Loading image'}
+        </span>
+    )
+}
+
+function StandaloneFileImage(props: ComponentPropsWithoutRef<'img'> & MarkdownFilePreviewOptions) {
+    const { api, sessionId, filePath, src, alt, onError, className, ...imageProps } = props
+    const source = typeof src === 'string' ? resolveMarkdownFileImage(filePath, src) : { kind: 'inert', href: '' } as const
+    const localPath = source.kind === 'local' ? source.path : null
+    const sourceKey = localPath ?? ('href' in source ? source.href : '')
+    const [state, setState] = useState<{ key: string; dataUrl: string | null; failed: boolean }>({
+        key: sourceKey,
+        dataUrl: null,
+        failed: source.kind === 'inert',
+    })
+
+    useEffect(() => {
+        let active = true
+        if (!localPath) {
+            setState({ key: sourceKey, dataUrl: null, failed: source.kind === 'inert' })
+            return () => {
+                active = false
+            }
+        }
+
+        setState({ key: sourceKey, dataUrl: null, failed: false })
+        void api.readSessionFile(sessionId, localPath, MAX_MARKDOWN_IMAGE_BYTES).then((result) => {
+            if (!active) return
+            const mimeType = getMarkdownImageMimeType(localPath)
+            const tooLarge = result.size !== undefined && result.size > MAX_MARKDOWN_IMAGE_BYTES
+            if (!result.success || !result.content || !mimeType || tooLarge) {
+                setState({ key: sourceKey, dataUrl: null, failed: true })
+                return
+            }
+            setState({
+                key: sourceKey,
+                dataUrl: `data:${mimeType};base64,${result.content}`,
+                failed: false,
+            })
+        }).catch(() => {
+            if (active) setState({ key: sourceKey, dataUrl: null, failed: true })
+        })
+
+        return () => {
+            active = false
+        }
+    }, [api, localPath, sessionId, source.kind, sourceKey])
+
+    if (localPath && state.key === sourceKey && !state.failed && !state.dataUrl) {
+        return markdownImageLoading({ label: alt, className })
+    }
+
+    if (state.key !== sourceKey || state.failed) {
+        return markdownImageFallback({ label: alt, source: typeof src === 'string' ? src : '', className })
+    }
+
+    const resolvedSrc = localPath ? state.dataUrl : source.kind === 'remote' ? source.href : null
+    if (!resolvedSrc) {
+        return markdownImageFallback({ label: alt, source: typeof src === 'string' ? src : '', className })
+    }
+
+    return (
+        <img
+            {...imageProps}
+            src={resolvedSrc}
+            alt={alt}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className={cn('aui-md-img my-3 max-w-full rounded-xl', className)}
+            onError={(event) => {
+                onError?.(event)
+                setState({ key: sourceKey, dataUrl: null, failed: true })
+            }}
+        />
+    )
+}
+
 function StandaloneMarkdownContent(props: MarkdownRendererProps) {
     const mergedComponents = props.components
         ? { ...defaultComponents, ...props.components }
@@ -71,11 +226,18 @@ function StandaloneMarkdownContent(props: MarkdownRendererProps) {
         ...componentsRest
     } = mergedComponents as typeof mergedComponents & Record<string, unknown>
 
-    const components = useMemo<Components>(() => ({
-        ...(componentsRest as Components),
-        pre: StandalonePre,
-        code: StandaloneCode,
-    }), [componentsRest])
+    const components = useMemo<Components>(() => {
+        const base = {
+            ...(componentsRest as Components),
+            pre: StandalonePre,
+            code: StandaloneCode,
+        } as Components
+        if (props.filePreview) {
+            base.a = (anchorProps) => <StandaloneFileLink {...anchorProps} {...props.filePreview!} />
+            base.img = (imageProps) => <StandaloneFileImage {...imageProps} {...props.filePreview!} />
+        }
+        return base
+    }, [componentsRest, props.filePreview])
 
     return (
         <UriConfirmProvider>

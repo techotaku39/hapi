@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ApiClient } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
+import { encodeBase64 } from '@/lib/utils'
+import { MAX_MARKDOWN_IMAGE_BYTES } from '@/lib/markdown-file-assets'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
 describe('MarkdownRenderer', () => {
@@ -52,5 +55,50 @@ E = mc^2
 
         expect(container.querySelector('.katex')).toBeTruthy()
         expect(container.querySelector('.katex-display')).toBeFalsy()
+    })
+
+    it('resolves standalone file links and loads relative images through the session API', async () => {
+        const readSessionFile = vi.fn(async () => ({
+            success: true,
+            content: encodeBase64('png-bytes'),
+            size: 9,
+        }))
+        const api = { readSessionFile } as unknown as ApiClient
+
+        render(
+            <I18nProvider>
+                <MarkdownRenderer
+                    standalone
+                    content={'[Related note](error-notes.md)\n\n![Page](images/page-001.png)'}
+                    filePreview={{ api, sessionId: 'session-1', filePath: 'notes/notes-01.md' }}
+                />
+            </I18nProvider>
+        )
+
+        const link = screen.getByRole('link', { name: 'Related note' })
+        expect(link.getAttribute('href')).toContain('/sessions/session-1/file?path=')
+        await waitFor(() => expect(screen.getByRole('img', { name: 'Page' })).toHaveAttribute('src', expect.stringContaining('data:image/png;base64,')))
+        expect(readSessionFile).toHaveBeenCalledWith('session-1', 'notes/images/page-001.png', MAX_MARKDOWN_IMAGE_BYTES)
+    })
+
+    it('loads HTTPS images directly and renders a fallback when they fail', async () => {
+        render(
+            <I18nProvider>
+                <MarkdownRenderer
+                    standalone
+                    content={'![Remote](https://example.com/image.png)'}
+                    filePreview={{
+                        api: {} as ApiClient,
+                        sessionId: 'session-1',
+                        filePath: 'notes/notes-01.md',
+                    }}
+                />
+            </I18nProvider>
+        )
+
+        const image = screen.getByRole('img', { name: 'Remote' })
+        expect(image).toHaveAttribute('src', 'https://example.com/image.png')
+        fireEvent.error(image)
+        await waitFor(() => expect(screen.getByRole('img', { name: 'Remote' })).toHaveAttribute('data-hapi-markdown-image-fallback', 'true'))
     })
 })

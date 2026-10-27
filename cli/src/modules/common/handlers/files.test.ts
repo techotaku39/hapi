@@ -46,4 +46,18 @@ describe('file RPC handlers', () => {
         expect(parsed.size).toBe(expectedStats.size)
         expect(parsed.modified).toBe(expectedStats.mtime.getTime())
     })
+
+    it('rejects bounded reads before loading an oversized file', async () => {
+        const filePath = join(rootDir, 'large.png')
+        await writeFile(filePath, Buffer.alloc(32))
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:readFile',
+            params: JSON.stringify({ path: 'large.png', maxBytes: 16 })
+        })
+        const parsed = JSON.parse(response) as { success: boolean; error?: string }
+
+        expect(parsed.success).toBe(false)
+        expect(parsed.error).toContain('too large')
+    })
 })

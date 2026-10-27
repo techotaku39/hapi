@@ -11,6 +11,7 @@ import { getErrorMessage, rpcError } from '../rpcResponses'
 
 interface ReadFileRequest {
     path: string
+    maxBytes?: number
 }
 
 type ReadFileResponse = FileReadResponse
@@ -45,6 +46,12 @@ export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, worki
         try {
             const resolvedPath = resolve(workingDirectory, data.path)
             const stats = await stat(resolvedPath)
+            const maxBytes = typeof data.maxBytes === 'number' && Number.isFinite(data.maxBytes) && data.maxBytes > 0
+                ? Math.min(Math.floor(data.maxBytes), 10 * 1024 * 1024)
+                : undefined
+            if (maxBytes !== undefined && stats.size > maxBytes) {
+                return rpcError(`File is too large to display inline (max ${maxBytes} bytes)`)
+            }
             const buffer = await readFile(resolvedPath)
             const content = buffer.toString('base64')
             return {

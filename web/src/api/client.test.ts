@@ -12,6 +12,18 @@ describe('ApiClient error mapping', () => {
         globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
     })
 
+    it('passes an optional maxBytes bound to session file reads', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(JSON.stringify({ success: true, content: '' }), { status: 200 })
+        )
+
+        const api = new ApiClient('test-token')
+        await api.readSessionFile('session-1', 'images/page.png', 10 * 1024 * 1024)
+
+        expect(String(fetchMock.mock.calls[0]?.[0])).toContain('path=images%2Fpage.png')
+        expect(String(fetchMock.mock.calls[0]?.[0])).toContain('maxBytes=10485760')
+    })
+
     afterEach(() => {
         globalThis.fetch = originalFetch
     })

@@ -6,6 +6,7 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import type { ApiClient } from '../src/api/client'
 import '../src/index.css'
 import { I18nProvider } from '../src/lib/i18n-context'
 import { MarkdownRenderer } from '../src/components/MarkdownRenderer'
@@ -18,6 +19,10 @@ import { useTranslation } from '../src/lib/use-translation'
 
 const SAMPLE_MARKDOWN = `# Teams and channels
 
+[Related note](error-notes.md)
+
+![Page 001](images/page-001.png)
+
 | Channel | Purpose |
 | --- | --- |
 | general | Day-to-day coordination |
@@ -29,6 +34,16 @@ export const ok = true
 
 > Preview uses the same markdown pipeline as chat.
 `
+
+const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+const FILE_PREVIEW_API = {
+    readSessionFile: async (_sessionId: string, path: string, _maxBytes?: number) => ({
+        success: true,
+        content: path === 'notes/images/page-001.png' ? ONE_PIXEL_PNG : '',
+        size: path === 'notes/images/page-001.png' ? 68 : 0,
+    }),
+} as unknown as ApiClient
 
 function FileMarkdownPreviewFixture() {
     const { t } = useTranslation()
@@ -69,7 +84,11 @@ function FileMarkdownPreviewFixture() {
                 </pre>
             ) : (
                 <div data-testid="markdown-preview-view" className="markdown-content">
-                    <MarkdownRenderer content={SAMPLE_MARKDOWN} standalone />
+                    <MarkdownRenderer
+                        content={SAMPLE_MARKDOWN}
+                        standalone
+                        filePreview={{ api: FILE_PREVIEW_API, sessionId: 'session-1', filePath: 'notes/notes-01.md' }}
+                    />
                 </div>
             )}
         </div>

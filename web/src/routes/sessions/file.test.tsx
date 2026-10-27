@@ -55,8 +55,14 @@ vi.mock('@/lib/shiki', () => ({
 }))
 
 vi.mock('@/components/MarkdownRenderer', () => ({
-    MarkdownRenderer: (props: { content: string }) => (
-        <div data-testid="markdown-preview">{props.content}</div>
+    MarkdownRenderer: (props: { content: string; filePreview?: { sessionId: string; filePath: string } }) => (
+        <div
+            data-testid="markdown-preview"
+            data-file-preview-session={props.filePreview?.sessionId}
+            data-file-preview-path={props.filePreview?.filePath}
+        >
+            {props.content}
+        </div>
     ),
 }))
 
@@ -88,6 +94,8 @@ describe('FilePage markdown preview', () => {
         await waitFor(() => {
             expect(screen.getByTestId('markdown-preview')).toHaveTextContent('# Heading')
         })
+        expect(screen.getByTestId('markdown-preview')).toHaveAttribute('data-file-preview-session', 'session-1')
+        expect(screen.getByTestId('markdown-preview')).toHaveAttribute('data-file-preview-path', filePath)
         expect(screen.getByText(formatFileMetadata(fileSize, fileModified, 'en')!)).toBeInTheDocument()
         expect(screen.getAllByText(filePath)).toHaveLength(1)
         const previewCopyButton = screen.getByRole('button', { name: 'Copy file content' })
