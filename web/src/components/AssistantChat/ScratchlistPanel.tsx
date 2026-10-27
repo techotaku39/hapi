@@ -710,16 +710,16 @@ function ScratchlistInventory({
     }, [actionPendingEntryId, closeMenu, disabled])
 
     const handleContextMenu = useCallback((entry: ScratchlistEntry, event: ReactMouseEvent<HTMLLIElement>) => {
+        // Let the browser's native editing menu (copy/paste/select) work
+        // inside the inline editor instead of opening the row action menu.
+        if (event.target instanceof Element && event.target.closest('textarea')) {
+            return
+        }
         const sourceCapabilities = (event.nativeEvent as MouseEvent & {
             sourceCapabilities?: { firesTouchEvents?: boolean } | null
         }).sourceCapabilities
         if (sourceCapabilities?.firesTouchEvents || touchContextMenuRef.current || touchDragRef.current) {
             event.preventDefault()
-            return
-        }
-        // Let the browser's native editing menu (copy/paste/select) work
-        // inside the inline editor instead of opening the row action menu.
-        if (event.target instanceof Element && event.target.closest('textarea')) {
             return
         }
         if (isScratchlistActionTarget(event.target)) {
@@ -936,11 +936,11 @@ function ScratchlistInventory({
     }, [finishPointerGesture])
 
     const handleTouchStart = useCallback((entry: ScratchlistEntry, event: ReactTouchEvent<HTMLLIElement>) => {
+        if (disabled || editingEntryId || isScratchlistActionTarget(event.target)) return
         touchContextMenuRef.current = true
         window.setTimeout(() => {
             touchContextMenuRef.current = false
         }, 1000)
-        if (disabled || editingEntryId || isScratchlistActionTarget(event.target)) return
         const touch = event.changedTouches[0] ?? event.touches[0]
         if (!touch) return
 

@@ -409,6 +409,9 @@ describe('ScratchlistPanel', () => {
 
         fireEvent.click(screen.getByTestId('scratchlist-entry-text'))
         const editor = screen.getByRole('textbox', { name: 'Edit scratchlist entry' })
+        fireTouchEvent(editor, 'touchstart', [
+            { identifier: 1, clientX: 10, clientY: 10 },
+        ])
         const event = createEvent.contextMenu(editor)
         fireEvent(editor, event)
 
