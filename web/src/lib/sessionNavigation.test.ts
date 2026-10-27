@@ -21,6 +21,15 @@ describe('getSessionListSelectionNavigation', () => {
             resetScroll: false,
         })
     })
+
+    it('preserves hidden-sidebar state when selecting another session', () => {
+        expect(getSessionListSelectionNavigation('session-focused', { sidebar: 'hidden' })).toEqual({
+            to: '/sessions/$sessionId',
+            params: { sessionId: 'session-focused' },
+            resetScroll: false,
+            search: { sidebar: 'hidden' },
+        })
+    })
 })
 
 describe('session separate-window navigation', () => {

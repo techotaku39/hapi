@@ -16,6 +16,7 @@ import {
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import {
     getSessionListSelectionNavigation,
+    isSessionSidebarHidden,
     PRESERVE_SESSION_SIDEBAR_SCROLL,
     shouldShowSessionSidebar,
 } from '@/lib/sessionNavigation'
@@ -208,8 +209,11 @@ function SessionsPage() {
     const shouldShowSidebar = isSessionsIndex || isSidebarVisible
     const sidebar = useSidebarResize()
     const handleSelectSession = useCallback((sessionId: string) => {
-        navigate(getSessionListSelectionNavigation(sessionId))
-    }, [navigate])
+        navigate(getSessionListSelectionNavigation(
+            sessionId,
+            isSessionSidebarHidden(sidebarSearch) ? { sidebar: 'hidden' } : undefined,
+        ))
+    }, [navigate, sidebarSearch])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',

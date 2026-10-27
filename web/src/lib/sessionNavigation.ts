@@ -26,10 +26,14 @@ export function buildSessionWindowPath(sessionId: string): string {
     return `${path}?sidebar=${SESSION_SIDEBAR_HIDDEN}`
 }
 
-export function getSessionListSelectionNavigation(sessionId: string) {
+export function getSessionListSelectionNavigation(
+    sessionId: string,
+    options?: { sidebar?: typeof SESSION_SIDEBAR_HIDDEN },
+) {
     return {
         to: '/sessions/$sessionId' as const,
         params: { sessionId },
         ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        ...(options?.sidebar ? { search: { sidebar: options.sidebar } } : {}),
     }
 }
