@@ -1,5 +1,4 @@
 import type { ApiSessionClient } from '@/api/apiSession'
-import { applySessionTitleSummary, type SessionTitleSummaryOptions } from '@/agent/sessionTitlePolicy'
 
 const MAX_FALLBACK_TITLE_LENGTH = 80
 
@@ -13,11 +12,21 @@ export function createSessionTitleFallback(message: string): string | null {
 
 export function applySessionTitleFallback(
     client: Pick<ApiSessionClient, 'updateMetadata'>,
-    message: string,
-    options: SessionTitleSummaryOptions = {}
+    message: string
 ): boolean {
     const title = createSessionTitleFallback(message)
     if (!title) return false
 
-    return applySessionTitleSummary(client, title, options)
+    client.updateMetadata((metadata) => {
+        if (metadata.name?.trim() || metadata.summary?.text.trim()) return metadata
+
+        return {
+            ...metadata,
+            summary: {
+                text: title,
+                updatedAt: Date.now()
+            }
+        }
+    })
+    return true
 }

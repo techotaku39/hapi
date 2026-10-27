@@ -39,6 +39,18 @@ Dictation and voice-assistant provider keys can also be added from **Settings â†
 - `TRANSCRIPTION_BASE_URL` and `TRANSCRIPTION_MODEL` - OpenAI-compatible/local transcription endpoint and model.
 - `TRANSCRIPTION_API_KEY` - Optional bearer token for the OpenAI-compatible endpoint.
 
+### Optional (fork titles)
+
+Configure `HAPI_TITLE_PROVIDER_BASE_URL`, `HAPI_TITLE_PROVIDER_API_KEY`, and
+`HAPI_TITLE_PROVIDER_MODEL` on the Hub to automatically name a fork from its
+recent conversation, using the same provider as the manual **Generate** action.
+The child immediately shows `Fork: <source title>` while the request runs.
+No new conversation turn is needed. Missing configuration or provider failure
+keeps this initial title, and manual **Generate** remains available.
+An explicit rename, title edit, or title lock made during generation wins over
+the pending result. Inherited Codex title-tool history does not rename a fork;
+new live rename calls still work.
+
 ### Optional
 
 - `HAPI_LISTEN_HOST` - HTTP bind address (default: 127.0.0.1).

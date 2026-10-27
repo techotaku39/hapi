@@ -3,8 +3,8 @@ import type { ApiSessionClient } from '@/api/apiSession';
 import type { Metadata } from '@/api/types';
 import { SharedCodexProjection } from './projection';
 
-function fixture(parentThreadId?: string, deferWrites = false, metadataOverrides: Partial<Metadata> = {}) {
-    let metadata: Metadata = { path: '/repo', host: 'test', flavor: 'codex', name: 'Manual name', ...metadataOverrides };
+function fixture(parentThreadId?: string, deferWrites = false) {
+    let metadata: Metadata = { path: '/repo', host: 'test', flavor: 'codex', name: 'Manual name' };
     const queued: Array<(value: Metadata) => Metadata> = [];
     const update = vi.fn((fn: (value: Metadata) => Metadata) => {
         if (deferWrites) queued.push(fn);
@@ -31,6 +31,31 @@ function params(item: unknown, turnId = 'turn') { return { threadId: 'thread', t
 function history(...items: unknown[]) { return { turns: [{ id: 'turn', status: 'completed', items }] }; }
 
 describe('shared Codex titles', () => {
+    it('never restores inherited title tools onto a fork, while a new live rename still works', async () => {
+        const f = fixture();
+        f.update(metadata => ({ ...metadata, name: undefined, forkedFrom: 'parent' }));
+        await f.projection.history(history(titleItem('inherited', 'Old parent title')));
+        expect(f.metadata().name).toBeUndefined();
+        await f.projection.notification('item/completed', params(titleItem('new', 'New child title'), 'new-turn'));
+        expect(f.metadata().name).toBe('New child title');
+    });
+
+    it('protects a fork title lock from a new live rename', async () => {
+        const f = fixture();
+        f.update(metadata => ({ ...metadata, name: undefined, forkedFrom: 'parent', titleLocked: true,
+            summary: { text: 'Fork: Current title', updatedAt: 1 } }));
+        await f.projection.notification('item/completed', params(titleItem('new', 'Unexpected')));
+        expect(f.metadata().name).toBeUndefined();
+        expect(f.metadata().summary?.text).toBe('Fork: Current title');
+    });
+
+    it('rechecks fork ownership when a cold replay metadata write was queued', async () => {
+        const f = fixture(undefined, true);
+        f.update(metadata => ({ ...metadata, name: undefined })); f.flush();
+        await f.projection.history(history(titleItem('old', 'Old parent title')));
+        const rename = f.update.mock.calls.at(-1)![0];
+        expect(rename({ path: '/repo', host: 'test', forkedFrom: 'parent' }).name).toBeUndefined();
+    });
     it('renames via metadata.name so a spawn name does not hide change_title', async () => {
         const f = fixture();
         const item = titleItem('title', ' Remote title ');
@@ -47,17 +72,6 @@ describe('shared Codex titles', () => {
         await f.projection.history(history(item));
         await f.projection.notification('item/completed', params(item));
         expect(f.update).toHaveBeenCalledTimes(1);
-    });
-
-    it('replaces a provisional Fork summary during a live root title notification', async () => {
-        const f = fixture(undefined, false, {
-            name: undefined,
-            forkedFrom: 'parent-session',
-            summary: { text: 'Fork: Parent title', updatedAt: 1 }
-        });
-        await f.projection.notification('item/completed', params(titleItem('title', 'Codex child title')));
-        expect(f.metadata().name).toBe('Codex child title');
-        expect(f.metadata().summary?.text).toBe('Fork: Parent title');
     });
 
     it('handles a complete item without a start and orders successive titles across deferred writes', async () => {
@@ -132,24 +146,8 @@ describe('shared Codex titles', () => {
         expect(f.metadata().summary).toEqual({ text: 'Existing', updatedAt: 123 });
     });
 
-    it('replaces a provisional Fork summary during a cold history replay', async () => {
-        const f = fixture(undefined, false, {
-            name: undefined,
-            forkedFrom: 'parent-session',
-            summary: { text: 'Fork: Parent title', updatedAt: 1 }
-        });
-        await f.projection.history(history(titleItem('title', 'Codex child title')));
-        expect(f.metadata().name).toBe('Codex child title');
-        expect(f.metadata().summary?.text).toBe('Fork: Parent title');
-    });
-
     it('keeps pending inputs from an active snapshot for a later argument-less completion', async () => {
         const f = fixture();
-        f.update(metadata => {
-            const { name: _ignored, ...rest } = metadata;
-            return rest as Metadata;
-        });
-        f.update.mockClear();
         const item = { ...titleItem('title', 'Resumed'), status: 'inProgress', result: null };
         await f.projection.history({ turns: [{ id: 'turn', status: 'inProgress', items: [item] }] });
         expect(f.update).not.toHaveBeenCalled();

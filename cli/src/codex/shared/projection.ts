@@ -63,7 +63,7 @@ export class SharedCodexProjection {
 
     private applyDisplayRename(title: string, revision: number): void {
         this.session.updateMetadata(metadata => {
-            if (revision !== this.titleRevision) return metadata;
+            if (revision !== this.titleRevision || metadata.titleLocked) return metadata;
             const normalized = normalizeSessionDisplayTitle(title);
             if (!normalized || metadata.name?.trim() === normalized) return metadata;
             return { ...metadata, name: normalized };
@@ -239,10 +239,11 @@ export class SharedCodexProjection {
         // Repair sessions created while remote title projection was missing.
         // Recheck inside the metadata lock: live updates may still be queued,
         // and a replay must never replace an existing or newer display title.
-        if (latestTitle && titleRevision === this.titleRevision && !metadataHasDisplayTitle(this.session.getMetadata())) {
+        if (latestTitle && titleRevision === this.titleRevision && !this.session.getMetadata()?.forkedFrom
+            && !metadataHasDisplayTitle(this.session.getMetadata())) {
             const title = latestTitle;
             this.session.updateMetadata(metadata => {
-                if (titleRevision !== this.titleRevision || metadataHasDisplayTitle(metadata)) {
+                if (titleRevision !== this.titleRevision || metadata.forkedFrom || metadataHasDisplayTitle(metadata)) {
                     return metadata;
                 }
                 const normalized = normalizeSessionDisplayTitle(title);

@@ -57,8 +57,11 @@ export const MetadataSchema = z.object({
     host: z.string(),
     version: z.string().optional(),
     name: z.string().optional(),
+    titleLocked: z.boolean().optional(),
     os: z.string().optional(),
     summary: MetadataSummarySchema.optional(),
+    // Exact provisional title owned by fork initialization, never a manual name.
+    forkTitleSeed: MetadataSummarySchema.optional(),
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),
     // Parent HAPI session id when this session was created by message-level fork

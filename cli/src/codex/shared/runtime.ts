@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { configuration } from '@/configuration';
+import { buildForkSessionSummary } from '@hapi/protocol';
 import { bootstrapSession, bootstrapExistingSession } from '@/agent/sessionFactory';
 import { notifyRunnerSessionStarted } from '@/runner/controlClient';
 import { getProcessStartMarker, killProcessByChildProcess } from '@/utils/process';
@@ -169,9 +170,11 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
     };
     const prepare = async (cwd: string, existingSessionId?: string, parent?: SharedCodexRoot): Promise<SharedCodexRoot> => {
         assertRunning();
+        const summary = parent ? buildForkSessionSummary(parent.session.getMetadata()) : undefined;
         const shared = { flavor: 'codex', startedBy: options.startedBy ?? 'terminal', workingDirectory: cwd,
             exportSessionEnv: false, reportStarted: false, metadataOverrides: { capabilities: { terminal: true, concurrentClients: true },
-                ...(parent ? { forkedFrom: parent.session.sessionId } : {}) } } as const;
+                ...(parent ? { forkedFrom: parent.session.sessionId } : {}),
+                ...(summary ? { summary, forkTitleSeed: summary } : {}) } } as const;
         // reservedSessionId names one preallocated hub row — single-use. A second
         // create()/fork must mint a fresh row, not re-adopt (#1911 Opus Major).
         const reservedSessionId = takeReservedSessionId(options);

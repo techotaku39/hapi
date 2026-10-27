@@ -188,6 +188,7 @@ export class SyncEngine {
     private readonly titleSuggestionService: TitleSuggestionService
     private readonly rpcGateway: RpcGateway
     private inactivityTimer: NodeJS.Timeout | null = null
+    private stopped = false
     /** Sessions that emitted `session-ready` (Cursor ACP or validated Pi get_state). */
     private readonly sessionReadyIds = new Set<string>()
     /** Same-ID PTY rows with a resume currently in flight. */
@@ -275,6 +276,7 @@ export class SyncEngine {
     }
 
     stop(): void {
+        this.stopped = true
         if (this.inactivityTimer) {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
@@ -1484,6 +1486,9 @@ export class SyncEngine {
         if (rpcResult.sessionId) {
             const child = await this.validateSharedChild(source, rpcResult.sessionId, rpcResult.nativeSessionId)
             if (!child || child.metadata?.forkedFrom !== sessionId) return { type: 'error', message: 'Invalid shared-runtime fork binding' }
+            const currentSource = this.sessionCache.refreshSession(sessionId)
+            await this.sessionCache.seedForkTitle(child.id, buildForkSessionSummary(currentSource?.metadata ?? source.metadata))
+            void this.generateForkTitle(child.id)
             return { type: 'success', sessionId: child.id }
         }
 
@@ -1512,7 +1517,7 @@ export class SyncEngine {
             host: source.metadata?.host ?? 'unknown',
             machineId,
             flavor,
-            ...(forkSummary ? { summary: forkSummary } : {}),
+            ...(forkSummary ? { summary: forkSummary, forkTitleSeed: forkSummary } : {}),
             forkedFrom: sessionId,
             startedBy: 'runner',
             capabilities: source.metadata?.capabilities,
@@ -1636,6 +1641,7 @@ export class SyncEngine {
                 }
             }
 
+            void this.generateForkTitle(childId)
             return { type: 'success', sessionId: childId }
         } catch (error) {
             if (childCreated) {
@@ -1647,6 +1653,21 @@ export class SyncEngine {
                 }
             }
             return { type: 'error', message: error instanceof Error ? error.message : String(error) }
+        }
+    }
+
+    /** Generate from the completed fork snapshot without delaying fork. */
+    private async generateForkTitle(sessionId: string): Promise<void> {
+        const metadata = this.sessionCache.getSession(sessionId)?.metadata
+        if (!metadata || metadata.name?.trim() || metadata.titleLocked === true) return
+        const expected = metadata.summary
+        if (expected && (expected.text !== metadata.forkTitleSeed?.text
+            || expected.updatedAt !== metadata.forkTitleSeed?.updatedAt)) return
+        try {
+            const title = await this.titleSuggestionService.suggestTitle(sessionId)
+            if (!this.stopped) await this.sessionCache.updateForkTitle(sessionId, title, expected)
+        } catch {
+            // Keep the seed on failure; manual Generate remains available.
         }
     }
 
