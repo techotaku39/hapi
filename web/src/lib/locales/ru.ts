@@ -232,6 +232,7 @@ export default {
   'session.title': 'Файлы',
   'session.view.returnToChat': 'Вернуться к диалогу',
   'session.more': 'Дополнительные действия',
+  'session.sidebar.show': 'Показать список сессий',
   'session.outline.open': 'План диалога',
   'session.outline.close': 'Закрыть план',
   'session.outline.title': 'План',
@@ -243,6 +244,7 @@ export default {
   'session.outline.noSearchResults': 'Нет подходящих элементов плана',
 
   // Действия с сессией
+  'session.action.openSeparateWindow': 'Открыть в отдельном окне',
   'session.action.rename': 'Переименовать',
   'session.action.pinProject': 'Закрепить в проекте',
   'session.action.unpinProject': 'Открепить от проекта',

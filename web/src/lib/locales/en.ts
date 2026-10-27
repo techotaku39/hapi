@@ -232,6 +232,7 @@ export default {
   'session.title': 'Files',
   'session.view.returnToChat': 'Return to conversation',
   'session.more': 'More actions',
+  'session.sidebar.show': 'Show session list',
   'session.outline.open': 'Conversation outline',
   'session.outline.close': 'Close outline',
   'session.outline.title': 'Outline',
@@ -243,6 +244,7 @@ export default {
   'session.outline.noSearchResults': 'No matching outline items',
 
   // Session actions
+  'session.action.openSeparateWindow': 'Open in separate window',
   'session.action.rename': 'Rename',
   'session.action.pinProject': 'Pin in project',
   'session.action.unpinProject': 'Unpin from project',

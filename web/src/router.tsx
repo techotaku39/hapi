@@ -10,16 +10,19 @@ import {
     useMatchRoute,
     useNavigate,
     useParams,
+    useRouter,
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import {
     getSessionListSelectionNavigation,
     PRESERVE_SESSION_SIDEBAR_SCROLL,
+    shouldShowSessionSidebar,
 } from '@/lib/sessionNavigation'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
+import { SidebarShowButton } from '@/components/SidebarToggle'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
@@ -138,6 +141,7 @@ function SettingsIcon(props: { className?: string }) {
 function SessionsPage() {
     const { api, baseUrl, titleSuggestionAvailable = false } = useAppContext()
     const navigate = useNavigate()
+    const router = useRouter()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
@@ -189,6 +193,19 @@ function SessionsPage() {
     }, [baseUrl, error, isLoading, sessions])
     useSelectedSessionSeen(selectedSessionId, selectedSession?.updatedAt)
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
+    const sidebarSearch = useLocation({ select: location => location.search })
+    const [isSidebarVisible, setIsSidebarVisible] = useState(
+        () => shouldShowSessionSidebar(pathname, sidebarSearch)
+    )
+    useEffect(() => {
+        if (isSessionsIndex) {
+            setIsSidebarVisible(true)
+        } else if (!shouldShowSessionSidebar(pathname, sidebarSearch)) {
+            setIsSidebarVisible(false)
+        }
+    }, [isSessionsIndex, pathname, sidebarSearch])
+    const sidebarHidden = !isSidebarVisible
+    const shouldShowSidebar = isSessionsIndex || isSidebarVisible
     const sidebar = useSidebarResize()
     const handleSelectSession = useCallback((sessionId: string) => {
         navigate(getSessionListSelectionNavigation(sessionId))
@@ -202,6 +219,16 @@ function SessionsPage() {
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate])
+    const showSidebar = useCallback(() => {
+        if (!sidebarHidden) return
+        setIsSidebarVisible(true)
+        const { pathname: currentPathname, search, hash, state } = router.history.location
+        const searchParams = new URLSearchParams(search)
+        searchParams.delete('sidebar')
+        const nextSearch = searchParams.toString()
+        const nextHref = `${currentPathname}${nextSearch ? `?${nextSearch}` : ''}${hash}`
+        router.history.replace(nextHref, state)
+    }, [router, setIsSidebarVisible, sidebarHidden])
 
     return (
         <>
@@ -210,7 +237,7 @@ function SessionsPage() {
                 // min-w-0: without it, shrink-0 toolbar icons inflate the flex
                 // item's min-content past --sidebar-w and the shed never sees a
                 // tight budget (#2039 desktop overflow past the split).
-                className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} min-w-0 w-full shrink-0 flex-col bg-[var(--app-bg)]`}
+                className={`${shouldShowSidebar ? (isSessionsIndex ? 'flex' : 'hidden split:flex') : 'hidden'} min-w-0 w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
@@ -273,14 +300,21 @@ function SessionsPage() {
                 </div>
             </div>
 
-            {/* Resize handle - desktop only */}
-            <div
-                className="sidebar-resize-handle hidden split:block shrink-0"
-                data-dragging={sidebar.isDragging || undefined}
-                onPointerDown={sidebar.onPointerDown}
-            />
+            {shouldShowSidebar ? (
+                <div
+                    className="sidebar-resize-handle hidden split:block shrink-0"
+                    data-dragging={sidebar.isDragging || undefined}
+                    onPointerDown={sidebar.onPointerDown}
+                />
+            ) : null}
 
-            <div className={`${isSessionsIndex ? 'hidden split:flex' : 'flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
+            <div className={`${isSessionsIndex ? 'hidden split:flex' : 'flex'} relative min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
+                {!shouldShowSidebar ? (
+                    <SidebarShowButton
+                        showLabel={t('session.sidebar.show')}
+                        onShow={showSidebar}
+                    />
+                ) : null}
                 <div className="flex-1 min-h-0">
                     <Outlet />
                 </div>
@@ -1042,9 +1076,13 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; sidebar?: 'hidden' } => {
         const outline = search.outline === true || search.outline === 'true'
-        return outline ? { outline: true } : {}
+        const sidebar = search.sidebar === 'hidden' ? 'hidden' : undefined
+        return {
+            ...(outline ? { outline: true } : {}),
+            ...(sidebar ? { sidebar } : {}),
+        }
     },
     component: SessionDetailRoute,
 })

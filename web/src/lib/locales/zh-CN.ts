@@ -232,6 +232,7 @@ export default {
   'session.title': '文件',
   'session.view.returnToChat': '返回会话',
   'session.more': '更多操作',
+  'session.sidebar.show': '显示会话列表',
   'session.outline.open': '会话大纲',
   'session.outline.close': '关闭大纲',
   'session.outline.title': '大纲',
@@ -243,6 +244,7 @@ export default {
   'session.outline.noSearchResults': '没有匹配的大纲条目',
 
   // Session actions
+  'session.action.openSeparateWindow': '独立窗口',
   'session.action.rename': '重命名',
   'session.action.pinProject': '项目置顶',
   'session.action.unpinProject': '取消项目置顶',
