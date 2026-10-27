@@ -321,6 +321,12 @@ function prepareExportElement(element: HTMLElement, exportWidth: number, preserv
         .hapi-share-export-root [data-hapi-code-body="true"]::-webkit-scrollbar {
             display: none !important;
         }
+        .hapi-share-export-root .aui-md-table-wrapper {
+            scrollbar-width: none !important;
+        }
+        .hapi-share-export-root .aui-md-table-wrapper::-webkit-scrollbar {
+            display: none !important;
+        }
     `
     captureElement.prepend(style)
     return captureElement

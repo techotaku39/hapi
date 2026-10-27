@@ -156,6 +156,57 @@ test('keeps long inline code aligned when exporting a wrapped message', async ({
     })
 })
 
+test('hides markdown table scrollbars in the shared image export', async ({ page }, testInfo) => {
+    await page.goto('/e2e-fixtures/share-turn-fixture.html')
+
+    const sourceTableWrapper = page.getByTestId('source-turn').locator('.aui-md-table-wrapper').first()
+    await sourceTableWrapper.evaluate((wrapper) => {
+        const table = wrapper.querySelector<HTMLTableElement>('.aui-md-table')
+        if (!table) throw new Error('Missing fixture table')
+        wrapper.style.width = '420px'
+        wrapper.style.height = '250px'
+        wrapper.style.overflow = 'auto'
+        table.style.width = '900px'
+        table.style.height = '900px'
+    })
+    const sourceMetrics = await sourceTableWrapper.evaluate((wrapper) => ({
+        clientWidth: wrapper.clientWidth,
+        scrollWidth: wrapper.scrollWidth,
+        clientHeight: wrapper.clientHeight,
+        scrollHeight: wrapper.scrollHeight,
+    }))
+    expect(sourceMetrics.scrollWidth).toBeGreaterThan(sourceMetrics.clientWidth)
+    expect(sourceMetrics.scrollHeight).toBeGreaterThan(sourceMetrics.clientHeight)
+
+    await page.getByRole('button', { name: 'Open share preview' }).click()
+    const exportMetricsPromise = page.waitForFunction(() => {
+        const frame = document.querySelector<HTMLIFrameElement>('iframe[aria-hidden="true"]')
+        const wrapper = frame?.contentDocument?.querySelector<HTMLElement>('.hapi-share-export-root .aui-md-table-wrapper')
+        if (!wrapper) return null
+        const style = getComputedStyle(wrapper)
+        const scrollbarStyle = getComputedStyle(wrapper, '::-webkit-scrollbar')
+        return {
+            scrollbarWidth: style.scrollbarWidth,
+            webkitScrollbarDisplay: scrollbarStyle.display,
+        }
+    }, undefined, { timeout: 10_000 })
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('dialog').getByRole('button', { name: 'Download' }).click()
+
+    const exportMetrics = await (await exportMetricsPromise).jsonValue() as {
+        scrollbarWidth: string
+        webkitScrollbarDisplay: string
+    }
+    expect(exportMetrics).toEqual({ scrollbarWidth: 'none', webkitScrollbarDisplay: 'none' })
+
+    const download = await downloadPromise
+    const path = testInfo.outputPath('table-scroll-hidden.png')
+    await download.saveAs(path)
+    const bytes = await readFile(path)
+    expect(bytes.subarray(1, 4).toString()).toBe('PNG')
+    expect(bytes.byteLength).toBeGreaterThan(50_000)
+})
+
 test('localizes the share dialog actions in Chinese', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('hapi-lang', 'zh-CN'))
     await page.goto('/e2e-fixtures/share-turn-fixture.html')
