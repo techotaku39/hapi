@@ -15,10 +15,12 @@ import {
     defaultComponents,
     denyOnlyTransform,
     UriConfirmProvider,
+    isExternalHttpHref,
 } from '@/components/assistant-ui/markdown-text'
 import { SyntaxHighlighter } from '@/components/assistant-ui/shiki-highlighter'
 import type { CodeHeaderProps, SyntaxHighlighterProps } from '@assistant-ui/react-markdown'
 import { cn, encodeBase64 } from '@/lib/utils'
+import { useOpenExternalLinksInNewTab } from '@/hooks/useOpenExternalLinksInNewTab'
 import {
     getMarkdownImageMimeType,
     MAX_MARKDOWN_IMAGE_BYTES,
@@ -30,6 +32,7 @@ export interface MarkdownFilePreviewOptions {
     api: ApiClient
     sessionId: string
     filePath: string
+    workspacePath?: string | null
 }
 
 interface MarkdownRendererProps {
@@ -92,8 +95,11 @@ function InertStandaloneFileTarget(props: { href: string; children?: ReactNode; 
 }
 
 function StandaloneFileLink(props: ComponentPropsWithoutRef<'a'> & MarkdownFilePreviewOptions) {
-    const { api: _api, filePath, sessionId, href, children, ...anchorProps } = props
-    const target = typeof href === 'string' ? resolveMarkdownFileLink(filePath, href) : { kind: 'inert', href: '' } as const
+    const { api: _api, filePath, sessionId, workspacePath, href, children, ...anchorProps } = props
+    const { openExternalLinksInNewTab } = useOpenExternalLinksInNewTab()
+    const target = typeof href === 'string'
+        ? resolveMarkdownFileLink(filePath, href, { workspacePath })
+        : { kind: 'inert', href: '' } as const
 
     if (target.kind === 'inert') {
         return <InertStandaloneFileTarget href={target.href}>{children}</InertStandaloneFileTarget>
@@ -102,11 +108,16 @@ function StandaloneFileLink(props: ComponentPropsWithoutRef<'a'> & MarkdownFileP
     const resolvedHref = target.kind === 'local'
         ? standaloneFileHref(sessionId, target.path)
         : target.href
+    const forceNewTab = openExternalLinksInNewTab && target.kind === 'remote' && isExternalHttpHref(resolvedHref)
+    const resolvedTarget = forceNewTab ? '_blank' : anchorProps.target
+    const resolvedRel = forceNewTab ? (anchorProps.rel ?? 'noopener noreferrer') : anchorProps.rel
 
     return (
         <a
             {...anchorProps}
             href={resolvedHref}
+            target={resolvedTarget}
+            rel={resolvedRel}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', anchorProps.className)}
         >
             {children}
@@ -142,8 +153,10 @@ function markdownImageLoading(props: { label?: string; className?: string }) {
 }
 
 function StandaloneFileImage(props: ComponentPropsWithoutRef<'img'> & MarkdownFilePreviewOptions) {
-    const { api, sessionId, filePath, src, alt, onError, className, ...imageProps } = props
-    const source = typeof src === 'string' ? resolveMarkdownFileImage(filePath, src) : { kind: 'inert', href: '' } as const
+    const { api, sessionId, filePath, workspacePath, src, alt, onError, className, ...imageProps } = props
+    const source = typeof src === 'string'
+        ? resolveMarkdownFileImage(filePath, src, { workspacePath })
+        : { kind: 'inert', href: '' } as const
     const localPath = source.kind === 'local' ? source.path : null
     const sourceKey = localPath ?? ('href' in source ? source.href : '')
     const [state, setState] = useState<{ key: string; dataUrl: string | null; failed: boolean }>({
@@ -182,7 +195,7 @@ function StandaloneFileImage(props: ComponentPropsWithoutRef<'img'> & MarkdownFi
         return () => {
             active = false
         }
-    }, [api, localPath, sessionId, source.kind, sourceKey])
+    }, [api, localPath, sessionId, source.kind, sourceKey, workspacePath])
 
     if (localPath && state.key === sourceKey && !state.failed && !state.dataUrl) {
         return markdownImageLoading({ label: alt, className })
@@ -214,17 +227,20 @@ function StandaloneFileImage(props: ComponentPropsWithoutRef<'img'> & MarkdownFi
 }
 
 function StandaloneMarkdownContent(props: MarkdownRendererProps) {
-    const mergedComponents = props.components
-        ? { ...defaultComponents, ...props.components }
-        : defaultComponents
-
-    const {
-        pre: _pre,
-        code: _code,
-        SyntaxHighlighter: _sh,
-        CodeHeader: _header,
-        ...componentsRest
-    } = mergedComponents as typeof mergedComponents & Record<string, unknown>
+    const mergedComponents = useMemo(
+        () => props.components ? { ...defaultComponents, ...props.components } : defaultComponents,
+        [props.components]
+    )
+    const componentsRest = useMemo(() => {
+        const {
+            pre: _pre,
+            code: _code,
+            SyntaxHighlighter: _sh,
+            CodeHeader: _header,
+            ...rest
+        } = mergedComponents as typeof mergedComponents & Record<string, unknown>
+        return rest
+    }, [mergedComponents])
 
     const components = useMemo<Components>(() => {
         const base = {
@@ -233,11 +249,12 @@ function StandaloneMarkdownContent(props: MarkdownRendererProps) {
             code: StandaloneCode,
         } as Components
         if (props.filePreview) {
-            base.a = (anchorProps) => <StandaloneFileLink {...anchorProps} {...props.filePreview!} />
-            base.img = (imageProps) => <StandaloneFileImage {...imageProps} {...props.filePreview!} />
+            const { api, sessionId, filePath, workspacePath } = props.filePreview
+            base.a = (anchorProps) => <StandaloneFileLink {...anchorProps} api={api} sessionId={sessionId} filePath={filePath} workspacePath={workspacePath} />
+            base.img = (imageProps) => <StandaloneFileImage {...imageProps} api={api} sessionId={sessionId} filePath={filePath} workspacePath={workspacePath} />
         }
         return base
-    }, [componentsRest, props.filePreview])
+    }, [componentsRest, props.filePreview?.api, props.filePreview?.filePath, props.filePreview?.sessionId, props.filePreview?.workspacePath])
 
     return (
         <UriConfirmProvider>

@@ -1,4 +1,4 @@
-import { hasKnownFileExtension, isKnownSpaHref } from '@/lib/markdown-href-policy'
+import { hasKnownFileExtension, isKnownSpaHref, isWithinWorkspace } from '@/lib/markdown-href-policy'
 
 export const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024
 
@@ -23,6 +23,10 @@ export type MarkdownAssetTarget =
     | { kind: 'anchor'; href: string }
     | { kind: 'inert'; href: string }
 
+export interface MarkdownAssetResolutionOptions {
+    workspacePath?: string | null
+}
+
 function decodeHref(value: string): string {
     try {
         return decodeURIComponent(value)
@@ -44,6 +48,14 @@ function stripHrefMeta(value: string): string {
 
 function hasScheme(value: string): boolean {
     return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)
+}
+
+function isWindowsAbsolutePath(value: string): boolean {
+    return /^[A-Za-z]:[\\/]/.test(value) || /^[A-Za-z]:%5[cC]/.test(value)
+}
+
+function isAbsolutePath(value: string): boolean {
+    return value.startsWith('/') || isWindowsAbsolutePath(value)
 }
 
 function normalizeLocalPath(currentFilePath: string, target: string): string | null {
@@ -79,28 +91,41 @@ function normalizeLocalPath(currentFilePath: string, target: string): string | n
         : joined
 }
 
-function classifyTarget(currentFilePath: string, href: string): MarkdownAssetTarget {
+function classifyTarget(currentFilePath: string, href: string, options: MarkdownAssetResolutionOptions = {}): MarkdownAssetTarget {
     const raw = href.trim()
     if (!raw) return { kind: 'inert', href }
     if (raw.startsWith('#') || raw.startsWith('?')) return { kind: 'anchor', href: raw }
     if (raw.startsWith('//') || /^https?:\/\//i.test(raw)) return { kind: 'remote', href: raw }
-    if (hasScheme(raw)) return { kind: 'inert', href: raw }
+    if (hasScheme(raw) && !isWindowsAbsolutePath(raw)) return { kind: 'inert', href: raw }
     if (isKnownSpaHref(raw)) return { kind: 'anchor', href: raw }
 
     const decoded = decodeHref(stripHrefMeta(raw))
     if (!decoded || decoded.startsWith('~/')) return { kind: 'inert', href: raw }
     if (!hasKnownFileExtension(decoded)) return { kind: 'inert', href: raw }
 
+    const absoluteTarget = isAbsolutePath(decoded)
+    const absoluteCurrent = isAbsolutePath(currentFilePath)
+    if (absoluteTarget && (!options.workspacePath || !isWithinWorkspace(decoded, options.workspacePath))) {
+        return { kind: 'inert', href: raw }
+    }
+    if (absoluteCurrent && !options.workspacePath) {
+        return { kind: 'inert', href: raw }
+    }
+
     const path = normalizeLocalPath(currentFilePath, decoded)
-    return path ? { kind: 'local', path } : { kind: 'inert', href: raw }
+    if (!path) return { kind: 'inert', href: raw }
+    if (options.workspacePath && isAbsolutePath(path) && !isWithinWorkspace(path, options.workspacePath)) {
+        return { kind: 'inert', href: raw }
+    }
+    return { kind: 'local', path }
 }
 
-export function resolveMarkdownFileLink(currentFilePath: string, href: string): MarkdownAssetTarget {
-    return classifyTarget(currentFilePath, href)
+export function resolveMarkdownFileLink(currentFilePath: string, href: string, options?: MarkdownAssetResolutionOptions): MarkdownAssetTarget {
+    return classifyTarget(currentFilePath, href, options)
 }
 
-export function resolveMarkdownFileImage(currentFilePath: string, src: string): MarkdownAssetTarget {
-    const target = classifyTarget(currentFilePath, src)
+export function resolveMarkdownFileImage(currentFilePath: string, src: string, options?: MarkdownAssetResolutionOptions): MarkdownAssetTarget {
+    const target = classifyTarget(currentFilePath, src, options)
     if (target.kind === 'local' && !getMarkdownImageMimeType(target.path)) {
         return { kind: 'inert', href: src }
     }

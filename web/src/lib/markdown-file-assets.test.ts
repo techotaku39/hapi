@@ -27,10 +27,28 @@ describe('markdown file assets', () => {
         })
     })
 
-    it('keeps safe absolute in-workspace-looking paths as local targets', () => {
-        expect(resolveMarkdownFileLink('/workspace/notes/notes-01.md', '/workspace/notes/error-notes.md')).toEqual({
+    it('keeps safe absolute in-workspace paths as local targets', () => {
+        expect(resolveMarkdownFileLink('/workspace/notes/notes-01.md', '/workspace/notes/error-notes.md', { workspacePath: '/workspace' })).toEqual({
             kind: 'local',
             path: '/workspace/notes/error-notes.md',
+        })
+    })
+
+    it('keeps out-of-workspace absolute paths inert', () => {
+        expect(resolveMarkdownFileLink('/workspace/notes/notes-01.md', '/etc/secret.md', { workspacePath: '/workspace' })).toEqual({
+            kind: 'inert',
+            href: '/etc/secret.md',
+        })
+    })
+
+    it('recognizes Windows drive paths and applies workspace containment', () => {
+        expect(resolveMarkdownFileLink('C:\\workspace\\notes\\notes-01.md', 'C:\\workspace\\notes\\error-notes.md', { workspacePath: 'C:\\workspace' })).toEqual({
+            kind: 'local',
+            path: 'C:/workspace/notes/error-notes.md',
+        })
+        expect(resolveMarkdownFileLink('C:\\workspace\\notes\\notes-01.md', 'C:\\Users\\other\\secret.md', { workspacePath: 'C:\\workspace' })).toEqual({
+            kind: 'inert',
+            href: 'C:\\Users\\other\\secret.md',
         })
     })
 

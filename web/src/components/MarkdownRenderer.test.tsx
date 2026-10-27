@@ -9,6 +9,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 describe('MarkdownRenderer', () => {
     afterEach(() => {
         cleanup()
+        localStorage.clear()
     })
 
     it('renders fenced code blocks with the shared syntax highlighter shell in standalone mode', () => {
@@ -100,5 +101,55 @@ E = mc^2
         expect(image).toHaveAttribute('src', 'https://example.com/image.png')
         fireEvent.error(image)
         await waitFor(() => expect(screen.getByRole('img', { name: 'Remote' })).toHaveAttribute('data-hapi-markdown-image-fallback', 'true'))
+    })
+
+    it('honors the external-link new-tab preference in standalone previews', () => {
+        localStorage.setItem('hapi-open-external-links-in-new-tab', 'true')
+
+        render(
+            <I18nProvider>
+                <MarkdownRenderer
+                    standalone
+                    content={'[Remote](https://example.com/docs)' }
+                    filePreview={{
+                        api: {} as ApiClient,
+                        sessionId: 'session-1',
+                        filePath: 'notes/notes-01.md',
+                    }}
+                />
+            </I18nProvider>
+        )
+
+        const link = screen.getByRole('link', { name: 'Remote' })
+        expect(link).toHaveAttribute('target', '_blank')
+        expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    })
+
+    it('preserves local image state across parent rerenders', async () => {
+        const readSessionFile = vi.fn(async () => ({
+            success: true,
+            content: encodeBase64('png-bytes'),
+            size: 9,
+        }))
+        const api = { readSessionFile } as unknown as ApiClient
+        const filePreview = { api, sessionId: 'session-1', filePath: 'notes/notes-01.md' }
+        const content = '![First](images/first.png)\n\n![Second](images/second.png)'
+        const view = render(
+            <I18nProvider>
+                <MarkdownRenderer standalone content={content} filePreview={filePreview} />
+            </I18nProvider>
+        )
+
+        await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2))
+        expect(readSessionFile).toHaveBeenCalledTimes(2)
+
+        view.rerender(
+            <I18nProvider>
+                <MarkdownRenderer standalone content={content} filePreview={filePreview} />
+            </I18nProvider>
+        )
+
+        await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2))
+        expect(readSessionFile).toHaveBeenCalledTimes(2)
     })
 })

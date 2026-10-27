@@ -42,6 +42,12 @@ vi.mock('@/hooks/useAppGoBack', () => ({
     useAppGoBack: () => goBackMock,
 }))
 
+vi.mock('@/hooks/queries/useSession', () => ({
+    useSession: () => ({
+        session: { metadata: { path: '/workspace' } },
+    }),
+}))
+
 vi.mock('@/hooks/useCopyToClipboard', () => ({
     useCopyToClipboard: () => ({
         copied: false,
@@ -55,11 +61,12 @@ vi.mock('@/lib/shiki', () => ({
 }))
 
 vi.mock('@/components/MarkdownRenderer', () => ({
-    MarkdownRenderer: (props: { content: string; filePreview?: { sessionId: string; filePath: string } }) => (
+    MarkdownRenderer: (props: { content: string; filePreview?: { sessionId: string; filePath: string; workspacePath?: string | null } }) => (
         <div
             data-testid="markdown-preview"
             data-file-preview-session={props.filePreview?.sessionId}
             data-file-preview-path={props.filePreview?.filePath}
+            data-file-preview-workspace={props.filePreview?.workspacePath}
         >
             {props.content}
         </div>
@@ -96,6 +103,7 @@ describe('FilePage markdown preview', () => {
         })
         expect(screen.getByTestId('markdown-preview')).toHaveAttribute('data-file-preview-session', 'session-1')
         expect(screen.getByTestId('markdown-preview')).toHaveAttribute('data-file-preview-path', filePath)
+        expect(screen.getByTestId('markdown-preview')).toHaveAttribute('data-file-preview-workspace', '/workspace')
         expect(screen.getByText(formatFileMetadata(fileSize, fileModified, 'en')!)).toBeInTheDocument()
         expect(screen.getAllByText(filePath)).toHaveLength(1)
         const previewCopyButton = screen.getByRole('button', { name: 'Copy file content' })
