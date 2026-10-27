@@ -1,6 +1,7 @@
 import { hashObject } from '@/utils/deterministicJson'
 import { MessageQueue2 } from '@/utils/MessageQueue2'
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler'
+import { registerLocalHandoffHandler } from '@/agent/localHandoff'
 import { createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle'
 import { bootstrapExistingSession, bootstrapSession } from '@/agent/sessionFactory'
 import { registerSessionConfigRpc } from '@/agent/sessionConfigRpc'
@@ -93,6 +94,7 @@ export async function runDsh(opts: {
     })
     lifecycle.registerProcessHandlers()
     registerKillSessionHandler(session.rpcHandlerManager, lifecycle, session)
+    registerLocalHandoffHandler(session.rpcHandlerManager, lifecycle)
 
     const dshSession = new DshSession({
         api,

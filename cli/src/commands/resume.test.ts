@@ -208,6 +208,30 @@ describe('resumeCommand', () => {
         })
     })
 
+    it('hands off an active DSH target before starting its remote launcher', async () => {
+        getLocalResumeTargetMock.mockResolvedValue({
+            sessionId: 'hapi-session-dsh-active',
+            flavor: 'dsh',
+            directory: '/tmp/project',
+            machineId: 'machine-1',
+            active: true,
+            thinking: false,
+            controlledByUser: false,
+            agentSessionId: 'dsh-session-active'
+        })
+
+        await resumeCommand.run(createContext(['hapi-session-dsh-active']))
+
+        expect(handoffSessionToLocalMock).toHaveBeenCalledWith('hapi-session-dsh-active')
+        expect(runDshMock).toHaveBeenCalledWith({
+            existingSessionId: 'hapi-session-dsh-active',
+            workingDirectory: '/tmp/project',
+            resumeSessionId: 'dsh-session-active',
+            startedBy: 'terminal',
+            startingMode: 'remote'
+        })
+    })
+
     it('resumes an inactive Claude target without handoff', async () => {
         getLocalResumeTargetMock.mockResolvedValue({
             sessionId: 'hapi-session-2',
