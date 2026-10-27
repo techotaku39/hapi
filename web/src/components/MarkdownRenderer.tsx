@@ -105,6 +105,11 @@ function StandaloneFileLink(props: ComponentPropsWithoutRef<'a'> & MarkdownFileP
         return <InertStandaloneFileTarget href={target.href}>{children}</InertStandaloneFileTarget>
     }
 
+    if (target.kind === 'uri') {
+        const DefaultAnchor = defaultComponents.a!
+        return <DefaultAnchor {...anchorProps} href={target.href}>{children}</DefaultAnchor>
+    }
+
     const resolvedHref = target.kind === 'local'
         ? standaloneFileHref(sessionId, target.path)
         : target.href

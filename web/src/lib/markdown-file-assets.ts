@@ -1,3 +1,4 @@
+import { classifyScheme } from '@/components/assistant-ui/markdown-text'
 import { hasKnownFileExtension, isKnownSpaHref, isWithinWorkspace } from '@/lib/markdown-href-policy'
 
 export const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024
@@ -20,6 +21,7 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
 export type MarkdownAssetTarget =
     | { kind: 'local'; path: string }
     | { kind: 'remote'; href: string }
+    | { kind: 'uri'; href: string }
     | { kind: 'anchor'; href: string }
     | { kind: 'inert'; href: string }
 
@@ -62,9 +64,13 @@ function normalizeLocalPath(currentFilePath: string, target: string): string | n
     const current = currentFilePath.replaceAll('\\', '/')
     const rawTarget = target.replaceAll('\\', '/')
     const absolute = rawTarget.startsWith('/') || /^[A-Za-z]:\//.test(rawTarget)
+    const currentAbsolute = current.startsWith('/') || /^[A-Za-z]:\//.test(current)
     const baseParts = absolute ? [] : current.split('/').slice(0, -1)
     const targetParts = rawTarget.split('/')
     const parts = absolute ? [] : [...baseParts]
+    const rootBoundary = absolute
+        ? (/^[A-Za-z]:\//.test(rawTarget) ? 1 : 0)
+        : (currentAbsolute ? 1 : 0)
 
     if (absolute && /^[A-Za-z]:\//.test(rawTarget)) {
         parts.push(rawTarget.slice(0, 2))
@@ -74,7 +80,7 @@ function normalizeLocalPath(currentFilePath: string, target: string): string | n
     for (const part of targetParts) {
         if (!part || part === '.') continue
         if (part === '..') {
-            if (parts.length === 0 || (parts.length === 1 && /^[A-Za-z]:$/.test(parts[0]!))) {
+            if (parts.length <= rootBoundary || (parts.length === 1 && /^[A-Za-z]:$/.test(parts[0]!))) {
                 return null
             }
             parts.pop()
@@ -96,12 +102,16 @@ function classifyTarget(currentFilePath: string, href: string, options: Markdown
     if (!raw) return { kind: 'inert', href }
     if (raw.startsWith('#') || raw.startsWith('?')) return { kind: 'anchor', href: raw }
     if (raw.startsWith('//') || /^https?:\/\//i.test(raw)) return { kind: 'remote', href: raw }
-    if (hasScheme(raw) && !isWindowsAbsolutePath(raw)) return { kind: 'inert', href: raw }
+    if (hasScheme(raw) && !isWindowsAbsolutePath(raw)) {
+        return classifyScheme(raw) === 'deny'
+            ? { kind: 'inert', href: raw }
+            : { kind: 'uri', href: raw }
+    }
     if (isKnownSpaHref(raw)) return { kind: 'anchor', href: raw }
 
     const decoded = decodeHref(stripHrefMeta(raw))
     if (!decoded || decoded.startsWith('~/')) return { kind: 'inert', href: raw }
-    if (!hasKnownFileExtension(decoded)) return { kind: 'inert', href: raw }
+    if (!hasKnownFileExtension(decoded) && !getMarkdownImageMimeType(decoded)) return { kind: 'inert', href: raw }
 
     const absoluteTarget = isAbsolutePath(decoded)
     const absoluteCurrent = isAbsolutePath(currentFilePath)
@@ -126,7 +136,7 @@ export function resolveMarkdownFileLink(currentFilePath: string, href: string, o
 
 export function resolveMarkdownFileImage(currentFilePath: string, src: string, options?: MarkdownAssetResolutionOptions): MarkdownAssetTarget {
     const target = classifyTarget(currentFilePath, src, options)
-    if (target.kind === 'local' && !getMarkdownImageMimeType(target.path)) {
+    if (target.kind === 'uri' || (target.kind === 'local' && !getMarkdownImageMimeType(target.path))) {
         return { kind: 'inert', href: src }
     }
     return target

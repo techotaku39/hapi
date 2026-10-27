@@ -41,6 +41,13 @@ describe('markdown file assets', () => {
         })
     })
 
+    it('rejects traversal beyond the root of an absolute current file path', () => {
+        expect(resolveMarkdownFileLink('/workspace/notes/readme.md', '../../../secret.md', { workspacePath: '/workspace' })).toEqual({
+            kind: 'inert',
+            href: '../../../secret.md',
+        })
+    })
+
     it('recognizes Windows drive paths and applies workspace containment', () => {
         expect(resolveMarkdownFileLink('C:\\workspace\\notes\\notes-01.md', 'C:\\workspace\\notes\\error-notes.md', { workspacePath: 'C:\\workspace' })).toEqual({
             kind: 'local',
@@ -59,6 +66,13 @@ describe('markdown file assets', () => {
         })
     })
 
+    it('preserves safe non-HTTP URI links for the shared link policy', () => {
+        expect(resolveMarkdownFileLink('notes/notes-01.md', 'mailto:help@example.com')).toEqual({
+            kind: 'uri',
+            href: 'mailto:help@example.com',
+        })
+    })
+
     it('keeps anchors and known app routes navigable', () => {
         expect(resolveMarkdownFileLink('notes/notes-01.md', '#section')).toEqual({ kind: 'anchor', href: '#section' })
         expect(resolveMarkdownFileLink('notes/notes-01.md', '/settings')).toEqual({ kind: 'anchor', href: '/settings' })
@@ -66,6 +80,16 @@ describe('markdown file assets', () => {
 
     it('maps supported image extensions to MIME types', () => {
         expect(getMarkdownImageMimeType('images/page-001.PNG')).toBe('image/png')
+        expect(getMarkdownImageMimeType('images/animation.apng')).toBe('image/apng')
+        expect(getMarkdownImageMimeType('images/scan.tif')).toBe('image/tiff')
+        expect(getMarkdownImageMimeType('images/scan.tiff')).toBe('image/tiff')
         expect(getMarkdownImageMimeType('docs/readme.md')).toBeNull()
+    })
+
+    it('resolves image extensions declared in the MIME map', () => {
+        expect(resolveMarkdownFileImage('notes/readme.md', 'images/animation.apng')).toEqual({
+            kind: 'local',
+            path: 'notes/images/animation.apng',
+        })
     })
 })

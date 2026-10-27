@@ -125,6 +125,24 @@ E = mc^2
         expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     })
 
+    it('preserves safe URI links in standalone previews', () => {
+        render(
+            <I18nProvider>
+                <MarkdownRenderer
+                    standalone
+                    content={'[Email](mailto:help@example.com)'}
+                    filePreview={{
+                        api: {} as ApiClient,
+                        sessionId: 'session-1',
+                        filePath: 'notes/notes-01.md',
+                    }}
+                />
+            </I18nProvider>
+        )
+
+        expect(screen.getByRole('link', { name: 'Email' })).toHaveAttribute('href', 'mailto:help@example.com')
+    })
+
     it('preserves local image state across parent rerenders', async () => {
         const readSessionFile = vi.fn(async () => ({
             success: true,
