@@ -11,7 +11,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setPinInProgressSessionsMode, setVoice, pinSettingsState, setAppBadgeEnabled } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setPinInProgressSessionsMode, setVoice, pinSettingsState, setAppBadgeEnabled, setFixedSessionOrder } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -24,6 +24,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setVoice: vi.fn(),
     pinSettingsState: { enabled: false },
     setAppBadgeEnabled: vi.fn(),
+    setFixedSessionOrder: vi.fn(),
 }))
 
 const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false, sessionSummaryInChat: false })
@@ -94,6 +95,10 @@ vi.mock('@/hooks/usePinInProgressSessionsMode', () => ({
         { value: 'combined', labelKey: 'settings.display.pinInProgressSessions.mode.combined' },
         { value: 'detailed', labelKey: 'settings.display.pinInProgressSessions.mode.detailed' },
     ],
+}))
+
+vi.mock('@/hooks/useFixedSessionOrder', () => ({
+    useFixedSessionOrder: () => ({ fixedSessionOrder: false, setFixedSessionOrder }),
 }))
 
 vi.mock('@/hooks/useAppBadgePreference', () => ({
@@ -312,6 +317,10 @@ describe('responsive settings pages', () => {
         expect(screen.getByRole('checkbox', { name: 'Created time' })).not.toBeChecked()
         expect(screen.getByRole('checkbox', { name: 'Updated time' })).not.toBeChecked()
         expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+        const fixedOrderToggle = screen.getByRole('checkbox', { name: 'Fixed session order' })
+        expect(fixedOrderToggle).not.toBeChecked()
+        fireEvent.click(fixedOrderToggle)
+        expect(setFixedSessionOrder).toHaveBeenCalledWith(true)
     })
 
     it('keeps the session status description visible with its choice group', () => {
