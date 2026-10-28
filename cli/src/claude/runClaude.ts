@@ -57,9 +57,7 @@ export function buildClaudeStaticContextDetails(args: {
 }): ReturnType<typeof buildClaudeContextDetails> {
     const catalogAvailable = args.sdkMetadata.slashCommands !== undefined;
     return buildClaudeContextDetails({
-        model: args.model,
         system: {
-            model: args.model,
             tools: args.sdkMetadata.tools,
             ...(catalogAvailable ? {
                 skills: args.catalog.skills,
