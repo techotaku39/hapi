@@ -272,6 +272,33 @@ describe('StatusBar context details dialog', () => {
         expect(cacheLine.parentElement?.textContent).toBe('Cache: 86kUsed: 90k (35%)Remaining: 168k (65%)')
     })
 
+    it('does not reuse a persisted context window after switching models', () => {
+        localStorage.setItem('hapi-lang', 'en')
+        render(
+            <I18nProvider>
+                <StatusBar
+                    active
+                    thinking={false}
+                    agentState={null}
+                    agentFlavor="claude"
+                    contextSize={100_000}
+                    contextModel="claude-fable-5"
+                    contextDetails={{
+                        version: 1,
+                        updatedAt: 100,
+                        provider: 'claude',
+                        model: 'claude-opus-4-7',
+                        contextWindow: 200_000,
+                        usage: { contextTokens: 100_000 }
+                    }}
+                />
+            </I18nProvider>
+        )
+
+        expect(screen.getByText('10% · 100k / 990k')).toBeInTheDocument()
+        expect(screen.queryByText('50% · 100k / 200k')).not.toBeInTheDocument()
+    })
+
     it('renders Claude system tools, slash commands, and skills from the agent status entry', async () => {
         localStorage.setItem('hapi-lang', 'en')
         render(

@@ -83,7 +83,7 @@ function createQueueStub() {
 }
 
 function createSessionStub(
-    permissionMode: 'default' | 'read-only' | 'safe-yolo' | 'yolo',
+    permissionMode: 'default' | 'read-only' | 'yolo',
     codexArgs?: string[],
     path = '/tmp/worktree',
     initialTranscriptPath: string | null = null,
@@ -372,29 +372,6 @@ describe('codexLocalLauncher', () => {
             'on-request',
             '--sandbox',
             'workspace-write',
-            '--model',
-            'o3'
-        ]);
-
-        await codexLocalLauncher(session as never);
-
-        expect(harness.launches).toHaveLength(1);
-        expect(harness.launches[0]?.codexArgs).toEqual([
-            '--ask-for-approval',
-            'on-request',
-            '--sandbox',
-            'workspace-write',
-            '--model',
-            'o3'
-        ]);
-    });
-
-    it('keeps sandbox escalation available in safe-yolo mode', async () => {
-        const { session } = createSessionStub('safe-yolo', [
-            '--ask-for-approval',
-            'never',
-            '--sandbox',
-            'danger-full-access',
             '--model',
             'o3'
         ]);

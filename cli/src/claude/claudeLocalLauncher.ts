@@ -20,6 +20,14 @@ function stampContextWindow(message: RawJSONLines, contextModel: string | null):
 }
 import { buildClaudeContextDetails, publishContextDetails } from '@/agent/contextDetails';
 
+function isInterruptMarker(message: RawJSONLines): boolean {
+    if (message.type !== 'user' || message.isSidechain) return false;
+    const content = message.message.content;
+    const blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+    return Array.isArray(blocks) && blocks.some((block) =>
+        block.type === 'text' && typeof block.text === 'string' && block.text.startsWith('[Request interrupted by user'));
+}
+
 export async function claudeLocalLauncher(session: Session): Promise<'switch' | 'exit'> {
     let lastSystemModel = session.getModel();
 
@@ -49,6 +57,13 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
             }
 
             session.localPermissionBridge.onTranscript(message);
+            // Esc-interrupted turns fire no Stop hook; Claude Code only
+            // writes this marker to the transcript. The scanner can deliver it
+            // after the next prompt's hook, so skip markers older than that turn.
+            if (session.thinking && isInterruptMarker(message)
+                && !(Date.parse(message.timestamp ?? '') < session.localTurnStartedAt)) {
+                session.onThinkingChange(false);
+            }
             // Preserve the AI-generated title emitted by Claude Code's native
             // interactive CLI. It is metadata, not a visible chat message.
             if (message.type === 'ai-title') {
@@ -137,6 +152,7 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
         return await launcher.run();
     } finally {
         // Cleanup
+        session.onThinkingChange(false);
         session.localPermissionBridge.stop();
         session.removeSessionFoundCallback(handleSessionFound);
         await scanner.cleanup();

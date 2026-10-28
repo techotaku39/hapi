@@ -206,6 +206,24 @@ function normalizeLegacyList(values: readonly string[] | null | undefined): stri
     return normalized.length > 0 ? normalized : undefined
 }
 
+function getEffectiveContextWindow(args: {
+    explicitContextWindow?: number | null
+    details?: ContextDetails | null
+    model?: string | null
+}): number | undefined {
+    if (args.explicitContextWindow !== undefined && args.explicitContextWindow !== null) {
+        return args.explicitContextWindow
+    }
+
+    const persistedWindow = args.details?.contextWindow
+    if (persistedWindow === undefined) return undefined
+
+    const persistedModel = args.details?.model?.trim()
+    const currentModel = args.model?.trim()
+    if (persistedModel && currentModel && persistedModel !== currentModel) return undefined
+    return persistedWindow
+}
+
 function addLegacyClaudeLists(args: {
     details: ContextDetails | null | undefined
     agentFlavor: string | null | undefined
@@ -274,9 +292,13 @@ export function StatusBar(props: {
     )
 
     const effectiveContextSize = props.contextSize ?? props.contextDetails?.usage?.contextTokens
-    const effectiveContextWindow = props.contextWindow ?? props.contextDetails?.contextWindow
+    const contextHeuristicModel = props.contextModel ?? props.model ?? props.contextDetails?.model
+    const effectiveContextWindow = getEffectiveContextWindow({
+        explicitContextWindow: props.contextWindow,
+        details: props.contextDetails,
+        model: contextHeuristicModel
+    })
     const effectiveContextCacheRead = props.contextCacheRead ?? props.contextDetails?.usage?.cacheReadTokens
-    const contextHeuristicModel = props.contextModel ?? props.contextDetails?.model ?? props.model
     const contextWarning = useMemo(
         () => {
             if (effectiveContextSize === undefined) return null
