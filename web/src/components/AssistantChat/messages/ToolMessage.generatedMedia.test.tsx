@@ -116,12 +116,18 @@ describe('GeneratedImageCard video fetch', () => {
         await waitFor(() => {
             expect(screen.getByRole('button', { name: 'Prepare download (20 KB)' })).toBeInTheDocument()
         })
-        fireEvent.click(screen.getByRole('button', { name: 'Prepare download (20 KB)' }))
+        const prepareButton = screen.getByRole('button', { name: 'Prepare download (20 KB)' })
+        expect(prepareButton.closest('[data-hapi-generated-media-id]')).toHaveAttribute('data-hapi-generated-media-id', 'img-1')
+        expect(prepareButton).toHaveAttribute('data-hapi-generated-media-download', 'true')
+        fireEvent.click(prepareButton)
 
         await waitFor(() => {
             expect(screen.getByRole('link', { name: 'Download file clip.mp4 (20 KB)' })).toHaveAttribute('download', 'clip.mp4')
             expect(screen.getByText('Download file (20 KB)')).toBeInTheDocument()
         })
+        const downloadLink = screen.getByRole('link', { name: 'Download file clip.mp4 (20 KB)' })
+        expect(downloadLink).toHaveAttribute('data-hapi-generated-media-download', 'true')
+        expect(downloadLink.closest('[data-hapi-generated-media-id]')).toHaveAttribute('data-hapi-generated-media-loaded', 'true')
     })
 
     it('localizes deferred media actions in Chinese', () => {
@@ -150,5 +156,8 @@ describe('GeneratedImageCard video fetch', () => {
             expect(screen.getByRole('link', { name: '下载文件 clip.mp4（20 KB）' })).toBeInTheDocument()
             expect(screen.getByText('下载文件（20 KB）')).toBeInTheDocument()
         })
+        const downloadLink = screen.getByRole('link', { name: '下载文件 clip.mp4（20 KB）' })
+        expect(downloadLink.closest('[data-hapi-generated-media-id]')).toHaveAttribute('data-hapi-generated-media-loaded', 'true')
+        expect(downloadLink).toHaveAttribute('data-hapi-generated-media-download', 'true')
     })
 })

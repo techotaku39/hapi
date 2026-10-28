@@ -151,6 +151,20 @@ export class SDKToLogConverter {
     }
 
     /**
+     * The contextWindow currently resolved for this session's model — the
+     * same value `convert()` stamps onto relayed assistant usage. Undefined
+     * until a system/init or result message establishes it. The
+     * post-compaction usage refresh (claudeRemoteLauncher) uses this so its
+     * context-only sample doesn't erase the status bar's known window
+     * denominator (the reducer replaces latestUsage wholesale).
+     */
+    currentContextWindow(): number | undefined {
+        return this.resolvedContextWindowKey
+            ? this.modelContextWindows.get(this.resolvedContextWindowKey)
+            : undefined
+    }
+
+    /**
      * Update session ID (for when session changes during resume)
      */
     updateSessionId(sessionId: string): void {
@@ -245,7 +259,9 @@ export class SDKToLogConverter {
             isSidechain = true;
             parentToolUseId = (sdkMessage as any).parent_tool_use_id;
             parentUuid = this.sidechainLastUUID.get((sdkMessage as any).parent_tool_use_id) ?? null;
-            this.sidechainLastUUID.set((sdkMessage as any).parent_tool_use_id!, uuid);
+            if (sdkMessage.type !== 'result') {
+                this.sidechainLastUUID.set((sdkMessage as any).parent_tool_use_id!, uuid);
+            }
         }
         const baseFields = {
             parentUuid: parentUuid,
@@ -280,6 +296,7 @@ export class SDKToLogConverter {
                 if (userMsg.isSynthetic === true || userMsg.isMeta === true) {
                     logMessage.isMeta = true
                 }
+
 
                 // Check if this is a tool result and add mode if available
                 if (Array.isArray(userMsg.message.content)) {
@@ -325,7 +342,9 @@ export class SDKToLogConverter {
                     type: 'assistant',
                     message: assistantMsg.message,
                     // Assistant messages often have additional fields
-                    requestId: (assistantMsg as any).requestId
+                    requestId: (assistantMsg as any).requestId,
+                    // Set on synthetic API error messages; the web renders these as errors
+                    error: (assistantMsg as any).error
                 }
                 // if (assistantMsg.message.content && Array.isArray(assistantMsg.message.content)) {
                 //     for (const content of assistantMsg.message.content) {
@@ -389,11 +408,7 @@ export class SDKToLogConverter {
             }
 
             case 'result': {
-                // Result messages are not converted to log messages
-                // They're SDK-specific messages that indicate session completion
-                // Not part of the actual conversation log.
-                //
-                // But they carry the authoritative per-model contextWindow. modelUsage is
+                // Result messages carry the authoritative per-model contextWindow. modelUsage is
                 // keyed by the same raw model id the CLI reports on system/init, so the
                 // entry for the current session model is stored under resolvedContextWindowKey
                 // (which folds in the "[1m]" for fable), matching what assistant lookups use.
@@ -412,6 +427,19 @@ export class SDKToLogConverter {
                                 : model
                             this.modelContextWindows.set(key, cw)
                         }
+                    }
+                }
+                logMessage = {
+                    ...baseFields,
+                    type: 'system',
+                    subtype: 'turn_duration',
+                    durationMs: resultMsg.duration_ms,
+                    resultSummary: {
+                        usage: resultMsg.usage,
+                        modelUsage: resultMsg.modelUsage,
+                        total_cost_usd: resultMsg.total_cost_usd,
+                        num_turns: resultMsg.num_turns,
+                        duration_ms: resultMsg.duration_ms
                     }
                 }
                 break
@@ -456,7 +484,7 @@ export class SDKToLogConverter {
         }
 
         // Update last UUID for parent tracking
-        if (logMessage && logMessage.type !== 'summary') {
+        if (logMessage && logMessage.type !== 'summary' && sdkMessage.type !== 'result') {
             this.lastUuid = uuid
         }
 

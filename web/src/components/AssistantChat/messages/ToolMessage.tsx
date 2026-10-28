@@ -163,7 +163,12 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     }, [ctx.api, ctx.sessionId, props.block.imageId, isImage, shouldFetch])
 
     return (
-        <div className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3">
+        <div
+            className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3"
+            data-hapi-generated-media-id={props.block.imageId}
+            data-hapi-generated-media-file-name={props.block.fileName}
+            data-hapi-generated-media-loaded={isFile && objectUrl ? 'true' : undefined}
+        >
             <div className="mb-2 min-w-0 truncate text-xs font-medium text-[var(--app-hint)]">
                 {mediaHeader}
             </div>
@@ -192,6 +197,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                             fileName: props.block.fileName,
                             size: formattedFileSize,
                         })}
+                        data-hapi-generated-media-download="true"
                         className={MEDIA_ACTION_CLASS_NAME}
                     >
                         <FileIcon fileName={props.block.fileName} size={24} />
@@ -205,6 +211,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                             src={objectUrl}
                             fileName={props.block.fileName}
                             label={props.block.fileName}
+                            fileSize={fileSize}
                             buttonClassName="block max-h-[min(28rem,60vh)] max-w-full cursor-zoom-in rounded-xl text-left"
                             imageClassName="max-h-[min(28rem,60vh)] max-w-full rounded-xl object-contain"
                             imageStyle={imageStyle}
@@ -219,6 +226,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                 <button
                     type="button"
                     onClick={() => setLoadMedia(true)}
+                    data-hapi-generated-media-download={isFile ? 'true' : undefined}
                     className={MEDIA_ACTION_CLASS_NAME}
                 >
                     <FileIcon fileName={props.block.fileName} size={24} />

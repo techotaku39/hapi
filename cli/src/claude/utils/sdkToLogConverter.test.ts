@@ -115,6 +115,27 @@ describe('SDKToLogConverter', () => {
 
             expect(converter.convert(sdkMessage)?.isMeta).toBeUndefined()
         })
+
+        it.each([
+            '<local-command-stdout>Compacted </local-command-stdout>',
+            '<local-command-name>/context</local-command-name>',
+            '<local-command-stdout>context window usage</local-command-stdout>',
+            '<local-command-stderr>boom</local-command-stderr>'
+        ])('keeps other local-command CLI output visible for the client contract (%s)', (content) => {
+            // Local-command output is rendered intentionally as a CLI-output
+            // block (docs/api/client-contract/messages.md). The compact stdout
+            // echo is suppressed upstream, in claudeRemote's stream loop, where
+            // the active-command state lives.
+            const sdkMessage: SDKUserMessage = {
+                type: 'user',
+                message: {
+                    role: 'user',
+                    content
+                }
+            }
+
+            expect(converter.convert(sdkMessage)?.isMeta).toBeUndefined()
+        })
     })
 
     describe('Assistant messages', () => {
@@ -159,6 +180,23 @@ describe('SDKToLogConverter', () => {
 
             expect((logMessage as any).requestId).toBe('req_123')
         })
+
+        it('keeps the top-level error on synthetic API error messages (#1857)', () => {
+            const sdkMessage: any = {
+                type: 'assistant',
+                message: {
+                    model: '<synthetic>',
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'Prompt is too long' }]
+                },
+                error: 'invalid_request',
+                is_api_error_message: true
+            }
+
+            const logMessage = converter.convert(sdkMessage)
+
+            expect((logMessage as any).error).toBe('invalid_request')
+        })
     })
 
     describe('System messages', () => {
@@ -202,10 +240,25 @@ describe('SDKToLogConverter', () => {
             const logMessage = converter.convert(userMessage)
             expect(logMessage?.sessionId).toBe('updated-session-789')
         })
+
+        it('keeps the task list on background_tasks_changed snapshots', () => {
+            const tasks = [{ task_id: 'b1', task_type: 'local_bash' }]
+            const logMessage = converter.convert({
+                type: 'system',
+                subtype: 'background_tasks_changed',
+                tasks
+            } as SDKSystemMessage)
+
+            expect(logMessage).toMatchObject({ type: 'system', subtype: 'background_tasks_changed', tasks })
+        })
     })
 
     describe('Result messages', () => {
-        it('should not convert result messages', () => {
+        it('converts successful results into a round-summary carrier without advancing the parent chain', () => {
+            const preceding = converter.convert({
+                type: 'user',
+                message: { role: 'user', content: 'first request' }
+            } as SDKUserMessage)
             const sdkMessage: SDKResultMessage = {
                 type: 'result',
                 subtype: 'success',
@@ -219,15 +272,41 @@ describe('SDKToLogConverter', () => {
                 duration_ms: 3000,
                 duration_api_ms: 2500,
                 is_error: false,
-                session_id: 'result-session'
+                session_id: 'result-session',
+                modelUsage: {
+                    'claude-opus-5': {
+                        inputTokens: 80,
+                        cacheCreationInputTokens: 20,
+                        cacheReadInputTokens: 100_000,
+                        outputTokens: 500
+                    }
+                }
             }
 
             const logMessage = converter.convert(sdkMessage)
 
-            expect(logMessage).toBeNull()
+            expect(logMessage).toMatchObject({
+                type: 'system',
+                subtype: 'turn_duration',
+                parentUuid: preceding?.uuid,
+                durationMs: 3000,
+                resultSummary: {
+                    usage: sdkMessage.usage,
+                    modelUsage: sdkMessage.modelUsage,
+                    total_cost_usd: 0.05,
+                    num_turns: 5,
+                    duration_ms: 3000
+                }
+            })
+
+            const following = converter.convert({
+                type: 'user',
+                message: { role: 'user', content: 'second request' }
+            } as SDKUserMessage)
+            expect(following?.parentUuid).toBe(preceding?.uuid)
         })
 
-        it('should not convert error results', () => {
+        it('converts error results into the same carrier shape', () => {
             const sdkMessage: SDKResultMessage = {
                 type: 'result',
                 subtype: 'error_max_turns',
@@ -241,8 +320,49 @@ describe('SDKToLogConverter', () => {
 
             const logMessage = converter.convert(sdkMessage)
 
-            // Error results are not converted to summaries
-            expect(logMessage).toBeFalsy()
+            expect(logMessage).toMatchObject({
+                type: 'system',
+                subtype: 'turn_duration',
+                durationMs: 5000,
+                resultSummary: {
+                    total_cost_usd: 0.1,
+                    num_turns: 10,
+                    duration_ms: 5000
+                }
+            })
+        })
+
+        it('does not let a sidechain result carrier advance the sidechain parent chain', () => {
+            const parentToolUseId = 'toolu_sidechain_result'
+            const firstSidechainAssistant = converter.convert({
+                type: 'assistant',
+                parent_tool_use_id: parentToolUseId,
+                message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] }
+            } as unknown as SDKAssistantMessage)
+
+            const result = converter.convert({
+                type: 'result',
+                subtype: 'success',
+                parent_tool_use_id: parentToolUseId,
+                num_turns: 1,
+                total_cost_usd: 0,
+                duration_ms: 100,
+                duration_api_ms: 100,
+                is_error: false,
+                session_id: 'sidechain-result'
+            } as unknown as SDKResultMessage)
+
+            const followingSidechainAssistant = converter.convert({
+                type: 'assistant',
+                parent_tool_use_id: parentToolUseId,
+                message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] }
+            } as unknown as SDKAssistantMessage)
+
+            expect(result).toMatchObject({
+                isSidechain: true,
+                parentUuid: firstSidechainAssistant?.uuid
+            })
+            expect(followingSidechainAssistant?.parentUuid).toBe(firstSidechainAssistant?.uuid)
         })
     })
 
@@ -322,6 +442,33 @@ describe('SDKToLogConverter', () => {
             // Subsequent assistant message uses the refined value
             const second = converter.convert(makeAssistantMessage()) as any
             expect(second?.message?.usage?.context_window).toBe(500_000)
+        })
+
+        it('exposes the resolved context window for the post-compaction usage refresh', () => {
+            // No init/result yet: the launcher's context-only usage must not
+            // invent a window, so the getter stays undefined.
+            expect(converter.currentContextWindow()).toBeUndefined()
+
+            converter.convert({
+                type: 'system',
+                subtype: 'init',
+                session_id: 'session-cw',
+                model: 'claude-opus-4-7[1m]'
+            } as SDKSystemMessage)
+            expect(converter.currentContextWindow()).toBe(1_000_000)
+
+            converter.convert({
+                type: 'result',
+                subtype: 'success',
+                num_turns: 1,
+                total_cost_usd: 0,
+                duration_ms: 1,
+                duration_api_ms: 1,
+                is_error: false,
+                session_id: 'session-cw',
+                modelUsage: { 'claude-opus-4-7[1m]': { contextWindow: 500_000 } }
+            } as SDKResultMessage)
+            expect(converter.currentContextWindow()).toBe(500_000)
         })
 
         it('does not overwrite an explicit context_window already set by upstream', () => {
