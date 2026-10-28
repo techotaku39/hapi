@@ -243,6 +243,42 @@ describe('claudeLocalLauncher message filtering', () => {
         expect(sentMessages[0]).not.toHaveProperty('context_usage')
     })
 
+    it('keeps the resolved assistant model when a launch uses an alias', async () => {
+        const { session, getMetadata } = createSessionStub()
+        session.getModel = () => 'sonnet'
+        await claudeLocalLauncher(session as never)
+
+        harness.scannerOnMessage!({
+            type: 'assistant',
+            uuid: 'resolved-context-details',
+            context_usage: {
+                model: 'claude-sonnet-5-5',
+                total_tokens: 26_697,
+                raw_max_tokens: 1_000_000
+            },
+            message: {
+                role: 'assistant',
+                model: 'claude-sonnet-5-5',
+                content: [{ type: 'text', text: 'hello' }]
+            }
+        })
+        harness.scannerOnMessage!({
+            type: 'assistant',
+            uuid: 'resolved-ordinary-reply',
+            message: {
+                role: 'assistant',
+                model: 'claude-sonnet-5-5',
+                content: [{ type: 'text', text: 'still resolved' }]
+            }
+        })
+
+        expect(getMetadata().contextDetails).toMatchObject({
+            model: 'claude-sonnet-5-5',
+            contextWindow: 1_000_000,
+            usage: { contextTokens: 26_697 }
+        })
+    })
+
     it('does not let Claude sidechain context details replace parent metadata', async () => {
         const { session, getMetadata } = createSessionStub()
         await claudeLocalLauncher(session as never)
