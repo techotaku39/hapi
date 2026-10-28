@@ -191,6 +191,90 @@ test('content search navigates between multiple matching messages in one session
     await expect(navigation).toContainText(`2/${sessionHit.total}`)
 })
 
+test('content search keeps both arrows usable for a single matching message', async ({ page, request }) => {
+    test.skip(!liveEnabled, 'Set HAPI_LIVE=1 to run against a real hub session')
+
+    const baseUrl = getHapiBaseUrl()
+    const query = process.env.HAPI_SINGLE_RESULT_QUERY ?? 'cache'
+    const accessToken = readCliAccessToken()
+    const authResponse = await request.post(`${baseUrl}/api/auth`, { data: { accessToken } })
+    expect(authResponse.ok()).toBe(true)
+    const auth = await authResponse.json() as { token: string }
+    const headers = { authorization: `Bearer ${auth.token}` }
+    const globalResponse = await request.get(
+        `${baseUrl}/api/sessions/content-search?query=${encodeURIComponent(query)}&limit=100`,
+        { headers }
+    )
+    expect(globalResponse.ok()).toBe(true)
+    const globalContent = await globalResponse.json() as {
+        results: Array<{ session: { id: string } }>
+    }
+
+    let singleHit: { sessionId: string; messageId: string } | null = null
+    for (const result of globalContent.results) {
+        const response = await request.get(
+            `${baseUrl}/api/sessions/${result.session.id}/content-search?query=${encodeURIComponent(query)}&limit=500`,
+            { headers }
+        )
+        if (!response.ok()) continue
+        const body = await response.json() as {
+            matches: Array<{ messageId: string }>
+            total: number
+        }
+        if (body.total === 1 && body.matches.length === 1) {
+            singleHit = {
+                sessionId: result.session.id,
+                messageId: body.matches[0]!.messageId
+            }
+            break
+        }
+    }
+    if (!singleHit) {
+        test.skip(true, 'The live database has no session with exactly one matching message')
+        return
+    }
+
+    await installHapiAuth(page, baseUrl, accessToken)
+    await page.addInitScript(() => {
+        localStorage.setItem('hapi-appearance', 'dark')
+        localStorage.removeItem('hapi-color-theme')
+    })
+    await page.goto(
+        `${baseUrl}/sessions/${singleHit.sessionId}?messageId=${encodeURIComponent(singleHit.messageId)}&messageQuery=${encodeURIComponent(query)}`,
+        { waitUntil: 'domcontentloaded', timeout: 60_000 }
+    )
+
+    const navigation = page.getByTestId('search-match-navigation')
+    await expect(navigation).toBeVisible({ timeout: 60_000 })
+    await expect(navigation).toContainText('1/1')
+    const previous = navigation.getByRole('button', { name: 'Previous match' })
+    const next = navigation.getByRole('button', { name: 'Next match' })
+    await expect(previous).toBeEnabled()
+    await expect(next).toBeEnabled()
+
+    const match = page.locator('[data-hapi-source-search-match="true"]')
+    await expect(match).toHaveAttribute('data-hapi-source-message-id', singleHit.messageId, {
+        timeout: 60_000
+    })
+    const gotIt = page.getByRole('button', { name: 'Got it' })
+    if (await gotIt.isVisible().catch(() => false)) {
+        await gotIt.click()
+    }
+    const screenshotPath = process.env.HAPI_SINGLE_RESULT_SCREENSHOT
+    if (screenshotPath) {
+        await page.screenshot({ path: screenshotPath })
+    }
+
+    await previous.click()
+    await expect(match).toHaveAttribute('data-hapi-source-message-id', singleHit.messageId, {
+        timeout: 30_000
+    })
+    await next.click()
+    await expect(match).toHaveAttribute('data-hapi-source-message-id', singleHit.messageId, {
+        timeout: 30_000
+    })
+})
+
 test('content search loads and opens a matching message outside the initial latest page', async ({ page, request }) => {
     test.skip(!liveEnabled, 'Set HAPI_LIVE=1 to run against a real hub session')
 

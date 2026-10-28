@@ -1012,15 +1012,24 @@ export function HappyThread(props: {
     }, [hasSearchTarget, initialSearchTargetId, props.searchRequestId, props.sessionId, targetSearchQuery])
 
     const navigateSearchMatch = useCallback((direction: -1 | 1) => {
-        if (searchMatches.length < 2) return
+        if (searchMatches.length === 0) return
         const currentIndex = activeSearchMatchIndex >= 0 ? activeSearchMatchIndex : 0
         const nextIndex = (currentIndex + direction + searchMatches.length) % searchMatches.length
         const nextMatch = searchMatches[nextIndex]
         if (nextMatch) {
             activeSearchMatchRequestIdRef.current = props.searchRequestId
+            // A single result still represents a useful navigation action:
+            // clicking either arrow should re-center the current match after
+            // the user has scrolled away. Reset the completed jump so the
+            // normal locating path runs again even though the message id is
+            // unchanged.
+            if (searchMatches.length === 1 && nextMatch.messageId === activeSearchTargetId) {
+                searchTargetJumpRef.current = null
+                setSearchTargetRetryVersion((version) => version + 1)
+            }
             setActiveSearchMatchId(nextMatch.messageId)
         }
-    }, [activeSearchMatchIndex, props.searchRequestId, searchMatches])
+    }, [activeSearchMatchIndex, activeSearchTargetId, props.searchRequestId, searchMatches])
 
     const isInitialScrollSettling = useCallback(() => {
         return initialScrollSessionRef.current === sessionIdRef.current && Date.now() < initialScrollDeadlineRef.current
@@ -2494,7 +2503,7 @@ export function HappyThread(props: {
                             <button
                                 type="button"
                                 aria-label={t('misc.previousSearchMatch')}
-                                disabled={searchMatches.length < 2}
+                                disabled={searchMatches.length === 0}
                                 onClick={() => navigateSearchMatch(-1)}
                                 className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm leading-none text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] disabled:cursor-default disabled:opacity-35"
                             >
@@ -2503,7 +2512,7 @@ export function HappyThread(props: {
                             <button
                                 type="button"
                                 aria-label={t('misc.nextSearchMatch')}
-                                disabled={searchMatches.length < 2}
+                                disabled={searchMatches.length === 0}
                                 onClick={() => navigateSearchMatch(1)}
                                 className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm leading-none text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] disabled:cursor-default disabled:opacity-35"
                             >

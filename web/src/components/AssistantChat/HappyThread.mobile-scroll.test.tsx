@@ -35,6 +35,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
 
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import type { ApiClient } from '@/api/client'
+import { queryKeys } from '@/lib/query-keys'
 import type { Session } from '@/types/api'
 
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
@@ -451,6 +452,62 @@ describe('explicit tail scrolling', () => {
 })
 
 describe('search target loading', () => {
+    it('keeps both navigation arrows active for a single result and re-jumps to it', async () => {
+        const onLoadMessageContext = vi.fn().mockResolvedValue(true)
+        const onInitialTargetConsumed = vi.fn()
+        searchTargetTestState.extras = { messagesVersion: 1, historyVersion: 0 }
+        searchTargetTestState.renderMessages = () => (
+            <div data-hapi-source-message-id="target-message">target</div>
+        )
+
+        const { queryClient, renderHappyThread } = renderSearchThread({
+            initialTargetMessageId: 'target-message',
+            initialTargetMessageQuery: 'target',
+            onLoadMessageContext,
+            onInitialTargetConsumed,
+            messagesVersion: 1,
+            historyVersion: 0,
+            rawMessagesCount: 1
+        })
+        const result = render(renderHappyThread())
+        act(() => {
+            queryClient.setQueryData(queryKeys.sessionContentSearch('search-target-session', 'target'), {
+                matches: [{
+                    messageId: 'target-message',
+                    role: 'user' as const,
+                    seq: 1,
+                    createdAt: 1,
+                    snippet: 'target'
+                }],
+                total: 1
+            })
+            result.rerender(renderHappyThread())
+        })
+
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+        const previous = result.getByRole('button', { name: 'Previous match' })
+        expect(previous).not.toBeDisabled()
+        const next = result.getByRole('button', { name: 'Next match' })
+        expect(next).not.toBeDisabled()
+        expect(onInitialTargetConsumed).toHaveBeenCalledTimes(1)
+
+        fireEvent.click(previous)
+        await act(async () => {
+            await Promise.resolve()
+        })
+        expect(onInitialTargetConsumed).toHaveBeenCalledTimes(2)
+
+        fireEvent.click(next)
+        await act(async () => {
+            await Promise.resolve()
+        })
+        expect(onInitialTargetConsumed).toHaveBeenCalledTimes(3)
+    })
+
     it('waits for assistant-ui to apply the current message window before anchoring', () => {
         const onLoadMessageContext = vi.fn().mockResolvedValue(true)
         const onInitialTargetConsumed = vi.fn()
