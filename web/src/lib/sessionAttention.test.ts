@@ -222,6 +222,7 @@ describe('sessionIsUnread', () => {
 
     it('defers reply-clock unread while generating, then reveals the completed reply', () => {
         const generating = makeSummary({
+            id: 'reply-generation',
             active: true, thinking: true, updatedAt: 9_000, lastAssistantMessageAt: 6_000,
         })
         expect(sessionIsUnread(generating, { lastSeenAt: 5_000 })).toBe(false)
@@ -231,6 +232,7 @@ describe('sessionIsUnread', () => {
 
     it('preserves manual unread across reply-clock advances and pending backfill', () => {
         const summary = makeSummary({
+            id: 'manual-pending-reply',
             active: true, thinking: true, updatedAt: 9_000, lastAssistantMessageAt: 6_000,
             assistantReplyClockBackfilled: false,
         })
