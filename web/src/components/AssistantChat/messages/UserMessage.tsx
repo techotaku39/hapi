@@ -14,6 +14,7 @@ export function HappyUserMessage() {
     const { t } = useTranslation()
     const role = useAuiState((s) => s.message.role)
     const messageId = useAuiState((s) => s.message.id)
+    const threadIsRunning = useAuiState((s) => s.thread.isRunning)
     const elementId = getConversationMessageAnchorId(messageId)
     const sourceMessageIds = useAuiState((s) => {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
@@ -60,16 +61,20 @@ export function HappyUserMessage() {
         && localId.length > 0
         && ctx.metadata?.conversationHistoryPoints?.[localId] === true
     const isLatestBoundary = ctx.isLatestCompletedBoundary?.(messageId) === true
+    // A user-only finished turn can be the latest completed boundary while
+    // another turn runs. Branch before that user turn, never from the live tail.
+    const runningCodex = threadIsRunning && ctx.metadata?.flavor === 'codex'
     const showCurrentFork = Boolean(
         history?.forkCurrent
         && isLatestBoundary
+        && !runningCodex
         && !ctx.disabled
         && ctx.onForkConversation
     )
     const showHistoricalFork = Boolean(
         history?.forkAtMessage
         && hasNativePoint
-        && !isLatestBoundary
+        && (!isLatestBoundary || runningCodex)
         && !ctx.disabled
         && ctx.onForkConversation
     )
@@ -133,6 +138,7 @@ export function HappyUserMessage() {
                 copyText={hasText ? text : undefined}
                 messageElementId={elementId}
                 showFork={showFork}
+                allowForkWhileRunning={showHistoricalFork && ctx.metadata?.flavor === 'codex'}
                 showRewind={showRewind}
                 historyActionPending={ctx.historyActionPending}
                 onFork={showCurrentFork

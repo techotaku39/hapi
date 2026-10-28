@@ -137,6 +137,10 @@ export class Store {
         this.workGraph = new WorkGraphStore(this.db)
     }
 
+    runInTransaction<T>(work: () => T): T {
+        return this.db.transaction(work)()
+    }
+
     /**
      * Atomically records a CLI prompt-consumption acknowledgement and returns
      * the persisted session activity timestamp. A duplicate or sibling-stamped
@@ -485,6 +489,12 @@ export class Store {
                 WHERE invoked_at IS NULL
                   AND local_id IS NOT NULL
                   AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
                   AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
@@ -1078,8 +1088,19 @@ export class Store {
         `)
     }
 
-    /** Derived FTS index for opt-in session message-content search. */
+    /**
+     * v26→v27: keep the session-list future-scheduled lookup indexed and
+     * initialize the derived message-content search tables.
+     */
     private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
+                  AND delivery_state = 'queued';
+        `)
         createMessageContentSearchTable(this.db)
         if (this.getMessageColumnNames().size === 0) return
         rebuildMessageContentSearch(this.db)

@@ -40,6 +40,7 @@ import {
     copyMessagesToSession as copyStoredMessagesToSession,
     getAllMessages,
     getMessagesAfterSeq,
+    getMinSeq,
     getMessageSeqById,
     getMessageById,
     truncateMessagesFromLocalId,
@@ -100,6 +101,10 @@ export class MessageStore {
 
     getMessagesAfterSeq(sessionId: string, afterSeq: number): StoredMessage[] {
         return getMessagesAfterSeq(this.db, sessionId, afterSeq)
+    }
+
+    getMinSeq(sessionId: string): number | null {
+        return getMinSeq(this.db, sessionId)
     }
 
     getSeqById(sessionId: string, messageId: string): number | null {
