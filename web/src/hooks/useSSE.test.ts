@@ -6,6 +6,7 @@ import type { Session, SessionResponse, SessionSummary, SessionsResponse } from 
 import { queryKeys } from '@/lib/query-keys'
 import {
     getSessionLastSeenAt,
+    getSessionManualUnreadAt,
     getUnreadSessionCount,
     initializeSessionLastSeen,
 } from '@/lib/sessionLastSeen'
@@ -465,6 +466,37 @@ describe('reply-clock full-record cache ordering', () => {
         const summary = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]
         expect(summary?.assistantReplyClockBackfilled).toBe(true)
         expect(getUnreadSessionCount([summary!])).toBe(1)
+        unmount()
+    })
+
+    it('preserves a pending-baseline reply without bypassing generation suppression', () => {
+        const sessionId = 'automatic-pending-reply'
+        window.localStorage.removeItem('hapi.sessionLastSeen.v2')
+        window.localStorage.removeItem('hapi.sessionManualUnread.v2')
+        window.localStorage.removeItem('hapi.sessionLastSeenBaseline.v2:http://hub.test')
+        const { queryClient, unmount } = renderUseSSE()
+        const hydrated = makeSummary({
+            id: sessionId, active: true, thinking: true, updatedAt: 9_000,
+            lastAssistantMessageAt: 6_000, lastAssistantMessageVersion: 11,
+            assistantReplyClockBackfilled: false,
+        })
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, { sessions: [hydrated] })
+        initializeSessionLastSeen('http://hub.test', [hydrated])
+        const patch = (data: Record<string, unknown>) => act(() => {
+            FakeEventSource.instances[0]?.simulateMessage({
+                type: 'session-updated', sessionId, namespace: 'default', data,
+            })
+        })
+        const summary = () => queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)!.sessions[0]!
+        patch({ lastAssistantMessageAt: 6_000, lastAssistantMessageVersion: 11 })
+        expect(getSessionLastSeenAt(sessionId)).toBe(5_999)
+        expect(getSessionManualUnreadAt(sessionId)).toBeNull()
+        expect(getUnreadSessionCount([summary()])).toBe(0)
+        patch({ lastAssistantMessageAt: 6_000, lastAssistantMessageVersion: 12, assistantReplyClockBackfilled: true })
+        initializeSessionLastSeen('http://hub.test', [summary()])
+        expect(getUnreadSessionCount([summary()])).toBe(0)
+        patch({ thinking: false })
+        expect(getUnreadSessionCount([summary()])).toBe(1)
         unmount()
     })
 

@@ -465,8 +465,12 @@ export function markSessionUnreadIfUnseen(sessionId: string, activityAt: number)
 
     const store = readStore()
     const currentSeenAt = store[sessionId]
-    if (typeof currentSeenAt === 'number' && Number.isFinite(currentSeenAt) && currentSeenAt >= activityAt) {
-        return
+    const unreadBefore = activityAt - 1
+    if (typeof currentSeenAt === 'number' && Number.isFinite(currentSeenAt)) {
+        if (currentSeenAt >= activityAt || currentSeenAt <= unreadBefore) return
     }
-    markSessionUnread(sessionId, activityAt)
+    // This is automatic preservation, not an explicit "Mark unread" action.
+    // A manual marker would bypass generation/backfill suppression.
+    store[sessionId] = unreadBefore
+    if (writeStore(store)) notifyStoreChanged()
 }
