@@ -12,7 +12,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setAppBadgeEnabled } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setAppBadgeEnabled, setFixedSessionOrder } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -23,6 +23,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setCodexExplorationCollapsed: vi.fn(),
     setVoice: vi.fn(),
     setAppBadgeEnabled: vi.fn(),
+    setFixedSessionOrder: vi.fn(),
 }))
 
 const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false, sessionSummaryInChat: false })
@@ -85,6 +86,10 @@ vi.mock('@/hooks/useShowActiveSessionsOnly', () => ({
 
 vi.mock('@/hooks/usePinInProgressSessions', () => ({
     usePinInProgressSessions: () => ({ pinInProgressSessions: false, setPinInProgressSessions: vi.fn() }),
+}))
+
+vi.mock('@/hooks/useFixedSessionOrder', () => ({
+    useFixedSessionOrder: () => ({ fixedSessionOrder: false, setFixedSessionOrder }),
 }))
 
 vi.mock('@/hooks/useAppBadgePreference', () => ({
@@ -302,6 +307,10 @@ describe('responsive settings pages', () => {
         expect(screen.getByRole('checkbox', { name: 'Created time' })).not.toBeChecked()
         expect(screen.getByRole('checkbox', { name: 'Updated time' })).not.toBeChecked()
         expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+        const fixedOrderToggle = screen.getByRole('checkbox', { name: 'Fixed session order' })
+        expect(fixedOrderToggle).not.toBeChecked()
+        fireEvent.click(fixedOrderToggle)
+        expect(setFixedSessionOrder).toHaveBeenCalledWith(true)
     })
 
     it('keeps the session status description visible with its choice group', () => {
@@ -342,9 +351,9 @@ describe('responsive settings pages', () => {
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
         expect(screen.getByText("What's New")).toBeInTheDocument()
         expect(screen.getByText(`v${latestReleaseNote.version}`)).toBeInTheDocument()
-        expect(screen.getByText(latestReleaseNote.groups[0].changes[0].text.en)).toBeInTheDocument()
         const latestReleaseElement = screen.getByRole('link', { name: `Open release page for v${latestReleaseNote.version}` }).closest('details')
         expect(latestReleaseElement).not.toBeNull()
+        expect(within(latestReleaseElement as HTMLElement).getByText(latestReleaseNote.groups[0].changes[0].text.en)).toBeInTheDocument()
         expect(latestReleaseElement?.textContent).toContain(latestReleaseNote.summary.en)
         expect(within(latestReleaseElement as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
         expect(within(latestReleaseElement as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')
@@ -365,9 +374,9 @@ describe('responsive settings pages', () => {
         const latestReleaseChanges = latestReleaseNote.groups.flatMap((group) => group.changes)
         const releaseKindLabels = { feature: '新增', fix: '修复', note: '说明' } as const
         expect(screen.getByText('更新公告')).toBeInTheDocument()
-        expect(screen.getByText(latestReleaseNote.groups[0].changes[0].text['zh-CN'])).toBeInTheDocument()
         const latestReleaseElement = screen.getByRole('link', { name: `打开 v${latestReleaseNote.version} 发行页` }).closest('details')
         expect(latestReleaseElement).not.toBeNull()
+        expect(within(latestReleaseElement as HTMLElement).getByText(latestReleaseNote.groups[0].changes[0].text['zh-CN'])).toBeInTheDocument()
         expect(latestReleaseElement?.textContent).toContain(latestReleaseNote.summary['zh-CN'])
         expect(within(latestReleaseElement as HTMLElement).getByText('🌟', { exact: true })).toHaveClass('sm:hidden')
         expect(within(latestReleaseElement as HTMLElement).getByText('⭐', { exact: true })).toHaveClass('hidden', 'sm:inline-block', 'sm:-translate-y-[0.5px]')

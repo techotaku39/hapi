@@ -76,6 +76,42 @@ function releaseNote(
  * guide and reusable authoring prompt.
  */
 export const RELEASE_NOTES = [
+    releaseNote('0.31.3', '2026-10-27',
+        'Maintenance release; the official release notes list no user-facing functional changes.',
+        '维护版本；官方 Release 未列出面向用户的功能变更。',
+        [
+            group('Release maintenance', '版本维护', [
+                change('note', 'No user-facing functional changes were listed in the official release notes.', '官方 Release 未列出面向用户的功能变更。'),
+            ]),
+        ]),
+    releaseNote('0.31.2', '2026-10-27',
+        'Add Russian localization, larger display sizing, external-link preferences, dictation shortcuts, OpenCode v2, and richer agent and permission controls; improve session loading, composer reliability, and native clients.',
+        '增加俄语本地化、更大显示字号、外部链接偏好、听写快捷键、OpenCode v2 以及更丰富的 Agent 和权限控制；改进会话加载、输入框稳定性和原生客户端。',
+        [
+            group('Localization and display', '本地化与显示', [
+                change('feature', 'Add Russian localization across Web, Android, and iOS, detect the initial language, and support a 130% app font size.', '在 Web、Android 和 iOS 中增加俄语本地化，支持检测初始语言，并增加 130% 应用字号。'),
+                change('feature', 'Let users choose whether external links open in a new tab and improve dictation and text-submission controls.', '允许用户选择是否在新标签页打开外部链接，并改进听写与文本提交控件。'),
+            ]),
+            group('Agent and permission controls', 'Agent 与权限控制', [
+                change('feature', 'Add hapi set-mode for changing a session permission mode and expose Approve for me as a permission option.', '增加 hapi set-mode 用于修改会话权限模式，并提供“替我批准”权限选项。'),
+                change('feature', 'Add DeepSeek Harness model selection and announce automatic Codex context compaction when it starts.', '增加 DeepSeek Harness 模型选择，并在 Codex 自动开始上下文压缩时提示用户。'),
+            ]),
+            group('Session, composer, and agent features', '会话、输入框与 Agent 新功能', [
+                change('feature', 'Give the rich composer its own undo history and preserve composer image previews across updates.', '为富文本输入框提供独立撤销历史，并在更新过程中保留输入框图片预览。'),
+                change('feature', 'Support OpenCode v2 alongside v1 sessions and display inline Pi tool-result images.', '在支持 v1 会话的同时支持 OpenCode v2，并在 Pi 会话中显示内联工具结果图片。'),
+                change('feature', 'Discover configured Kimi models dynamically.', '动态发现已配置的 Kimi 模型。'),
+                change('feature', 'Add persistent Android permission-mode controls, settled permission verdict details, and a session-list date-range filter.', '增加 Android 持久化权限模式控件、已确定权限结果详情，以及会话列表日期范围筛选。'),
+            ]),
+            group('Permission and session fixes', '权限与会话修复', [
+                change('fix', 'Keep Claude permission downgrades effective and pass the selected permission mode to the local TUI.', '确保 Claude 权限降级持续生效，并将选定的权限模式传递给本地 TUI。'),
+                change('fix', 'Remove composer attachments without waiting for cleanup, prevent released image previews from dragging, and keep session history loading coherent.', '移除输入框附件时无需等待清理；避免释放后的图片预览继续拖动；保持会话历史加载一致。'),
+                change('fix', 'Ignore pending requests on archived sessions and show Claude sessions waiting on background tasks.', '忽略已归档会话中的待处理请求，并显示正在等待后台任务的 Claude 会话。'),
+            ]),
+            group('Agent and Hub fixes', 'Agent 与 Hub 修复', [
+                change('fix', 'Forward Claude Code 2.x subagent transcripts in local mode and keep status summaries out of intermediate messages.', '在本地模式转发 Claude Code 2.x 子 Agent transcript，并避免状态摘要出现在中间消息中。'),
+                change('fix', 'Improve Hub settings caching, runner liveness handling, orphan cleanup, and history synchronization for active sessions.', '改进 Hub 设置缓存、Runner 存活状态处理、孤儿清理，以及活动会话的历史同步。'),
+            ]),
+        ]),
     releaseNote('0.30.7', '2026-09-15',
         'Improve permission and unread-session workflows, add adaptive iPad navigation, and add macOS 27 support.',
         '改进权限和未读会话流程，增加自适应 iPad 导航，并支持 macOS 27。',
