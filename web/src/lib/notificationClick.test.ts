@@ -75,12 +75,23 @@ describe('focusOrOpenNotificationClient', () => {
         expect(clients.openWindow).not.toHaveBeenCalled()
     })
 
-    it('focuses an existing window already at the notification URL', async () => {
-        const existing = createClient('https://hapi.test/sessions/session-1')
+    it('delivers the route even when WindowClient.url matches the notification URL', async () => {
+        const existing = createClient('https://hapi.test/sessions/session-1', {
+            postMessage: vi.fn((_message, transfer) => {
+                transfer[0] && (transfer[0] as MessagePort).postMessage({ type: NOTIFICATION_CLICK_ACK_TYPE })
+            })
+        })
         const clients = createClients([existing])
 
         await focusOrOpenNotificationClient(clients, 'https://hapi.test/sessions/session-1', APP_SCOPE)
 
+        expect(existing.postMessage).toHaveBeenCalledWith(
+            {
+                type: NOTIFICATION_CLICK_MESSAGE_TYPE,
+                url: 'https://hapi.test/sessions/session-1'
+            },
+            expect.any(Array)
+        )
         expect(existing.focus).toHaveBeenCalledOnce()
         expect(existing.navigate).not.toHaveBeenCalled()
         expect(clients.openWindow).not.toHaveBeenCalled()

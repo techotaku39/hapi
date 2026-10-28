@@ -116,7 +116,10 @@ function AppInner() {
         const handleServiceWorkerMessage = (event: MessageEvent<unknown>) => {
             const href = getNotificationClickHref(event.data, window.location.origin)
             if (!href) return
-            router.history.push(href)
+            const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`
+            if (currentHref !== href) {
+                router.history.push(href)
+            }
             event.ports[0]?.postMessage({ type: NOTIFICATION_CLICK_ACK_TYPE })
         }
 

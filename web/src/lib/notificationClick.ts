@@ -134,11 +134,6 @@ export async function focusOrOpenNotificationClient(
         ?? appClients[0]
 
     if (targetClient) {
-        if (targetClient.url === targetUrl) {
-            await targetClient.focus()
-            return
-        }
-
         // Keep the SPA's router in control of an already-open app window. Some
         // installed browser runtimes resolve WindowClient.navigate() without
         // updating the active SPA route on subsequent notification clicks.
