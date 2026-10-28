@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 describe('schema migration v26 through v28', () => {
-    it('adds the durable migration state table to a V26 database', () => {
+    it('preserves the upstream scheduled index and adds task backfill state to a V26 database', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v27-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
@@ -23,6 +23,7 @@ describe('schema migration v26 through v28', () => {
         const legacy = new Database(dbPath)
         legacy.exec(`
             DROP TABLE migration_state;
+            DROP INDEX idx_messages_future_scheduled_queued;
             PRAGMA user_version = 26;
         `)
         legacy.close()
@@ -39,6 +40,12 @@ describe('schema migration v26 through v28', () => {
         versionStatement.finalize()
 
         expect(table?.name).toBe('migration_state')
+        const indexStatement = internalDb.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_future_scheduled_queued'"
+        )
+        const index = indexStatement.get()
+        indexStatement.finalize()
+        expect(index).not.toBeNull()
         expect(version.user_version).toBe(28)
         migrated.close()
     })

@@ -83,6 +83,7 @@ describe('schema migration v27 to v28', () => {
         initial.close()
         const legacy = new Database(dbPath)
         legacy.exec(`
+            DROP TABLE migration_state;
             ALTER TABLE sessions DROP COLUMN todos_source_seq;
             ALTER TABLE sessions DROP COLUMN todos_source_at;
             PRAGMA user_version = 27;
@@ -108,6 +109,18 @@ describe('schema migration v27 to v28', () => {
             'todos_source_seq'
         ]))
         expect(version.user_version).toBe(28)
+        const markerStatement = internalDb.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'migration_state'"
+        )
+        const marker = markerStatement.get()
+        markerStatement.finalize()
+        expect(marker).not.toBeNull()
+        const indexStatement = internalDb.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_future_scheduled_queued'"
+        )
+        const index = indexStatement.get()
+        indexStatement.finalize()
+        expect(index).not.toBeNull()
         expect(source).toEqual({ todos_source_at: null, todos_source_seq: null })
         migrated.close()
     })

@@ -134,6 +134,10 @@ export class Store {
         this.migrations = new MigrationStore(this.db)
     }
 
+    runInTransaction<T>(work: () => T): T {
+        return this.db.transaction(work)()
+    }
+
     /**
      * Atomically records a CLI prompt-consumption acknowledgement and returns
      * the persisted session activity timestamp. A duplicate or sibling-stamped
@@ -472,6 +476,12 @@ export class Store {
                 WHERE invoked_at IS NULL
                   AND local_id IS NOT NULL
                   AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
                   AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
@@ -984,6 +994,29 @@ export class Store {
     }
 
     /**
+     * v26→v27: make the session-list future-scheduled lookups indexed.
+     * GET /api/sessions runs countFutureScheduledBySessionIds and
+     * minFutureScheduledAtBySessionIds over every session id in the namespace.
+     * Neither the (session_id, seq) indexes nor idx_messages_scheduled_pending
+     * match the full predicate set, so SQLite falls back to probing
+     * idx_messages_local_id — one pass over every local message per call
+     * (O(all local messages), twice per session-list refresh) even though the
+     * matching set is almost always empty. This partial index covers every
+     * constant predicate and exposes (session_id, scheduled_at), so both
+     * queries become a near-empty index range scan.
+     */
+    private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
+                  AND delivery_state = 'queued';
+        `)
+    }
+
+    /**
      * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
      * Namespace + principal_json required on every events row.
      * Bumped as v22→v23 because upstream main already ships schema 22.
@@ -1069,18 +1102,14 @@ export class Store {
         `)
     }
 
-    /** v26→v27: create the durable structured-task backfill marker. */
-    private migrateFromV26ToV27(): void {
+    /** v27→v28: persist structured-task backfill state and canonical source positions. */
+    private migrateFromV27ToV28(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS migration_state (
                 migration_id TEXT PRIMARY KEY,
                 completed_at INTEGER NOT NULL
             );
         `)
-    }
-
-    /** v27→v28: persist the canonical source position for structured tasks. */
-    private migrateFromV27ToV28(): void {
         const columns = this.getSessionColumnNames()
         // A partially built legacy database may not have the sessions table yet.
         // createSchema runs after the legacy migration ladder and creates the
