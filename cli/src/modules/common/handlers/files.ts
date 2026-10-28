@@ -6,7 +6,7 @@ import type { FileReadResponse, GeneratedImageResponse } from '@hapi/protocol/ap
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
-import { getGeneratedImage } from '../generatedImages'
+import { getGeneratedImage, readBoundedRegularFile } from '../generatedImages'
 import { getErrorMessage, rpcError } from '../rpcResponses'
 
 interface ReadFileRequest {
@@ -45,20 +45,20 @@ export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, worki
 
         try {
             const resolvedPath = resolve(workingDirectory, data.path)
-            const stats = await stat(resolvedPath)
             const maxBytes = typeof data.maxBytes === 'number' && Number.isFinite(data.maxBytes) && data.maxBytes > 0
                 ? Math.min(Math.floor(data.maxBytes), 10 * 1024 * 1024)
                 : undefined
-            if (maxBytes !== undefined && stats.size > maxBytes) {
-                return rpcError(`File is too large to display inline (max ${maxBytes} bytes)`)
-            }
-            const buffer = await readFile(resolvedPath)
+            const stats = maxBytes === undefined ? await stat(resolvedPath) : undefined
+            const buffer = maxBytes === undefined
+                ? await readFile(resolvedPath)
+                : await readBoundedRegularFile(resolvedPath, maxBytes)
+            const finalStats = maxBytes === undefined ? stats! : await stat(resolvedPath)
             const content = buffer.toString('base64')
             return {
                 success: true,
                 content,
-                size: stats.size,
-                modified: stats.mtime.getTime()
+                size: finalStats.size,
+                modified: finalStats.mtime.getTime()
             }
         } catch (error) {
             logger.debug('Failed to read file:', error)

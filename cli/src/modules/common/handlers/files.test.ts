@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, rm, stat, writeFile } from 'fs/promises'
+import { mkdir, rm, stat, symlink, truncate, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { RpcHandlerManager } from '../../../api/rpc/RpcHandlerManager'
@@ -59,5 +59,54 @@ describe('file RPC handlers', () => {
 
         expect(parsed.success).toBe(false)
         expect(parsed.error).toContain('too large')
+    })
+
+    it('rejects bounded reads of non-regular files', async () => {
+        const directoryPath = join(rootDir, 'directory.png')
+        await mkdir(directoryPath)
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:readFile',
+            params: JSON.stringify({ path: 'directory.png', maxBytes: 1024 })
+        })
+        const parsed = JSON.parse(response) as { success: boolean; error?: string }
+
+        expect(parsed.success).toBe(false)
+        expect(parsed.error).toContain('regular file')
+    })
+
+    it('keeps bounded reads within the limit when the file is sparse and oversized', async () => {
+        const filePath = join(rootDir, 'growth.png')
+        await writeFile(filePath, Buffer.from('small'))
+        await truncate(filePath, 32)
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:readFile',
+            params: JSON.stringify({ path: 'growth.png', maxBytes: 16 })
+        })
+        const parsed = JSON.parse(response) as { success: boolean; error?: string }
+
+        expect(parsed.success).toBe(false)
+        expect(parsed.error).toContain('too large')
+    })
+
+    it('does not follow a symlink to a non-regular target for bounded reads', async () => {
+        const target = join(rootDir, 'target-directory')
+        const link = join(rootDir, 'linked.png')
+        await mkdir(target)
+        try {
+            await symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+        } catch {
+            return
+        }
+
+        const response = await rpc.handleRequest({
+            method: 'session-test:readFile',
+            params: JSON.stringify({ path: 'linked.png', maxBytes: 1024 })
+        })
+        const parsed = JSON.parse(response) as { success: boolean; error?: string }
+
+        expect(parsed.success).toBe(false)
+        expect(parsed.error).toContain('regular file')
     })
 })
