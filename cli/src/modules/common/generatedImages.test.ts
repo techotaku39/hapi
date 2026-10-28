@@ -266,7 +266,9 @@ describe('generatedImages', () => {
                     console.log(error instanceof Error ? error.message : String(error))
                 }
             `
-            const child = spawn(process.execPath, ['-e', script], {
+            const bunExec = process.env.HAPI_BUN_EXEC
+            if (!bunExec) throw new Error('HAPI_BUN_EXEC is required for the FIFO subprocess test')
+            const child = spawn(bunExec, ['--eval', script], {
                 cwd: process.cwd(),
                 env: { ...process.env, HAPI_FIFO_PATH: fifo },
                 stdio: ['ignore', 'pipe', 'pipe'],
