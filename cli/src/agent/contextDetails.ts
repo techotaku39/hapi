@@ -334,12 +334,18 @@ export function mergeContextDetails(
     const compactNext = compactContextDetails(next)
     if (!previous || !compactPrevious || compactPrevious.provider !== compactNext.provider) return compactNext
 
+    const modelChanged = compactPrevious.model !== undefined
+        && compactNext.model !== undefined
+        && compactPrevious.model !== compactNext.model
+    const previousForMerge = modelChanged && compactNext.contextWindow === undefined
+        ? (({ contextWindow: _contextWindow, ...rest }) => rest)(compactPrevious)
+        : compactPrevious
     const merged: ContextDetails = {
-        ...compactPrevious,
+        ...previousForMerge,
         ...compactNext,
-        ...(compactPrevious.usage || compactNext.usage ? { usage: { ...compactPrevious.usage, ...compactNext.usage } } : {}),
-        ...(compactPrevious.claude || compactNext.claude ? { claude: { ...compactPrevious.claude, ...compactNext.claude } } : {}),
-        ...(compactPrevious.codex || compactNext.codex ? { codex: { ...compactPrevious.codex, ...compactNext.codex } } : {})
+        ...(previousForMerge.usage || compactNext.usage ? { usage: { ...previousForMerge.usage, ...compactNext.usage } } : {}),
+        ...(previousForMerge.claude || compactNext.claude ? { claude: { ...previousForMerge.claude, ...compactNext.claude } } : {}),
+        ...(previousForMerge.codex || compactNext.codex ? { codex: { ...previousForMerge.codex, ...compactNext.codex } } : {})
     }
     const unchanged = JSON.stringify(withoutUpdatedAt(compactPrevious)) === JSON.stringify(withoutUpdatedAt(merged))
     const previousWasCompact = JSON.stringify(withoutUpdatedAt(previous)) === JSON.stringify(withoutUpdatedAt(compactPrevious))

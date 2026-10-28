@@ -386,6 +386,25 @@ describe('mergeContextDetails', () => {
         })
     })
 
+    it('clears a retained context window when the published model changes', () => {
+        const first = buildClaudeContextDetails({
+            updatedAt: 100,
+            model: 'claude-opus',
+            contextUsage: { raw_max_tokens: 200_000 }
+        })!
+        const next = buildClaudeContextDetails({
+            updatedAt: 200,
+            model: 'claude-fable-5',
+            system: { tools: ['Read'] }
+        })!
+
+        const merged = mergeContextDetails(first, next)
+
+        expect(merged.model).toBe('claude-fable-5')
+        expect(merged.contextWindow).toBeUndefined()
+        expect(merged.claude?.systemTools).toEqual(['Read'])
+    })
+
     it('merges from the metadata value when queued publishers are applied later', () => {
         const updates: Array<(metadata: Metadata) => Metadata> = []
         const client = {
