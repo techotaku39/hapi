@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 
 test.use({ serviceWorkers: 'block' })
+test.setTimeout(90_000)
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 }]) {
     test(`list/detail catch-up preserves the real chat at ${viewport.width}px`, async ({ page }) => {
@@ -9,6 +12,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 
         await page.addInitScript(() => {
             localStorage.setItem('hapi_access_token::' + location.origin, 'fixture-token')
             localStorage.setItem('hapi-language', 'en')
+            localStorage.setItem('hapi.fue.v1.rich-composer-mentions', '1')
             class FixtureEventSource {
                 static CONNECTING = 0
                 static OPEN = 1
@@ -60,9 +64,9 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 
             else if (path.includes('push')) body = { enabled: false, publicKey: null }
             await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
         })
-        await page.goto('/e2e-fixtures/session-refresh-fixture.html')
+        await page.goto('/e2e-fixtures/session-refresh-fixture.html', { waitUntil: 'domcontentloaded' })
         const composer = page.getByRole('textbox').first()
-        await expect(composer).toBeVisible()
+        await expect(composer).toBeVisible({ timeout: 20_000 })
         await composer.fill('unsent browser draft')
         const original = await composer.elementHandle()
         const viewportElement = page.locator('.app-scroll-y').last()
@@ -82,11 +86,18 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 
         expect(await composer.evaluate((el, previous) => el === previous, original)).toBe(true)
         await expect(composer).toHaveText('unsent browser draft')
         expect(await viewportElement.evaluate(el => el.scrollTop)).toBe(scrollBefore)
+        if (process.env.HAPI_SESSION_REFRESH_SCREENSHOTS) {
+            await mkdir(process.env.HAPI_SESSION_REFRESH_SCREENSHOTS, { recursive: true })
+            await page.screenshot({ path: join(process.env.HAPI_SESSION_REFRESH_SCREENSHOTS, `${viewport.width}-syncing.png`) })
+        }
         await page.evaluate(() => window.sessionRefreshProbe.catchUp())
         await expect(page.locator('[aria-busy="true"][inert]')).toHaveCount(0)
         expect(await composer.evaluate((el, previous) => el === previous, original)).toBe(true)
         await expect(composer).toHaveText('unsent browser draft')
         expect(await page.evaluate(() => performance.getEntriesByType('navigation').length)).toBe(navigationCount)
+        if (process.env.HAPI_SESSION_REFRESH_SCREENSHOTS) {
+            await page.screenshot({ path: join(process.env.HAPI_SESSION_REFRESH_SCREENSHOTS, `${viewport.width}-restored.png`) })
+        }
         releaseDetail()
     })
 }

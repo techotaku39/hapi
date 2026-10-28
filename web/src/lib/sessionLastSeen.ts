@@ -188,6 +188,11 @@ export function getSessionManualUnreadAt(sessionId: string): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+/** One localStorage read/parse for bulk consumers such as the PWA badge. */
+export function getSessionManualUnreadSnapshot(): Readonly<Record<string, number>> {
+    return readManualUnreadStore()
+}
+
 /** One localStorage read/parse for bulk filters (e.g. unread-only lens). */
 export function getSessionLastSeenSnapshot(): Readonly<Record<string, number>> {
     return readStore()
@@ -215,7 +220,13 @@ export function isSessionLastSeenBaselinePending(scope: string, sessionId: strin
 type SessionReadStateInput = Pick<
     SessionSummary,
     'id' | 'updatedAt' | 'lastAssistantMessageAt' | 'assistantReplyClockBackfilled'
->
+> & GenerationState
+
+type GenerationState = Partial<Pick<SessionSummary, 'active' | 'thinking'>>
+
+function isGenerating(session: SessionReadStateInput & GenerationState): boolean {
+    return session.active !== false && session.thinking === true
+}
 
 function latestSessionUpdates(sessions: Iterable<SessionReadStateInput>): Map<string, SessionReadStateInput> {
     const latest = new Map<string, SessionReadStateInput>()
@@ -231,7 +242,9 @@ function latestSessionUpdates(sessions: Iterable<SessionReadStateInput>): Map<st
         }
         const currentActivityAt = getSessionActivityTimestamp(current)
         if (sessionActivityAt > currentActivityAt
-            || (sessionActivityAt === currentActivityAt && session.updatedAt > current.updatedAt)) {
+            || (sessionActivityAt === currentActivityAt && session.updatedAt > current.updatedAt)
+            || (sessionActivityAt === currentActivityAt && session.updatedAt === current.updatedAt
+                && isGenerating(current) && !isGenerating(session))) {
             latest.set(session.id, session)
         }
     }
@@ -246,9 +259,10 @@ function hasUnreadActivity(
     const activityAt = getSessionActivityTimestamp(session)
     const lastSeenAt = store[session.id]
     const manualUnreadAt = manualUnreadStore[session.id]
-    return manualUnreadAt === activityAt
+    return typeof manualUnreadAt === 'number' && Number.isFinite(manualUnreadAt)
         || (
-            session.assistantReplyClockBackfilled !== false
+            !isGenerating(session)
+            && session.assistantReplyClockBackfilled !== false
             && activityAt > (typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : 0)
         )
 }

@@ -42,7 +42,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 27
+const SCHEMA_VERSION: number = 28
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -126,6 +126,10 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+    }
+
+    runInTransaction<T>(work: () => T): T {
+        return this.db.transaction(work)()
     }
 
     /**
@@ -349,6 +353,7 @@ export class Store {
             24: () => this.migrateFromV24ToV25(),
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
+            27: () => this.migrateFromV27ToV28(),
         })
 
         if (currentVersion === 0) {
@@ -465,6 +470,12 @@ export class Store {
                 WHERE invoked_at IS NULL
                   AND local_id IS NOT NULL
                   AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
                   AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
@@ -988,6 +999,29 @@ export class Store {
     }
 
     /**
+     * v26→v27: make the session-list future-scheduled lookups indexed.
+     * GET /api/sessions runs countFutureScheduledBySessionIds and
+     * minFutureScheduledAtBySessionIds over every session id in the namespace.
+     * Neither the (session_id, seq) indexes nor idx_messages_scheduled_pending
+     * match the full predicate set, so SQLite falls back to probing
+     * idx_messages_local_id — one pass over every local message per call
+     * (O(all local messages), twice per session-list refresh) even though the
+     * matching set is almost always empty. This partial index covers every
+     * constant predicate and exposes (session_id, scheduled_at), so both
+     * queries become a near-empty index range scan.
+     */
+    private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
+                  AND delivery_state = 'queued';
+        `)
+    }
+
+    /**
      * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
      * Namespace + principal_json required on every events row.
      * Bumped as v22→v23 because upstream main already ships schema 22.
@@ -1058,11 +1092,14 @@ export class Store {
     }
 
     /**
-     * Add the durable assistant reply clock after the upstream v26 schema.
+     * Add the durable assistant reply clock after the upstream v27 index.
      * Existing rows start unchecked so startup can backfill them incrementally;
      * new rows opt into the write-through path immediately.
      */
-    private migrateFromV26ToV27(): void {
+    private migrateFromV27ToV28(): void {
+        // Earlier PR builds used v27 for reply fields before upstream took it.
+        // Preserve their values and install the upstream index if missing.
+        this.migrateFromV26ToV27()
         // Existing rows start unchecked so startup can backfill them
         // incrementally; new rows opt into the write-through path immediately.
         const columns = this.getSessionColumnNames()

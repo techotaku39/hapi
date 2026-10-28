@@ -46,6 +46,7 @@ import {
     getAllMessages,
     getMessagesBeforeSeq,
     getMessagesAfterSeq,
+    getMinSeq,
     getMessageSeqById,
     truncateMessagesFromLocalId,
     type CancelQueuedMessageResult,
@@ -122,6 +123,10 @@ export class MessageStore {
 
     rememberTurnUuid(sessionId: string, content: unknown): void {
         rememberStoredTurnUuid(this.db, sessionId, content)
+    }
+
+    getMinSeq(sessionId: string): number | null {
+        return getMinSeq(this.db, sessionId)
     }
 
     getSeqById(sessionId: string, messageId: string): number | null {
