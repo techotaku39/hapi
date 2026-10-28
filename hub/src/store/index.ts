@@ -42,7 +42,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 27
+const SCHEMA_VERSION: number = 28
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -378,6 +378,7 @@ export class Store {
             24: () => this.migrateFromV24ToV25(),
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
+            27: () => this.migrateFromV27ToV28(),
         })
 
         if (currentVersion === 0) {
@@ -1035,8 +1036,20 @@ export class Store {
         `)
     }
 
-    /** v26→v27: persist scratchlist order for databases that already reached v26. */
+    /** v26→v27: make the session-list future-scheduled lookups indexed. */
     private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
+                  AND delivery_state = 'queued';
+        `)
+    }
+
+    /** v27→v28: persist scratchlist order for databases that already reached v27. */
+    private migrateFromV27ToV28(): void {
         const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
         if (columns.length === 0) return
         if (!columns.some((column) => column.name === 'position')) {
@@ -1062,14 +1075,6 @@ export class Store {
         this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
                 ON session_scratchlist(session_id, position)
-        `)
-        this.db.exec(`
-            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
-                ON messages(session_id, scheduled_at)
-                WHERE invoked_at IS NULL
-                  AND local_id IS NOT NULL
-                  AND scheduled_at IS NOT NULL
-                  AND delivery_state = 'queued';
         `)
     }
 
