@@ -1,4 +1,4 @@
-import { classifyScheme } from '@/components/assistant-ui/markdown-text'
+import { classifyScheme } from '@/lib/markdown-uri-policy'
 import { hasKnownFileExtension, isKnownSpaHref, isWithinWorkspace } from '@/lib/markdown-href-policy'
 
 export const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024
