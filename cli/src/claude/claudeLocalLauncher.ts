@@ -42,7 +42,8 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
                 if (rawMessage.type === 'system' && typeof rawMessage.model === 'string') {
                     lastSystemModel = rawMessage.model;
                 }
-                if (rawMessage.type === 'assistant' || rawMessage.type === 'system' || rawMessage.type === 'result') {
+                const isSyntheticApiError = rawMessage.type === 'assistant' && rawMessage.isApiErrorMessage === true;
+                if (!isSyntheticApiError && (rawMessage.type === 'assistant' || rawMessage.type === 'system' || rawMessage.type === 'result')) {
                     const nestedMessage = rawMessage.message as Record<string, unknown> | undefined;
                     const nestedModel = typeof nestedMessage?.model === 'string' ? nestedMessage.model : undefined;
                     const details = buildClaudeContextDetails({

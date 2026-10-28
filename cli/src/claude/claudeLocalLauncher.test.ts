@@ -243,6 +243,47 @@ describe('claudeLocalLauncher message filtering', () => {
         expect(sentMessages[0]).not.toHaveProperty('context_usage')
     })
 
+    it('does not replace context details with a synthetic API error', async () => {
+        const { session, getMetadata } = createSessionStub()
+        await claudeLocalLauncher(session as never)
+
+        harness.scannerOnMessage!({
+            type: 'assistant',
+            uuid: 'valid-context-details',
+            context_usage: {
+                model: 'claude-sonnet-5-5',
+                total_tokens: 26_697,
+                raw_max_tokens: 1_000_000
+            },
+            message: {
+                role: 'assistant',
+                model: 'claude-sonnet-5-5',
+                content: [{ type: 'text', text: 'hello' }]
+            }
+        })
+        const beforeError = getMetadata().contextDetails
+
+        harness.scannerOnMessage!({
+            type: 'assistant',
+            uuid: 'synthetic-api-error',
+            isApiErrorMessage: true,
+            error: 'invalid_request',
+            message: {
+                role: 'assistant',
+                model: '<synthetic>',
+                content: [{ type: 'text', text: 'Prompt is too long' }],
+                usage: {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0
+                }
+            }
+        })
+
+        expect(getMetadata().contextDetails).toEqual(beforeError)
+    })
+
     it('keeps the resolved assistant model when a launch uses an alias', async () => {
         const { session, getMetadata } = createSessionStub()
         session.getModel = () => 'sonnet'
