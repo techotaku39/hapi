@@ -128,6 +128,10 @@ export class Store {
         this.workGraph = new WorkGraphStore(this.db)
     }
 
+    runInTransaction<T>(work: () => T): T {
+        return this.db.transaction(work)()
+    }
+
     /**
      * Atomically records a CLI prompt-consumption acknowledgement and returns
      * the persisted session activity timestamp. A duplicate or sibling-stamped
@@ -488,6 +492,12 @@ export class Store {
                 WHERE invoked_at IS NULL
                   AND local_id IS NOT NULL
                   AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
                   AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
@@ -1052,6 +1062,14 @@ export class Store {
         this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_position
                 ON session_scratchlist(session_id, position)
+        `)
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
+                  AND delivery_state = 'queued';
         `)
     }
 
