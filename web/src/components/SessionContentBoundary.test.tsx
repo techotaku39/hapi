@@ -29,6 +29,13 @@ function harness() {
     function Chat() {
         const [draft, setDraft] = useState('')
         useEffect(() => { mounts() }, [])
+        useEffect(() => {
+            const shortcut = (event: KeyboardEvent) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'm') send()
+            }
+            window.addEventListener('keydown', shortcut)
+            return () => window.removeEventListener('keydown', shortcut)
+        }, [])
         return <>
             <input aria-label="Draft" value={draft} onChange={e => setDraft(e.target.value)} />
             <div data-testid="scroll" style={{ height: 100, overflow: 'auto' }}><div style={{ height: 2_000 }}>Messages</div></div>
@@ -51,6 +58,21 @@ function harness() {
 }
 
 describe('SessionContentBoundary', () => {
+    it.each(['ctrlKey', 'metaKey'] as const)('pauses %s+M global model actions while retaining stale content', async modifier => {
+        const h = harness()
+        fireEvent.keyDown(document.body, { key: 'm', [modifier]: true })
+        expect(h.send).toHaveBeenCalledTimes(1)
+        h.send.mockClear()
+        h.advance()
+        await waitFor(() => expect(h.api.getSession).toHaveBeenCalled())
+        fireEvent.keyDown(document.body, { key: 'm', [modifier]: true })
+        expect(h.send).not.toHaveBeenCalled()
+        h.catchUp()
+        await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeNull())
+        fireEvent.keyDown(document.body, { key: 'm', [modifier]: true })
+        expect(h.send).toHaveBeenCalledTimes(1)
+    })
+
     it('retains the mounted conversation, draft and scroll while a newer list waits for detail', async () => {
         const h = harness()
         const draft = screen.getByLabelText('Draft')

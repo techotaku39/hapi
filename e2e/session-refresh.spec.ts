@@ -27,6 +27,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 
             Object.defineProperty(window, 'EventSource', { value: FixtureEventSource })
         })
         let detailRequests = 0
+        let modelChanges = 0
         let releaseDetail!: () => void
         const blocked = new Promise<void>(resolve => { releaseDetail = resolve })
         await page.route('**/api/**', async route => {
@@ -36,6 +37,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 
                 return
             }
             let body: unknown = {}
+            if (path.endsWith('/model') && route.request().method() === 'POST') modelChanges++
             if (path === '/api/auth') {
                 const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')
                 body = { token: `fixture.${payload}.signature`, user: { id: 'fixture', namespace: 'default' } }
@@ -86,6 +88,15 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 
         expect(await composer.evaluate((el, previous) => el === previous, original)).toBe(true)
         await expect(composer).toHaveText('unsent browser draft')
         expect(await viewportElement.evaluate(el => el.scrollTop)).toBe(scrollBefore)
+        await page.evaluate(() => {
+            document.body.focus()
+            for (const modifier of ['ctrlKey', 'metaKey']) {
+                document.body.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'm', [modifier]: true, bubbles: true, cancelable: true,
+                }))
+            }
+        })
+        expect(modelChanges).toBe(0)
         if (process.env.HAPI_SESSION_REFRESH_SCREENSHOTS) {
             await mkdir(process.env.HAPI_SESSION_REFRESH_SCREENSHOTS, { recursive: true })
             await page.screenshot({ path: join(process.env.HAPI_SESSION_REFRESH_SCREENSHOTS, `${viewport.width}-syncing.png`) })
@@ -98,6 +109,10 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 412, height: 915 
         if (process.env.HAPI_SESSION_REFRESH_SCREENSHOTS) {
             await page.screenshot({ path: join(process.env.HAPI_SESSION_REFRESH_SCREENSHOTS, `${viewport.width}-restored.png`) })
         }
+        await page.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'm', ctrlKey: true, bubbles: true, cancelable: true,
+        })))
+        await expect.poll(() => modelChanges).toBe(1)
         releaseDetail()
     })
 }

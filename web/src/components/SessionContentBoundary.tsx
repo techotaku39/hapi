@@ -39,6 +39,22 @@ export function SessionContentBoundary(props: {
         wasPaused.current = paused
     }, [paused])
 
+    useLayoutEffect(() => {
+        if (!paused) return
+        const guardGlobalAction = (event: KeyboardEvent) => {
+            if (!(event.ctrlKey || event.metaKey)) return
+            const key = event.key.toLowerCase()
+            // Retained descendants also register window-level model, scratchlist
+            // and dictation actions. Body focus bypasses React capture/inert.
+            if (key === 'm' || (event.shiftKey && (key === 's' || key === 'd'))) {
+                event.preventDefault()
+                event.stopImmediatePropagation()
+            }
+        }
+        window.addEventListener('keydown', guardGlobalAction, true)
+        return () => window.removeEventListener('keydown', guardGlobalAction, true)
+    }, [paused])
+
     const guardInteraction = (event: SyntheticEvent) => {
         if (paused) {
             // React portals are outside the inert DOM subtree but their
