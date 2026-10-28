@@ -73,12 +73,12 @@ vi.mock('@/ui/logger', () => ({ logger: { debug: vi.fn(), warn: vi.fn() } }))
 
 import { DshRemoteLauncher } from './dshRemoteLauncher'
 
-function createSessionWithBatches(batches: Array<[string, DshMode]>) {
+function createSessionWithBatches(batches: Array<[string, DshMode]>, closeQueue = true) {
     const queue = new MessageQueue2<DshMode>((m) => JSON.stringify(m))
     for (const [message, mode] of batches) {
         queue.push(message, mode)
     }
-    queue.close()
+    if (closeQueue) queue.close()
 
     return {
         path: '/tmp/dsh-test',
@@ -95,7 +95,7 @@ function createSessionWithBatches(batches: Array<[string, DshMode]>) {
 
 function createSession(arg: boolean | DshMode = true) {
     if (typeof arg === 'boolean') {
-        return createSessionWithBatches(arg ? [['first', {}]] : [])
+        return createSessionWithBatches(arg ? [['first', {}]] : [], arg)
     }
     return createSessionWithBatches([['first', arg]])
 }
