@@ -45,6 +45,9 @@ final class SessionListFilterTests: XCTestCase {
 
         XCTAssertTrue(model.isOffline)
         XCTAssertFalse(model.rows[0].unread)
+        XCTAssertEqual(model.unreadCount, 0)
+        model.setUnreadOnly(true)
+        XCTAssertTrue(model.rows.isEmpty)
     }
 
     func testEmptyAndSingleMachineHaveNoMachineFilter() {
@@ -186,6 +189,7 @@ final class SessionListFilterTests: XCTestCase {
         let sessions = HomeFilterTestSessions([fresh, stale])
         let lastSeen = LastSeenStore()
         lastSeen.markSeen(sessionId: "seen", seenAt: 10)
+        lastSeen.initializeBaseline(scopeKey: "test", sessions: [stale])
         let model = SessionListModel(sessionStore: sessions, machineStore: HomeFilterTestMachines(),
                                      lastSeenStore: lastSeen, hubUrl: "test")
         XCTAssertEqual(model.unreadCount, 1)
@@ -201,6 +205,33 @@ final class SessionListFilterTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), ["seen"])
         model.clearFilters()
         XCTAssertFalse(model.filters.unreadOnly)
+    }
+
+    func testUnreadLensAndMarkAllReadUseReplyClockInsteadOfActivity() {
+        var summary = HomeFilterTestData.summary("reply-clock", machine: "mac")
+        summary.updatedAt = 9_000
+        summary.lastAssistantMessageAt = 20
+        let sessions = HomeFilterTestSessions([summary])
+        let seen = LastSeenStore()
+        seen.initializeBaseline(scopeKey: "test", sessions: [])
+        seen.markSeen(sessionId: summary.id, seenAt: 10)
+        let model = SessionListModel(sessionStore: sessions, machineStore: HomeFilterTestMachines(),
+                                     lastSeenStore: seen, hubUrl: "test")
+        model.setUnreadOnly(true)
+        XCTAssertEqual(model.unreadCount, 1)
+        XCTAssertEqual(model.rows.map(\.id), [summary.id])
+        model.markAllRead()
+        XCTAssertEqual(seen.lastSeenAt(summary.id), 20)
+        XCTAssertEqual(model.unreadCount, 0)
+        XCTAssertTrue(model.rows.isEmpty)
+
+        summary.updatedAt = 10_000
+        sessions.sessions = [summary]
+        XCTAssertEqual(model.unreadCount, 0, "Activity alone must not restore unread")
+        summary.lastAssistantMessageAt = 21
+        sessions.sessions = [summary]
+        XCTAssertEqual(model.unreadCount, 1)
+        XCTAssertEqual(model.rows.map(\.id), [summary.id])
     }
 
     func testSearchRanksTitlesWithinPinSections() {

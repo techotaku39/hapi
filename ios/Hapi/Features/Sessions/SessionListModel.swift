@@ -243,18 +243,16 @@ final class SessionListModel {
 
     /// Unread sessions this device has not opened since their last update.
     var unreadCount: Int {
-        let lastSeen = lastSeenStore.state.lastSeen
         return sessionStore.sessions.filter {
-            LastSeenStore.isUnread($0, lastSeenAt: lastSeen[$0.id] ?? 0)
+            lastSeenStore.isUnread($0, scopeKey: hubUrl)
         }.count
     }
 
     /// Web `markAllSessionsSeen`: local watermarks only, nothing hub-side.
     func markAllRead() {
-        let lastSeen = lastSeenStore.state.lastSeen
         for summary in sessionStore.sessions
-        where LastSeenStore.isUnread(summary, lastSeenAt: lastSeen[summary.id] ?? 0) {
-            lastSeenStore.markSeen(sessionId: summary.id, seenAt: summary.updatedAt)
+        where lastSeenStore.isUnread(summary, scopeKey: hubUrl) {
+            lastSeenStore.markSeen(sessionId: summary.id, seenAt: LastSeenStore.seenTimestamp(summary))
         }
     }
 
@@ -285,7 +283,7 @@ final class SessionListModel {
         if filters.unreadOnly {
             visible = visible.filter { summary in
                 summary.id == selectedSessionId
-                    || LastSeenStore.isUnread(summary, lastSeenAt: lastSeen[summary.id] ?? 0)
+                    || lastSeenStore.isUnread(summary, scopeKey: hubUrl)
             }
         }
         if isSearching {
