@@ -53,6 +53,9 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
                         model: nestedModel ?? (typeof rawMessage.model === 'string' ? rawMessage.model : lastSystemModel)
                     });
                     if (details) {
+                        if (details.model) {
+                            lastSystemModel = details.model;
+                        }
                         publishContextDetails(session.client, details);
                     }
                 }

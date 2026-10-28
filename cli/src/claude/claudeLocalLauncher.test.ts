@@ -271,6 +271,11 @@ describe('claudeLocalLauncher message filtering', () => {
                 content: [{ type: 'text', text: 'still resolved' }]
             }
         })
+        harness.scannerOnMessage!({
+            type: 'system',
+            subtype: 'turn_duration',
+            uuid: 'model-less-system-event'
+        })
 
         expect(getMetadata().contextDetails).toMatchObject({
             model: 'claude-sonnet-5-5',
