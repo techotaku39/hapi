@@ -135,6 +135,7 @@ describe('DshRemoteLauncher', () => {
 
     it('ends the DSH launcher when the ACP transport closes while idle', async () => {
         const session = createSession(false)
+        const waitForMessages = vi.spyOn(session.queue, 'waitForMessagesAndGetAsString')
         const launcher = new DshRemoteLauncher(session as never)
         const launchPromise = launcher.launch()
         void launchPromise.catch(() => undefined)
@@ -144,6 +145,7 @@ describe('DshRemoteLauncher', () => {
         )
 
         await vi.waitFor(() => expect(harness.transportClosedHandler).not.toBeNull())
+        await vi.waitFor(() => expect(waitForMessages).toHaveBeenCalled())
         harness.transportClosedHandler!(new Error('ACP process exited (code=1, signal=null)'))
 
         const result = await launchResult
