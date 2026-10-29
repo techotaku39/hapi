@@ -40,6 +40,46 @@ function fixture() {
 }
 
 describe('archived Codex fork coordination', () => {
+    it.each(['resume', 'reopen'])('rejects a fork while an earlier %s is awaiting startup confirmation', async action => {
+        const f = fixture()
+        let finish!: () => void
+        let spawned!: () => void
+        const entered = new Promise<void>(resolve => { spawned = resolve })
+        const gate = new Promise<void>(resolve => { finish = resolve })
+        f.rpc.spawnSession = async (...args) => {
+            spawned()
+            await gate
+            f.engine.handleSessionAlive({ sid: args[12]!, time: Date.now(), mode: 'remote' })
+            f.engine.handleSessionReady({ sid: args[12]!, time: Date.now() })
+            return { type: 'success', sessionId: args[12]! }
+        }
+        try {
+            const pending = action === 'resume' ? f.engine.resumeSession(f.source.id, 'ns') : f.engine.reopenSession(f.source.id, 'ns')
+            await entered
+            const fork = await f.engine.forkConversation(f.source.id, 'ns', 'boundary')
+            expect(fork.type).toBe('error')
+            expect(f.counts().forks).toBe(0)
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexArchivedFork).toBeUndefined()
+            finish()
+            expect((await pending).type).toBe('success')
+            // The startup lock is released after confirmation, even though the
+            // original source is now active.
+            expect((await f.engine.reopenSession(f.source.id, 'ns')).type).toBe('success')
+        } finally { finish(); f.engine.stop() }
+    })
+
+    it('releases a fresh ownership rejection so source reconnection cannot trap lifecycle actions', async () => {
+        const f = fixture()
+        try {
+            f.rpc.forkArchivedCodex = async () => {
+                f.engine.handleSessionAlive({ sid: f.source.id, time: Date.now(), mode: 'remote' })
+                return { error: 'Thread belongs to another Codex runtime', rollbackSafe: true }
+            }
+            expect((await f.engine.forkConversation(f.source.id, 'ns')).type).toBe('error')
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexArchivedFork).toBeUndefined()
+            expect((await f.engine.reopenSession(f.source.id, 'ns')).type).toBe('success')
+        } finally { f.engine.stop() }
+    })
     it.each(['offline', 'old-runner', 'queued', 'diverged', 'missing-native'])('rejects %s before reserving a child', async condition => {
         const f = fixture()
         try {

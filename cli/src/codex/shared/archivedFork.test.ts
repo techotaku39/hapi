@@ -4,8 +4,17 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ApiClient } from '@/api/api'
 import { CodexAppServerClient } from '../codexAppServerClient'
+import { codexHome } from './registry'
 import { forkArchivedCodex, performArchivedFork, type ArchivedForkJournal } from './archivedFork'
 import type { ForkArchivedCodexRequest } from '@hapi/protocol/apiTypes'
+
+vi.mock('@/utils/process', async importOriginal => ({
+    ...await importOriginal<typeof import('@/utils/process')>(),
+    // Ownership must conservatively retain a live PID with an unknown marker;
+    // the OS-specific marker probe is covered separately from this journal test.
+    getProcessStartMarker: () => undefined,
+    isProcessAlive: (pid: number) => pid === process.pid
+}))
 
 function fixture() {
     const request: ForkArchivedCodexRequest = { operationId: 'operation', sourceSessionId: 'hapi-source', sourceThreadId: 'source', directory: '/work',
@@ -120,7 +129,7 @@ describe('archived Codex native fork', () => {
 describe('archived fork workspace preflight', () => {
     afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-    it.each(['fresh', 'restore', 'unconfirmed', 'known-child'])('rejects a denied %s operation without starting native transport and preserves recovery intent', async kind => {
+    it.each(['fresh', 'restore', 'unconfirmed', 'known-child'].flatMap(kind => ['policy', 'ownership'].map(preflight => ({ kind, preflight }))))('rejects $preflight preflight for a $kind operation and preserves recovery intent', async ({ kind, preflight }) => {
         const home = await mkdtemp(join(tmpdir(), 'hapi-archived-preflight-'))
         vi.stubEnv('CODEX_HOME', home)
         vi.spyOn(ApiClient, 'create').mockResolvedValue({} as ApiClient)
@@ -131,12 +140,20 @@ describe('archived fork workspace preflight', () => {
             forkIssued: kind === 'unconfirmed' || kind === 'known-child', done: false,
             ...(kind === 'known-child' ? { nativeSessionId: 'child' } : {}) }
         try {
+            if (preflight === 'ownership') {
+                const owners = join(home, 'hapi-runtime-owners')
+                await mkdir(owners, { recursive: true })
+                await writeFile(join(owners, 'live.json'), JSON.stringify({ id: 'other', pid: process.pid, marker: '',
+                    endpoint: 'mock', command: 'codex', args: [], codexHome: codexHome(), hub: 'hub', authHash: 'hash',
+                    sessions: { source: { threadId: request.sourceThreadId, namespace: 'ns', active: true } } }))
+            }
             if (kind !== 'fresh') {
                 await mkdir(join(home, 'hapi-archived-forks'), { recursive: true })
                 await writeFile(target, JSON.stringify(journal))
             }
-            expect(await forkArchivedCodex(request, async () => false)).toEqual({
-                error: 'Directory is outside workspace roots', rollbackSafe: kind === 'fresh'
+            expect(await forkArchivedCodex(request, async () => preflight !== 'policy')).toEqual({
+                error: preflight === 'policy' ? 'Directory is outside workspace roots'
+                    : 'Thread belongs to another Codex runtime. Use hapi resume source.', rollbackSafe: kind === 'fresh'
             })
             expect(connect).not.toHaveBeenCalled()
             if (kind !== 'fresh') expect(JSON.parse(await readFile(target, 'utf8'))).toEqual(journal)

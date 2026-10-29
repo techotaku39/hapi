@@ -1513,10 +1513,10 @@ export class SyncEngine {
     }
 
     private setArchivedForkAttempt(sessionId: string, namespace: string,
-        attempt: NonNullable<Session['metadata']>['codexArchivedFork']): Session {
+        attempt: NonNullable<Session['metadata']>['codexArchivedFork'], allowActiveClear = false): Session {
         for (let retry = 0; retry < 5; retry++) {
             const source = this.sessionCache.refreshSession(sessionId)
-            if (!source || source.namespace !== namespace || source.active || !source.metadata) throw new Error('Archived source changed during fork')
+            if (!source || source.namespace !== namespace || (source.active && !(allowActiveClear && !attempt)) || !source.metadata) throw new Error('Archived source changed during fork')
             const result = this.store.sessions.updateSessionMetadata(sessionId,
                 { ...source.metadata, codexArchivedFork: attempt ?? null }, source.metadataVersion, namespace, { touchUpdatedAt: false })
             if (result.result === 'success') return this.sessionCache.refreshSession(sessionId)!
@@ -1581,7 +1581,7 @@ export class SyncEngine {
                 })
                 if ('error' in result) {
                     if (result.rollbackSafe) {
-                        this.setArchivedForkAttempt(source.id, namespace, undefined)
+                        this.setArchivedForkAttempt(source.id, namespace, undefined, true)
                         await this.sessionCache.deleteSession(childId)
                     }
                     throw new Error(result.error)
@@ -3392,6 +3392,13 @@ export class SyncEngine {
         if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId, namespace)) {
             return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
         }
+        this.historyActionsInFlight.add(sessionId)
+        try {
+            return await this.resumeSessionUnlocked(sessionId, namespace, opts)
+        } finally { this.historyActionsInFlight.delete(sessionId) }
+    }
+
+    private async resumeSessionUnlocked(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
             return {
@@ -3858,6 +3865,13 @@ export class SyncEngine {
         if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId, namespace)) {
             return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
         }
+        this.historyActionsInFlight.add(sessionId)
+        try {
+            return await this.reopenSessionUnlocked(sessionId, namespace)
+        } finally { this.historyActionsInFlight.delete(sessionId) }
+    }
+
+    private async reopenSessionUnlocked(sessionId: string, namespace: string): Promise<ReopenSessionResult> {
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
             return {
@@ -3952,7 +3966,7 @@ export class SyncEngine {
             // (after Pi/PTY attempt rows capture archiveSnapshot). Hub restart
             // between clear and spawn leaves a non-archived inactive row;
             // archiveSnapshot still rolls back on resume failure while alive.
-            const resumeResult = await this.resumeSession(access.sessionId, namespace)
+            const resumeResult = await this.resumeSessionUnlocked(access.sessionId, namespace)
             if (resumeResult.type === 'error') {
                 // Never restore archived metadata over a live Pi child. A live
                 // row blocks retry by itself and must remain visible as active.
@@ -3984,7 +3998,7 @@ export class SyncEngine {
         // Not active and not archived (e.g. brand-new session that has not yet connected,
         // or one that ended without writing archive metadata). Forward to resume so the
         // operator still gets one-click revival.
-        const resumeResult = await this.resumeSession(access.sessionId, namespace)
+        const resumeResult = await this.resumeSessionUnlocked(access.sessionId, namespace)
         if (resumeResult.type === 'error') {
             return resumeResult
         }

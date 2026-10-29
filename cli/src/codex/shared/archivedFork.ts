@@ -119,6 +119,17 @@ export async function forkArchivedCodex(request: ForkArchivedCodexRequest, allow
     const journalDirectory = join(home, 'hapi-archived-forks')
     await mkdir(journalDirectory, { recursive: true, mode: 0o700 })
     const target = join(journalDirectory, `${request.operationId}.json`)
+    const loadJournal = async (): Promise<ArchivedForkJournal> => {
+        try { return JournalSchema.parse(JSON.parse(await readFile(target, 'utf8'))) }
+        catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+            return { request, restoreRequired: false, forkIssued: false, done: false }
+        }
+    }
+    const failure = (error: unknown, journal?: ArchivedForkJournal): ForkArchivedCodexResponse => ({
+        error: error instanceof Error ? error.message : String(error),
+        rollbackSafe: Boolean(journal && !journal.forkIssued && !journal.restoreRequired && !journal.nativeSessionId)
+    })
     return withThreadOwnership(home, request.sourceThreadId, `archived-fork:${request.operationId}`, async () => {
         const api = await ApiClient.create()
         const assertSourceInactive = async () => {
@@ -128,12 +139,7 @@ export async function forkArchivedCodex(request: ForkArchivedCodexRequest, allow
                 throw new Error('Source session changed during archived fork')
             }
         }
-        let journal: ArchivedForkJournal
-        try { journal = JournalSchema.parse(JSON.parse(await readFile(target, 'utf8'))) }
-        catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-            journal = { request, restoreRequired: false, forkIssued: false, done: false }
-        }
+        const journal = await loadJournal()
         const save = async () => {
             const temporary = `${target}.${randomUUID()}.tmp`
             await writeFile(temporary, JSON.stringify(journal), { mode: 0o600 })
@@ -148,8 +154,10 @@ export async function forkArchivedCodex(request: ForkArchivedCodexRequest, allow
             await initializeSharedClient(client)
             return { nativeSessionId: await performArchivedFork(client, request, journal, save, assertSourceInactive) }
         } catch (error) {
-            return { error: error instanceof Error ? error.message : String(error),
-                rollbackSafe: !journal.forkIssued && !journal.restoreRequired && !journal.nativeSessionId }
+            return failure(error, journal)
         } finally { await client.disconnect({ gracefulTimeoutMs: 2_000 }) }
+    }, async error => {
+        try { return failure(error, await loadJournal()) }
+        catch { return failure(error) } // Unreadable journals cannot prove rollback safe.
     })
 }
