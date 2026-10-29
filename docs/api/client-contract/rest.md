@@ -260,6 +260,14 @@ Source: `hub/src/web/routes/usage.ts`, `hub/src/web/routes/storage.ts`. Both `40
 | `GET /api/usage/summary` | Query: `range=7d\|30d\|all` (default 7d), `timeZone` (IANA, validated) | `UsageSummaryResponse` `{range, totals, daily[], byAgent[], byModel[], updatedAt}` |
 | `GET /api/storage/sqlite` | — | `{path, databaseBytes, walBytes, shmBytes, totalBytes}` |
 
+### Agent activity
+
+Source: `hub/src/web/routes/activity.ts`. Scoped to the caller's namespace (not owner-only).
+
+| Method & path | Request | Response |
+|---|---|---|
+| `GET /api/activity` | Query: `since`, `until` (epoch ms; default the 24 h before `until`, which defaults to now; at most 31 days; else `400`) | `AgentActivityResponse` `{since, until, generatedAt, sessions[]}`. Each session: `{id, flavor, agentSessionId, machineId, host, machineName, path, title, turns[], waits[]}`. A turn is `{start, end, endReason, startedBy}` with `end: null` while the agent is still working; turns are persisted when `thinking` flips, so they survive hub restarts. Waits are permission prompts and questions raised during the turns, `{start, end, kind: 'permission'\|'input', tool}`, with `end: null` while still pending. |
+
 ### Devices (Android / iOS push)
 
 Source: `hub/src/web/routes/devices.ts`; full push contract in [`native-companion-contract.md`](../native-companion-contract.md).

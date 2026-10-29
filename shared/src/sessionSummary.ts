@@ -28,7 +28,9 @@ export type PendingRequest = {
     since: number
 }
 
-function classifyKind(tool: string): PendingRequestKind {
+/** Whether a request asks the user to answer something (a question, a plan)
+ *  or to allow a tool. */
+export function classifyKind(tool: string): PendingRequestKind {
     return INPUT_REQUEST_TOOLS.has(tool) ? 'input' : 'permission'
 }
 
