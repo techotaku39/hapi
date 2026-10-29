@@ -1,7 +1,7 @@
 import { logger } from '@/ui/logger'
-import { readFile, stat, writeFile } from 'fs/promises'
+import { readFile, realpath, stat, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
-import { resolve } from 'path'
+import { isAbsolute, relative, resolve, sep } from 'path'
 import type { FileReadResponse, GeneratedImageResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
@@ -34,6 +34,18 @@ interface WriteFileResponse {
     error?: string
 }
 
+async function resolveReadablePath(path: string, workingDirectory: string): Promise<string> {
+    const [realWorkingDirectory, realPath] = await Promise.all([
+        realpath(workingDirectory),
+        realpath(path),
+    ])
+    const relativePath = relative(realWorkingDirectory, realPath)
+    if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+        throw new Error('Access denied: resolved path is outside the working directory')
+    }
+    return realPath
+}
+
 export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     rpcHandlerManager.registerHandler<ReadFileRequest, ReadFileResponse>(RPC_METHODS.ReadFile, async (data) => {
         logger.debug('Read file request:', data.path)
@@ -44,7 +56,7 @@ export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, worki
         }
 
         try {
-            const resolvedPath = resolve(workingDirectory, data.path)
+            const resolvedPath = await resolveReadablePath(resolve(workingDirectory, data.path), workingDirectory)
             const maxBytes = typeof data.maxBytes === 'number' && Number.isFinite(data.maxBytes) && data.maxBytes > 0
                 ? Math.min(Math.floor(data.maxBytes), 10 * 1024 * 1024)
                 : undefined

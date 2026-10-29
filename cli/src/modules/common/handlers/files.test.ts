@@ -109,4 +109,35 @@ describe('file RPC handlers', () => {
         expect(parsed.success).toBe(false)
         expect(parsed.error).toContain('regular file')
     })
+
+    it('rejects bounded reads through a symlink to an outside regular file', async () => {
+        const outsideDir = await createTempDir('hapi-file-handler-outside')
+        const outsidePath = join(outsideDir, 'secret.png')
+        const link = join(rootDir, 'linked-secret.png')
+        await writeFile(outsidePath, Buffer.from('secret'))
+
+        try {
+            if (process.platform === 'win32') {
+                await symlink(outsidePath, link, 'file')
+            } else {
+                await symlink(outsidePath, link)
+            }
+        } catch {
+            await rm(outsideDir, { recursive: true, force: true })
+            return
+        }
+
+        try {
+            const response = await rpc.handleRequest({
+                method: 'session-test:readFile',
+                params: JSON.stringify({ path: 'linked-secret.png', maxBytes: 1024 })
+            })
+            const parsed = JSON.parse(response) as { success: boolean; error?: string }
+
+            expect(parsed.success).toBe(false)
+            expect(parsed.error).toContain('outside')
+        } finally {
+            await rm(outsideDir, { recursive: true, force: true })
+        }
+    })
 })
