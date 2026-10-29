@@ -4422,7 +4422,9 @@ export class SyncEngine {
 
     async readSessionFile(sessionId: string, path: string, options?: { maxBytes?: number }): Promise<RpcReadFileResponse> {
         try {
-            return await this.rpcGateway.readSessionFile(sessionId, path, options)
+            return options === undefined
+                ? await this.rpcGateway.readSessionFile(sessionId, path)
+                : await this.rpcGateway.readSessionFile(sessionId, path, options)
         } catch (error) {
             return await this.withInactiveWorkspaceFallback(sessionId, error, ({ machineId, cwd }) =>
                 this.rpcGateway.readWorkspaceFile(machineId, { cwd, path, ...options })
