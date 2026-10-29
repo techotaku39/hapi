@@ -40,6 +40,74 @@ function fixture() {
 }
 
 describe('archived Codex fork coordination', () => {
+    it('keeps an unconfirmed resume fenced across sparse metadata and late activation until native ready', async () => {
+        const f = fixture()
+        try {
+            f.rpc.spawnSession = async () => ({ type: 'error', message: 'startup unconfirmed' })
+            const result = await f.engine.resumeSession(f.source.id, 'ns')
+            expect(result).toMatchObject({ type: 'error', rollbackSafe: false })
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexResumePending).toEqual({ machineId: f.machineId, nativeSessionId: 'native-source' })
+            const current = f.store.sessions.getSession(f.source.id)!
+            f.store.sessions.updateSessionMetadata(f.source.id, { path: '/work', host: 'test' }, current.metadataVersion, 'ns')
+            ;(f.engine as unknown as { sessionCache: { refreshSession(id: string): void } }).sessionCache.refreshSession(f.source.id)
+            expect((await f.engine.forkConversation(f.source.id, 'ns')).type).toBe('error')
+            f.engine.handleSessionAlive({ sid: f.source.id, time: Date.now(), mode: 'remote' })
+            expect((await f.engine.forkConversation(f.source.id, 'ns')).type).toBe('error')
+            expect(f.counts().forks).toBe(0)
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexArchivedFork).toBeUndefined()
+            f.engine.handleSessionReady({ sid: f.source.id, time: Date.now() })
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexResumePending).toBeUndefined()
+        } finally { f.engine.stop() }
+    })
+
+    it('retains an unconfirmed resume across Hub restart and reconciles only a proven stopped process', async () => {
+        const f = fixture()
+        let restarted: SyncEngine | undefined
+        try {
+            f.rpc.spawnSession = async () => ({ type: 'error', message: 'startup unconfirmed' })
+            await f.engine.reopenSession(f.source.id, 'ns')
+            f.engine.stop()
+            restarted = new SyncEngine(f.store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+            expect((await restarted.forkConversation(f.source.id, 'ns')).type).toBe('error')
+            const rpc = (restarted as unknown as { rpcGateway: RpcGateway }).rpcGateway
+            rpc.stopRunnerSession = async () => 'unknown'
+            expect((await restarted.resumeSession(f.source.id, 'ns')).type).toBe('error')
+            expect(restarted.getSession(f.source.id)?.metadata?.codexResumePending).toBeDefined()
+            rpc.stopRunnerSession = async () => 'already_gone'
+            rpc.spawnSession = async () => ({ type: 'error', message: 'confirmed refusal', childStarted: false })
+            await restarted.resumeSession(f.source.id, 'ns')
+            expect(restarted.getSession(f.source.id)?.metadata?.codexResumePending).toBeUndefined()
+        } finally { restarted?.stop(); f.engine.stop() }
+    })
+
+    it('releases confirmed pre-start failure immediately and permits an archived fork', async () => {
+        const f = fixture()
+        try {
+            const spawn = f.rpc.spawnSession
+            f.rpc.spawnSession = async () => ({ type: 'error', message: 'confirmed refusal', childStarted: false })
+            await f.engine.reopenSession(f.source.id, 'ns')
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexResumePending).toBeUndefined()
+            f.rpc.spawnSession = spawn
+            expect((await f.engine.forkConversation(f.source.id, 'ns')).type).toBe('success')
+        } finally { f.engine.stop() }
+    })
+
+    it('keeps an unconfirmed resume fenced until archive proves Runner termination', async () => {
+        const f = fixture()
+        try {
+            f.rpc.spawnSession = async () => ({ type: 'error', message: 'startup unconfirmed' })
+            await f.engine.resumeSession(f.source.id, 'ns')
+            f.rpc.killSession = async () => ({})
+            f.rpc.stopRunnerSession = async () => 'unknown'
+            await expect(f.engine.archiveSession(f.source.id)).rejects.toThrow('still running')
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexResumePending).toBeDefined()
+            f.rpc.stopRunnerSession = async () => 'already_gone'
+            await f.engine.archiveSession(f.source.id)
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexResumePending).toBeUndefined()
+            expect(f.engine.getSession(f.source.id)?.metadata?.lifecycleState).toBe('archived')
+        } finally { f.engine.stop() }
+    })
+
     it.each(['resume', 'reopen'])('rejects a fork while an earlier %s is awaiting startup confirmation', async action => {
         const f = fixture()
         let finish!: () => void

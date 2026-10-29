@@ -657,6 +657,10 @@ export class SyncEngine {
     handleSessionReady(payload: { sid: string; time: number }): void {
         this.sessionReadyIds.add(payload.sid)
         const session = this.sessionCache.getSession(payload.sid)
+        if (session?.active && session.metadata?.codexResumePending
+            && session.metadata.codexResumePending.nativeSessionId === session.metadata.codexSessionId) {
+            this.writeCodexResumePending(session.id, session.namespace, undefined)
+        }
         if (session?.metadata?.piResumeAttempt) {
             void this.writePiResumeAttempt(payload.sid, session.namespace, null)
                 .then(() => {
@@ -1512,6 +1516,33 @@ export class SyncEngine {
         return parent?.metadata?.codexArchivedFork?.childSessionId === sessionId
     }
 
+    private writeCodexResumePending(sessionId: string, namespace: string,
+        pending: NonNullable<Session['metadata']>['codexResumePending']): void {
+        for (let retry = 0; retry < 5; retry++) {
+            const current = this.sessionCache.refreshSession(sessionId)
+            if (!current?.metadata || current.namespace !== namespace) throw new Error('Codex resume source changed')
+            const result = this.store.sessions.updateSessionMetadata(sessionId,
+                { ...current.metadata, codexResumePending: pending ?? null }, current.metadataVersion, namespace, { touchUpdatedAt: false })
+            if (result.result === 'success') { this.sessionCache.refreshSession(sessionId); return }
+            if (result.result === 'error') break
+        }
+        throw new Error('Failed to persist Codex resume state')
+    }
+
+    private async reconcileCodexResume(session: Session): Promise<boolean> {
+        const pending = session.metadata?.codexResumePending
+        if (!pending) return true
+        if (session.active && this.sessionReadyIds.has(session.id) && session.metadata?.codexSessionId === pending.nativeSessionId) {
+            this.writeCodexResumePending(session.id, session.namespace, undefined)
+            return true
+        }
+        const stopped = await this.rpcGateway.stopRunnerSession(pending.machineId, session.id)
+        if (stopped !== 'stopped' && stopped !== 'already_gone') return false
+        if (this.sessionCache.getSession(session.id)?.active) this.handleSessionEnd({ sid: session.id, time: Date.now(), reason: 'error' })
+        this.writeCodexResumePending(session.id, session.namespace, undefined)
+        return true
+    }
+
     private setArchivedForkAttempt(sessionId: string, namespace: string,
         attempt: NonNullable<Session['metadata']>['codexArchivedFork'], allowActiveClear = false): Session {
         for (let retry = 0; retry < 5; retry++) {
@@ -1628,6 +1659,9 @@ export class SyncEngine {
         messageLocalId?: string
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         const candidate = this.sessionCache.getSessionByNamespace(sessionId, namespace)
+        if (candidate?.metadata?.codexResumePending) {
+            return { type: 'error', message: 'Codex resume startup is unconfirmed; retry resume or archive to confirm its process stopped before forking' }
+        }
         if (this.archivedForkPending(sessionId, namespace) && (!candidate?.metadata?.codexArchivedFork || candidate.active)) {
             return { type: 'error', message: 'Archived fork is pending; wait for its child binding before creating another branch' }
         }
@@ -2011,8 +2045,8 @@ export class SyncEngine {
         }
 
         const sessionMeta = this.sessionCache.getSession(sessionId)?.metadata
-        const machineId = sessionMeta?.machineId
-        const runnerSpawned = sessionMeta?.startedBy === 'runner'
+        const machineId = sessionMeta?.codexResumePending?.machineId ?? sessionMeta?.machineId
+        const runnerSpawned = Boolean(sessionMeta?.codexResumePending) || sessionMeta?.startedBy === 'runner'
             || sessionMeta?.startedFromRunner === true
         if (machineId && runnerSpawned) {
             let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
@@ -2075,6 +2109,7 @@ export class SyncEngine {
                 if (
                     stored
                     && isMachineSpawnPreallocatedStub(stored)
+                    && !sessionMeta?.codexResumePending
                     && !(typeof sessionMeta?.hostPid === 'number' && sessionMeta.hostPid > 0)
                 ) {
                     status = 'already_gone'
@@ -2109,6 +2144,8 @@ export class SyncEngine {
         }
         this.releaseSessionEnumerations(sessionId)
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+        const archivedSession = this.sessionCache.getSession(sessionId)
+        if (archivedSession?.metadata?.codexResumePending) this.writeCodexResumePending(sessionId, archivedSession.namespace, undefined)
     }
 
     /**
@@ -2364,6 +2401,7 @@ export class SyncEngine {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
+        if (this.sessionCache.getSession(sessionId)?.metadata?.codexResumePending) throw new Error('Codex resume startup is unconfirmed; archive to confirm termination before deleting')
         if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId)) {
             throw new Error('Archived fork is pending; reconcile it before deleting the source')
         }
@@ -3409,6 +3447,10 @@ export class SyncEngine {
         }
 
         let initialSession = access.session
+        if (initialSession.metadata?.codexResumePending) {
+            if (!await this.reconcileCodexResume(initialSession)) return { type: 'error', message: 'Codex resume startup is still unconfirmed', code: 'resume_failed', rollbackSafe: false }
+            initialSession = this.sessionCache.getSessionByNamespace(sessionId, namespace) ?? initialSession
+        }
         if (await this.recoverInactiveReservedClear(initialSession, namespace)) {
             initialSession = this.sessionCache.getSessionByNamespace(sessionId, namespace) ?? initialSession
         }
@@ -3600,6 +3642,10 @@ export class SyncEngine {
                 }
             }
 
+            if (flavor === 'codex' && resumeToken) {
+                this.sessionReadyIds.delete(access.sessionId)
+                this.writeCodexResumePending(access.sessionId, namespace, { machineId: targetMachine.id, nativeSessionId: resumeToken })
+            }
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,
@@ -3620,6 +3666,10 @@ export class SyncEngine {
             )
 
             if (spawnResult.type !== 'success') {
+                if (flavor === 'codex' && resumeToken) {
+                    if (spawnResult.childStarted === false) this.writeCodexResumePending(access.sessionId, namespace, undefined)
+                    else return { type: 'error', message: spawnResult.message, code: 'resume_failed', rollbackSafe: false }
+                }
                 if (requiresPiNativeReady) {
                     const stopped = await this.terminateInPlacePiResume(
                         targetMachine.id,
@@ -3882,6 +3932,10 @@ export class SyncEngine {
         }
 
         let session = access.session
+        if (session.metadata?.codexResumePending) {
+            const result = await this.resumeSessionUnlocked(sessionId, namespace)
+            return result.type === 'error' ? result : { type: 'success', sessionId: result.sessionId, resumed: true }
+        }
         if (await this.recoverInactiveReservedClear(session, namespace)) {
             session = this.sessionCache.getSessionByNamespace(sessionId, namespace) ?? session
         }

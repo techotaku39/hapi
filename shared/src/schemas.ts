@@ -183,6 +183,8 @@ export const MetadataSchema = z.object({
         boundaryLocalId: z.string().optional(), boundaryTurnId: z.string().optional(),
         nativeSessionId: z.string().optional(), spawnAttempted: z.boolean().optional()
     }).optional(),
+    // A timed-out resume can still activate later; retain until native ready or proven stopped.
+    codexResumePending: z.object({ machineId: z.string(), nativeSessionId: z.string() }).optional(),
     worktree: WorktreeMetadataSchema.optional(),
     // Cached Pi model list — written by CLI, read by web (inactive session fallback).
     // Minimal shape: each entry must have modelId; other fields (provider, name, etc.) pass through.

@@ -72,6 +72,7 @@ const SIMPLE_RESUME_TOKENS = [
 // `null` remains the explicit-clear sentinel handled by carryForwardIfMissing.
 const HUB_OWNED_METADATA_FIELDS = [
     'codexArchivedFork',
+    'codexResumePending',
     'titleSuggestionAutoAttemptedAt',
     'titleSuggestionTurn'
 ] as const
