@@ -1367,7 +1367,7 @@ export class SyncEngine {
     private async waitForExactNativeForkBound(
         childId: string,
         expectedNativeSessionId: string,
-        metadataKey: 'grokSessionId' | 'piSessionId',
+        metadataKey: 'grokSessionId' | 'piSessionId' | 'codexSessionId',
         requireSessionReady: boolean,
         timeoutMs: number = 60_000
     ): Promise<boolean> {
@@ -1503,11 +1503,131 @@ export class SyncEngine {
         }
     }
 
+    private archivedForkPending(sessionId: string, namespace?: string): boolean {
+        const session = namespace ? this.sessionCache.getSessionByNamespace(sessionId, namespace) : this.sessionCache.getSession(sessionId)
+        if (!session) return false
+        if (session.metadata?.codexArchivedFork) return true
+        const parent = session.metadata?.forkedFrom
+            ? this.sessionCache.getSessionByNamespace(session.metadata.forkedFrom, session.namespace) : undefined
+        return parent?.metadata?.codexArchivedFork?.childSessionId === sessionId
+    }
+
+    private setArchivedForkAttempt(sessionId: string, namespace: string,
+        attempt: NonNullable<Session['metadata']>['codexArchivedFork']): Session {
+        for (let retry = 0; retry < 5; retry++) {
+            const source = this.sessionCache.refreshSession(sessionId)
+            if (!source || source.namespace !== namespace || source.active || !source.metadata) throw new Error('Archived source changed during fork')
+            const result = this.store.sessions.updateSessionMetadata(sessionId,
+                { ...source.metadata, codexArchivedFork: attempt ?? null }, source.metadataVersion, namespace, { touchUpdatedAt: false })
+            if (result.result === 'success') return this.sessionCache.refreshSession(sessionId)!
+            if (result.result === 'error') break
+        }
+        throw new Error('Failed to persist archived fork reservation')
+    }
+
+    private async forkArchivedCodexSession(source: Session, namespace: string, messageLocalId?: string): Promise<
+        { type: 'success'; sessionId: string } | { type: 'error'; message: string }
+    > {
+        try {
+            const metadata = source.metadata
+            if (metadata?.flavor !== 'codex' || !metadata.codexSessionId || !metadata.machineId || !metadata.path) {
+                throw new Error('Inactive fork requires a Codex session with native history and a machine binding')
+            }
+            if (metadata.conversationHistoryDiverged) throw new Error('Conversation history is diverged; refuse further fork/rewind')
+            if (this.store.messages.getUninvokedLocalMessages(source.id).length) throw new Error('Session has queued messages')
+            const machine = this.getMachine(metadata.machineId)
+            if (!machine?.active || machine.namespace !== namespace) throw new Error('Source machine is offline')
+            if (!machine.metadata?.capabilities?.includes(MACHINE_CAPABILITIES.ForkArchivedCodex)) {
+                throw new Error('Upgrade the source Runner to fork archived Codex sessions')
+            }
+            const turnId = messageLocalId ? metadata.conversationHistoryTurns?.[messageLocalId] : undefined
+            if (messageLocalId) {
+                this.assertInvokedHistoryBoundary(source.id, messageLocalId)
+                if (!turnId) throw new Error('No native history point for this message')
+            }
+            let attempt = metadata.codexArchivedFork
+            if (attempt && attempt.boundaryLocalId !== messageLocalId) throw new Error('A previous archived fork is pending at another boundary; retry that fork first')
+            if (!attempt) {
+                attempt = { operationId: randomUUID(), childSessionId: randomUUID(), ...(messageLocalId ? { boundaryLocalId: messageLocalId } : {}) }
+                this.setArchivedForkAttempt(source.id, namespace, attempt)
+            }
+            const childId = attempt.childSessionId
+            let child = this.sessionCache.refreshSession(childId)
+            if (child?.active) {
+                if (!attempt.nativeSessionId || child.metadata?.codexSessionId !== attempt.nativeSessionId
+                    || child.namespace !== namespace || child.metadata?.forkedFrom !== source.id) throw new Error('Archived fork child binding is unconfirmed')
+                this.setArchivedForkAttempt(source.id, namespace, undefined)
+                return { type: 'success', sessionId: childId }
+            }
+            if (!child) {
+                child = this.sessionCache.getOrCreateSession(`archived-fork:${attempt.operationId}`, {
+                    path: metadata.path, host: metadata.host, machineId: metadata.machineId, flavor: 'codex',
+                    forkedFrom: source.id, startedBy: 'runner',
+                    summary: buildForkSessionSummary(metadata)
+                }, null, namespace, source.model ?? undefined, source.effort ?? undefined, source.modelReasoningEffort ?? undefined, childId)
+            } else if (child.namespace !== namespace || child.metadata?.forkedFrom !== source.id) throw new Error('Invalid archived fork reservation')
+            if (attempt.spawnAttempted) {
+                const stopped = await this.rpcGateway.stopRunnerSession(metadata.machineId, childId)
+                if (stopped !== 'stopped' && stopped !== 'already_gone') throw new Error('Previous fork launcher outcome is unconfirmed; retry after cleanup')
+            }
+            if (!attempt.nativeSessionId) {
+                const result = await this.rpcGateway.forkArchivedCodex(metadata.machineId, {
+                    operationId: attempt.operationId, sourceSessionId: source.id,
+                    sourceThreadId: metadata.codexSessionId, directory: metadata.path,
+                    ...(messageLocalId ? { boundary: { localId: messageLocalId, turnId: turnId! } } : {})
+                })
+                if ('error' in result) {
+                    if (result.rollbackSafe) {
+                        this.setArchivedForkAttempt(source.id, namespace, undefined)
+                        await this.sessionCache.deleteSession(childId)
+                    }
+                    throw new Error(result.error)
+                }
+                if (result.nativeSessionId === metadata.codexSessionId) throw new Error('Native fork reused the source identity')
+                attempt = { ...attempt, nativeSessionId: result.nativeSessionId }
+                this.setArchivedForkAttempt(source.id, namespace, attempt)
+            }
+            child = this.sessionCache.refreshSession(childId)!
+            const updated = this.store.sessions.updateSessionMetadata(childId,
+                { ...child.metadata!, codexSessionId: attempt.nativeSessionId }, child.metadataVersion, namespace, { touchUpdatedAt: false })
+            if (updated.result !== 'success') throw new Error('Failed to bind native fork to its child')
+            this.sessionCache.refreshSession(childId)
+            attempt = { ...attempt, spawnAttempted: true }
+            this.setArchivedForkAttempt(source.id, namespace, attempt)
+            const spawn = await this.rpcGateway.spawnSession(metadata.machineId, metadata.path, 'codex',
+                source.model ?? undefined, source.modelReasoningEffort ?? undefined, undefined, 'simple', undefined,
+                attempt.nativeSessionId, source.effort ?? undefined, source.permissionMode, source.serviceTier ?? undefined,
+                childId, source.collaborationMode)
+            if (spawn.type === 'success' && spawn.sessionId !== childId) throw new Error('Fork launcher returned a different session')
+            if (spawn.type === 'error' && spawn.childStarted === false) throw new Error(spawn.message)
+            // A slow Runner can confirm its already-created child after the
+            // spawn RPC deadline. Observe the reserved binding; never spawn a
+            // second engine just because that acknowledgement was delayed.
+            const deadline = Date.now() + 90_000
+            let bound = false
+            do {
+                const ready = this.sessionCache.refreshSession(childId)
+                if (!ready || ready.metadata?.codexSessionId !== attempt.nativeSessionId) throw new Error('Fork child native binding changed')
+                bound = ready.active && this.sessionReadyIds.has(childId)
+                if (!bound) await new Promise(resolve => setTimeout(resolve, 250))
+            } while (!bound && Date.now() < deadline)
+            if (!bound) throw new Error(spawn.type === 'error' ? spawn.message : 'Archived fork child did not become ready')
+            this.setArchivedForkAttempt(source.id, namespace, undefined)
+            return { type: 'success', sessionId: childId }
+        } catch (error) {
+            return { type: 'error', message: `${error instanceof Error ? error.message : String(error)}. The source was not reopened; retry the same fork to reconcile a pending operation.` }
+        }
+    }
+
     async forkConversation(
         sessionId: string,
         namespace: string,
         messageLocalId?: string
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
+        const candidate = this.sessionCache.getSessionByNamespace(sessionId, namespace)
+        if (this.archivedForkPending(sessionId, namespace) && (!candidate?.metadata?.codexArchivedFork || candidate.active)) {
+            return { type: 'error', message: 'Archived fork is pending; wait for its child binding before creating another branch' }
+        }
         if (this.historyActionsInFlight.has(sessionId)) {
             return { type: 'error', message: 'Conversation history action already in progress' }
         }
@@ -1529,6 +1649,7 @@ export class SyncEngine {
             return { type: 'error', message: access.reason === 'not-found' ? 'Session not found' : 'Access denied' }
         }
         let source = access.session
+        if (!source.active) return this.forkArchivedCodexSession(source, namespace, messageLocalId)
         try {
             this.assertConversationHistoryIdle(source, Boolean(messageLocalId) && this.resolveFlavor(source) === 'codex')
         } catch (error) {
@@ -1863,6 +1984,9 @@ export class SyncEngine {
     }
 
     async archiveSession(sessionId: string): Promise<void> {
+        if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId)) {
+            throw new Error('Archived fork is in progress; retry the fork to reconcile it before archiving')
+        }
         // tiann/hapi#916 / #1910: KillSession is a session-socket RPC. A missing
         // target does not prove the runner child is dead (stale registration,
         // mid-reconnect, id rotation on resume). Always fall through to the
@@ -2237,6 +2361,9 @@ export class SyncEngine {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
+        if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId)) {
+            throw new Error('Archived fork is pending; reconcile it before deleting the source')
+        }
         await this.sessionCache.deleteSession(sessionId)
         this.titleTurnCompletedIds.delete(sessionId)
         this.automaticTitleSuggestionService.forgetSession(sessionId)
@@ -3259,6 +3386,9 @@ export class SyncEngine {
     }
 
     async resumeSession(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
+        if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId, namespace)) {
+            return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
+        }
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
             return {
@@ -3722,6 +3852,9 @@ export class SyncEngine {
      * needed to resume is missing.
      */
     async reopenSession(sessionId: string, namespace: string): Promise<ReopenSessionResult> {
+        if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId, namespace)) {
+            return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
+        }
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
             return {

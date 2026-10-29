@@ -177,6 +177,11 @@ export const MetadataSchema = z.object({
     }).optional(),
     // Set when native rewind succeeded but HAPI truncate/hydrate failed.
     conversationHistoryDiverged: z.boolean().optional(),
+    // Durable cold-fork reservation: retries reuse the same native/Hub child.
+    codexArchivedFork: z.object({
+        operationId: z.string().uuid(), childSessionId: z.string().uuid(),
+        boundaryLocalId: z.string().optional(), nativeSessionId: z.string().optional(), spawnAttempted: z.boolean().optional()
+    }).optional(),
     worktree: WorktreeMetadataSchema.optional(),
     // Cached Pi model list — written by CLI, read by web (inactive session fallback).
     // Minimal shape: each entry must have modelId; other fields (provider, name, etc.) pass through.
