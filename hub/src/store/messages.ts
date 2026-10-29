@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
+import { recordUserMessage } from './sessionUserActivity'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
@@ -98,6 +99,7 @@ export function addImportedMessage(
             createdAt: stampedAt,
             invokedAt: stampedAt
         })
+        recordUserMessage(db, sessionId, content, stampedAt)
         if (previousHead && stampedAt < previousHead.at) bumpMessageEpoch(db, sessionId)
         const row = prepareCached(db, 'SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
         if (!row) throw new Error('Failed to create imported message')
@@ -201,6 +203,7 @@ export function addMessage(
             invokedAt
         })
 
+        recordUserMessage(db, sessionId, content, stampedAt)
         const positionAt = invokedAt ?? stampedAt
         if (previousHead && positionAt < previousHead.at) bumpMessageEpoch(db, sessionId)
         const row = prepareCached(db, 'SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
@@ -288,6 +291,7 @@ export function copyMessageToSession(
         // Copies preserve the source display timestamp, so a new high-seq row can
         // still land behind a Web client's cached composite tail cursor. Mark the
         // target history as structurally changed so incremental readers reset.
+        recordUserMessage(db, sessionId, message.content, createdAt)
         bumpMessageEpoch(db, sessionId)
         return toStoredMessage(row)
     })
@@ -349,6 +353,7 @@ export function copyMessagesToSession(
                 createdAt,
                 invokedAt: invokedAt ?? null
             })
+            recordUserMessage(db, sessionId, message.content, createdAt)
             nextSeq += 1
         }
 
@@ -1093,12 +1098,12 @@ export function moveUninvokedScheduledMessages(
     if (fromSessionId === toSessionId) return 0
 
     const rows = prepareCached(db, `
-        SELECT id FROM messages
+        SELECT id, content, created_at FROM messages
         WHERE session_id = ?
           AND scheduled_at IS NOT NULL
           AND invoked_at IS NULL
         ORDER BY seq ASC
-    `).all(fromSessionId) as Array<{ id: string }>
+    `).all(fromSessionId) as Array<{ id: string; content: string | Uint8Array; created_at: number }>
     if (rows.length === 0) return 0
 
     try {
@@ -1108,6 +1113,7 @@ export function moveUninvokedScheduledMessages(
         for (const row of rows) {
             nextSeq += 1
             update.run(toSessionId, nextSeq, row.id)
+            recordUserMessage(db, toSessionId, decodeMessageContent(row.content), row.created_at)
         }
         bumpMessageEpoch(db, fromSessionId)
         bumpMessageEpoch(db, toSessionId)
@@ -1140,7 +1146,7 @@ export function moveUninvokedMessages(db: Database, fromSessionId: string, toSes
               )
         `).run(fromSessionId, toSessionId).changes
         const rows = prepareCached(db, `
-            SELECT id, session_id FROM messages
+            SELECT id, session_id, content, created_at FROM messages
             WHERE session_id IN (?, ?) AND invoked_at IS NULL
             -- created_at is millisecond-granularity; rowid is the durable
             -- cross-session insertion order for ties within this database.
@@ -1148,7 +1154,7 @@ export function moveUninvokedMessages(db: Database, fromSessionId: string, toSes
                      rowid ASC,
                      seq ASC,
                      id ASC
-        `).all(fromSessionId, toSessionId) as Array<{ id: string; session_id: string }>
+        `).all(fromSessionId, toSessionId) as Array<{ id: string; session_id: string; content: string | Uint8Array; created_at: number }>
         const moved = rows.filter((row) => row.session_id === fromSessionId).length
         if (discarded === 0 && moved === 0) return 0
         const invokedMax = prepareCached(db, `
@@ -1157,7 +1163,10 @@ export function moveUninvokedMessages(db: Database, fromSessionId: string, toSes
         `).get(toSessionId) as { maxSeq: number }
         let nextSeq = invokedMax.maxSeq
         const update = prepareCached(db, 'UPDATE messages SET session_id = ?, seq = ? WHERE id = ?')
-        for (const row of rows) update.run(toSessionId, ++nextSeq, row.id)
+        for (const row of rows) {
+            update.run(toSessionId, ++nextSeq, row.id)
+            recordUserMessage(db, toSessionId, decodeMessageContent(row.content), row.created_at)
+        }
         bumpMessageEpoch(db, fromSessionId)
         bumpMessageEpoch(db, toSessionId)
         return discarded + moved
@@ -1214,6 +1223,11 @@ export function mergeSessionMessages(
 
         if (result.changes > 0) {
             rebuildMessageContentSearchForSessions(db, [fromSessionId, toSessionId], true)
+            prepareCached(db, `
+                UPDATE sessions SET last_user_message_at = MAX(COALESCE(last_user_message_at, 0),
+                    (SELECT last_user_message_at FROM sessions WHERE id = ?))
+                WHERE id = ? AND (SELECT last_user_message_at FROM sessions WHERE id = ?) IS NOT NULL
+            `).run(fromSessionId, toSessionId, fromSessionId)
             bumpMessageEpoch(db, fromSessionId)
             bumpMessageEpoch(db, toSessionId)
         }
@@ -1303,6 +1317,7 @@ export function truncateMessagesFromLocalId(
                 createdAt,
                 invokedAt
             })
+            recordUserMessage(db, sessionId, message.content, createdAt)
             inserted += 1
         }
 

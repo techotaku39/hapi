@@ -5,12 +5,14 @@ import { dirname } from 'node:path'
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { addMessage } from './messages'
+import { backfillLastUserMessageAt } from './sessionUserActivity'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { TurnStore } from './turnStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
 import {
@@ -40,6 +42,8 @@ export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { TurnStore } from './turnStore'
+export type { SessionTurn, SessionTurnEndReason, SessionTurnTrigger } from './turns'
 export { UsageStore } from './usageStore'
 export { WorkGraphStore } from './workGraphStore'
 export {
@@ -64,7 +68,8 @@ const REQUIRED_TABLES = [
     'usage_events',
     'usage_scan_state',
     'events',
-    'event_links'
+    'event_links',
+    'session_turns'
 ] as const
 
 export class Store {
@@ -80,6 +85,7 @@ export class Store {
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
     readonly usage: UsageStore
+    readonly turns: TurnStore
     readonly workGraph: WorkGraphStore
 
     /**
@@ -134,6 +140,7 @@ export class Store {
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
         this.usage = new UsageStore(this.db)
+        this.turns = new TurnStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
     }
 
@@ -429,6 +436,7 @@ export class Store {
                 machine_id TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                last_user_message_at INTEGER,
                 metadata TEXT,
                 metadata_version INTEGER DEFAULT 1,
                 agent_state TEXT,
@@ -631,6 +639,25 @@ export class Store {
                 ON event_links(namespace, from_event_id);
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
+
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                end_reason TEXT,
+                started_by TEXT NOT NULL,
+                recover_until INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_turns_namespace_started
+                ON session_turns(namespace, started_at);
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_started
+                ON session_turns(session_id, started_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_turns_one_open
+                ON session_turns(session_id)
+                WHERE ended_at IS NULL;
         `)
         createMessageContentSearchTable(this.db)
     }
@@ -1107,21 +1134,50 @@ export class Store {
     }
 
     private migrateFromV26ToV30(): void {
-        createMessageContentSearchTable(this.db)
-        if (this.getMessageColumnNames().size === 0) return
-        rebuildMessageContentSearch(this.db)
+        this.migrateFromV26ToV27()
+        this.migrateFromV27ToV28()
+        this.migrateFromV28ToV29()
     }
 
     /** Complete the derived message-content index lookup added after v27. */
     private migrateFromV27ToV28(): void {
         createMessageContentSearchTable(this.db)
         backfillMessageContentSearchLookup(this.db)
+        if (this.getSessionColumnNames().size === 0) return
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                end_reason TEXT,
+                started_by TEXT NOT NULL,
+                recover_until INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_turns_namespace_started
+                ON session_turns(namespace, started_at);
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_started
+                ON session_turns(session_id, started_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_turns_one_open
+                ON session_turns(session_id)
+                WHERE ended_at IS NULL;
+        `)
     }
 
     /** Add the indexed short-query n-gram table to the message-content index. */
     private migrateFromV28ToV29(): void {
         createMessageContentSearchTable(this.db)
         backfillMessageContentSearchShortIndex(this.db)
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0 || columns.has('last_user_message_at')) return
+        this.db.transaction(() => {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_user_message_at INTEGER')
+            if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get()) {
+                backfillLastUserMessageAt(this.db)
+            }
+        })()
     }
 
     /** Rebuild the derived content index after adding truncation metadata. */
