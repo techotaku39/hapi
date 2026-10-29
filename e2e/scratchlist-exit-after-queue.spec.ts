@@ -113,7 +113,7 @@ test.describe('scratchlist drawer inline editing', () => {
         await expect(page.getByRole('menuitem', { name: 'Delete entry' })).toBeVisible()
 
         await page.getByRole('menuitem', { name: 'Delete entry' }).click()
-        const dialog = page.getByRole('dialog', { name: 'Delete draft?' })
+        const dialog = page.getByRole('dialog', { name: 'Delete draft' })
         await expect(dialog).toBeVisible()
         await expect(page.getByTestId('scratchlist-entry')).toHaveCount(1)
         await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
