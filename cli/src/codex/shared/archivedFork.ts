@@ -114,7 +114,7 @@ export async function performArchivedFork(
     return journal.nativeSessionId!
 }
 
-export async function forkArchivedCodex(request: ForkArchivedCodexRequest): Promise<ForkArchivedCodexResponse> {
+export async function forkArchivedCodex(request: ForkArchivedCodexRequest, allowsDirectory: () => Promise<boolean>): Promise<ForkArchivedCodexResponse> {
     const home = codexHome()
     const journalDirectory = join(home, 'hapi-archived-forks')
     await mkdir(journalDirectory, { recursive: true, mode: 0o700 })
@@ -142,6 +142,9 @@ export async function forkArchivedCodex(request: ForkArchivedCodexRequest): Prom
         const client = new CodexAppServerClient({ cwd: request.directory })
         client.setServerRequestHandler(() => {})
         try {
+            // Report policy rejection against the persisted journal: a fresh
+            // attempt is safe to release, but interrupted native work is not.
+            if (!await allowsDirectory()) throw new Error('Directory is outside workspace roots')
             await initializeSharedClient(client)
             return { nativeSessionId: await performArchivedFork(client, request, journal, save, assertSourceInactive) }
         } catch (error) {

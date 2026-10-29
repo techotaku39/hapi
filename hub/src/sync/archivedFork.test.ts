@@ -5,6 +5,7 @@ import { SyncEngine } from './syncEngine'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { MACHINE_CAPABILITIES } from '@hapi/protocol'
 import type { RpcGateway } from './rpcGateway'
+import type { ForkArchivedCodexRequest } from '@hapi/protocol/apiTypes'
 
 function fixture() {
     const store = new Store(':memory:')
@@ -145,6 +146,48 @@ describe('archived Codex fork coordination', () => {
             expect(result).toEqual({ type: 'success', sessionId: childId })
             expect(stopped).toBe(childId)
             expect(f.counts().forks).toBe(1)
+        } finally { f.engine.stop() }
+    })
+
+    it('retries an interrupted historical fork with its reserved native boundary after sparse metadata replacement', async () => {
+        const f = fixture()
+        try {
+            let original: ForkArchivedCodexRequest | undefined
+            f.rpc.forkArchivedCodex = async (_machine, request) => {
+                original = structuredClone(request)
+                throw new Error('native response lost')
+            }
+            expect((await f.engine.forkConversation(f.source.id, 'ns', 'boundary')).type).toBe('error')
+            const current = f.store.sessions.getSession(f.source.id)!
+            f.store.sessions.updateSessionMetadata(f.source.id, { path: '/work', host: 'test' }, current.metadataVersion, 'ns')
+            ;(f.engine as unknown as { sessionCache: { refreshSession(id: string): void } }).sessionCache.refreshSession(f.source.id)
+            expect(f.engine.getSession(f.source.id)?.metadata?.conversationHistoryTurns).toBeUndefined()
+            f.rpc.forkArchivedCodex = async (_machine, request) => {
+                expect(request).toEqual(original!)
+                return { nativeSessionId: 'native-child' }
+            }
+            expect((await f.engine.forkConversation(f.source.id, 'ns', 'boundary')).type).toBe('success')
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexArchivedFork).toBeUndefined()
+        } finally { f.engine.stop() }
+    })
+
+    it('does not complete an active child retry until native readiness is confirmed again', async () => {
+        const f = fixture()
+        try {
+            f.rpc.spawnSession = async (...args) => {
+                f.engine.handleSessionAlive({ sid: args[12]!, time: Date.now(), mode: 'remote' })
+                return { type: 'error', message: 'startup interrupted', childStarted: false }
+            }
+            expect((await f.engine.forkConversation(f.source.id, 'ns')).type).toBe('error')
+            const child = f.engine.getSession(f.source.id)!.metadata!.codexArchivedFork!.childSessionId
+            let completed = false
+            const retry = f.engine.forkConversation(f.source.id, 'ns').then(result => { completed = true; return result })
+            await new Promise(resolve => setTimeout(resolve, 10))
+            expect(completed).toBe(false)
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexArchivedFork).toBeDefined()
+            f.engine.handleSessionReady({ sid: child, time: Date.now() })
+            expect(await retry).toEqual({ type: 'success', sessionId: child })
+            expect(f.engine.getSession(f.source.id)?.metadata?.codexArchivedFork).toBeUndefined()
         } finally { f.engine.stop() }
     })
 

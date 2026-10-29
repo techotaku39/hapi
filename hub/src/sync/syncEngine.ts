@@ -1540,15 +1540,16 @@ export class SyncEngine {
             if (!machine.metadata?.capabilities?.includes(MACHINE_CAPABILITIES.ForkArchivedCodex)) {
                 throw new Error('Upgrade the source Runner to fork archived Codex sessions')
             }
-            const turnId = messageLocalId ? metadata.conversationHistoryTurns?.[messageLocalId] : undefined
-            if (messageLocalId) {
-                this.assertInvokedHistoryBoundary(source.id, messageLocalId)
-                if (!turnId) throw new Error('No native history point for this message')
-            }
             let attempt = metadata.codexArchivedFork
             if (attempt && attempt.boundaryLocalId !== messageLocalId) throw new Error('A previous archived fork is pending at another boundary; retry that fork first')
+            const turnId = attempt ? attempt.boundaryTurnId : messageLocalId ? metadata.conversationHistoryTurns?.[messageLocalId] : undefined
+            if (messageLocalId) {
+                if (!attempt) this.assertInvokedHistoryBoundary(source.id, messageLocalId)
+                if (!turnId) throw new Error('No native history point for this message')
+            }
             if (!attempt) {
-                attempt = { operationId: randomUUID(), childSessionId: randomUUID(), ...(messageLocalId ? { boundaryLocalId: messageLocalId } : {}) }
+                attempt = { operationId: randomUUID(), childSessionId: randomUUID(),
+                    ...(messageLocalId ? { boundaryLocalId: messageLocalId, boundaryTurnId: turnId! } : {}) }
                 this.setArchivedForkAttempt(source.id, namespace, attempt)
             }
             const childId = attempt.childSessionId
@@ -1556,6 +1557,8 @@ export class SyncEngine {
             if (child?.active) {
                 if (!attempt.nativeSessionId || child.metadata?.codexSessionId !== attempt.nativeSessionId
                     || child.namespace !== namespace || child.metadata?.forkedFrom !== source.id) throw new Error('Archived fork child binding is unconfirmed')
+                if (!await this.waitForExactNativeForkBound(childId, attempt.nativeSessionId, 'codexSessionId', true, 90_000)
+                    || !this.sessionCache.getSession(childId)?.active) throw new Error('Archived fork child native startup is not confirmed')
                 this.setArchivedForkAttempt(source.id, namespace, undefined)
                 return { type: 'success', sessionId: childId }
             }

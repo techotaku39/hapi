@@ -459,9 +459,8 @@ export class ApiMachineClient {
     setRPCHandlers({ spawnSession, stopSession, requestShutdown }: MachineRpcHandlers): void {
         this.rpcHandlerManager.registerHandler(RPC_METHODS.ForkArchivedCodex, async (raw: unknown) => {
             const request = ForkArchivedCodexRequestSchema.parse(raw)
-            if (!await this.pathPolicy.allowsSpawn(request.directory)) throw new Error('Directory is outside workspace roots')
             const { forkArchivedCodex } = await import('@/codex/shared/archivedFork')
-            return forkArchivedCodex(request)
+            return forkArchivedCodex(request, () => this.pathPolicy.allowsSpawn(request.directory))
         })
         this.rpcHandlerManager.registerHandler(RPC_METHODS.SpawnHappySession, async (params: any) => {
             const { directory, sessionId, existingSessionId, reservedSessionId, resumeSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, collaborationMode, copilotAgentMode, token, sessionType, worktreeName, startingMode, forkSession } = params || {}

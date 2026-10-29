@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
-import { performArchivedFork, type ArchivedForkJournal } from './archivedFork'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { ApiClient } from '@/api/api'
+import { CodexAppServerClient } from '../codexAppServerClient'
+import { forkArchivedCodex, performArchivedFork, type ArchivedForkJournal } from './archivedFork'
 import type { ForkArchivedCodexRequest } from '@hapi/protocol/apiTypes'
 
 function fixture() {
@@ -109,5 +114,32 @@ describe('archived Codex native fork', () => {
         f.inactive.mockRejectedValue(new Error('Source session changed'))
         await expect(f.run()).rejects.toThrow('Source session changed')
         expect(f.native).not.toHaveBeenCalled()
+    })
+})
+
+describe('archived fork workspace preflight', () => {
+    afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
+
+    it.each(['fresh', 'restore', 'unconfirmed', 'known-child'])('rejects a denied %s operation without starting native transport and preserves recovery intent', async kind => {
+        const home = await mkdtemp(join(tmpdir(), 'hapi-archived-preflight-'))
+        vi.stubEnv('CODEX_HOME', home)
+        vi.spyOn(ApiClient, 'create').mockResolvedValue({} as ApiClient)
+        const connect = vi.spyOn(CodexAppServerClient.prototype, 'connect').mockRejectedValue(new Error('unexpected native startup'))
+        const request = fixture().request
+        const target = join(home, 'hapi-archived-forks', `${request.operationId}.json`)
+        const journal: ArchivedForkJournal = { request, restoreRequired: kind === 'restore',
+            forkIssued: kind === 'unconfirmed' || kind === 'known-child', done: false,
+            ...(kind === 'known-child' ? { nativeSessionId: 'child' } : {}) }
+        try {
+            if (kind !== 'fresh') {
+                await mkdir(join(home, 'hapi-archived-forks'), { recursive: true })
+                await writeFile(target, JSON.stringify(journal))
+            }
+            expect(await forkArchivedCodex(request, async () => false)).toEqual({
+                error: 'Directory is outside workspace roots', rollbackSafe: kind === 'fresh'
+            })
+            expect(connect).not.toHaveBeenCalled()
+            if (kind !== 'fresh') expect(JSON.parse(await readFile(target, 'utf8'))).toEqual(journal)
+        } finally { await rm(home, { recursive: true, force: true }) }
     })
 })
