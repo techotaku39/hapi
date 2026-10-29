@@ -55,7 +55,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
                     await expect(dialog).toBeVisible()
                     if (dismissal === 'Close') await dialog.getByTitle('Close', { exact: true }).click()
                     else if (dismissal === 'Escape') await page.keyboard.press('Escape')
-                    else await dialog.locator('div').last().click({ position: { x: 5, y: 5 } })
+                    else await dialog.locator('img').locator('..').click({ position: { x: 5, y: 5 } })
                     await expect(dialog).toBeHidden()
                     await expectConversation(page)
                 }
