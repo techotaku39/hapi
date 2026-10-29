@@ -289,6 +289,11 @@ describe('RichComposerInput controlled synchronization', () => {
 
         expect(serializeComposerSegments(segmentsFromEditor(editor))).toBe('restored history')
         expect(selectionOffset(editor)).toBe('restored history'.length)
+
+        fireEvent.keyDown(editor, { key: 'z', ctrlKey: true })
+        expect(serializeComposerSegments(segmentsFromEditor(editor))).toBe('draft')
+        fireEvent.keyDown(editor, { key: 'Z', ctrlKey: true, shiftKey: true })
+        expect(serializeComposerSegments(segmentsFromEditor(editor))).toBe('restored history')
     })
 
     it('deletes exactly one trailing line break per Backspace', () => {

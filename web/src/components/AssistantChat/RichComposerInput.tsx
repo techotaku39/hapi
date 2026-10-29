@@ -871,11 +871,14 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
                 const fallbackSelection = selection ?? { start: mirror.length, end: mirror.length }
                 return { text: next, selection: fallbackSelection }
             }
-            const mirror = mirrorComposerSegments(parseComposerSegments(next))
+            const currentSegments = segmentsFromEditor(root)
+            const currentSelection = getMirrorSelection(root)
+            recordUndo(currentSegments, currentSelection)
+            const nextSegments = parseComposerSegments(next)
+            const mirror = mirrorComposerSegments(nextSegments)
             const nextSelection = selection ?? { start: mirror.length, end: mirror.length }
-            syncFromValue(next, nextSelection)
-            onValueChange(next)
-            return { text: next, selection: nextSelection }
+            const serialized = commitSegments(root, nextSegments, nextSelection)
+            return { text: serialized, selection: nextSelection }
         },
         flushSerializedText: () => {
             const root = rootRef.current
