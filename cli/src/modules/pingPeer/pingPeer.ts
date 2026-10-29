@@ -125,7 +125,7 @@ const AUTH_RECOVERY_HINT =
     'or run `hapi auth login` to save the token. Inside a HAPI session prefer MCP ' +
     '`list_peers` / `ping_peer` / `inspect_peer`, which use the session CLI credentials.'
 
-function resolveApiUrl(apiUrl?: string): string {
+export function resolveApiUrl(apiUrl?: string): string {
     const raw = (apiUrl ?? configuration.apiUrl).trim().replace(/\/+$/, '')
     if (!raw) {
         throw new PingPeerError(
@@ -138,7 +138,7 @@ function resolveApiUrl(apiUrl?: string): string {
     return raw
 }
 
-function resolveAccessToken(accessToken?: string): string {
+export function resolveAccessToken(accessToken?: string): string {
     let token = ''
     try {
         token = (accessToken ?? getAuthToken()).trim()
@@ -158,7 +158,7 @@ function authFailedMessage(apiUrl: string, detail: string): string {
     return `failed to exchange access token for JWT (${detail}). Hub URL: ${apiUrl}. ${AUTH_RECOVERY_HINT}`
 }
 
-async function exchangeJwt(
+export async function exchangeJwt(
     apiUrl: string,
     accessToken: string,
     http: AxiosInstance
@@ -192,7 +192,7 @@ async function exchangeJwt(
     }
 }
 
-function authHeaders(jwt: string): Record<string, string> {
+export function authHeaders(jwt: string): Record<string, string> {
     return buildHubRequestHeaders({
         Authorization: `Bearer ${jwt}`,
         'Content-Type': 'application/json'

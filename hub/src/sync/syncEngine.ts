@@ -278,6 +278,7 @@ export class SyncEngine {
             this.titleSuggestionService
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.sessionCache.closeTurnsLeftOpen()
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }

@@ -75,7 +75,7 @@ describe('shared session read state', () => {
         expect(() => store.sessionReads.update('default', [{ ...mutation, activityAt: Number.MAX_SAFE_INTEGER }])).toThrow('future-activity')
     })
 
-    for (const previousVersion of [26, 27]) it(`migrates v${previousVersion} without changing session rows or losing the upstream index`, () => {
+    for (const previousVersion of [26, 27, 28]) it(`migrates v${previousVersion} without changing session rows or losing upstream schema`, () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-read-sync-'))
         dirs.push(dir)
         const path = join(dir, 'test.db')
@@ -97,6 +97,9 @@ describe('shared session read state', () => {
         const legacy = new Database(path)
         legacy.exec(`DROP TABLE session_read_states; PRAGMA user_version = ${previousVersion}`)
         if (previousVersion === 26) legacy.exec('DROP INDEX idx_messages_future_scheduled_queued')
+        if (previousVersion < 28) legacy.exec('DROP TABLE session_turns')
+        else legacy.query(`INSERT INTO session_turns(session_id, namespace, started_at, ended_at, started_by)
+            VALUES (?, 'default', 10, 20, 'test')`).run(original.id)
         legacy.close()
         const migrated = run(`
             const store = new Store(path);
@@ -106,13 +109,17 @@ describe('shared session read state', () => {
             const db = store['db'];
             const version = db.query('PRAGMA user_version').get().user_version;
             const index = db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_future_scheduled_queued'").get();
-            console.log(JSON.stringify({ session, before, version, index })); store.close();
+            const turns = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_turns'").get();
+            const turnCount = db.query('SELECT COUNT(*) AS count FROM session_turns').get().count;
+            console.log(JSON.stringify({ session, before, version, index, turns, turnCount })); store.close();
         `)
         expect(migrated.session).toEqual(original)
         expect(migrated.before).toEqual([])
-        expect(migrated.version).toBe(28)
+        expect(migrated.version).toBe(29)
         expect(migrated.index?.name).toBe('idx_messages_future_scheduled_queued')
+        expect(migrated.turns?.name).toBe('session_turns')
+        if (previousVersion === 28) expect(migrated.turnCount).toBe(1)
         const reopened = run(`const store = new Store(path); console.log(JSON.stringify(store.sessionReads.list('default'))); store.close();`)
         expect(reopened[0]).toMatchObject({ manualUnreadAt: 100, version: 1 })
-    }, 30000)
+    }, 60000)
 })

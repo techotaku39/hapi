@@ -158,6 +158,10 @@ for request/response shapes and error semantics, and `src/web/routes/` for all e
 
 - `GET /api/usage/summary` - Get cache-aware token usage for the owner namespace (`range=7d|30d|all`).
 
+### Activity (`src/web/routes/activity.ts`)
+
+- `GET /api/activity` - When agents in the caller's namespace were working (`since`/`until` epoch ms, default last 24 h, max 31 days): each session's turns from the `session_turns` table, plus the permission prompts and questions it waited on. Used by `hapi usage`.
+
 ### Storage (`src/web/routes/storage.ts`)
 
 - `GET /api/storage/sqlite` - SQLite database/WAL/SHM sizes for the owner namespace.
