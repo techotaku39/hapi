@@ -40,6 +40,31 @@ function fixture() {
 }
 
 describe('archived Codex fork coordination', () => {
+    it('refuses local resume discovery of a CLI-archived source while its fork child is starting', async () => {
+        const f = fixture()
+        let entered!: () => void
+        const spawning = new Promise<void>(resolve => { entered = resolve })
+        let childId = ''
+        try {
+            const current = f.store.sessions.getSession(f.source.id)!
+            f.store.sessions.updateSessionMetadata(f.source.id, { ...current.metadata as object, archivedBy: 'cli' }, current.metadataVersion, 'ns')
+            ;(f.engine as unknown as { sessionCache: { refreshSession(id: string): void } }).sessionCache.refreshSession(f.source.id)
+            f.rpc.spawnSession = async (...args) => {
+                childId = args[12]!
+                f.engine.handleSessionAlive({ sid: childId, time: Date.now(), mode: 'remote' })
+                entered()
+                return { type: 'success', sessionId: childId }
+            }
+            const pending = f.engine.forkConversation(f.source.id, 'ns')
+            await spawning
+            expect(f.engine.resolveLocalResumeTarget(f.source.id, 'ns')).toMatchObject({ type: 'error', code: 'resume_unavailable' })
+            expect(f.engine.resolveLocalResumeTarget(childId, 'ns')).toMatchObject({ type: 'error', code: 'resume_unavailable' })
+            expect(f.engine.getSession(f.source.id)?.active).toBe(false)
+            f.engine.handleSessionReady({ sid: childId, time: Date.now() })
+            expect((await pending).type).toBe('success')
+            expect(f.engine.resolveLocalResumeTarget(f.source.id, 'ns').type).toBe('success')
+        } finally { f.engine.stop() }
+    })
     it('keeps an unconfirmed resume fenced across sparse metadata and late activation until native ready', async () => {
         const f = fixture()
         try {

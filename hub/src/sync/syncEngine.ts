@@ -3072,6 +3072,10 @@ export class SyncEngine {
             }
         }
 
+        if (this.archivedForkPending(access.sessionId, namespace)) {
+            return { type: 'error', message: 'Archived fork is pending; retry that fork before resuming', code: 'resume_unavailable' }
+        }
+
         const session = access.session
         const metadata = session.metadata
         if (!metadata || typeof metadata.path !== 'string' || metadata.path.length === 0) {
