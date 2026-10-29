@@ -2025,6 +2025,13 @@ export class SyncEngine {
         if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId)) {
             throw new Error('Archived fork is in progress; retry the fork to reconcile it before archiving')
         }
+        this.historyActionsInFlight.add(sessionId)
+        try {
+            await this.archiveSessionUnlocked(sessionId)
+        } finally { this.historyActionsInFlight.delete(sessionId) }
+    }
+
+    private async archiveSessionUnlocked(sessionId: string): Promise<void> {
         // tiann/hapi#916 / #1910: KillSession is a session-socket RPC. A missing
         // target does not prove the runner child is dead (stale registration,
         // mid-reconnect, id rotation on resume). Always fall through to the
