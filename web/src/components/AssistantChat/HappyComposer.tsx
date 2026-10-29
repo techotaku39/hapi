@@ -23,7 +23,12 @@ import {
 } from 'react'
 import { useNarrowViewport } from '@/hooks/useNarrowViewport'
 import { shouldInvokeComposerDictateShortcut } from '@/lib/composerDictateShortcut'
-import { isRichComposerMentionsEnabled, resolveComposerPlaceholderKey } from '@/lib/composerSegments'
+import {
+    isRichComposerMentionsEnabled,
+    mirrorComposerSegments,
+    parseComposerSegments,
+    resolveComposerPlaceholderKey,
+} from '@/lib/composerSegments'
 import { dictationDirectSendEligible, sendVoiceMessage } from '@/lib/dictationSend'
 import type { SessionMentionResolveResult } from '@/components/AssistantChat/RichComposerInput'
 import {
@@ -1096,9 +1101,11 @@ export function HappyComposer(props: {
         // A restored message may itself begin with #/＃. Keep that literal
         // prefix without immediately treating the restored value as a new
         // history query; the next user edit clears this dismissal.
-        setHistoryDismissedText(entry.text)
+        setHistoryDismissedText(richMentionsEnabled
+            ? mirrorComposerSegments(parseComposerSegments(entry.text))
+            : entry.text)
         haptic('light')
-    }, [handleUserEdit, haptic, replaceComposerText, visibleHistoryEntries])
+    }, [handleUserEdit, haptic, replaceComposerText, richMentionsEnabled, visibleHistoryEntries])
 
     const enterHistoryNavigation = useCallback(() => {
         const entry = messageHistory[0]
