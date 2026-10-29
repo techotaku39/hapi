@@ -6,9 +6,11 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Outlet, createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import type { ApiClient } from '../src/api/client'
 import '../src/index.css'
+import { AppContextProvider } from '../src/lib/app-context'
 import { I18nProvider } from '../src/lib/i18n-context'
 import { MarkdownRenderer } from '../src/components/MarkdownRenderer'
 import {
@@ -46,7 +48,19 @@ const FILE_PREVIEW_API = {
         content: path === 'notes/images/page-001.png' ? ONE_PIXEL_PNG : '',
         size: path === 'notes/images/page-001.png' ? 68 : 0,
     }),
+    listSessionDirectory: async (_sessionId: string, path?: string) => ({
+        success: true,
+        entries: path === 'notes/images'
+            ? [{ name: 'page-001.png', type: 'file' as const, size: 68 }]
+            : [],
+    }),
 } as unknown as ApiClient
+
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: { retry: false },
+    },
+})
 
 function FileMarkdownPreviewFixture() {
     const { t } = useTranslation()
@@ -90,7 +104,9 @@ function FileMarkdownPreviewFixture() {
                     <MarkdownRenderer
                         content={SAMPLE_MARKDOWN}
                         standalone
-                        filePreview={{ api: FILE_PREVIEW_API, sessionId: 'session-1', filePath: 'notes/notes-01.md' }}
+                        sessionId="session-1"
+                        filePath="notes/notes-01.md"
+                        workspacePath="/workspace"
                     />
                 </div>
             )}
@@ -131,9 +147,13 @@ const rootEl = document.getElementById('root')
 if (rootEl) {
     ReactDOM.createRoot(rootEl).render(
         <React.StrictMode>
-            <I18nProvider>
-                <RouterProvider router={router} />
-            </I18nProvider>
+            <QueryClientProvider client={queryClient}>
+                <AppContextProvider value={{ api: FILE_PREVIEW_API, token: 'fixture-token', baseUrl: window.location.origin }}>
+                    <I18nProvider>
+                        <RouterProvider router={router} />
+                    </I18nProvider>
+                </AppContextProvider>
+            </QueryClientProvider>
         </React.StrictMode>
     )
 }
