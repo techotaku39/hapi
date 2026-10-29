@@ -761,7 +761,7 @@ export default {
   'scratchlist.action.menuAriaLabel': 'Scratchlist entry actions',
   'scratchlist.action.sendNow': 'Send now',
   'scratchlist.action.scheduleSend': 'Schedule send',
-  'scratchlist.confirmDelete.title': 'Delete draft?',
+  'scratchlist.confirmDelete.title': 'Delete draft',
   'scratchlist.confirmDelete.description': 'Delete this draft? This action cannot be undone.',
   'scratchlist.confirmDelete.attachmentTitle': 'Delete attachment?',
   'scratchlist.confirmDelete.attachmentDescription': 'Delete “{name}”? This action cannot be undone.',

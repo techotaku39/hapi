@@ -759,7 +759,7 @@ export default {
   'scratchlist.action.menuAriaLabel': '草稿条目操作',
   'scratchlist.action.sendNow': '立即发送',
   'scratchlist.action.scheduleSend': '定时发送',
-  'scratchlist.confirmDelete.title': '删除草稿？',
+  'scratchlist.confirmDelete.title': '删除草稿',
   'scratchlist.confirmDelete.description': '确定要删除这条草稿吗？此操作无法撤销。',
   'scratchlist.confirmDelete.attachmentTitle': '删除附件？',
   'scratchlist.confirmDelete.attachmentDescription': '确定要删除附件“{name}”吗？此操作无法撤销。',

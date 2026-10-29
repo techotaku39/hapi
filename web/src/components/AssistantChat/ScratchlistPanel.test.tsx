@@ -168,7 +168,7 @@ describe('ScratchlistPanel', () => {
         expandPanel()
         fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
-        const dialog = screen.getByRole('dialog', { name: 'Delete draft?' })
+        const dialog = screen.getByRole('dialog', { name: 'Delete draft' })
         expect(within(dialog).getByText('Delete this draft? This action cannot be undone.')).toBeInTheDocument()
         expect(within(dialog).getByRole('button', { name: 'Delete' })).toHaveClass('bg-red-600')
         expect(screen.getByText('short')).toBeInTheDocument()
@@ -180,8 +180,20 @@ describe('ScratchlistPanel', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
-        fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete draft?' })).getByRole('button', { name: 'Delete' }))
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete draft' })).getByRole('button', { name: 'Delete' }))
         expect(readScratchlist(SID)).toEqual([])
+    })
+
+    it('localizes the delete draft title without a trailing question mark', () => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+        persistScratchlist(SID, [makeEntry({ id: 'zh-delete', text: '短草稿' })])
+        renderPanel()
+        fireEvent.click(screen.getByRole('button', { name: /草稿夹/ }))
+        fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: '删除条目' }))
+
+        expect(screen.getByRole('dialog', { name: '删除草稿' })).toBeInTheDocument()
+        expect(screen.queryByRole('dialog', { name: '删除草稿？' })).toBeNull()
     })
 
     it('edits an entry by clicking its text block and removes the old row action buttons', async () => {
@@ -939,11 +951,11 @@ describe('ScratchlistDrawer disabled operations', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
-        const dialog = screen.getByRole('dialog', { name: 'Delete draft?' })
+        const dialog = screen.getByRole('dialog', { name: 'Delete draft' })
         fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
 
         await waitFor(() => expect(within(dialog).getByText('delete failed')).toBeInTheDocument())
-        expect(screen.getByRole('dialog', { name: 'Delete draft?' })).toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: 'Delete draft' })).toBeInTheDocument()
     })
 
     it('renders non-image attachment-only rows with a filename and remove affordance', () => {
