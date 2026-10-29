@@ -121,6 +121,10 @@ test.describe('session read state across isolated devices', () => {
         const row = (page: Page, suffix: string) => page.locator('button.session-list-item').filter({ hasText: `Read sync ${suffix}` })
         const unread = (page: Page, suffix: string) => row(page, suffix).locator('span.rounded-full[class*="--app-link"]')
         const badge = (page: Page) => page.evaluate(() => (window as unknown as { badgeCount: number }).badgeCount)
+        const capture = async (page: Page, name: string) => {
+            const directory = process.env.HAPI_READ_SYNC_SCREENSHOT_DIR
+            if (directory) await page.screenshot({ path: `${directory}/${name}.png`, animations: 'disabled' })
+        }
         const markUnread = async (page: Page, suffix: string) => {
             // Exercise the row's context-menu action independently of the existing
             // left-scrollbar hit-testing issue on desktop Chromium.
@@ -133,17 +137,20 @@ test.describe('session read state across isolated devices', () => {
             await expect(unread(desktop.page, 'A')).toBeVisible()
             await expect(unread(mobile.page, 'A')).toBeVisible()
             await expect.poll(() => badge(mobile.page)).toBe(3)
+            await capture(mobile.page, '01-mobile-before-read')
 
             await desktop.page.bringToFront()
             await row(desktop.page, 'A').press('Enter')
             await expect.poll(async () => (await snapshots()).find(s => s.sessionId === 'read-sync-fixture-a')?.manualUnreadAt).toBeNull()
             await expect(unread(mobile.page, 'A')).toHaveCount(0)
             await expect.poll(() => badge(mobile.page)).toBe(2)
+            await capture(mobile.page, '02-mobile-after-desktop-read')
             await desktop.page.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded', timeout: 30000 })
             await expandFixtureGroup(desktop.page)
             await markUnread(desktop.page, 'A')
             await expect(unread(mobile.page, 'A')).toBeVisible()
             await expect.poll(() => badge(mobile.page)).toBe(3)
+            await capture(mobile.page, '03-mobile-after-desktop-mark-unread')
             await expect.poll(async () => (await snapshots()).find(s => s.sessionId === 'read-sync-fixture-a')?.manualUnreadAt).not.toBeNull()
 
             await mobile.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })

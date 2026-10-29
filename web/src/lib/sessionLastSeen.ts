@@ -205,6 +205,11 @@ export function getSessionManualUnreadAt(sessionId: string): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+/** One localStorage read/parse for bulk consumers such as the PWA badge. */
+export function getSessionManualUnreadSnapshot(): Readonly<Record<string, number>> {
+    return readManualUnreadStore()
+}
+
 /** One localStorage read/parse for bulk filters (e.g. unread-only lens). */
 export function getSessionLastSeenSnapshot(): Readonly<Record<string, number>> {
     return readStore()
@@ -213,32 +218,42 @@ export function getSessionLastSeenSnapshot(): Readonly<Record<string, number>> {
 type SessionReadStateInput = {
     id: string
     updatedAt: number
+    active?: boolean
+    thinking?: boolean
 }
 
-function latestSessionUpdates(sessions: Iterable<SessionReadStateInput>): Map<string, number> {
-    const latest = new Map<string, number>()
+function isGenerating(session: SessionReadStateInput): boolean {
+    return session.active !== false && session.thinking === true
+}
+
+function latestSessionUpdates(sessions: Iterable<SessionReadStateInput>): Map<string, SessionReadStateInput> {
+    const latest = new Map<string, SessionReadStateInput>()
     for (const session of sessions) {
         if (!session.id || !Number.isFinite(session.updatedAt)) {
             continue
         }
         const current = latest.get(session.id)
-        if (current === undefined || session.updatedAt > current) {
-            latest.set(session.id, session.updatedAt)
+        if (
+            current === undefined
+            || session.updatedAt > current.updatedAt
+            || (session.updatedAt === current.updatedAt && isGenerating(current) && !isGenerating(session))
+        ) {
+            latest.set(session.id, session)
         }
     }
     return latest
 }
 
 function hasUnreadActivity(
-    sessionId: string,
-    updatedAt: number,
+    session: SessionReadStateInput,
     store: LastSeenStore,
     manualUnreadStore: ManualUnreadStore
 ): boolean {
-    const lastSeenAt = store[sessionId]
-    const manualUnreadAt = manualUnreadStore[sessionId]
-    return updatedAt > (typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : 0)
-        || manualUnreadAt === updatedAt
+    const lastSeenAt = store[session.id]
+    const manualUnreadAt = manualUnreadStore[session.id]
+    return typeof manualUnreadAt === 'number' && Number.isFinite(manualUnreadAt)
+        || (!isGenerating(session)
+            && session.updatedAt > (typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : 0))
 }
 
 /** Count unread sessions in the supplied list using one localStorage snapshot. */
@@ -247,8 +262,8 @@ export function getUnreadSessionCount(sessions: Iterable<SessionReadStateInput>)
     const store = readStore()
     const manualUnreadStore = readManualUnreadStore()
     let count = 0
-    for (const [sessionId, updatedAt] of latest) {
-        if (hasUnreadActivity(sessionId, updatedAt, store, manualUnreadStore)) {
+    for (const session of latest.values()) {
+        if (hasUnreadActivity(session, store, manualUnreadStore)) {
             count += 1
         }
     }
@@ -267,24 +282,26 @@ export function markAllSessionsSeen(sessions: Iterable<SessionReadStateInput>): 
     let count = 0
     let seenChanged = false
     let manualUnreadChanged = false
+    const seenSessions: SessionReadStateInput[] = []
 
-    for (const [sessionId, updatedAt] of latest) {
-        if (!hasUnreadActivity(sessionId, updatedAt, store, manualUnreadStore)) {
+    for (const session of latest.values()) {
+        if (!hasUnreadActivity(session, store, manualUnreadStore)) {
             continue
         }
 
         count += 1
-        const currentSeenAt = store[sessionId]
+        seenSessions.push(session)
+        const currentSeenAt = store[session.id]
         const nextSeenAt = Math.max(
             typeof currentSeenAt === 'number' && Number.isFinite(currentSeenAt) ? currentSeenAt : 0,
-            updatedAt
+            session.updatedAt
         )
-        if (store[sessionId] !== nextSeenAt) {
-            store[sessionId] = nextSeenAt
+        if (store[session.id] !== nextSeenAt) {
+            store[session.id] = nextSeenAt
             seenChanged = true
         }
-        if (Object.prototype.hasOwnProperty.call(manualUnreadStore, sessionId)) {
-            delete manualUnreadStore[sessionId]
+        if (Object.prototype.hasOwnProperty.call(manualUnreadStore, session.id)) {
+            delete manualUnreadStore[session.id]
             manualUnreadChanged = true
         }
     }
@@ -293,7 +310,7 @@ export function markAllSessionsSeen(sessions: Iterable<SessionReadStateInput>): 
         return 0
     }
 
-    onMutation?.('seen', [...latest].map(([id, updatedAt]) => ({ id, updatedAt })))
+    onMutation?.('seen', seenSessions)
 
     const seenWritten = !seenChanged || writeStore(store)
     const manualUnreadWritten = !manualUnreadChanged || writeManualUnreadStore(manualUnreadStore)

@@ -50,6 +50,19 @@ beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clea
 afterEach(() => { sync?.stop(); sync = undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Hub read-state synchronization', () => {
+    it('uploads bulk-read mutations only for unread sessions eligible under the upstream generating rule', async () => {
+        const api = mockApi()
+        sync = startSessionReadSync(api, scope)
+        await tick()
+        expect(markAllSessionsSeen([
+            { id: 'busy', updatedAt: 100, active: true, thinking: true },
+            { id: 'finished', updatedAt: 200, active: false, thinking: false }
+        ])).toBe(1)
+        await tick()
+        expect(api.records.has('busy')).toBe(false)
+        expect(api.records.get('finished')?.lastSeenAt).toBe(200)
+    })
+
     it('starts a fresh snapshot after a connection refresh overlaps an older request', async () => {
         const api = mockApi([state(2, 99, 100)])
         let release!: (value: { states: SessionReadState[] }) => void

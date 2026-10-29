@@ -75,7 +75,7 @@ describe('shared session read state', () => {
         expect(() => store.sessionReads.update('default', [{ ...mutation, activityAt: Number.MAX_SAFE_INTEGER }])).toThrow('future-activity')
     })
 
-    it('migrates v26 without changing session rows and survives a store restart', () => {
+    for (const previousVersion of [26, 27]) it(`migrates v${previousVersion} without changing session rows or losing the upstream index`, () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-read-sync-'))
         dirs.push(dir)
         const path = join(dir, 'test.db')
@@ -95,17 +95,23 @@ describe('shared session read state', () => {
             console.log(JSON.stringify(session)); store.close();
         `)
         const legacy = new Database(path)
-        legacy.exec('DROP TABLE session_read_states; PRAGMA user_version = 26')
+        legacy.exec(`DROP TABLE session_read_states; PRAGMA user_version = ${previousVersion}`)
+        if (previousVersion === 26) legacy.exec('DROP INDEX idx_messages_future_scheduled_queued')
         legacy.close()
         const migrated = run(`
             const store = new Store(path);
             const session = store.sessions.getSessionsByNamespace('default')[0];
             const before = store.sessionReads.list('default');
             store.sessionReads.update('default', [{ mutationId: 'persisted', sessionId: session.id, kind: 'unread', activityAt: 100, expectedVersion: 0 }]);
-            console.log(JSON.stringify({ session, before })); store.close();
+            const db = store['db'];
+            const version = db.query('PRAGMA user_version').get().user_version;
+            const index = db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_future_scheduled_queued'").get();
+            console.log(JSON.stringify({ session, before, version, index })); store.close();
         `)
         expect(migrated.session).toEqual(original)
         expect(migrated.before).toEqual([])
+        expect(migrated.version).toBe(28)
+        expect(migrated.index?.name).toBe('idx_messages_future_scheduled_queued')
         const reopened = run(`const store = new Store(path); console.log(JSON.stringify(store.sessionReads.list('default'))); store.close();`)
         expect(reopened[0]).toMatchObject({ manualUnreadAt: 100, version: 1 })
     }, 30000)
