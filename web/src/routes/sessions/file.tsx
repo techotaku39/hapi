@@ -14,11 +14,13 @@ import { useTranslation } from '@/lib/use-translation'
 import { decodeBase64 } from '@/lib/utils'
 import { ImagePreview } from '@/components/ImagePreview'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { ExpandableErrorMessage } from '@/components/ExpandableErrorMessage'
 import { formatFileMetadata } from '@/lib/file-metadata'
 import {
     getInitialMarkdownPreviewMode,
     isMarkdownFile,
     persistMarkdownPreviewMode,
+    resolveImageMimeType,
     type MarkdownPreviewMode,
 } from '@/lib/file-markdown-preview'
 import { downloadBase64File } from '@/lib/file-download'
@@ -30,20 +32,6 @@ const FILE_SCROLL_KEY_PREFIX = 'hapi-file-scroll-'
 
 function getFileScrollStorageKey(sessionId: string, filePath: string, staged: boolean | undefined): string {
     return `${FILE_SCROLL_KEY_PREFIX}${sessionId}:${encodeURIComponent(filePath)}:${staged === true ? 'staged' : 'unstaged'}`
-}
-const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
-    apng: 'image/apng',
-    avif: 'image/avif',
-    bmp: 'image/bmp',
-    gif: 'image/gif',
-    ico: 'image/x-icon',
-    jpeg: 'image/jpeg',
-    jpg: 'image/jpeg',
-    png: 'image/png',
-    svg: 'image/svg+xml',
-    tif: 'image/tiff',
-    tiff: 'image/tiff',
-    webp: 'image/webp'
 }
 
 function decodePath(value: string): string {
@@ -205,14 +193,6 @@ function resolveLanguage(path: string): string | undefined {
     return langAlias[ext] ?? ext
 }
 
-function resolveImageMimeType(path: string): string | null {
-    const parts = path.split('.')
-    if (parts.length <= 1) return null
-    const ext = parts[parts.length - 1]?.toLowerCase()
-    if (!ext) return null
-    return IMAGE_MIME_BY_EXTENSION[ext] ?? null
-}
-
 function getUtf8ByteLength(value: string): number {
     return new TextEncoder().encode(value).length
 }
@@ -240,10 +220,14 @@ export default function FilePage() {
     const { copied: contentCopied, copy: copyContent } = useCopyToClipboard()
     const goBack = useAppGoBack()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/file' })
-    const { session } = useSession(api, sessionId)
     const search = useSearch({ from: '/sessions/$sessionId/file' })
+    const { session } = useSession(api, sessionId)
     const encodedPath = typeof search.path === 'string' ? search.path : ''
     const staged = search.staged
+    const markdownLinkSearch = useMemo(
+        () => ({ origin: search.origin, tab: search.tab, query: search.query }),
+        [search.origin, search.tab, search.query]
+    )
 
     const filePath = useMemo(() => decodePath(encodedPath), [encodedPath])
     const fileName = filePath.split('/').pop() || filePath || t('file.page.fallbackName')
@@ -354,6 +338,34 @@ export default function FilePage() {
         restoreFileScroll()
         restoredScrollKeyRef.current = fileScrollKey
     }, [diffQuery.isLoading, fileQuery.isLoading, fileScrollKey, restoreFileScroll])
+    useLayoutEffect(() => {
+        const element = fileScrollRef.current
+        if (!element) return
+        const content = element.querySelector<HTMLElement>('.file-preview-scroll-content')
+
+        const updateScrollbarCompensation = () => {
+            const scrollbarWidth = Math.max(0, element.offsetWidth - element.clientWidth)
+            element.style.setProperty('--file-preview-scrollbar-compensation', `${scrollbarWidth}px`)
+            const contentWidth = content?.getBoundingClientRect().width ?? element.clientWidth
+            const contentOffset = scrollbarWidth > 0
+                ? Math.min(
+                    scrollbarWidth / 2,
+                    Math.max(0, (element.offsetWidth - contentWidth) / 2)
+                )
+                : 0
+            element.style.setProperty('--file-preview-scroll-content-offset', `${contentOffset}px`)
+        }
+
+        updateScrollbarCompensation()
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollbarCompensation)
+        resizeObserver?.observe(element)
+        if (content) resizeObserver?.observe(content)
+        window.addEventListener('resize', updateScrollbarCompensation)
+        return () => {
+            resizeObserver?.disconnect()
+            window.removeEventListener('resize', updateScrollbarCompensation)
+        }
+    }, [])
 
     const setMarkdownPreviewMode = (mode: MarkdownPreviewMode) => {
         setMarkdownMode(mode)
@@ -470,29 +482,37 @@ export default function FilePage() {
                 </div>
             ) : null}
 
-            <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y flex-1 min-h-0">
-                <div className="mx-auto w-full max-w-content p-4">
+            <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y file-preview-scroll-y flex-1 min-h-0">
+                <div className="file-preview-scroll-content mx-auto w-full max-w-content p-4">
                     {diffErrorMessage ? (
-                        <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs text-[var(--app-hint)]">
-                            {diffErrorMessage}
-                        </div>
+                        <ExpandableErrorMessage
+                            message={diffErrorMessage}
+                            expandLabel={t('file.page.expandError')}
+                            collapseLabel={t('file.page.collapseError')}
+                            className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs text-[var(--app-hint)]"
+                        />
                     ) : null}
                     {missingPath ? (
                         <div className="text-sm text-[var(--app-hint)]">{t('file.page.missingPath')}</div>
                     ) : loading ? (
                         <FileContentSkeleton label={t('loading.file')} />
                     ) : fileErrorMessage ? (
-                        <div className="text-sm text-[var(--app-hint)]">{fileErrorMessage}</div>
+                        <ExpandableErrorMessage
+                            message={fileErrorMessage}
+                            expandLabel={t('file.page.expandError')}
+                            collapseLabel={t('file.page.collapseError')}
+                            className="text-sm text-[var(--app-hint)]"
+                        />
                     ) : displayMode === 'diff' && diffContent ? (
                         <DiffDisplay diffContent={diffContent} />
-                    ) : displayMode === 'diff' && diffError ? (
-                        <div className="text-sm text-[var(--app-hint)]">{diffErrorMessage}</div>
-                    ) : displayMode === 'file' ? (
+                    ) : displayMode === 'diff' && diffError ? null
+                    : displayMode === 'file' ? (
                         imagePreviewUrl ? (
                             <ImagePreview
                                 src={imagePreviewUrl}
                                 fileName={fileName}
                                 label={t('file.page.imagePreviewAlt', { name: fileName })}
+                                fileSize={fileContentResult?.size}
                             />
                         ) : binaryFile ? (
                             <div className="text-sm text-[var(--app-hint)]">
@@ -515,7 +535,10 @@ export default function FilePage() {
                                         <MarkdownRenderer
                                             content={decodedContent}
                                             standalone
-                                            filePreview={{ api, sessionId, filePath, workspacePath: session?.metadata?.path }}
+                                            sessionId={sessionId}
+                                            filePath={filePath}
+                                            workspacePath={session?.metadata?.path}
+                                            fileSearch={markdownLinkSearch}
                                         />
                                     </div>
                                 ) : (

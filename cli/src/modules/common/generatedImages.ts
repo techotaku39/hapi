@@ -9,7 +9,8 @@ import { asString, isObject } from '@hapi/protocol'
  * Read a regular file through one open descriptor: size is taken from the fd
  * (not a separate pathname `lstat`), then the buffer is allocated to that size
  * only. Rejects if the file grows/shrinks while reading so a TOCTOU swap cannot
- * force an unbounded `readFile` allocation.
+ * force an unbounded `readFile` allocation. Non-blocking open prevents a FIFO
+ * or other special file from hanging the caller before its type can be checked.
  */
 export async function readBoundedRegularFile(path: string, maxBytes: number): Promise<Buffer> {
     // O_NONBLOCK prevents opening a POSIX FIFO without a writer from hanging
