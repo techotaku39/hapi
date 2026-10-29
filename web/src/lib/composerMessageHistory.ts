@@ -34,10 +34,13 @@ export function getComposerHistoryTrigger(
         return null
     }
 
+    // A space immediately after the prefix means the whole value is literal
+    // text, even when the caret is still directly after the prefix.
+    if (/\s/.test(text.charAt(1))) return null
+
     const query = text.slice(1, selection.start)
-    // A space immediately after the prefix means the user is typing literal
-    // text, not searching history. Keep the candidate list dismissed until
-    // the prefix is deleted or a non-whitespace query is entered.
+    // Keep the candidate list dismissed while the query is on a later line or
+    // starts with whitespace, until the prefix is deleted or edited.
     if (query.includes('\n') || /^\s/.test(query)) return null
 
     return {
