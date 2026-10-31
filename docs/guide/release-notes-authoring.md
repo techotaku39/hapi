@@ -2,21 +2,23 @@
 
 The in-app release history is maintained in `web/src/lib/releaseNotes.ts`. It
 is bundled with the Web app so users can read it offline. Keep the catalog
-newest-first. Add the target version before the release build starts; the
-release script builds the embedded Web app before it creates the commit and
-tag.
+newest-first. Add the target version before preparing the release; the release
+script checks that the entry leads the catalog before it bumps versions,
+commits, tags, and pushes.
 
 ## Release sequencing
 
 Release authors should prepare and merge the release-note entry before running
-the release build:
+the release script:
 
 1. Add the target version, date, bilingual summary, and grouped changes.
 2. Run the focused release-note tests and review the generated copy.
 3. Merge the release-note change into `main`.
-4. Run the release script. It verifies that the target version is present
-   before building the embedded Web app.
-5. Let the release script commit, tag, and push the built version.
+4. Run the release script. It verifies that the target version leads the
+   catalog, updates the version files and lockfile, and commits, tags, and
+   pushes the release.
+5. Let the tag-triggered Release workflow build the binaries, publish to npm,
+   and create the GitHub Release.
 
 Do not wait until after the tag is created to add the entry: that would publish
 a build whose About page still ends at the previous version.
@@ -26,7 +28,7 @@ During preparation, the catalog test only requires the current
 release entry to be prepared at the top of the list while the repository still
 has the previous version in `shared/src/buildInfo.ts`. At release time,
 `release-all.ts` performs the stricter check that the requested version is the
-first catalog entry before it starts the build.
+first catalog entry before it prepares the release commit and tag.
 
 ## Source of truth
 

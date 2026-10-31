@@ -76,6 +76,74 @@ function releaseNote(
  * guide and reusable authoring prompt.
  */
 export const RELEASE_NOTES = [
+    releaseNote('0.33.3', '2026-10-29',
+        'Offer the current Claude model presets with 1M context defaults, support local Markdown images in chat, add Android file and text sharing, and default peer messages to Codex-aware auto delivery; improve post-reboot session recovery, Codex thread replay, and Web composer and directory interactions.',
+        '提供当前四款默认 1M 上下文的 Claude 模型预设，在聊天中支持本地 Markdown 图片，增加 Android 文件与文本分享，并将对等消息默认设为感知 Codex 的自动投递；改进主机重启后的会话恢复、Codex 线程重放以及 Web 输入框与目录交互。',
+        [
+            group('Models, messaging, and sharing', '模型、消息与分享', [
+                change('feature', 'Offer the four current Claude model presets (Opus, Fable, Sonnet, and Haiku) with native 1M context defaults, remove obsolete 1M preset rows, and read the effective context window from Claude.', '提供当前四款原生 1M 上下文的 Claude 模型预设（Opus、Fable、Sonnet 和 Haiku），移除过时的 1M 预设行，并从 Claude 读取实际生效的上下文窗口。'),
+                change('feature', 'Render local workspace Markdown images in conversation messages and resolve relative Markdown assets in file previews.', '在对话消息中渲染本地工作区 Markdown 图片，并在文件预览中解析相对路径的 Markdown 资源。'),
+                change('feature', 'Default CLI and MCP peer messages to auto delivery, steering eligible active Codex turns and queueing otherwise.', '将 CLI 和 MCP 对等消息默认设为 auto 投递：对符合条件的活动 Codex 回合执行介入（steer），其余情况加入队列。'),
+                change('feature', 'Share files and text from Android apps directly into HAPI sessions.', '支持从 Android 其他应用直接将文件和文本分享到 HAPI 会话。'),
+            ]),
+            group('Session recovery and Web interactions', '会话恢复与 Web 交互', [
+                change('fix', 'Recover Runner-managed sessions after a host reboot and reduce Codex history replay work during thread recovery.', '支持主机重启后恢复由 Runner 管理的会话，并减少 Codex 线程恢复期间的历史重放开销。'),
+                change('fix', 'Preserve the identity, status, and timing of late Codex command results.', '保留迟到的 Codex 命令结果的标识、状态和耗时信息。'),
+                change('fix', 'Show composer session mentions without waiting for remote file search, and keep the tail of long directory paths visible with touch scrolling.', '无需等待远程文件搜索即可显示输入框会话引用，并通过触摸滚动保持长目录路径末尾可见。'),
+            ]),
+        ]),
+    releaseNote('0.33.2', '2026-10-29',
+        'Add explicit peer message delivery modes and expressive Android settings dialogs; stabilize session ordering by latest user input and hide unneeded single-attachment reorder handles.',
+        '增加明确的对等消息投递模式和更具表现力的 Android 设置选择对话框；按最近用户输入稳定会话排序，并隐藏单个附件不必要的排序手柄。',
+        [
+            group('Peer messaging and Android settings', '对等消息与 Android 设置', [
+                change('feature', 'Add queue and steer delivery modes for CLI and MCP peer messages while respecting each agent’s steering support.', '为 CLI 和 MCP 对等消息增加排队（queue）和介入（steer）投递模式，并遵循各 Agent 的介入能力限制。'),
+                change('feature', 'Render Android theme and language pickers as choice cards with preview swatches and align the Material type scale with shared reading tokens.', '将 Android 主题和语言选择器展示为带预览色块的选择卡片，并将 Material 字体比例与共享阅读字号标记对齐。'),
+            ]),
+            group('Session ordering and composer polish', '会话排序与输入框优化', [
+                change('fix', 'Order sessions deterministically by the latest user input across Web and native clients while preserving manual pins.', '在 Web 和原生客户端中统一按最近一次用户输入对会话进行稳定排序，同时保留手动置顶。'),
+                change('fix', 'Hide attachment reorder handles when the Web composer has only a single attachment.', '当 Web 输入框中只有一个附件时，隐藏附件排序手柄。'),
+            ]),
+        ]),
+    releaseNote('0.33.1', '2026-10-29',
+        'Reject mismatched platform binary packages in the CLI launcher and build release binaries with the macOS 27 darwin-arm64 code-signing fix.',
+        '在 CLI 启动器中拒绝版本不匹配的平台二进制包，并使用带 macOS 27 darwin-arm64 代码签名修复的构建工具链构建发行版二进制文件。',
+        [
+            group('CLI launcher and platform binaries', 'CLI 启动器与平台二进制包', [
+                change('fix', 'Refuse to run a mismatched @twsxtd/hapi-<platform>-<arch> binary after an incomplete package upgrade and print clean reinstall commands.', '当包升级不完整导致 @twsxtd/hapi-<platform>-<arch> 版本不匹配时拒绝启动旧二进制文件，并输出完整的重装命令。'),
+                change('fix', 'Pin the release toolchain to Bun 1.4.4 so darwin-arm64 binaries include the code-signing fix required on macOS 27.', '将发行版构建工具链固定为 Bun 1.4.4，使 darwin-arm64 二进制文件包含 macOS 27 所需的代码签名修复。'),
+            ]),
+        ]),
+    releaseNote('0.33.0', '2026-10-29',
+        'Add session windows, title locks and fallback generation, hapi usage turn reporting, OpenCode history import, Claude compaction cards, and major iOS and Android upgrades; improve file previews, session navigation, and multi-agent reliability.',
+        '增加独立会话窗口、标题锁定与回退生成、hapi usage 回合统计、OpenCode 历史导入、Claude 压缩摘要卡片以及多项 iOS 与 Android 重要升级；改进文件预览、会话导航和多 Agent 稳定性。',
+        [
+            group('Sessions, usage, and agent workflows', '会话、用量与 Agent 流程', [
+                change('feature', 'Open a session in a separate window, show the project in the session header, and persist and send voice input across session navigation.', '支持在独立窗口中打开会话、在会话头部显示所属项目，并在切换会话时保留和发送语音输入。'),
+                change('feature', 'Add per-session title locks and generate fallback session titles after the first completed turn.', '增加按会话锁定标题的开关，并在首个回合完成后自动生成后备会话标题。'),
+                change('feature', 'Persist agent turn durations and wait times in the Hub and report them through hapi usage and GET /api/activity.', '在 Hub 中持久化 Agent 回合时长与等待时间，并通过 hapi usage 和 GET /api/activity 提供统计报告。'),
+                change('feature', 'Allow historical Codex forks while a turn is running, import local OpenCode session history, and show Claude context compaction as a summary card with token delta.', '支持在 Codex 回合运行期间从历史节点发起 Fork，导入本地 OpenCode 会话历史，并将 Claude 上下文压缩展示为带 Token 变化量的摘要卡片。'),
+            ]),
+            group('iOS and Android clients', 'iOS 与 Android 客户端', [
+                change('feature', 'Add iOS session search, an unread-only filter, Mark All as Read, and session rename, delete, and reopen actions.', '在 iOS 端增加会话搜索、仅看未读筛选、全部标为已读，以及会话重命名、删除和重新打开操作。'),
+                change('feature', 'Support model selection for every agent when creating or configuring an iOS session, plus composer slash-command suggestions and scheduled sends.', '在 iOS 新建会话和会话设置中支持为所有 Agent 选择模型，并增加输入框斜杠命令建议与定时发送。'),
+                change('feature', 'Add iOS conversation fork, rewind, and JSON export actions, route notification taps to the owning Hub, and adapt split navigation for foldable iPhone Duo.', '在 iOS 端增加对话 Fork、rewind 和 JSON 导出操作，点击通知时自动切换到所属 Hub，并为折叠屏 iPhone Duo 适配分栏导航。'),
+                change('feature', 'Organize Android settings into a hub with category subpages.', '将 Android 设置重构为带分类子页面的设置中心。'),
+            ]),
+            group('Web previews, navigation, and composer fixes', 'Web 预览、导航与输入框修复', [
+                change('fix', 'Keep inactive file previews available through the Runner, resolve relative Markdown links and images, align preview scrollbars, and make long file errors expandable.', '通过 Runner 保持非活动会话的文件预览可用，解析相对路径的 Markdown 链接和图片，对齐预览滚动条，并支持展开较长的文件错误信息。'),
+                change('fix', 'Preserve shared turn layouts and generated file downloads, refine the fullscreen image toolbar, keep mobile code gutters clear, and consolidate tool-card display settings.', '保留分享回合的布局与生成文件下载，优化全屏图片预览工具栏，保持移动端代码行号栏清晰，并整合工具卡片显示设置。'),
+                change('fix', 'Exclude in-progress sessions from unread counts, prevent right-click navigation and live-reorder misclicks, allow directory collapse during search, and keep single-machine health visible.', '将进行中的会话排除在未读计数之外，防止右键触发会话跳转和实时重排误触，支持在搜索时折叠目录，并在单设备布局中保持设备健康状态可见。'),
+                change('fix', 'Dismiss composer settings before Escape aborts a turn, ellipsize long session mention pills, keep tail following during layout scroll, and show Codex cached-input share in response metadata.', '按 Escape 时先关闭输入框设置面板再中止回合，对过长的会话引用胶囊进行省略显示，在布局变化引起滚动时继续跟随底部，并在响应元数据中显示 Codex 缓存输入占比。'),
+            ]),
+            group('Agent, Runner, and Hub reliability', 'Agent、Runner 与 Hub 稳定性', [
+                change('fix', 'Apply mid-turn Claude permission-mode switches, announce automatic compaction, report local-mode thinking, follow worktree transcripts, and use native ai-title for remote titles.', '支持 Claude 回合中切换权限模式并提示被拒绝的模式、开始自动压缩时发出提示、上报本地模式思考状态、追踪迁移到 Git worktree 的 transcript，并使用原生 ai-title 作为远程会话标题。'),
+                change('fix', 'Gate Codex history actions until the native thread is ready, drop unsupported safe-yolo mode, reuse live model catalogs, speed up targeted imports, and confirm archived roots.', '在 Codex 原生线程就绪前门控历史操作、移除不支持的 safe-yolo 模式、复用实时模型目录、加快定向会话导入，并确认已归档根会话状态。'),
+                change('fix', 'Relaunch live Cursor sessions in place when switching to Auto, stop acknowledging soft steers canceled by an abort, and render OpenCode file tools through shared views.', '将活动 Cursor 会话切换为 Auto 时原地重启、不再确认被中止取消的软介入（soft steer），并通过共享视图渲染 OpenCode 文件工具调用。'),
+                change('fix', 'Discover DeepSeek Harness skills from its home directory, surface Antigravity failure reasons, flush idle ACP text, synthesize cards for dropped permission requests, and release local-mode stdin cleanly.', '从 DeepSeek Harness 主目录发现技能、显示 Antigravity 失败原因、在空闲间隙刷新缓冲的 ACP 文本、为遗漏的权限请求生成可回答卡片，并在进入本地模式前释放标准输入。'),
+                change('fix', 'Distinguish accepted vs. consumed peer messages, stop routine state updates from bumping session updatedAt, bound SSE writes and notify-cause ingest, and speed up archive shutdown.', '区分对等消息的已接收与已消费状态、避免常规状态更新刷新会话 updatedAt、限制阻塞的 SSE 写入与通知成因读取范围，并加快归档关闭流程。'),
+            ]),
+        ]),
     releaseNote('0.31.3', '2026-10-27',
         'Maintenance release; the official release notes list no user-facing functional changes.',
         '维护版本；官方 Release 未列出面向用户的功能变更。',
