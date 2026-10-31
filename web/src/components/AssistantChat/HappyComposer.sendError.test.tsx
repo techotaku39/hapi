@@ -15,6 +15,8 @@ import {
 } from '@/lib/composer-attachment-drafts'
 import { clearDraft, getDraft, saveDraft } from '@/lib/composer-drafts'
 import { getComposerDraftRevision, resetComposerSendStateForTests } from '@/lib/composer-send-state'
+import { appendFileReferenceToComposerDraft } from '@/lib/file-composer'
+import { appendTerminalExcerptToComposerDraft } from '@/lib/terminal-composer'
 
 vi.mock('@/lib/clearDraftsAfterSend', async () => {
     const actual = await vi.importActual<typeof import('@/lib/clearDraftsAfterSend')>('@/lib/clearDraftsAfterSend')
@@ -1011,6 +1013,49 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.remount())
 
         await waitFor(() => expect(input()).toHaveValue('foo'))
+    })
+
+    it('preserves same-text drafts created from file and terminal routes before a send settlement is consumed on remount', async () => {
+        runtime.useRealDraftLifecycle = true
+        const fileSessionId = 'session-file-route-draft'
+        const terminalSessionId = 'session-terminal-route-draft'
+        const terminalExcerpt = { kind: 'selection' as const, text: 'npm test' }
+        const terminalText = '### Terminal selection\n\n```text\nnpm test\n```'
+
+        try {
+            const fileControls = renderComposer('`src/foo.ts`', null, false, fileSessionId)
+            await waitFor(() => expect(input()).toHaveValue('`src/foo.ts`'))
+            send()
+            act(() => fileControls.current!.acceptSend())
+
+            act(() => {
+                fileControls.current!.remount()
+                appendFileReferenceToComposerDraft(fileSessionId, 'src/foo.ts')
+                fileControls.current!.settleSend()
+            })
+
+            await waitFor(() => expect(input()).toHaveValue('`src/foo.ts`'))
+            expect(getDraft(fileSessionId)).toBe('`src/foo.ts`')
+            cleanup()
+
+            const terminalControls = renderComposer(terminalText, null, false, terminalSessionId)
+            await waitFor(() => expect(input()).toHaveValue(terminalText))
+            send()
+            act(() => terminalControls.current!.acceptSend())
+
+            act(() => {
+                terminalControls.current!.remount()
+                appendTerminalExcerptToComposerDraft(terminalSessionId, terminalExcerpt)
+                terminalControls.current!.settleSend()
+            })
+
+            await waitFor(() => expect(input()).toHaveValue(terminalText))
+            expect(getDraft(terminalSessionId)).toBe(terminalText)
+        } finally {
+            runtime.useRealDraftLifecycle = false
+            clearDraft(fileSessionId)
+            clearDraft(terminalSessionId)
+        }
     })
 
     it('does not implicitly restore after a keyed remount receives a new draft interaction', async () => {
