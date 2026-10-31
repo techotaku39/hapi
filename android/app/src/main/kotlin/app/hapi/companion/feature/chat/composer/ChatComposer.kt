@@ -40,6 +40,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -92,6 +96,17 @@ fun ChatComposer(
     onDictationToggle: () -> Unit = {},
     onDictationCancel: () -> Unit = {},
 ) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // Do not replay an old focus intent when returning from an inspector.
+    var handledFocusRequest by remember { mutableLongStateOf(state.focusRequest) }
+    LaunchedEffect(state.focusRequest) {
+        if (state.focusRequest != handledFocusRequest) {
+            handledFocusRequest = state.focusRequest
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
     Surface(color = MaterialTheme.colorScheme.surface, modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
             if (slashSuggestions.isNotEmpty()) {
@@ -110,6 +125,10 @@ fun ChatComposer(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column {
+                    if (state.isImportingShare) {
+                        Text(stringResource(R.string.share_importing), style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                    }
                     if (attachments.isNotEmpty()) {
                         LazyRow(
                             modifier = Modifier
@@ -136,6 +155,7 @@ fun ChatComposer(
                     }
                     BasicTextField(
                         value = state.text,
+                        enabled = !state.isImportingShare,
                         onValueChange = onTextChange,
                         textStyle = app.hapi.companion.ui.theme.HapiTypography.body.copy(
                             color = MaterialTheme.colorScheme.onSurface,
@@ -143,6 +163,8 @@ fun ChatComposer(
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         maxLines = 6,
                         modifier = Modifier
+                            .focusRequester(focusRequester)
+                            .testTag("chat-composer-input")
                             .fillMaxWidth()
                             .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
                         decorationBox = { inner ->
@@ -488,9 +510,9 @@ private fun PrimaryActionButton(
     // allows an attachments-only send (wire: text or attachments required).
     val attachmentsBusy = attachments.any { it.status != ComposerAttachmentStatus.Ready }
     val attachmentsReady = attachments.isNotEmpty() && !attachmentsBusy
-    val canSubmit = (hasText || attachmentsReady) && !attachmentsBusy && !state.isSending
+    val canSubmit = (hasText || attachmentsReady) && !attachmentsBusy && !state.isSending && !state.isImportingShare
     val action = when {
-        state.isSending -> ComposerPrimaryAction.Sending
+        state.isSending || state.isImportingShare -> ComposerPrimaryAction.Sending
         state.canSteer && !hasDraft -> ComposerPrimaryAction.Stop
         else -> ComposerPrimaryAction.Send
     }
