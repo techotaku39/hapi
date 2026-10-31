@@ -730,7 +730,7 @@ export class SharedCodexRoot {
             this.currentTurn = undefined;
             this.latestTurn = lastId ? { id: lastId, status: string(last.status) ?? 'unknown', planId: planProposalForTurn(this.threadId, last) } : undefined;
             this.interrupted = last.status === 'interrupted';
-            await this.projection.history(thread);
+            await this.projection.history(thread, { replayTranscript: false });
             if (await this.session.flush() === false) throw new Error('Hub history reconciliation acknowledgement is unavailable');
         });
         this.deferredRequests = [];

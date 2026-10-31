@@ -81,6 +81,7 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
     const updateState = vi.fn((fn: (value: AgentState) => AgentState) => { state = fn(state); });
     const rpc = new Map<string, (raw: unknown) => Promise<unknown>>();
     const send = vi.fn();
+    const sendUserMessage = vi.fn();
     const consumed = vi.fn();
     const uncertain = vi.fn();
     const hubArchivedListeners: Array<() => void> = [];
@@ -96,7 +97,7 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
         },
         rpcHandlerManager: { registerHandler: (name: string, handler: (raw: unknown) => Promise<unknown>) => rpc.set(name, handler) },
         sendSessionEvent() {}, sendAgentMessage: send, emitSessionReady() {},
-        sendUserMessage() {}, emitMessagesConsumed: consumed, emitSteerIndeterminate: uncertain, syncNativeQueuedMessage() {},
+        sendUserMessage, emitMessagesConsumed: consumed, emitSteerIndeterminate: uncertain, syncNativeQueuedMessage() {},
         sendSessionDeath() {}, async flush() {}, close() {}
     } as unknown as ApiSessionClient;
     const end = opts?.end ?? (async () => { throw new Error('Unexpected root archive'); });
@@ -118,7 +119,7 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
         responses: Array<{ id: string | number; result: unknown }>;
     };
     return {
-        root, native, rpc, send, consumed, uncertain, metadata: () => metadata, state: () => state, updateState,
+        root, native, rpc, send, sendUserMessage, consumed, uncertain, metadata: () => metadata, state: () => state, updateState,
         drain: () => (root as unknown as { notifications: Promise<void> }).notifications,
         reconnect: () => reconnect?.(),
         emitHubArchived: () => { for (const listener of hubArchivedListeners) listener(); },
@@ -552,18 +553,35 @@ describe('shared conversation rewind', () => {
             .toMatchObject({ success: true });
     });
 
-    it('succeeds with multiple turns when lazy history is enabled', async () => {
+    it('succeeds with multiple turns when lazy history is enabled and does not append retained history to Hub', async () => {
         vi.stubEnv('HAPI_CODEX_LAZY_HISTORY_IDS', 'thread');
         try {
             const f = await history();
+            f.sendUserMessage.mockClear();
+
+            // 第一次 rewind：rewind at 'two'
             const result = await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }) as {
                 success: boolean; rewindToken: string; truncateFromLocalId: string; error?: string;
             };
             expect(result.error).toBeUndefined();
             expect(result).toMatchObject({ success: true, truncateFromLocalId: 'two', rewindToken: expect.any(String) });
             expect(f.native.thread.turns.map(t => t.id)).toEqual(['one']);
+
             await f.rpc.get('complete-conversation-rewind')!({ rewindToken: result.rewindToken });
             expect(f.metadata().conversationHistoryTurns).toEqual({ one: 'one' });
+            // 关键断言：保留的历史 Turn 1 绝不能再次通过 sendUserMessage 追加到 Hub
+            expect(f.sendUserMessage).not.toHaveBeenCalled();
+
+            // 连续第二次 rewind：对剩下的保留 Turn 1 ('one') 执行 rewind
+            const secondResult = await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'one' }) as {
+                success: boolean; rewindToken: string; truncateFromLocalId: string; error?: string;
+            };
+            expect(secondResult.error).toBeUndefined();
+            expect(secondResult).toMatchObject({ success: true, truncateFromLocalId: 'one', rewindToken: expect.any(String) });
+            expect(f.native.thread.turns).toHaveLength(0);
+            await f.rpc.get('complete-conversation-rewind')!({ rewindToken: secondResult.rewindToken });
+            expect(f.metadata().conversationHistoryTurns).toEqual({});
+            expect(f.sendUserMessage).not.toHaveBeenCalled();
         } finally {
             vi.unstubAllEnvs();
         }
