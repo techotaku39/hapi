@@ -41,6 +41,53 @@ function unavailable(command: string) {
 }
 
 describe('getHapiRunnerProcessIdentity on Windows', () => {
+    it.each(['', '[]', '{}', '{broken', JSON.stringify([{ ProcessId: 100, CreationDate: 'generation' }]),
+        JSON.stringify([{ ProcessId: process.pid }, { ProcessId: process.pid }]),
+        JSON.stringify([{ ProcessId: process.pid }, { ProcessId: 1.5 }]),
+        JSON.stringify([{ ProcessId: process.pid }, { ProcessId: -1 }])])(
+        'rejects an unverifiable complete process-generation snapshot: %s', async (stdout) => {
+            const { readWindowsProcessStartMarkers } = await import('./process')
+            spawnSyncMock.mockReturnValue(completed(stdout))
+            expect(readWindowsProcessStartMarkers()).toBeNull()
+        }
+    )
+
+    it('keeps present processes with unknown creation times distinct from absent processes', async () => {
+        const { readWindowsProcessStartMarkers } = await import('./process')
+        spawnSyncMock.mockReturnValue(completed(JSON.stringify([
+            { ProcessId: process.pid, CreationDate: 'scanner-generation' },
+            { ProcessId: 100, CreationDate: null }
+        ])))
+        const snapshot = readWindowsProcessStartMarkers()!
+        expect(snapshot.has(100)).toBe(true)
+        expect(snapshot.get(100)).toBeNull()
+        expect(snapshot.has(200)).toBe(false)
+    })
+
+    it('does not use stdout as a complete snapshot after a failed OS query', async () => {
+        const { readWindowsProcessStartMarkers } = await import('./process')
+        const stdout = JSON.stringify([{ ProcessId: process.pid, CreationDate: 'scanner-generation' }])
+        spawnSyncMock.mockReturnValue(completed(stdout, 1))
+        expect(readWindowsProcessStartMarkers()).toBeNull()
+        spawnSyncMock.mockReturnValue({ ...completed(stdout), error: new Error('query failed') })
+        expect(readWindowsProcessStartMarkers()).toBeNull()
+    })
+    it('reads the generation directly from CIM without a redundant tasklist probe', async () => {
+        const { getProcessStartMarker } = await import('./process')
+        spawnSyncMock.mockImplementation((command: string) => command === 'powershell'
+            ? completed('generation-100') : completed('hapi.exe 100 Console'))
+        expect(getProcessStartMarker(100)).toBe('generation-100')
+        expect(spawnSyncMock.mock.calls.filter(call => call[0] === 'tasklist')).toHaveLength(0)
+    })
+
+    it('keeps a missing CIM generation unknown and rejects invalid PIDs without probing', async () => {
+        const { getProcessStartMarker } = await import('./process')
+        spawnSyncMock.mockReturnValue(completed(''))
+        expect(getProcessStartMarker(100)).toBeNull()
+        spawnSyncMock.mockClear()
+        for (const pid of [0, -1, 1.5, NaN, Infinity]) expect(getProcessStartMarker(pid)).toBeNull()
+        expect(spawnSyncMock).not.toHaveBeenCalled()
+    })
     beforeAll(() => {
         if (!originalPlatformDescriptor?.configurable) {
             throw new Error('process.platform is not configurable in this runtime')
@@ -179,6 +226,50 @@ describe('getHapiRunnerProcessIdentity on Windows', () => {
 })
 
 describe('killProcess on Windows (orphanReap / stopSession)', () => {
+    it('includes slow liveness probes in the graceful shutdown deadline', async () => {
+        let graceStarted: number | undefined
+        let alive = true
+        let forcedAt: number | undefined
+        spawnSyncMock.mockImplementation((command: string, args: string[] = []) => {
+            if (command === 'tasklist') {
+                // A synchronous OS query consumes real time even though it is
+                // not part of the timer used to yield between observations.
+                vi.setSystemTime(Date.now() + 400)
+                return completed(alive ? 'hapi.exe 7788 Console' : 'INFO: No tasks')
+            }
+            if (command === 'taskkill' && args.includes('/F')) {
+                forcedAt = Date.now()
+                alive = false
+            } else if (command === 'taskkill') {
+                graceStarted = Date.now()
+            }
+            return completed('')
+        })
+        const stopped = killProcess(7788)
+        await vi.runAllTimersAsync()
+        await expect(stopped).resolves.toBe(true)
+        expect(forcedAt).toBeDefined()
+        expect(graceStarted).toBeDefined()
+        // The two-second wait plus the final observation and taskkill's own
+        // liveness recheck, each taking 400ms in this scenario.
+        expect(forcedAt! - graceStarted!).toBeLessThanOrEqual(2_800)
+    })
+
+    it('bounds slow probes after forced shutdown without treating a live process as stopped', async () => {
+        const started = Date.now()
+        spawnSyncMock.mockImplementation((command: string) => {
+            if (command === 'tasklist') {
+                vi.setSystemTime(Date.now() + 400)
+                return completed('hapi.exe 7788 Console')
+            }
+            return completed('')
+        })
+        const stopped = killProcess(7788, true)
+        await vi.runAllTimersAsync()
+        await expect(stopped).resolves.toBe(false)
+        expect(Date.now() - started).toBeLessThanOrEqual(3_200)
+    })
+
     beforeAll(() => {
         if (!originalPlatformDescriptor?.configurable) {
             throw new Error('process.platform is not configurable in this runtime')
@@ -340,8 +431,8 @@ describe('killProcess on Windows (orphanReap / stopSession)', () => {
         // Assert generated command text, not mocked stdout (mocks never parse PS).
         const { windowsProcessTreeCimCommand } = await import('./process')
         const cmd = windowsProcessTreeCimCommand(4242)
-        expect(cmd).toContain('$root=4242')
-        expect(cmd).toContain('ParentProcessId=$p')
+        expect(cmd).toContain('$root=[long]4242')
+        expect(cmd).toContain('ParentProcessId')
         // Statements must be on separate lines — spaces between `$x=@{}` tokens fail.
         expect(cmd).toContain('\n$seen=@{}')
         expect(cmd).toContain('\n$bfs=@()')

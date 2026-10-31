@@ -33,19 +33,22 @@ export function runtimeAlive(record: CodexRuntimeRecord): boolean {
     return isProcessAlive(record.pid) && getProcessStartMarker(record.pid) === record.marker;
 }
 
-function generationMayBeAlive(pid: number, marker?: string): boolean {
+function generationMayBeAlive(pid: number, marker?: string, snapshot?: ReadonlyMap<number, string | null> | WindowsProcessTable | null): boolean {
+    if (snapshot !== undefined) {
+        if (snapshot === null) return true;
+        if (!snapshot.has(pid)) return false;
+        const entry = snapshot.get(pid);
+        const actual = typeof entry === 'object' && entry !== null ? entry.marker : entry;
+        return !actual || !marker || actual === marker;
+    }
     if (!isProcessAlive(pid)) return false;
     const actual = getProcessStartMarker(pid);
     // A failed OS probe is not evidence that the engine exited.
     return !actual || !marker || actual === marker;
 }
-export function runtimeMayBeAlive(owner: CodexRuntimeRecord, table?: WindowsProcessTable | null): boolean {
-    if (table !== undefined) {
-        return windowsGenerationMayBeAlive(table, owner.pid, owner.marker)
-            || Boolean(owner.serverPid && windowsGenerationMayBeAlive(table, owner.serverPid, owner.serverMarker));
-    }
-    return generationMayBeAlive(owner.pid, owner.marker)
-        || Boolean(owner.serverPid && generationMayBeAlive(owner.serverPid, owner.serverMarker));
+export function runtimeMayBeAlive(owner: CodexRuntimeRecord, snapshot?: ReadonlyMap<number, string | null> | WindowsProcessTable | null): boolean {
+    return generationMayBeAlive(owner.pid, owner.marker, snapshot)
+        || Boolean(owner.serverPid && generationMayBeAlive(owner.serverPid, owner.serverMarker, snapshot));
 }
 
 export async function readRuntimes(options?: { strict?: boolean }): Promise<CodexRuntimeRecord[]> {
