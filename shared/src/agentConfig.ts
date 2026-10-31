@@ -57,7 +57,11 @@ function fields(...fields: AgentConfigFieldDescriptor[]): AgentConfigFieldDescri
 }
 
 const BUILTIN_DESCRIPTORS: Record<AgentFlavor, AgentConfigFieldDescriptor[]> = {
-    agy: fields({ ...MODEL, optionSource: 'machine' }, PERMISSION),
+    agy: fields(
+        { ...MODEL, optionSource: 'machine' },
+        { id: 'effort', section: 'effort', kind: 'select', optionSource: 'model', availability: 'both' },
+        PERMISSION
+    ),
     claude: fields(MODEL, { id: 'effort', section: 'effort', kind: 'select', optionSource: 'static', availability: 'both' }, PERMISSION),
     codex: fields(
         { ...MODEL, optionSource: 'machine' },
@@ -66,6 +70,7 @@ const BUILTIN_DESCRIPTORS: Record<AgentFlavor, AgentConfigFieldDescriptor[]> = {
         { id: 'serviceTier', section: 'settings', kind: 'select', optionSource: 'model', availability: 'both' },
         { id: 'collaborationMode', section: 'settings', kind: 'select', optionSource: 'static', availability: 'both' }
     ),
+    dsh: fields(MANAGED_PERMISSION),
     copilot: fields({ ...MODEL, optionSource: 'directory' }, PERMISSION),
     cursor: fields({ id: 'model', section: 'model', kind: 'dependent-select', optionSource: 'machine', availability: 'both' }, PERMISSION),
     gemini: fields(MODEL, PERMISSION),
@@ -74,7 +79,7 @@ const BUILTIN_DESCRIPTORS: Record<AgentFlavor, AgentConfigFieldDescriptor[]> = {
         { id: 'effort', section: 'effort', kind: 'select', optionSource: 'model', availability: 'both' },
         PERMISSION
     ),
-    kimi: fields(MODEL, PERMISSION),
+    kimi: fields({ ...MODEL, optionSource: 'directory' }, PERMISSION),
     opencode: fields(
         { ...MODEL, optionSource: 'directory' },
         { id: 'effort', section: 'effort', kind: 'select', optionSource: 'model', availability: 'both' },
@@ -109,6 +114,7 @@ export function resolveHapiYoloPermissionMode(flavor: AgentFlavor): PermissionMo
         case 'kimi':
         case 'opencode':
             return 'yolo'
+        case 'dsh':
         case 'pi':
             return null
     }

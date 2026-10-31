@@ -40,6 +40,10 @@ describe('getPermissionModesForFlavor', () => {
         ])
     })
 
+    test("returns no HAPI mode selector for DSH's server-owned permission policy", () => {
+        expect(getPermissionModesForFlavor('dsh')).toEqual([])
+    })
+
     test("returns [] for flavor 'pi' (RPC mode has no runtime permission switching)", () => {
         expect(getPermissionModesForFlavor('pi')).toEqual([])
     })
@@ -72,6 +76,8 @@ describe('isPermissionModeAllowedForFlavor', () => {
         expect(isPermissionModeAllowedForFlavor('acceptEdits', 'grok')).toBe(false)
         expect(isPermissionModeAllowedForFlavor('auto', 'grok')).toBe(true)
         expect(isPermissionModeAllowedForFlavor('yolo', 'grok')).toBe(false)
+        expect(isPermissionModeAllowedForFlavor('read-only', 'dsh')).toBe(false)
+        expect(isPermissionModeAllowedForFlavor('plan', 'dsh')).toBe(false)
     })
 
     test("no mode is allowed for pi", () => {
@@ -88,10 +94,16 @@ describe('isPermissionModeAllowedForFlavor', () => {
 
     test("cursor includes autoReview", () => {
         expect(getPermissionModesForFlavor('cursor')).toContain('autoReview')
-        expect(getPermissionModeLabel('autoReview')).toBe('Auto-review')
+        expect(getPermissionModeLabel('autoReview')).toBe('Auto')
         expect(getPermissionModeTone('autoReview')).toBe('warning')
         expect(isPermissionModeAllowedForFlavor('autoReview', 'cursor')).toBe(true)
         expect(isPermissionModeAllowedForFlavor('autoReview', 'claude')).toBe(false)
+    })
+
+    test("codex offers autoReview at launch and mid-session", () => {
+        expect(getPermissionModesForFlavor('codex')).toEqual(['default', 'read-only', 'autoReview', 'yolo'])
+        expect(isPermissionModeAllowedForFlavor('autoReview', 'codex')).toBe(true)
+        expect(isPermissionModeAllowedForFlavor('autoReview', 'gemini')).toBe(false)
     })
 })
 

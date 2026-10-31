@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { reduceChatBlocks } from './reducer'
+import { reconcileChatBlocks } from './reconcile'
 import { normalizeDecryptedMessage } from './normalize'
 import type { NormalizedMessage } from './types'
 import type { DecryptedMessage } from '@/types/api'
@@ -438,5 +439,204 @@ describe('reduceChatBlocks', () => {
         const block = reduced.blocks.find(b => b.kind === 'tool-call' && b.id === 'ask-pending')
         expect(block).toBeDefined()
         expect(block?.kind === 'tool-call' ? block.tool.permission?.status : null).toBe('pending')
+    })
+
+    it('synthesizes a card for a pending permission whose sidechain tool_use was dropped by the tracer', () => {
+        // Regression (hapi#1073): background subagents arrive with no
+        // parentToolUseId and no prompt-holding sidechain root, so the tracer
+        // cannot attribute the chain to its parent Task and drops it as
+        // orphans. The raw transcript still contains the tool_use id, which
+        // used to suppress the orphan fallback — leaving the request pending
+        // in agentState with no answerable card anywhere.
+        const messages: NormalizedMessage[] = [
+            userMessage('u1', 'hello', 1_700_000_000_000),
+            {
+                id: 'agent-tool', localId: null, createdAt: 1_700_000_000_100, role: 'agent', isSidechain: false,
+                content: [{
+                    type: 'tool-call', id: 'toolu-task-1', name: 'Agent',
+                    input: { prompt: 'research a topic', subagent_type: 'general-purpose' },
+                    description: null, uuid: 'root-uuid-1', parentUUID: null
+                }]
+            },
+            {
+                id: 'sidechain-call', localId: null, createdAt: 1_700_000_000_200, role: 'agent', isSidechain: true,
+                parentToolUseId: null,
+                content: [{
+                    type: 'tool-call', id: 'toolu-sub-1', name: 'WebFetch',
+                    input: { url: 'https://example.com', prompt: 'summarize' },
+                    description: null, uuid: 'side-uuid-2', parentUUID: 'side-uuid-1'
+                }]
+            }
+        ]
+        const agentState = {
+            requests: {
+                'toolu-sub-1': {
+                    tool: 'WebFetch',
+                    arguments: { url: 'https://example.com', prompt: 'summarize' },
+                    createdAt: 1_700_000_000_200
+                }
+            },
+            completedRequests: {}
+        } as unknown as AgentState
+
+        const reduced = reduceChatBlocks(messages, agentState)
+        const block = reduced.blocks.find(b => b.kind === 'tool-call' && b.id === 'toolu-sub-1')
+        expect(block).toBeDefined()
+        expect(block?.kind === 'tool-call' ? block.tool.permission?.status : null).toBe('pending')
+    })
+
+    it('does not duplicate a pending permission card when its sidechain tool_use renders nested', () => {
+        const messages: NormalizedMessage[] = [
+            {
+                id: 'agent-tool', localId: null, createdAt: 1_700_000_000_100, role: 'agent', isSidechain: false,
+                content: [{
+                    type: 'tool-call', id: 'toolu-task-1', name: 'Agent',
+                    input: { prompt: 'inspect the code', subagent_type: 'general-purpose' },
+                    description: null, uuid: 'root-uuid-1', parentUUID: null
+                }]
+            },
+            {
+                id: 'sidechain-call', localId: null, createdAt: 1_700_000_000_200, role: 'agent', isSidechain: true,
+                parentToolUseId: 'toolu-task-1',
+                content: [{
+                    type: 'tool-call', id: 'toolu-sub-2', name: 'WebFetch',
+                    input: { url: 'https://example.com', prompt: 'summarize' },
+                    description: null, uuid: 'side-uuid-1', parentUUID: null
+                }]
+            }
+        ]
+        const agentState = {
+            requests: {
+                'toolu-sub-2': {
+                    tool: 'WebFetch',
+                    arguments: { url: 'https://example.com', prompt: 'summarize' },
+                    createdAt: 1_700_000_000_200
+                }
+            },
+            completedRequests: {}
+        } as unknown as AgentState
+
+        const reduced = reduceChatBlocks(messages, agentState)
+
+        const countBlocksWithId = (list: typeof reduced.blocks, id: string): number =>
+            list.reduce((count, block) => {
+                const self = block.kind === 'tool-call' && block.id === id ? 1 : 0
+                const nested = block.kind === 'tool-call' ? countBlocksWithId(block.children, id) : 0
+                return count + self + nested
+            }, 0)
+        expect(countBlocksWithId(reduced.blocks, 'toolu-sub-2')).toBe(1)
+
+        // The single card must be nested under the Agent card, not a root-level orphan.
+        const agentCard = reduced.blocks.find(b => b.kind === 'tool-call' && b.id === 'toolu-task-1')
+        expect(
+            agentCard?.kind === 'tool-call'
+                ? agentCard.children.some(c => c.kind === 'tool-call' && c.id === 'toolu-sub-2')
+                : false
+        ).toBe(true)
+        expect(reduced.blocks.some(b => b.kind === 'tool-call' && b.id === 'toolu-sub-2')).toBe(false)
+    })
+
+    it('attaches a result summary to the first block in the preceding contiguous assistant group', () => {
+        const summary = {
+            usage: { input_tokens: 100, output_tokens: 20 },
+            modelUsage: { 'claude-opus-5': { inputTokens: 100, outputTokens: 20 } },
+            totalCostUsd: 0.02,
+            numTurns: 2,
+            durationMs: 1500
+        }
+        const messages: NormalizedMessage[] = [
+            userMessage('u1', 'hello', 1),
+            {
+                id: 'a1', localId: 'turn-1', createdAt: 2, role: 'agent', isSidechain: false,
+                content: [{ type: 'text', text: 'thinking', uuid: 'a1', parentUUID: null }]
+            },
+            {
+                id: 'a2', localId: 'turn-2', createdAt: 3, role: 'agent', isSidechain: false,
+                content: [{ type: 'text', text: 'answer', uuid: 'a2', parentUUID: 'a1' }]
+            },
+            {
+                id: 'summary', localId: null, createdAt: 4, role: 'event', isSidechain: false,
+                content: { type: 'turn-summary', summary } as any
+            }
+        ]
+
+        const reduced = reduceChatBlocks(messages, null)
+        const firstAssistant = reduced.blocks.find(block => block.kind === 'agent-text' && block.id.startsWith('a1'))
+        expect((firstAssistant as any)?.roundSummary).toEqual(summary)
+        const secondAssistant = reduced.blocks.find(block => block.kind === 'agent-text' && block.id.startsWith('a2'))
+        expect((secondAssistant as any)?.roundSummary).toBeUndefined()
+    })
+
+    it('keeps a sidechain result summary on the subagent card instead of the next root response', () => {
+        const summary = {
+            modelUsage: { 'claude-opus-5': { inputTokens: 10, outputTokens: 2 } },
+            totalCostUsd: 0.01,
+            numTurns: 1,
+            durationMs: 800
+        }
+        const messages: NormalizedMessage[] = [
+            {
+                id: 'agent-tool', localId: null, createdAt: 1, role: 'agent', isSidechain: false,
+                content: [{
+                    type: 'tool-call', id: 'toolu-agent-1', name: 'Agent',
+                    input: { prompt: 'inspect the code', subagent_type: 'general-purpose' },
+                    description: null, uuid: 'root-1', parentUUID: null
+                }]
+            },
+            {
+                id: 'sidechain-answer', localId: null, createdAt: 2, role: 'agent', isSidechain: true,
+                parentToolUseId: 'toolu-agent-1',
+                content: [{ type: 'text', text: 'subagent answer', uuid: 'side-1', parentUUID: null }]
+            },
+            {
+                id: 'sidechain-summary', localId: null, createdAt: 3, role: 'event', isSidechain: true,
+                parentToolUseId: 'toolu-agent-1',
+                content: { type: 'turn-summary', summary } as any
+            },
+            {
+                id: 'root-answer', localId: null, createdAt: 4, role: 'agent', isSidechain: false,
+                content: [{ type: 'text', text: 'root answer', uuid: 'root-2', parentUUID: 'root-1' }]
+            }
+        ]
+
+        const reduced = reduceChatBlocks(messages, null)
+        const agentCard = reduced.blocks.find(block => block.kind === 'tool-call')
+        const sidechainAnswer = agentCard?.kind === 'tool-call'
+            ? agentCard.children.find(block => block.kind === 'agent-text')
+            : undefined
+        const rootAnswer = reduced.blocks.find(block => block.kind === 'agent-text')
+
+        expect(sidechainAnswer?.kind === 'agent-text' ? sidechainAnswer.roundSummary : undefined).toEqual(summary)
+        expect(rootAnswer?.kind === 'agent-text' ? rootAnswer.roundSummary : undefined).toBeUndefined()
+    })
+
+    it('keeps a late result summary when reconciling an existing assistant block', () => {
+        const summary = {
+            usage: { input_tokens: 10, output_tokens: 2 },
+            modelUsage: { 'claude-haiku-4-5': { inputTokens: 10, outputTokens: 2 } },
+            totalCostUsd: 0.02,
+            numTurns: 1,
+            durationMs: 1200
+        }
+        const baseMessages: NormalizedMessage[] = [
+            userMessage('u1', 'hello', 1),
+            {
+                id: 'a1', localId: 'turn-1', createdAt: 2, role: 'agent', isSidechain: false,
+                content: [{ type: 'text', text: 'answer', uuid: 'a1', parentUUID: null }]
+            }
+        ]
+        const before = reduceChatBlocks(baseMessages, null)
+        const previousById = new Map(before.blocks.map(block => [block.id, block]))
+        const after = reduceChatBlocks([
+            ...baseMessages,
+            {
+                id: 'summary', localId: null, createdAt: 3, role: 'event', isSidechain: false,
+                content: { type: 'turn-summary', summary } as any
+            }
+        ], null)
+
+        const reconciled = reconcileChatBlocks(after.blocks, previousById)
+        const assistant = reconciled.blocks.find(block => block.kind === 'agent-text')
+        expect(assistant?.kind === 'agent-text' ? assistant.roundSummary : undefined).toEqual(summary)
     })
 })

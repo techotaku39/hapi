@@ -4,20 +4,13 @@ import HapiProtocol
 import Observation
 import SwiftUI
 
-/// A pairing that awaits user confirmation — from a deep link, a scanned QR,
-/// or manual entry. Drives the confirm sheet.
-struct PendingPairing: Identifiable, Hashable {
-    enum Source: Hashable {
-        case deepLink
-        case qrScan
-        case manual
-    }
-
+/// A pairing that awaits user confirmation — from a deep link. Drives the
+/// confirm sheet.
+struct PendingPairing: Identifiable {
     let id = UUID()
-    /// Hub URL as carried by the link/entry (normalized during `pair`).
+    /// Hub URL as carried by the link (normalized during `pair`).
     let hubUrl: String
     let accessToken: String
-    let source: Source
 }
 
 /// Root application state: which hubs are paired, which one is active, and
@@ -53,7 +46,8 @@ final class AppModel {
     var infoNotice: String?
     /// Session targeted by a notification tap (Android
     /// `pendingOpenSessionId`): the home screen consumes it into its
-    /// navigation path against the active hub.
+    /// navigation path against the active hub (switched to the owner first,
+    /// see ``openNotificationTarget(sessionId:hubUrl:)``).
     var pendingOpenSessionId: String?
 
     // `let` storage is inert under @Observable (no annotation needed).
@@ -85,7 +79,12 @@ final class AppModel {
             credentialStore: credentialStore,
             performer: performer,
             openChatSessionId: { [weak self] in self?.session?.openChatSessionId },
-            openSession: { [weak self] sessionId in self?.pendingOpenSessionId = sessionId }
+            activeHubKnowsSession: { [weak self] sessionId in
+                self?.session?.sessionStore.sessions.contains { $0.id == sessionId } ?? false
+            },
+            openSession: { [weak self] sessionId, hubUrl in
+                self?.openNotificationTarget(sessionId: sessionId, hubUrl: hubUrl)
+            }
         ))
     }
 
@@ -158,6 +157,15 @@ final class AppModel {
         }
     }
 
+    /// Notification tap: a located owning hub becomes active first, so the
+    /// new home screen consumes the target (`HomeView` is keyed by hub).
+    func openNotificationTarget(sessionId: String, hubUrl: String?) {
+        if let hubUrl, registry.hubs.contains(hubUrl), hasCredentials(for: hubUrl) {
+            switchHub(to: hubUrl)
+        }
+        pendingOpenSessionId = sessionId
+    }
+
     // MARK: - Deep links (hapicompanion://bind)
 
     /// Routes a parsed bind link: already-paired hubs just switch (with a
@@ -184,8 +192,7 @@ final class AppModel {
         showAddHub = false
         pendingPairing = PendingPairing(
             hubUrl: link.hubUrl,
-            accessToken: link.accessToken,
-            source: .deepLink
+            accessToken: link.accessToken
         )
         return true
     }
