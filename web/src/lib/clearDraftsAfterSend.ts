@@ -1,12 +1,27 @@
 import { clearDraft } from '@/lib/composer-drafts'
-import { clearDraftAttachments } from '@/lib/composer-attachment-drafts'
+import {
+    clearDraftAttachments,
+    removeDraftAttachmentsById,
+} from '@/lib/composer-attachment-drafts'
 import { clearComposerDraftSnapshotIfText } from '@/lib/composer-draft-transfer'
 
-function clearComposerDraft(sessionId: string, sentText?: string): void {
+function clearComposerDraft(
+    sessionId: string,
+    sentText?: string,
+    sentAttachmentIds?: readonly string[],
+): void {
     clearDraft(sessionId)
-    clearDraftAttachments(sessionId)
+    if (sentAttachmentIds === undefined) {
+        clearDraftAttachments(sessionId)
+    } else {
+        removeDraftAttachmentsById(sessionId, sentAttachmentIds)
+    }
     if (sentText !== undefined) {
-        clearComposerDraftSnapshotIfText(sessionId, sentText)
+        if (sentAttachmentIds !== undefined) {
+            clearComposerDraftSnapshotIfText(sessionId, sentText, sentAttachmentIds)
+        } else {
+            clearComposerDraftSnapshotIfText(sessionId, sentText)
+        }
     }
 }
 
@@ -19,9 +34,10 @@ export function clearDraftsAfterSend(
     sentSessionId: string,
     routeSessionId: string | null,
     sentText?: string,
+    sentAttachmentIds?: readonly string[],
 ): void {
-    clearComposerDraft(sentSessionId, sentText)
+    clearComposerDraft(sentSessionId, sentText, sentAttachmentIds)
     if (routeSessionId && sentSessionId !== routeSessionId) {
-        clearComposerDraft(routeSessionId, sentText)
+        clearComposerDraft(routeSessionId, sentText, sentAttachmentIds)
     }
 }

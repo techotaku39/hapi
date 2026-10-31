@@ -446,12 +446,16 @@ export function applyComposerAcceptanceRevision(
     sessionId: string,
     submitted: Pick<SendMessageAcceptance, 'programmaticEditRevision' | 'draftRevision'>,
     originalText?: string,
+    attachmentIds?: readonly string[],
 ): SendMessageAcceptance {
     if (acceptance.sessionId !== sessionId) return acceptance
     return {
         ...acceptance,
         ...submitted,
         ...(originalText !== undefined ? { originalText } : {}),
+        ...(acceptance.attachmentIds === undefined && attachmentIds !== undefined
+            ? { attachmentIds }
+            : {}),
     }
 }
 
@@ -729,6 +733,7 @@ export function SessionChat(props: SessionChatProps) {
             programmaticEditRevision: pendingSend.programmaticEditRevision,
             draftRevision: pendingSend.draftRevision,
             originalText: pendingSend.originalText,
+            ...(pendingSend.attachmentIds !== undefined ? { attachmentIds: pendingSend.attachmentIds } : {}),
         }
         : null, [pendingSend])
     const onSendAccepted = useCallback((acceptance: SendMessageAcceptance, text: string) => {
@@ -1115,6 +1120,7 @@ function SessionChatInner(props: SessionChatProps) {
                             props.session.id,
                             submittedComposerRevision,
                             originalText,
+                            ordered.map((attachment) => attachment.id),
                         )
                         props.onSendAccepted?.(composerAcceptance, text)
                         return composerAcceptance
@@ -1152,6 +1158,7 @@ function SessionChatInner(props: SessionChatProps) {
                 props.session.id,
                 submittedComposerRevision,
                 originalText,
+                list.map((attachment) => attachment.id),
             )
             props.onSendAccepted?.(composerAcceptance, text)
             return composerAcceptance

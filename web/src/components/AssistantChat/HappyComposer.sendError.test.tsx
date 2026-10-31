@@ -6,11 +6,26 @@ import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
+import * as composerAttachmentDrafts from '@/lib/composer-attachment-drafts'
+import {
+    clearDraftAttachments,
+    getDraftAttachments,
+    getRestoredUploadMetadata,
+    saveDraftAttachments,
+} from '@/lib/composer-attachment-drafts'
+import { clearDraft, getDraft, saveDraft } from '@/lib/composer-drafts'
 import { getComposerDraftRevision, resetComposerSendStateForTests } from '@/lib/composer-send-state'
 
-vi.mock('@/lib/clearDraftsAfterSend', () => ({
-    clearDraftsAfterSend: vi.fn(),
-}))
+vi.mock('@/lib/clearDraftsAfterSend', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/clearDraftsAfterSend')>('@/lib/clearDraftsAfterSend')
+    return {
+        clearDraftsAfterSend: vi.fn((...args: Parameters<typeof actual.clearDraftsAfterSend>) => {
+            if (runtime.useRealDraftLifecycle) {
+                actual.clearDraftsAfterSend(...args)
+            }
+        }),
+    }
+})
 
 import { HappyComposer, type ComposerSendError } from './HappyComposer'
 
@@ -21,7 +36,7 @@ const mockClearDraftsAfterSend = vi.mocked(clearDraftsAfterSend)
  * composer store. This focused harness supplies the small subset of that
  * store necessary to exercise send → user interaction → delayed error races.
  */
-type FakeAttachment = { id: string; status: { type: 'complete' } }
+type FakeAttachment = { id: string; file?: File; path?: string; status: { type: 'complete' } }
 type MockComposerInputProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
     asChild?: boolean
     maxRows?: number
@@ -47,6 +62,7 @@ const runtime = vi.hoisted(() => ({
     sentIntents: [] as ComposerSendIntent[],
     modelChanges: [] as Array<{ provider: string; modelId: string } | string | null>,
     pendingHydration: null as Promise<void> | null,
+    useRealDraftLifecycle: false,
     dictationEnabled: false,
     dictation: { status: 'connected', supported: true, partialTranscript: '', error: null, toggle: vi.fn(), stopAndSend: vi.fn() },
 }))
@@ -68,6 +84,18 @@ vi.mock('@assistant-ui/react', async () => {
                     composer: { ...current.composer, attachments: [] },
                 }))
             },
+            attachment: ({ id }: { id: string }) => ({
+                getState: () => runtime.snapshot.composer.attachments.find((item) => item.id === id),
+                remove: async () => {
+                    runtime.setSnapshot!((current) => ({
+                        ...current,
+                        composer: {
+                            ...current.composer,
+                            attachments: current.composer.attachments.filter((item) => item.id !== id),
+                        },
+                    }))
+                },
+            }),
             send: () => {
                 const intent = runtime.pendingSendIntentRef?.current ?? 'default'
                 runtime.sentIntents.push(intent)
@@ -77,7 +105,25 @@ vi.mock('@assistant-ui/react', async () => {
                     composer: { text: '', attachments: [] },
                 }))
             },
-            addAttachment: async () => {},
+            addAttachment: async (file?: File) => {
+                if (!file) return
+                const restored = getRestoredUploadMetadata(file)
+                runtime.setSnapshot!((current) => ({
+                    ...current,
+                    composer: {
+                        ...current.composer,
+                        attachments: [
+                            ...current.composer.attachments,
+                            {
+                                id: restored?.id ?? file.name,
+                                file,
+                                path: restored?.path,
+                                status: { type: 'complete' },
+                            },
+                        ],
+                    },
+                }))
+            },
         }),
         thread: () => ({ cancelRun: () => {} }),
     }
@@ -124,22 +170,36 @@ vi.mock('@/lib/composerSegments', () => ({
     resolveComposerPlaceholderKey: ({ showContinueHint }: { showContinueHint: boolean }) =>
         showContinueHint ? 'misc.typeMessage' : 'misc.typeAMessage',
 }))
-vi.mock('@/hooks/useComposerDraft', () => ({
-    useComposerDraft: (
-        sessionId: string | undefined,
-        _composerText: string,
-        _attachments: readonly FakeAttachment[],
-        _canRestoreAttachments: boolean,
-        _setText: (text: string) => void,
-        _addAttachment: (file: File) => Promise<void>,
-        onRestoredAttachmentIds?: (ids: readonly string[]) => void,
-    ) => {
-        runtime.restoredAttachmentIds = onRestoredAttachmentIds ?? null
-        const [complete, setComplete] = useState(runtime.pendingHydration === null)
-        useEffect(() => { void runtime.pendingHydration?.then(() => setComplete(true)) }, [])
-        return { sessionId, complete, restoredAny: false, hasStoredAttachments: false }
-    },
-}))
+vi.mock('@/hooks/useComposerDraft', async () => {
+    const actual = await vi.importActual<typeof import('@/hooks/useComposerDraft')>('@/hooks/useComposerDraft')
+    return {
+        useComposerDraft: (
+            sessionId: string | undefined,
+            composerText: string,
+            attachments: readonly FakeAttachment[],
+            canRestoreAttachments: boolean,
+            setText: (text: string) => void,
+            addAttachment: (file: File) => Promise<void>,
+            onRestoredAttachmentIds?: (ids: readonly string[]) => void,
+        ) => {
+            if (runtime.useRealDraftLifecycle) {
+                return actual.useComposerDraft(
+                    sessionId,
+                    composerText,
+                    attachments as Parameters<typeof actual.useComposerDraft>[2],
+                    canRestoreAttachments,
+                    setText,
+                    addAttachment,
+                    onRestoredAttachmentIds,
+                )
+            }
+            runtime.restoredAttachmentIds = onRestoredAttachmentIds ?? null
+            const [complete, setComplete] = useState(runtime.pendingHydration === null)
+            useEffect(() => { void runtime.pendingHydration?.then(() => setComplete(true)) }, [])
+            return { sessionId, complete, restoredAny: false, hasStoredAttachments: false }
+        },
+    }
+})
 vi.mock('@/hooks/useDictation', () => ({
     useDictation: (config: { onTextChange: (text: string) => void }) => {
         runtime.dictationTextChange = config.onTextChange
@@ -714,7 +774,7 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue(''))
         await waitFor(() => expect(runtime.snapshot.composer.attachments).toHaveLength(0))
-        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo')
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-a', null, 'foo', [])
     })
 
     it('preserves a same-text edit made before resumed acceptance is published', async () => {
@@ -843,7 +903,98 @@ describe('HappyComposer send-error atomic restore', () => {
         act(() => controls.current!.settleSend())
 
         await waitFor(() => expect(input()).toHaveValue(''))
-        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-resolved', null, 'foo')
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-resolved', null, 'foo', [])
+    })
+
+    it('preserves an unsent attachment hydrated from storage after sending restored text', async () => {
+        runtime.useRealDraftLifecycle = true
+        const sessionId = 'session-delayed-attachment-hydration'
+        saveDraft(sessionId, 'restored text')
+        saveDraftAttachments(sessionId, [{
+            id: 'unsent-attachment',
+            file: new File(['image-bytes'], 'unsent.png', { type: 'image/png' }),
+            path: '/tmp/unsent.png',
+        }])
+        const storedFiles = await getDraftAttachments(sessionId)
+        let resolveAttachmentHydration: (() => void) | undefined
+        const getDraftAttachmentsSpy = vi
+            .spyOn(composerAttachmentDrafts, 'getDraftAttachments')
+            .mockImplementation(() => new Promise<File[]>((resolve) => {
+                resolveAttachmentHydration = () => resolve(storedFiles)
+            }))
+
+        try {
+            const controls = renderComposer('', null, false, sessionId)
+
+            await waitFor(() => expect(input()).toHaveValue('restored text'))
+            expect(runtime.snapshot.composer.attachments).toEqual([])
+
+            send()
+            act(() => controls.current!.acceptSend())
+            expect(input()).toHaveValue('')
+
+            await act(async () => {
+                resolveAttachmentHydration?.()
+            })
+            await waitFor(() => expect(runtime.snapshot.composer.attachments).toEqual([
+                expect.objectContaining({ id: 'unsent-attachment', path: '/tmp/unsent.png' }),
+            ]))
+
+            getDraftAttachmentsSpy.mockRestore()
+            act(() => controls.current!.settleSend())
+
+            await waitFor(() => expect(mockClearDraftsAfterSend).toHaveBeenCalledWith(
+                sessionId,
+                null,
+                '',
+                [],
+            ))
+            expect(input()).toHaveValue('')
+            expect(runtime.snapshot.composer.attachments).toEqual([
+                expect.objectContaining({ id: 'unsent-attachment', path: '/tmp/unsent.png' }),
+            ])
+            expect(getDraft(sessionId)).toBe('')
+            const remainingAttachments = await getDraftAttachments(sessionId)
+            expect(remainingAttachments).toHaveLength(1)
+            expect(getRestoredUploadMetadata(remainingAttachments[0])?.id).toBe('unsent-attachment')
+        } finally {
+            getDraftAttachmentsSpy.mockRestore()
+            runtime.useRealDraftLifecycle = false
+            clearDraft(sessionId)
+            clearDraftAttachments(sessionId)
+        }
+    })
+
+    it('removes only submitted attachments when an unsent attachment hydrates before settlement', async () => {
+        const controls = renderComposer('foo', null)
+        act(() => controls.current!.addAttachment())
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => {
+            runtime.restoredAttachmentIds?.(['new-attachment', 'unsent-attachment'])
+            runtime.setSnapshot!((current) => ({
+                ...current,
+                composer: {
+                    ...current.composer,
+                    attachments: [
+                        { id: 'new-attachment', status: { type: 'complete' } },
+                        { id: 'unsent-attachment', status: { type: 'complete' } },
+                    ],
+                },
+            }))
+        })
+        act(() => controls.current!.settleSend())
+
+        await waitFor(() => expect(runtime.snapshot.composer.attachments).toEqual([
+            { id: 'unsent-attachment', status: { type: 'complete' } },
+        ]))
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith(
+            'session-a',
+            null,
+            'foo',
+            ['new-attachment'],
+        )
     })
 
     it('preserves a later same-text draft after success and a session remount', async () => {

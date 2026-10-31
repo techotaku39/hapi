@@ -408,6 +408,7 @@ export function HappyComposer(props: {
         programmaticEditRevision?: number
         draftRevision?: number
         originalText?: string
+        attachmentIds?: readonly string[]
     } | null
     /** Monotonic programmatic Queued Edit revision owned outside this keyed composer. */
     programmaticEditRevision?: number
@@ -607,11 +608,13 @@ export function HappyComposer(props: {
     const pendingSendEditGenerationRef = useRef<number | null>(null)
     const pendingSendAttachmentGenerationRef = useRef<number | null>(null)
     const pendingSendScheduleGenerationRef = useRef<number | null>(null)
+    const pendingSendAttachmentIdsRef = useRef<readonly string[] | null>(null)
     const acceptedSendEditGenerationRef = useRef<{
         attemptId: string
         generation: number
         attachmentGeneration: number
         scheduleGeneration: number
+        attachmentIds?: readonly string[]
     } | null>(null)
     const handledSuccessfulSendRef = useRef<string | null>(null)
     const [showSettings, setShowSettings] = useState(false)
@@ -635,6 +638,7 @@ export function HappyComposer(props: {
             pendingSendEditGenerationRef.current = null
             pendingSendAttachmentGenerationRef.current = null
             pendingSendScheduleGenerationRef.current = null
+            pendingSendAttachmentIdsRef.current = null
             acceptedSendEditGenerationRef.current = null
             if (acceptance.sessionId) {
                 consumePendingComposerSend(acceptance.sessionId, null)
@@ -646,6 +650,7 @@ export function HappyComposer(props: {
         const pendingGeneration = pendingSendEditGenerationRef.current
         const pendingAttachmentGeneration = pendingSendAttachmentGenerationRef.current
         const pendingScheduleGeneration = pendingSendScheduleGenerationRef.current
+        const pendingAttachmentIds = pendingSendAttachmentIdsRef.current
         acceptedSendEditGenerationRef.current = pendingGeneration === null
             ? null
             : {
@@ -653,10 +658,12 @@ export function HappyComposer(props: {
                 generation: pendingGeneration,
                 attachmentGeneration: pendingAttachmentGeneration ?? userAttachmentGenerationRef.current,
                 scheduleGeneration: pendingScheduleGeneration ?? userScheduleGenerationRef.current,
+                attachmentIds: acceptance.attachmentIds ?? pendingAttachmentIds ?? [],
             }
         pendingSendEditGenerationRef.current = null
         pendingSendAttachmentGenerationRef.current = null
         pendingSendScheduleGenerationRef.current = null
+        pendingSendAttachmentIdsRef.current = null
         const settlement = props.sendSettlement
         if (!settlement || settlement.attemptId !== acceptance.attemptId) return
         pendingSendAttemptIdRef.current = null
@@ -689,6 +696,7 @@ export function HappyComposer(props: {
     const userAttachmentGenerationRef = useRef(0)
     const observedAttachmentIdsRef = useRef(new Set(attachments.map((attachment) => attachment.id)))
     const restoredDraftAttachmentIdsRef = useRef(new Set<string>())
+    const clearedSentAttachmentIdsRef = useRef(new Set<string>())
     const sendRestoreGuardRef = useRef<{
         userEditGeneration: number
         userScheduleGeneration: number
@@ -737,7 +745,7 @@ export function HappyComposer(props: {
     } = useRichComposerBridge(api, setInputState, sendError, onClearSendError, recordUserEdit)
 
     const attachmentDrafts = orderedAttachments.flatMap((attachment) => {
-        if (!attachment.file) return []
+        if (!attachment.file || clearedSentAttachmentIdsRef.current.has(attachment.id)) return []
         const upload = attachment as typeof attachment & { path?: string; previewUrl?: string; uploadSessionId?: string }
         return [{
             id: attachment.id,
@@ -942,17 +950,54 @@ export function HappyComposer(props: {
         if (composerText === submittedText) {
             api.composer().setText('')
         }
-        if (attachments.length > 0) {
-            props.onReleaseSentAttachments?.(attachments.map(({ id }) => id))
-            void api.composer().clearAttachments()
+        const submittedAttachmentIds = settlement.attachmentIds
+            ?? props.sendAcceptance?.attachmentIds
+            ?? (
+                acceptedSend?.attemptId === settlement.attemptId
+                    ? acceptedSend.attachmentIds
+                    : pendingSendAttachmentIdsRef.current ?? undefined
+            )
+        const submittedAttachmentIdSet = submittedAttachmentIds
+            ? new Set(submittedAttachmentIds)
+            : null
+        const sentLiveAttachmentIds = submittedAttachmentIdSet
+            ? attachments
+                .filter((attachment) => submittedAttachmentIdSet.has(attachment.id))
+                .map((attachment) => attachment.id)
+            : attachments.map((attachment) => attachment.id)
+        if (sentLiveAttachmentIds.length > 0) {
+            for (const id of sentLiveAttachmentIds) {
+                clearedSentAttachmentIdsRef.current.add(id)
+            }
+            attachmentDraftsRef.current = attachmentDraftsRef.current.filter(
+                (attachment) => !clearedSentAttachmentIdsRef.current.has(attachment.id),
+            )
+            props.onReleaseSentAttachments?.(sentLiveAttachmentIds)
+            const composer = api.composer()
+            if (sentLiveAttachmentIds.length === attachments.length) {
+                void composer.clearAttachments()
+            } else if (typeof composer.attachment === 'function') {
+                for (const id of sentLiveAttachmentIds) {
+                    void composer.attachment({ id }).remove()
+                }
+            }
         }
-        clearDraftsAfterSend(
-            settlement.sessionId,
-            null,
-            submittedText,
-        )
+        if (submittedAttachmentIds !== undefined) {
+            clearDraftsAfterSend(
+                settlement.sessionId,
+                null,
+                submittedText,
+                submittedAttachmentIds,
+            )
+        } else {
+            clearDraftsAfterSend(
+                settlement.sessionId,
+                null,
+                submittedText,
+            )
+        }
         consumeSettlement()
-    }, [api, attachments.length, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.onReleaseSentAttachments, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
+    }, [api, attachments, composerText, draftHydration.complete, draftHydration.sessionId, props.onConsumeSendSettlement, props.onReleaseSentAttachments, props.programmaticEditRevision, props.sendAcceptance, props.sendSettlement, sessionId])
 
     // Failed sends use the separate sendError recovery path, so their terminal
     // settlement can be consumed immediately and must not remain in the
@@ -1493,12 +1538,14 @@ export function HappyComposer(props: {
             pendingSendEditGenerationRef.current = userEditGenerationRef.current
             pendingSendAttachmentGenerationRef.current = userAttachmentGenerationRef.current
             pendingSendScheduleGenerationRef.current = userScheduleGenerationRef.current
+            pendingSendAttachmentIdsRef.current = attachments.map((attachment) => attachment.id)
             api.composer().send()
         } catch (error) {
             resetPendingSendIntent()
             pendingSendEditGenerationRef.current = null
             pendingSendAttachmentGenerationRef.current = null
             pendingSendScheduleGenerationRef.current = null
+            pendingSendAttachmentIdsRef.current = null
             throw error
         }
         // SessionChat owns clearing the schedule — it clears only after awaiting

@@ -70,6 +70,7 @@ describe('useSendMessage', () => {
             attemptId: 'local-id-1',
             sessionId: 'session-A',
             text: 'hello',
+            attachmentIds: [],
             status: 'success',
             source: 'send',
         })
@@ -102,12 +103,14 @@ describe('useSendMessage', () => {
             programmaticEditRevision: 0,
             draftRevision: 0,
             originalText: ' foo\n',
+            attachmentIds: [],
         })
         expect(result.current.sendSettlement).toEqual({
             attemptId: 'local-id-1',
             sessionId: 'session-A',
             text: 'foo',
             originalText: ' foo\n',
+            attachmentIds: [],
             status: 'success',
             source: 'send',
         })
@@ -254,6 +257,7 @@ describe('useSendMessage', () => {
             sessionId: targetSessionId,
             programmaticEditRevision: 0,
             draftRevision: 0,
+            attachmentIds: [],
         })
         expect(onSessionResolved).toHaveBeenCalledOnce()
     })
@@ -581,6 +585,7 @@ describe('useSendMessage', () => {
                 attemptId: 'local-id-1',
                 sessionId: 'session-A',
                 text: 'see this image',
+                attachmentIds: ['att-1'],
                 status: 'error',
                 source: 'send',
             })
@@ -676,6 +681,7 @@ describe('useSendMessage', () => {
             sessionId: 'session-A',
             programmaticEditRevision: 0,
             draftRevision: 0,
+            attachmentIds: [],
         })
     })
 
@@ -741,6 +747,7 @@ describe('useSendMessage', () => {
             sessionId: 'session-resolved',
             programmaticEditRevision: 0,
             draftRevision: 0,
+            attachmentIds: [],
         })
     })
 
@@ -1005,6 +1012,7 @@ describe('useSendMessage', () => {
                 attemptId: 'local-retry-1',
                 sessionId: 'session-A',
                 text: 'hi later',
+                attachmentIds: [],
                 status: 'success',
                 source: 'retry',
             })

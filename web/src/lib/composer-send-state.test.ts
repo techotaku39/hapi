@@ -172,6 +172,28 @@ describe('composer send state', () => {
         expect(mockClearDraftsAfterSend).toHaveBeenCalledWith('session-A', null, 'foo\n')
     })
 
+    it('reconciles with submitted attachment IDs when provided', () => {
+        recordPendingComposerSend({
+            sessionId: 'session-A',
+            attemptId: 'attempt-A',
+            text: 'message A',
+            attachmentIds: ['att-1'],
+            programmaticEditRevision: 0,
+            draftRevision: 0,
+        })
+        publishComposerSendSettlement({
+            ...settlement('session-A', 'attempt-A'),
+            attachmentIds: ['att-1'],
+        })
+
+        expect(mockClearDraftsAfterSend).toHaveBeenCalledWith(
+            'session-A',
+            null,
+            'text-session-A',
+            ['att-1'],
+        )
+    })
+
     it('does not reconcile after a newer draft revision', () => {
         recordPendingComposerSend({
             sessionId: 'session-A',

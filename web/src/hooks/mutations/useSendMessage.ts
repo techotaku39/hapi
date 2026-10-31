@@ -40,6 +40,8 @@ export type SendMessageAcceptance = {
     draftRevision: number
     /** Composer text before assistant-ui/runtime normalization (e.g. trim). */
     originalText?: string
+    /** Attachment IDs included in the accepted send. */
+    attachmentIds?: readonly string[]
 }
 
 export type SendMessageSettlement = {
@@ -48,6 +50,8 @@ export type SendMessageSettlement = {
     text: string
     /** Composer text before assistant-ui/runtime normalization (e.g. trim). */
     originalText?: string
+    /** Attachment IDs included in the settled send. */
+    attachmentIds?: readonly string[]
     status: 'success' | 'error'
     source: 'send' | 'retry'
 }
@@ -268,6 +272,7 @@ export function useSendMessage(
                 sessionId: input.sessionId,
                 text: input.text,
                 ...(input.originalText !== undefined ? { originalText: input.originalText } : {}),
+                attachmentIds: (input.attachments ?? []).map((attachment) => attachment.id),
                 status: 'success',
                 source: input.source,
             })
@@ -285,6 +290,7 @@ export function useSendMessage(
                 sessionId: input.sessionId,
                 text: input.text,
                 ...(input.originalText !== undefined ? { originalText: input.originalText } : {}),
+                attachmentIds: (input.attachments ?? []).map((attachment) => attachment.id),
                 status: 'error',
                 source: input.source,
             })
@@ -421,6 +427,7 @@ export function useSendMessage(
             programmaticEditRevision,
             draftRevision,
             ...(originalText !== undefined ? { originalText } : {}),
+            attachmentIds: (sendAttachments ?? []).map((attachment) => attachment.id),
         }
     }
 
