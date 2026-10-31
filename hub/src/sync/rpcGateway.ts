@@ -648,7 +648,13 @@ export class RpcGateway {
     }
 
     async completeConversationRewind(sessionId: string, rewindToken: string): Promise<void> {
-        await this.sessionRpc(sessionId, RPC_METHODS.CompleteConversationRewind, { rewindToken }, 120_000)
+        const response = await this.sessionRpc(sessionId, RPC_METHODS.CompleteConversationRewind, { rewindToken }, 120_000)
+        if (response && typeof response === 'object' && 'error' in response && typeof (response as { error: unknown }).error === 'string') {
+            throw new Error((response as { error: string }).error)
+        }
+        if (!response || typeof response !== 'object' || (response as { success?: unknown }).success !== true) {
+            throw new Error('Invalid rewind completion response from session')
+        }
     }
 
     async listOpencodeReasoningEffortOptionsForSession(sessionId: string): Promise<RpcListOpencodeReasoningEffortOptionsResponse> {

@@ -94,6 +94,27 @@ describe('shared Codex rewind commit', () => {
         }
     })
 
+    it.each([
+        { name: 'serialized error', response: { error: 'Verification failed' }, expectedMessage: 'Verification failed' },
+        { name: 'malformed response', response: { unexpected: true }, expectedMessage: 'Invalid rewind completion response' },
+    ])('quarantines when completeConversationRewind receives $name', async ({ response, expectedMessage }) => {
+        const { store, engine, session, gateway } = fixture()
+        try {
+            gateway.rewindConversation = async () => ({ success: true, truncateFromLocalId: 'two', rewindToken: 'transaction' })
+            ;(gateway as any).sessionRpc = async () => response
+
+            const result = await engine.rewindConversation(session.id, 'default', 'two')
+            expect(result).toMatchObject({
+                type: 'error',
+                message: expect.stringContaining(expectedMessage),
+                hydrateFailed: true
+            })
+            expect(engine.getSession(session.id)?.metadata?.conversationHistoryDiverged).toBe(true)
+        } finally {
+            engine.stop()
+        }
+    })
+
     it.each(['truncate', 'complete'])('quarantines a %s failure without reporting success', async failure => {
         const { store, engine, session, gateway } = fixture()
         try {
