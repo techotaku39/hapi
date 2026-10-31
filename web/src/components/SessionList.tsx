@@ -1690,6 +1690,7 @@ export function SessionList(props: {
     const [activeSectionCollapsed, setActiveSectionCollapsed] = useState(false)
     const [pinnedSectionCollapsed, setPinnedSectionCollapsed] = useState(false)
     const autoExpandedSelectedSessionKeyRef = useRef<string | null>(null)
+    const autoExpandedFilterSelectedSessionKeyRef = useRef<string | null>(null)
     const isGroupCollapsed = (group: SessionGroup): boolean => {
         const override = isFiltering
             ? filterCollapseOverrides.get(group.key)
@@ -1718,6 +1719,7 @@ export function SessionList(props: {
 
     useEffect(() => {
         if (isFiltering) return
+        autoExpandedFilterSelectedSessionKeyRef.current = null
         setFilterCollapseOverrides(prev => prev.size === 0 ? prev : new Map())
     }, [isFiltering])
 
@@ -2017,11 +2019,12 @@ export function SessionList(props: {
     // session-list refresh (for example tool-call updates from a running selected
     // session) reopens a path the user just collapsed.
     useEffect(() => {
-        // Search reveals matches temporarily. It must not reset the selection
-        // guard or replace a manual collapse when that group reappears.
-        if (isFiltering) return
         if (!selectedSessionId) {
-            autoExpandedSelectedSessionKeyRef.current = null
+            if (isFiltering) {
+                autoExpandedFilterSelectedSessionKeyRef.current = null
+            } else {
+                autoExpandedSelectedSessionKeyRef.current = null
+            }
             return
         }
 
@@ -2037,9 +2040,19 @@ export function SessionList(props: {
             // (e.g. it moved to the pinned "in progress" section). Drop the
             // guard so it auto-expands again when it transitions back into a
             // group later.
-            if (!isFiltering) {
+            if (isFiltering) {
+                autoExpandedFilterSelectedSessionKeyRef.current = null
+            } else {
                 autoExpandedSelectedSessionKeyRef.current = null
             }
+            return
+        }
+
+        if (isFiltering) {
+            const filterAutoExpandKey = `${selectedSessionId}::${group.key}`
+            if (autoExpandedFilterSelectedSessionKeyRef.current === filterAutoExpandKey) return
+            autoExpandedFilterSelectedSessionKeyRef.current = filterAutoExpandKey
+            setFilterCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
             return
         }
 
@@ -2047,11 +2060,7 @@ export function SessionList(props: {
         if (autoExpandedSelectedSessionKeyRef.current === autoExpandKey) return
         autoExpandedSelectedSessionKeyRef.current = autoExpandKey
 
-        if (isFiltering) {
-            setFilterCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
-        } else {
-            revealGroup(group.key)
-        }
+        revealGroup(group.key)
     }, [selectedSessionId, groups, isFiltering, collapseStorageKey, revealGroup])
 
     // Clean up reveal caps for groups that no longer exist.
