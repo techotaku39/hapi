@@ -223,7 +223,6 @@ function prepareExportElement(element: HTMLElement, exportWidth: number, preserv
 
     captureElement.classList.add('hapi-share-export-root')
     stripExportControls(captureElement)
-    captureElement.style.paddingBottom = '14px'
     captureElement.style.cssText += [
         'position:absolute',
         'left:0',
@@ -246,6 +245,7 @@ function prepareExportElement(element: HTMLElement, exportWidth: number, preserv
     const style = document.createElement('style')
     style.textContent = `
         .hapi-share-export-root {
+            padding: 1rem !important;
             background: ${backgroundColor} !important;
             color: ${color} !important;
             box-sizing: border-box !important;
@@ -255,6 +255,11 @@ function prepareExportElement(element: HTMLElement, exportWidth: number, preserv
                 font-size: 14px !important;
                 line-height: 1.6 !important;
             `}
+        }
+        @media (min-width: 640px) {
+            .hapi-share-export-root {
+                padding: 1.25rem !important;
+            }
         }
         .hapi-share-export-root [data-hapi-share-exclude="true"],
         .hapi-share-export-root .aui-reasoning-group,
