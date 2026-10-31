@@ -193,12 +193,10 @@ describe('SessionList manual project preferences', () => {
         expect(isOpen()).toBe(false)
     })
 
-    it('preserves manual preferences and fixed ordering when fixed order disables in-progress pinning', () => {
-        localStorage.setItem('hapi-fixed-session-order', 'true')
-        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+    it('preserves manual preferences with user-activity ordering', () => {
         const sessions = [
-            { ...session('older'), createdAt: 100, updatedAt: 999, active: true },
-            { ...session('newer'), createdAt: 200, updatedAt: 1 },
+            { ...session('older'), createdAt: 100, lastUserMessageAt: 100, updatedAt: 999, active: true },
+            { ...session('newer'), createdAt: 200, lastUserMessageAt: 200, updatedAt: 1 },
         ]
         const view = render(list({ sessions }))
         expect(screen.queryByTitle('In progress')).toBeNull()
