@@ -4,7 +4,7 @@ import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createMachinesRoutes } from './machines'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
-import { MACHINE_CAPABILITIES } from '@hapi/protocol'
+import { MACHINE_CAPABILITIES, RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol'
 
 function createMachine(overrides?: Partial<Machine>): Machine {
     return {
@@ -216,6 +216,60 @@ describe('machines routes', () => {
             ],
             currentModelId: null
         })
+    })
+
+    it('returns Claude models for an online machine', async () => {
+        const machine = createMachine()
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            listClaudeModelsForMachine: async () => ({
+                success: true,
+                availableModels: [
+                    { value: 'opus', displayName: 'Opus 5.5', effortLevels: ['low'] }
+                ]
+            })
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/claude-models')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: true,
+            availableModels: [
+                { value: 'opus', displayName: 'Opus 5.5', effortLevels: ['low'] }
+            ]
+        })
+    })
+
+    it('returns a stable code when a runner predates Claude model discovery', async () => {
+        const machine = createMachine()
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            listClaudeModelsForMachine: async () => {
+                throw new RpcTargetMissingError('machine-1:listClaudeModels', 'handler-not-registered')
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/claude-models')
+
+        expect(response.status).toBe(503)
+        expect(await response.json()).toMatchObject({ success: false, code: RPC_TARGET_MISSING_ERROR_CODE })
     })
 
     it('returns a stable code when the Codex machine RPC target is absent', async () => {
@@ -789,5 +843,26 @@ describe('machines routes', () => {
 
             expect((await patch(app, { displayName: 'Workstation' })).status).toBe(500)
         })
+    })
+
+    it('forwards an explicit agy model refresh to the machine and defaults to the cached catalog', async () => {
+        const machine = createMachine()
+        const calls: Array<{ refresh?: boolean } | undefined> = []
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            listAgyModelsForMachine: (_machineId: string, options?: { refresh?: boolean }) => {
+                calls.push(options)
+                return Promise.resolve({ success: true, availableModels: [] })
+            },
+        } as unknown as Partial<SyncEngine>
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        expect((await app.request('/api/machines/machine-1/agy-models')).status).toBe(200)
+        expect((await app.request('/api/machines/machine-1/agy-models?refresh=true')).status).toBe(200)
+
+        expect(calls).toEqual([{ refresh: false }, { refresh: true }])
     })
 })

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     applyGlobalSelectAll,
+    buildAgyComposerModelOptions,
     applyModelChangeWithReasoningRollback,
     buildGoalStateMessages,
     isScratchlistHotkeyBlockedTarget,
@@ -9,6 +10,7 @@ import {
     mergeStagedAttachmentsInOrder,
     opencodeEffortOptionsInvalidationKey,
     resolvePiContextWindow,
+    resolveEffortForModelChange,
     resolveLatestCompletedBoundaryIdForView,
     shouldAutoClearPendingSchedule,
     shouldClearReasoningEffortForModelChange,
@@ -563,5 +565,55 @@ describe('buildGoalStateMessages', () => {
 
         expect(buildGoalStateMessages([futureQueued, matureQueued, invokedScheduled]).map((message) => message.id))
             .toEqual(['invoked'])
+    })
+})
+
+describe('buildAgyComposerModelOptions', () => {
+    it('groups model effort variants into one family option', () => {
+        expect(buildAgyComposerModelOptions([
+            { modelId: 'gemini-4-argon-medium', name: 'Gemini 4 Argon (Medium)' },
+            { modelId: 'gemini-4-argon-high', name: 'Gemini 4 Argon (High)' },
+        ])).toEqual([{ value: 'gemini-4-argon', label: 'Gemini 4 Argon' }])
+    })
+
+    it('maps the machine catalog into composer options and keeps the id when agy sent no label', () => {
+        expect(buildAgyComposerModelOptions([
+            { modelId: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+            { modelId: 'gemini-9.9-experimental' }
+        ])).toEqual([
+            { value: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+            { value: 'gemini-9.9-experimental', label: 'gemini-9.9-experimental' }
+        ])
+    })
+
+    it('signals "no catalog yet" rather than an empty picker while the machine is still answering', () => {
+        expect(buildAgyComposerModelOptions([])).toBeUndefined()
+    })
+})
+
+describe('resolveEffortForModelChange', () => {
+    const claudeModels = [
+        { value: 'opus', effortLevels: ['low', 'high', 'xhigh'] },
+        { value: 'haiku', effortLevels: [] },
+    ]
+
+    it('clears an effort the next Claude model does not offer', () => {
+        expect(resolveEffortForModelChange({ currentEffort: 'xhigh', model: 'haiku', claudeModels })).toEqual({ effort: null })
+    })
+
+    it('leaves the effort alone when the next model keeps it', () => {
+        expect(resolveEffortForModelChange({ currentEffort: 'high', model: 'claude-opus-5-5', claudeModels })).toBeUndefined()
+    })
+
+    it('leaves the effort alone without a catalog (non-Claude sessions, or discovery unavailable)', () => {
+        expect(resolveEffortForModelChange({ currentEffort: 'xhigh', model: 'haiku', claudeModels: [] })).toBeUndefined()
+    })
+
+    it('ignores provider-qualified selections', () => {
+        expect(resolveEffortForModelChange({
+            currentEffort: 'xhigh',
+            model: { provider: 'p', modelId: 'haiku' },
+            claudeModels
+        })).toBeUndefined()
     })
 })
