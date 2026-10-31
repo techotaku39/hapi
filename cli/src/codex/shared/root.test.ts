@@ -35,7 +35,12 @@ vi.mock('../codexAppServerClient', () => ({
             if (method === 'thread/list') return { data: [] };
             if (method === 'thread/queue/list') return { data: this.queue };
             if (method === 'thread/goal/get') return { goal: null };
-            if (method === 'thread/turns/list') return { data: structuredClone(this.thread.turns) };
+            if (method === 'thread/turns/list') {
+                let turns = structuredClone(this.thread.turns);
+                if (params.sortDirection === 'desc') turns = turns.reverse();
+                if (typeof params.limit === 'number') turns = turns.slice(0, params.limit);
+                return { data: turns };
+            }
             if (method === 'thread/revert') {
                 const index = this.thread.turns.findIndex(turn => turn.id === params.beforeTurnId);
                 if (index < 0) throw new Error('Invalid boundary');
@@ -545,6 +550,23 @@ describe('shared conversation rewind', () => {
         await f.root.refresh();
         expect(await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }))
             .toMatchObject({ success: true });
+    });
+
+    it('succeeds with multiple turns when lazy history is enabled', async () => {
+        vi.stubEnv('HAPI_CODEX_LAZY_HISTORY_IDS', 'thread');
+        try {
+            const f = await history();
+            const result = await f.rpc.get(RPC_METHODS.RewindConversation)!({ messageLocalId: 'two' }) as {
+                success: boolean; rewindToken: string; truncateFromLocalId: string; error?: string;
+            };
+            expect(result.error).toBeUndefined();
+            expect(result).toMatchObject({ success: true, truncateFromLocalId: 'two', rewindToken: expect.any(String) });
+            expect(f.native.thread.turns.map(t => t.id)).toEqual(['one']);
+            await f.rpc.get('complete-conversation-rewind')!({ rewindToken: result.rewindToken });
+            expect(f.metadata().conversationHistoryTurns).toEqual({ one: 'one' });
+        } finally {
+            vi.unstubAllEnvs();
+        }
     });
 
     it('refuses cold recovery before connecting a native client after an interrupted rewind', async () => {

@@ -650,10 +650,17 @@ export class SharedCodexRoot {
             if ((await this.queue.list()).length || this.queue.hasUncertainInput()) throw new Error('Session has queued or uncertain input');
             const goal = record(record(await this.client.request('thread/goal/get', { threadId: this.threadId })).goal);
             if (goal.status === 'active') throw new Error('Pause the native goal before rewinding');
-            const thread = await this.readThread();
+            const thread = await this.readThread(this.threadId, true);
             if (thread.historyMode !== 'paginated' || this.supportsRevert !== true) throw new Error('Rewind requires native thread/revert and paginated history');
             const turns = this.checkedRewindTurns(thread);
-            const turnId = this.projection.turnFor(messageLocalId);
+            const turnId = this.projection.turnFor(messageLocalId) ?? turns.find(turn =>
+                turn.items.map(record).some(item => {
+                    if (item.type !== 'userMessage') return false;
+                    const id = string(item.clientId ?? item.clientUserMessageId)
+                        ?? (item.id ? `codex:${this.threadId}:user:${item.id}` : undefined);
+                    return id === messageLocalId;
+                })
+            )?.id;
             const index = turns.findIndex(turn => turn.id === turnId);
             const selected = turns[index];
             const first = selected?.items.map(record).find(item => item.type === 'userMessage');
@@ -705,7 +712,7 @@ export class SharedCodexRoot {
         });
     }
     private async verifyRewind(): Promise<Record<string, unknown>> {
-        const thread = await this.readThread();
+        const thread = await this.readThread(this.threadId, true);
         const ids = this.checkedRewindTurns(thread).map(turn => turn.id);
         if (!this.retainedTurnIds || JSON.stringify(ids) !== JSON.stringify(this.retainedTurnIds)
             || (await this.queue.list()).length) throw new Error('Native rewind requires reconciliation');
