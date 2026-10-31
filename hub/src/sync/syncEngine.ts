@@ -1524,6 +1524,11 @@ export class SyncEngine {
         return parent?.metadata?.codexArchivedFork?.childSessionId === sessionId
     }
 
+    private isPtySession(sessionId: string, namespace: string): boolean {
+        const session = this.sessionCache.getSessionByNamespace(sessionId, namespace)
+        return (session?.agentState as { startingMode?: string } | null)?.startingMode === 'pty'
+    }
+
     private writeCodexResumePending(sessionId: string, namespace: string,
         pending: NonNullable<Session['metadata']>['codexResumePending']): void {
         for (let retry = 0; retry < 5; retry++) {
@@ -3449,8 +3454,11 @@ export class SyncEngine {
         if (this.archivedForkPending(sessionId, namespace)) {
             return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
         }
-        const existing = this.resumeTails.get(sessionId)
-        if (existing) return await existing
+        const isPty = this.isPtySession(sessionId, namespace)
+        if (!isPty) {
+            const existing = this.resumeTails.get(sessionId)
+            if (existing) return await existing
+        }
 
         if (this.historyActionsInFlight.has(sessionId)) {
             return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
@@ -3464,7 +3472,9 @@ export class SyncEngine {
                 this.resumeTails.delete(sessionId)
             }
         })()
-        this.resumeTails.set(sessionId, promise)
+        if (!isPty) {
+            this.resumeTails.set(sessionId, promise)
+        }
         return await promise
     }
 
@@ -3947,15 +3957,18 @@ export class SyncEngine {
         if (this.archivedForkPending(sessionId, namespace)) {
             return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
         }
-        const existing = this.reopenTails.get(sessionId)
-        if (existing) return await existing
+        const isPty = this.isPtySession(sessionId, namespace)
+        if (!isPty) {
+            const existing = this.reopenTails.get(sessionId)
+            if (existing) return await existing
 
-        const existingResume = this.resumeTails.get(sessionId)
-        if (existingResume) {
-            const result = await existingResume
-            return result.type === 'error'
-                ? { type: 'error', message: result.message, code: result.code }
-                : { type: 'success', sessionId: result.sessionId, resumed: true }
+            const existingResume = this.resumeTails.get(sessionId)
+            if (existingResume) {
+                const result = await existingResume
+                return result.type === 'error'
+                    ? { type: 'error', message: result.message, code: result.code }
+                    : { type: 'success', sessionId: result.sessionId, resumed: true }
+            }
         }
 
         if (this.historyActionsInFlight.has(sessionId)) {
@@ -3970,7 +3983,9 @@ export class SyncEngine {
                 this.reopenTails.delete(sessionId)
             }
         })()
-        this.reopenTails.set(sessionId, promise)
+        if (!isPty) {
+            this.reopenTails.set(sessionId, promise)
+        }
         return await promise
     }
 
