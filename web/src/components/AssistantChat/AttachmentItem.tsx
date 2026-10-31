@@ -98,7 +98,7 @@ export function AttachmentItem(props: {
     onRemove?: () => void
     dragHandleProps?: AttachmentDragHandleProps
 } = {}) {
-    const { name, status, previewUrl } = useAuiState((s) => s.attachment) as ComposerAttachmentWithPreview
+    const { name, status, previewUrl, file } = useAuiState((s) => s.attachment) as ComposerAttachmentWithPreview
     const isParking = useComposerParking()
     const isUploading = status.type === 'running'
     const isError = status.type === 'incomplete'
@@ -123,6 +123,7 @@ export function AttachmentItem(props: {
                     src={previewUrl}
                     fileName={name}
                     label={name}
+                    fileSize={file?.size}
                     galleryId="composer-attachments"
                     buttonClassName={`group h-full w-full cursor-zoom-in overflow-hidden rounded-lg text-left ${props.dragHandleProps ? 'touch-none' : ''}`}
                     imageClassName="h-full w-full object-cover"
@@ -161,7 +162,7 @@ export function AttachmentItem(props: {
 
     return (
         <AttachmentPrimitive.Root
-            className="relative flex items-center gap-1.5 rounded-lg bg-[var(--app-subtle-bg)] px-2 py-2 text-base text-[var(--app-fg)]"
+            className={`relative flex items-center gap-1.5 rounded-lg bg-[var(--app-subtle-bg)] py-2 pr-2 text-base text-[var(--app-fg)] ${!props.dragHandleProps && !isParking ? 'pl-3' : 'pl-2'}`}
             onPointerDown={surfacePointerDown}
             onContextMenu={props.dragHandleProps?.onSurfaceContextMenu}
         >
