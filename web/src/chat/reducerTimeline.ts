@@ -1050,6 +1050,7 @@ export function reduceTimeline(
                     // null exec timestamp is a no-op, leaving exec start unset so
                     // toolDurationMs falls back to hub times on both sides.
                     setEarliestStartedAt(block, msg.createdAt)
+                    if (block.tool.startUnavailable) block.tool = { ...block.tool, startUnavailable: false }
                     setEarliestExecStartedAt(block, msg.agentTimestamp ?? null)
 
                     if (isSubagentToolName(c.name) && !context.consumedGroupIds.has(msg.id)) {
@@ -1104,6 +1105,7 @@ export function reduceTimeline(
                         return permissionFromResult ?? permissionEntry?.permission
                     })()
 
+                    const existing = toolBlocksById.get(c.tool_use_id)
                     const block = ensureToolBlock(blocks, toolBlocksById, c.tool_use_id, {
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
@@ -1111,8 +1113,8 @@ export function reduceTimeline(
                         model: msg.model,
                         localId: msg.localId,
                         meta: msg.meta,
-                        name: permissionEntry?.toolName ?? 'Tool',
-                        input: permissionEntry?.input ?? null,
+                        name: permissionEntry?.toolName ?? (c.commandExecution ? 'CodexBash' : 'Tool'),
+                        input: existing?.tool.input ?? permissionEntry?.input ?? c.commandExecution?.input ?? null,
                         description: null,
                         permission
                         // NOTE: no agentTimestamp seed here. execStartedAt must
@@ -1126,6 +1128,10 @@ export function reduceTimeline(
 
                     block.tool = {
                         ...block.tool,
+                        ...(c.commandExecution ? {
+                            executionDurationMs: c.commandExecution.durationMs ?? block.tool.executionDurationMs,
+                            ...(!existing ? { startedAt: null, startUnavailable: true } : {})
+                        } : {}),
                         result: c.content,
                         completedAt: msg.createdAt,
                         // Only a real Claude timestamp — never the hub receive

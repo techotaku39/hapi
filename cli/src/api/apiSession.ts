@@ -467,8 +467,8 @@ export class ApiSessionClient extends EventEmitter {
                     // Explicit user retry: release any held in-memory
                     // reservation and bypass the normal message-id dedup.
                     let accepted = true
-                    if (data.body.localId && this.cancelQueuedMessageCallback) {
-                        const cancellation = this.cancelQueuedMessageCallback(data.body.localId)
+                    if (data.body.localId) {
+                        const cancellation = this.cancelQueuedMessage(data.body.localId)
                         const cancelled = cancellation instanceof Promise ? await cancellation : cancellation
                         accepted = cancelled !== 'in-flight' && cancelled !== 'consumed'
                         if (cancelled === 'indeterminate') {
@@ -487,8 +487,8 @@ export class ApiSessionClient extends EventEmitter {
                 }
 
                 if (data.body.t === 'cancel-queued-message') {
-                    const cancellation = (data.body.localId && this.cancelQueuedMessageCallback)
-                        ? this.cancelQueuedMessageCallback(data.body.localId)
+                    const cancellation = data.body.localId
+                        ? this.cancelQueuedMessage(data.body.localId)
                         : false
                     const result = cancellation instanceof Promise ? await cancellation : cancellation
                     // 'in-flight' = the row is inside an async steer: not
@@ -735,6 +735,15 @@ export class ApiSessionClient extends EventEmitter {
 
     onRetryQueuedMessage(callback: (localId: string) => boolean | Promise<boolean>): void {
         this.retryQueuedMessageCallback = callback
+    }
+
+    private cancelQueuedMessage(localId: string): QueueCancelResult | Promise<QueueCancelResult> {
+        const remaining = this.pendingMessages.filter((pending) => pending.localId !== localId)
+        if (remaining.length !== this.pendingMessages.length) {
+            this.pendingMessages = remaining
+            return true
+        }
+        return this.cancelQueuedMessageCallback?.(localId) ?? false
     }
 
     private enqueueUserMessage(message: UserMessage, localId?: string): void {

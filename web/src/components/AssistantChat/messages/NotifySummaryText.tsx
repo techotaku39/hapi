@@ -133,6 +133,7 @@ export const NotifySummaryText: TextMessagePartComponent = (props) => {
     const sourceMessageIds = (props as SourceAwareTextMessagePartProps).sourceMessageIds
     const searchSource: SearchSourceMarker = { id: sourceMessageId, ids: sourceMessageIds }
     const showInChat = useSessionSummaryInChat()
+    const completedTextRef = useRef<string | null>(null)
     const previousTextRef = useRef(text)
     const runStartedWithRunningRef = useRef(status.type === 'running')
     const hasTextChangedDuringRunRef = useRef(false)
@@ -155,6 +156,15 @@ export const NotifySummaryText: TextMessagePartComponent = (props) => {
 
     previousTextRef.current = text
 
+    // A new send can temporarily mark the previous response running. Preserve
+    // its completed presentation until its text changes; a genuinely streaming
+    // part must still wait for completion before becoming a summary.
+    if (status.type === 'complete') {
+        completedTextRef.current = text
+    } else if (text !== completedTextRef.current) {
+        completedTextRef.current = null
+    }
+
     if (!showInChat) {
         const stripped = stripNotifySummaryFooter(text)
         if (!stripped) return null
@@ -162,7 +172,9 @@ export const NotifySummaryText: TextMessagePartComponent = (props) => {
         return withSearchSourceMarker(searchSource, <MarkdownRenderer content={stripped} />)
     }
 
-    if (status.type !== 'complete') return withSearchSourceMarker(searchSource, <MarkdownText smooth={smooth} />)
+    if (status.type !== 'complete' && !(status.type === 'running' && completedTextRef.current === text)) {
+        return withSearchSourceMarker(searchSource, <MarkdownText smooth={smooth} />)
+    }
 
     const display = splitNotifySummary(text)
     if (!display) return withSearchSourceMarker(searchSource, <MarkdownText smooth={smooth} />)

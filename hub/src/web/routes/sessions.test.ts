@@ -829,6 +829,23 @@ describe('sessions routes', () => {
         ])
     })
 
+    it.each(['high', null])('applies an Antigravity model and effort %s atomically', async (effort) => {
+        const { app, applySessionConfigCalls } = createApp(createSession({
+            metadata: { path: '/tmp/project', host: 'localhost', flavor: 'agy' }
+        }))
+
+        const response = await app.request('/api/sessions/session-1/model', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'gemini-4-argon', effort })
+        })
+
+        expect(response.status).toBe(200)
+        expect(applySessionConfigCalls).toEqual([
+            ['session-1', { model: 'gemini-4-argon', effort }]
+        ])
+    })
+
     it('rejects an effort sent with a model change for Pi, which applies the two separately', async () => {
         const session = createSession({
             metadata: { path: '/tmp/project', host: 'localhost', flavor: 'pi' }
@@ -1025,6 +1042,22 @@ describe('sessions routes', () => {
             error: 'Effort selection is not supported for this session type'
         })
         expect(applySessionConfigCalls).toEqual([])
+    })
+
+    it('applies effort changes for Antigravity sessions', async () => {
+        const { app, applySessionConfigCalls } = createApp(createSession({
+            metadata: { path: '/tmp/project', host: 'localhost', flavor: 'agy' }
+        }))
+        const response = await app.request('/api/sessions/session-1/effort', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ effort: 'high' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(applySessionConfigCalls).toEqual([
+            ['session-1', { effort: 'high' }]
+        ])
     })
 
     it('applies effort changes for Claude sessions', async () => {

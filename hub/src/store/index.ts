@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { addMessage } from './messages'
+import { clearCachedStatements } from './statementCache'
 import { backfillLastUserMessageAt } from './sessionUserActivity'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
@@ -324,6 +325,7 @@ export class Store {
 
     close(): void {
         if (this.closed) return
+        clearCachedStatements(this.db)
         this.db.close()
         this.closed = true
 
