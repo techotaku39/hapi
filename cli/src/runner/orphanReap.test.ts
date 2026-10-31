@@ -3,9 +3,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+    commandMatchesHapiMcpBridgeForSession,
     commandMatchesRunnerSpawnedSession,
     findRunnerSpawnedOrphanTargets,
     findStopSessionOrphanTargets,
+    parseWindowsProcessSnapshot,
     reapRunnerSpawnedOrphans,
     selectOrphanPidsForSession,
     selectOrphanTargetsForSession,
@@ -15,6 +17,17 @@ import {
     windowsProcessListCimCommand,
     windowsProcessMarkerCimCommand,
 } from '@/utils/process'
+
+describe('complete Windows process snapshots', () => {
+    it.each(['', '[]', '{}', 'null', '[{"ProcessId":1},{}]', '[{"ProcessId":0}]'])('rejects unverifiable listing %s', raw => {
+        expect(() => parseWindowsProcessSnapshot(raw)).toThrow();
+    });
+    it('retains missing creation times as unknown rather than treating the PID as absent', () => {
+        expect(parseWindowsProcessSnapshot('[{"ProcessId":0},{"ProcessId":42,"CreationDate":null}]')).toEqual([
+            { pid: 42, name: '', cmd: '', startMarker: null }
+        ]);
+    });
+});
 
 describe('orphanReap argv matching', () => {
     const sessionId = 'sess-abc-123'
@@ -43,6 +56,34 @@ describe('orphanReap argv matching', () => {
     it('rejects substring false positives', () => {
         const cmd = `bun src/index.ts claude --started-by runner --existing-session-id ${sessionId}-extra`
         expect(commandMatchesRunnerSpawnedSession(cmd, sessionId)).toBe(false)
+    })
+
+    it('matches stamped HAPI MCP bridge helpers without --started-by (#2003)', () => {
+        const cmd = `hapi-hapi-soup mcp --url http://127.0.0.1:45619/ --tools display_image --hapi-session-id ${sessionId}`
+        expect(commandMatchesHapiMcpBridgeForSession(cmd, sessionId)).toBe(true)
+        expect(commandMatchesRunnerSpawnedSession(cmd, sessionId)).toBe(false)
+    })
+
+    it('rejects MCP helpers for a different session id', () => {
+        const cmd = `hapi mcp --url http://127.0.0.1:1/ --hapi-session-id other-sess`
+        expect(commandMatchesHapiMcpBridgeForSession(cmd, sessionId)).toBe(false)
+    })
+
+    it('rejects unstamped legacy MCP helpers (no session flag)', () => {
+        const cmd = 'hapi mcp --url http://127.0.0.1:1/ --tools display_image'
+        expect(commandMatchesHapiMcpBridgeForSession(cmd, sessionId)).toBe(false)
+    })
+
+    it('selectOrphanPidsForSession includes stamped MCP bridges alongside agent roots', () => {
+        const pids = selectOrphanPidsForSession(
+            [
+                { pid: 10, cmd: `bun src/index.ts cursor --started-by runner --existing-session-id ${sessionId}`, name: 'bun' },
+                { pid: 11, cmd: `hapi mcp --url http://127.0.0.1:9/ --hapi-session-id ${sessionId}`, name: 'hapi' },
+                { pid: 12, cmd: `hapi mcp --url http://127.0.0.1:9/ --hapi-session-id other`, name: 'hapi' },
+            ],
+            sessionId
+        )
+        expect(pids.sort((a, b) => a - b)).toEqual([10, 11])
     })
 
     it('treats empty Windows process-list stdout as scan_failed (not no-orphans)', async () => {
@@ -401,7 +442,8 @@ describe('Windows orphan startMarker format agreement', () => {
                     startMarker: iso, // as listWindowsProcessesWithCommandLine would set
                 },
             ],
-            sessionId
+            sessionId,
+            1 // Synthetic self PID: never collide with the fixture PID (4242).
         )
         expect(targets).toEqual([{ pid: 4242, startMarker: iso }])
     })

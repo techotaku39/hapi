@@ -7,6 +7,9 @@
  * the hub archives by HAPI session id — matching `--started-by runner` plus
  * an explicit `--existing-session-id` / `--hapi-session-id` flag.
  *
+ * Also matches HAPI MCP stdio bridge helpers (`mcp --url … --hapi-session-id`)
+ * which the agent spawns without `--started-by runner` (#2003).
+ *
  * Windows: do not use ps-list. Its fastlist vendor binary is often missing from
  * single-exe bundles and never returns CommandLine — argv matching needs CIM.
  */
@@ -45,6 +48,16 @@ export function isHapiDriverCliCommand(cmd: string, name = ''): boolean {
     )
 }
 
+function commandHasHapiSessionIdFlag(cmd: string, sessionId: string): boolean {
+    if (!sessionId) return false
+    const escaped = sessionId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // Require an explicit HAPI id flag. Do not match bare `--resume <native-id>`
+    // — that is the agent session, not the HAPI row id.
+    return new RegExp(
+        `(?:^|\\s)(?:--existing-session-id|--hapi-session-id)(?:\\s+|=)${escaped}(?:\\s|$)`
+    ).test(cmd)
+}
+
 /**
  * Token-aware match: session id must appear as its own argv token (or after
  * `--existing-session-id=` / `--hapi-session-id=`), and the process must claim
@@ -53,13 +66,21 @@ export function isHapiDriverCliCommand(cmd: string, name = ''): boolean {
 export function commandMatchesRunnerSpawnedSession(cmd: string, sessionId: string): boolean {
     if (!sessionId || !cmd.includes('--started-by')) return false
     if (!/(?:^|\s)--started-by(?:\s+|=)runner(?:\s|$)/.test(cmd)) return false
+    return commandHasHapiSessionIdFlag(cmd, sessionId)
+}
 
-    const escaped = sessionId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    // Require an explicit HAPI id flag. Do not match bare `--resume <native-id>`
-    // — that is the agent session, not the HAPI row id.
-    return new RegExp(
-        `(?:^|\\s)(?:--existing-session-id|--hapi-session-id)(?:\\s+|=)${escaped}(?:\\s|$)`
-    ).test(cmd)
+/**
+ * HAPI MCP stdio bridge helpers (`hapi … mcp --url …`) are spawned by the agent,
+ * not the runner — they never carry `--started-by runner`. After #1911 roots are
+ * reaped, these helpers often survive (OOM of the root only, KillMode=process
+ * races) and keep holding RAM. Match them by stamped `--hapi-session-id` (#2003).
+ */
+export function commandMatchesHapiMcpBridgeForSession(cmd: string, sessionId: string): boolean {
+    if (!sessionId) return false
+    // Subcommand token `mcp` near a `--url` flag (bridge signature).
+    if (!/(?:^|\s)mcp(?:\s|$)/.test(cmd)) return false
+    if (!/(?:^|\s)--url(?:\s+|=)/.test(cmd)) return false
+    return commandHasHapiSessionIdFlag(cmd, sessionId)
 }
 
 export function selectOrphanTargetsForSession(
@@ -77,7 +98,12 @@ export function selectOrphanTargetsForSession(
         const cmd = proc.cmd || ''
         const name = proc.name || ''
         if (!isHapiDriverCliCommand(cmd, name)) continue
-        if (!commandMatchesRunnerSpawnedSession(cmd, sessionId)) continue
+        if (
+            !commandMatchesRunnerSpawnedSession(cmd, sessionId)
+            && !commandMatchesHapiMcpBridgeForSession(cmd, sessionId)
+        ) {
+            continue
+        }
         targets.push({
             pid,
             startMarker: proc.startMarker === undefined ? null : proc.startMarker,
@@ -165,7 +191,12 @@ export function listWindowsProcessesWithCommandLine(): ProcessSnapshot[] {
     if (result.error || result.status !== 0) {
         throw result.error ?? new Error(`powershell Win32_Process exit ${result.status}`)
     }
-    const raw = (result.stdout ?? '').trim()
+    return parseWindowsProcessSnapshot((result.stdout ?? '').toString())
+}
+
+/** Reject incomplete/invalid listings before absence can prove a PID exited. */
+export function parseWindowsProcessSnapshot(stdout: string): ProcessSnapshot[] {
+    const raw = stdout.trim()
     // Empty stdout is a failed scan, not "no processes" — a live Windows host
     // always has System/Idle. Match process.ts collectWindowsProcessTree
     // fail-closed semantics so orphan reap does not claim archive-ok (#1911).
@@ -176,7 +207,11 @@ export function listWindowsProcessesWithCommandLine(): ProcessSnapshot[] {
         | Array<{ ProcessId?: number; Name?: string; CommandLine?: string; CreationDate?: string }>
         | { ProcessId?: number; Name?: string; CommandLine?: string; CreationDate?: string }
     const rows = Array.isArray(parsed) ? parsed : [parsed]
-    return rows
+    if (!rows.length || rows.some(row => !row || typeof row.ProcessId !== 'number'
+        || !Number.isInteger(row.ProcessId) || row.ProcessId < 0)) {
+        throw new Error('powershell Win32_Process returned an invalid process snapshot')
+    }
+    const processes = rows
         .map((row) => ({
             pid: Number(row.ProcessId),
             name: row.Name ?? '',
@@ -186,6 +221,8 @@ export function listWindowsProcessesWithCommandLine(): ProcessSnapshot[] {
                 : null,
         }))
         .filter((proc) => Number.isFinite(proc.pid) && proc.pid > 0)
+    if (!processes.length) throw new Error('powershell Win32_Process returned no verifiable processes')
+    return processes
 }
 
 export async function listProcessesForOrphanScan(): Promise<ProcessSnapshot[]> {
