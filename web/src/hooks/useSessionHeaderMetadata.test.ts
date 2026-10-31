@@ -10,6 +10,7 @@ describe('parseSessionHeaderMetadata', () => {
             showLabels: true,
             agent: true,
             agentIcon: true,
+            project: true,
             model: true,
             reasoning: true,
             fastMode: true,
