@@ -5,6 +5,7 @@ export type StoredSession = {
     machineId: string | null
     createdAt: number
     updatedAt: number
+    lastUserMessageAt?: number
     pinned: boolean
     globalPinned: boolean
     metadata: unknown | null
@@ -38,6 +39,8 @@ export type StoredMachine = {
     seq: number
 }
 
+export type MessageDeliveryState = 'indeterminate'
+
 export type StoredMessage = {
     id: string
     sessionId: string
@@ -47,6 +50,8 @@ export type StoredMessage = {
     localId: string | null
     invokedAt: number | null
     scheduledAt: number | null
+    /** Omitted for ordinary queued/delivered rows; set when steer outcome is unknown. */
+    deliveryState?: MessageDeliveryState
 }
 
 export type StoredUser = {
@@ -66,12 +71,21 @@ export type StoredPushSubscription = {
     createdAt: number
 }
 
+export type NativeDevicePlatform = 'phone' | 'wear' | 'ios'
+
 export type StoredFcmDevice = {
     id: number
     namespace: string
+    /** FCM registration token (phone/wear) or hex APNs device token (ios). */
     token: string
-    platform: 'phone' | 'wear'
+    platform: NativeDevicePlatform
     deviceId: string
+    /**
+     * base64 of the device-generated 32-byte E2E push encryption key.
+     * Required for `ios`, optional for `phone` (relay capable clients),
+     * null for legacy phone/Wear registrations.
+     */
+    pushKey: string | null
     createdAt: number
     updatedAt: number
 }

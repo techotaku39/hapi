@@ -7,11 +7,14 @@ import { UserBubbleContent, getUserBubbleClassName, shouldShowMessageStatus } fr
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageActions } from '@/components/AssistantChat/messages/MessageActions'
+import { useTranslation } from '@/lib/use-translation'
 
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
+    const { t } = useTranslation()
     const role = useAuiState((s) => s.message.role)
     const messageId = useAuiState((s) => s.message.id)
+    const threadIsRunning = useAuiState((s) => s.thread.isRunning)
     const elementId = getConversationMessageAnchorId(messageId)
     const text = useAuiState((s) => {
         if (s.message.role !== 'user') return ''
@@ -36,6 +39,9 @@ export function HappyUserMessage() {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
     })
+    const steered = useAuiState(({ message }) => (
+        message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+    )?.steered === true)
     const cliText = useAuiState((s) => {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         if (custom?.kind !== 'cli-output') return ''
@@ -51,16 +57,20 @@ export function HappyUserMessage() {
         && localId.length > 0
         && ctx.metadata?.conversationHistoryPoints?.[localId] === true
     const isLatestBoundary = ctx.isLatestCompletedBoundary?.(messageId) === true
+    // A user-only finished turn can be the latest completed boundary while
+    // another turn runs. Branch before that user turn, never from the live tail.
+    const runningCodex = threadIsRunning && ctx.metadata?.flavor === 'codex'
     const showCurrentFork = Boolean(
         history?.forkCurrent
         && isLatestBoundary
+        && !runningCodex
         && !ctx.disabled
         && ctx.onForkConversation
     )
     const showHistoricalFork = Boolean(
         history?.forkAtMessage
         && hasNativePoint
-        && !isLatestBoundary
+        && (!isLatestBoundary || runningCodex)
         && !ctx.disabled
         && ctx.onForkConversation
     )
@@ -108,12 +118,21 @@ export function HappyUserMessage() {
                         </div>
                     )}
                 </div>
+                {steered ? (
+                    <span
+                        title={t('queuedMessages.steeredBadgeTitle')}
+                        className="mt-1 inline-flex items-center gap-0.5 text-[10px] leading-none text-[var(--app-hint)]"
+                    >
+                        {t('queuedMessages.steeredBadge')}
+                    </span>
+                ) : null}
             </div>
             <MessageActions
                 align="end"
                 copyText={hasText ? text : undefined}
                 messageElementId={elementId}
                 showFork={showFork}
+                allowForkWhileRunning={showHistoricalFork && ctx.metadata?.flavor === 'codex'}
                 showRewind={showRewind}
                 historyActionPending={ctx.historyActionPending}
                 onFork={showCurrentFork

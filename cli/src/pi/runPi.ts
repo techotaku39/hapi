@@ -1,19 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from '@/ui/logger';
+import { convertAgentMessage } from '@/agent/messageConverter';
 import { bootstrapExistingSession, bootstrapSession } from '@/agent/sessionFactory';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
 import { registerLocalHandoffHandler } from '@/agent/localHandoff';
 import { createRunnerLifecycle, createModeChangeHandler, setControlledByUser } from '@/agent/runnerLifecycle';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PiTransport } from './piTransport';
+import { getAgentLaunchCommand } from '@/agent/agentLaunchCommand';
 import { PiSession } from './session';
 import { PiConversationHistory, PiHistoryRestoreError } from './conversationHistory';
 import { parsePiModels, parsePiCommands, PiRpcTimeoutError, sendPiRpcAndWait, wireTransportEvents } from './loop';
+import { convertPiCompactionUsage } from './piEventConverter';
 import { PiThinkingLevelSchema, SetSessionConfigPayloadSchema, PiCompactResultSchema, PiFullSessionStatsSchema } from './schemas';
 import type { PiImageContent, PiThinkingLevel } from './types';
 import { parsePiSpecialCommand, parseLeadingSlashName, type PiSpecialCommand } from './specialCommands';
 import { PiPromptQueue, isPiSpecialQueued, type PiPreparedPrompt } from './promptQueue';
 import { PiSteerDispatcher } from './steerDispatcher';
+import { materializePiTitleExtension } from './titleExtension';
 import { getBuiltinSlashCommands, mergeSlashCommands } from '@hapi/protocol/slashCommands';
 import type { ListPiModelsResponse, PiCommandSummary, PiModelSummary, SlashCommand, SlashCommandsResponse } from '@hapi/protocol/apiTypes';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
@@ -189,6 +193,8 @@ export async function runPi(opts: {
     effort?: string;
     resumeSessionId?: string;
     existingSessionId?: string;
+    /** Fresh machine-spawn stub (`--hapi-session-id`); adopt via bootstrapSession. */
+    reservedSessionId?: string;
     workingDirectory?: string;
 } = {}): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
@@ -219,7 +225,8 @@ export async function runPi(opts: {
             // handleSessionAlive persists every non-undefined keepAlive model, so
             // passing it here would store/show a model Pi may reject. PiSession
             // carries opts.model as initialModel and applies it once confirmed.
-            model: undefined
+            model: undefined,
+            reservedSessionId: opts.reservedSessionId
         });
     const { session: apiSession } = bootstrap;
 
@@ -236,15 +243,16 @@ export async function runPi(opts: {
         expectedNativeSessionId: opts.resumeSessionId,
     });
 
-    const transportArgs = ['--mode', 'rpc'];
+    const titleExtensionPath = await materializePiTitleExtension();
+    const transportArgs = ['--mode', 'rpc', '--extension', titleExtensionPath];
     if (opts.resumeSessionId) {
         transportArgs.push('--session', opts.resumeSessionId);
     }
     const transport = new PiTransport({
-        command: 'pi',
+        command: getAgentLaunchCommand('pi'),
         args: transportArgs,
         cwd: workingDirectory,
-        env: { ...process.env, PI_RPC_EMIT_TITLE: '1' },
+        env: process.env,
     });
     const conversationHistory = new PiConversationHistory(
         piSession,
@@ -297,7 +305,7 @@ export async function runPi(opts: {
     });
 
     lifecycle.registerProcessHandlers();
-    registerKillSessionHandler(apiSession.rpcHandlerManager, lifecycle);
+    registerKillSessionHandler(apiSession.rpcHandlerManager, lifecycle, apiSession);
     registerLocalHandoffHandler(apiSession.rpcHandlerManager, lifecycle);
 
     let cleanupInitiated = false;
@@ -1059,6 +1067,13 @@ export async function runPi(opts: {
                         else delta.push('?');
                         sendEvent(`📦 Compaction completed (tokens: ${delta.join(' ')})`);
                     }
+                    // Pi reports unknown context stats until the next model
+                    // response; use the compact result's estimate as a
+                    // temporary context-only update, then let real usage
+                    // replace it on the next turn.
+                    const usage = convertPiCompactionUsage(result.estimatedTokensAfter);
+                    const convertedUsage = usage ? convertAgentMessage(usage, piSession.currentModel) : null;
+                    if (convertedUsage) piSession.sendAgentMessage(convertedUsage);
                 } catch (error) {
                     if (error instanceof PiRpcTimeoutError) {
                         // The runtime lease is deliberately retained on timeout

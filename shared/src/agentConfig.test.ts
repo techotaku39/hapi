@@ -7,6 +7,11 @@ import {
 } from './agentConfig'
 
 describe('agent config descriptors', () => {
+    test('exposes model-dependent Antigravity effort at creation and during a session', () => {
+        expect(getAgentConfigDescriptor('agy').fields).toContainEqual({
+            id: 'effort', section: 'effort', kind: 'select', optionSource: 'model', availability: 'both'
+        })
+    })
     test('exposes the three primary fields with their intended placements', () => {
         const descriptor = getAgentConfigDescriptor('codex')
         expect(descriptor.fields.map((field) => [field.id, field.section])).toEqual([
@@ -25,6 +30,16 @@ describe('agent config descriptors', () => {
             kind: 'dependent-select',
             optionSource: 'machine'
         }))
+    })
+
+    test('reports DSH permission as managed by its ACP composition', () => {
+        const descriptor = getAgentConfigDescriptor('dsh')
+        expect(descriptor.fields).toEqual([expect.objectContaining({
+            id: 'permission',
+            kind: 'status',
+            availability: 'managed'
+        })])
+        expect(resolveHapiYoloPermissionMode('dsh')).toBeNull()
     })
 
     test('reports Pi permission as managed rather than pretending YOLO applies', () => {

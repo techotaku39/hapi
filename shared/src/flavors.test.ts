@@ -10,9 +10,9 @@ import {
 } from './flavors'
 
 describe('hasCapability', () => {
-    test('agy supports model-change but not effort', () => {
+    test('agy supports model-change and effort', () => {
         expect(hasCapability('agy', Capabilities.ModelChange)).toBe(true)
-        expect(hasCapability('agy', Capabilities.Effort)).toBe(false)
+        expect(hasCapability('agy', Capabilities.Effort)).toBe(true)
     })
 
     test('claude supports model-change', () => {
@@ -26,6 +26,11 @@ describe('hasCapability', () => {
     test('gemini supports model-change but not effort', () => {
         expect(hasCapability('gemini', Capabilities.ModelChange)).toBe(true)
         expect(hasCapability('gemini', Capabilities.Effort)).toBe(false)
+    })
+
+    test('dsh supports model-change but not effort (ACP config options)', () => {
+        expect(hasCapability('dsh', Capabilities.ModelChange)).toBe(true)
+        expect(hasCapability('dsh', Capabilities.Effort)).toBe(false)
     })
 
     test('codex supports model-change but not effort', () => {
@@ -79,6 +84,7 @@ describe('getFlavorLabel', () => {
         expect(getFlavorLabel('claude')).toBe('Claude')
         expect(getFlavorLabel('gemini')).toBe('Gemini')
         expect(getFlavorLabel('codex')).toBe('Codex')
+        expect(getFlavorLabel('dsh')).toBe('DeepSeek Harness')
         expect(getFlavorLabel('cursor')).toBe('Cursor')
         expect(getFlavorLabel('opencode')).toBe('OpenCode')
         expect(getFlavorLabel('pi')).toBe('Pi')
@@ -103,6 +109,7 @@ describe('isKnownFlavor', () => {
         expect(isKnownFlavor('claude')).toBe(true)
         expect(isKnownFlavor('gemini')).toBe(true)
         expect(isKnownFlavor('codex')).toBe(true)
+        expect(isKnownFlavor('dsh')).toBe(true)
         expect(isKnownFlavor('cursor')).toBe(true)
         expect(isKnownFlavor('opencode')).toBe(true)
         expect(isKnownFlavor('pi')).toBe(true)
@@ -136,6 +143,7 @@ describe('convenience functions', () => {
     })
 
     test('supportsEffort matches hasCapability', () => {
+        expect(supportsEffort('agy')).toBe(true)
         expect(supportsEffort('claude')).toBe(true)
         expect(supportsEffort('codex')).toBe(false)
         expect(supportsEffort('gemini')).toBe(false)

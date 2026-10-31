@@ -6,6 +6,7 @@ import {
     MessageActions,
     selectThreadIsRunning,
 } from './MessageActions'
+import { MESSAGE_ACTION_BUTTON_CLASS } from './MessageActionButton'
 
 const copy = vi.fn()
 const onShareTurn = vi.fn()
@@ -31,8 +32,9 @@ vi.mock('@/components/ui/ConfirmDialog', () => ({
         onConfirm: () => Promise<void>
         onClose: () => void
         isPending: boolean
+        centerTitle?: boolean
     }) => props.isOpen ? (
-        <div role="dialog">
+        <div role="dialog" data-center-title={props.centerTitle ? 'true' : 'false'}>
             <div>{props.title}</div>
             <div>{props.description}</div>
             <button type="button" onClick={() => void props.onConfirm()}>
@@ -226,7 +228,7 @@ describe('MessageActions', () => {
         const dialog = screen.getByRole('dialog')
         expect(dialog.textContent).toContain('分叉对话')
         expect(dialog.textContent).toContain('从此处创建新会话？')
-        expect(dialog.textContent).toContain('当前会话不会被修改。')
+        expect(dialog.textContent).toContain('从此处创建新会话？当前会话不会被修改。')
 
         fireEvent.click(within(dialog).getByRole('button', { name: '分叉' }))
         expect(onFork).toHaveBeenCalledTimes(1)
@@ -254,7 +256,7 @@ describe('MessageActions', () => {
         const dialog = screen.getByRole('dialog')
         expect(dialog.textContent).toContain('回退对话')
         expect(dialog.textContent).toContain('将此会话回退到此处？')
-        expect(dialog.textContent).toContain('之后的对话历史将永久移除。文件不会被修改。')
+        expect(dialog.textContent).toContain('将此会话回退到此处？之后的对话历史将永久移除。文件不会被修改。')
 
         fireEvent.click(within(dialog).getByRole('button', { name: '回退' }))
         expect(onRewind).toHaveBeenCalledTimes(1)
@@ -262,6 +264,24 @@ describe('MessageActions', () => {
 
         resolveRewind?.()
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    })
+
+    it('centers Fork and Rewind confirmation titles like other ConfirmDialogs', () => {
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            showFork: true,
+            showRewind: true,
+            onFork: async () => {},
+            onRewind: async () => {}
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Fork' }))
+        expect(screen.getByRole('dialog')).toHaveAttribute('data-center-title', 'true')
+
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Rewind' }))
+        expect(screen.getByRole('dialog')).toHaveAttribute('data-center-title', 'true')
     })
 
     it('hides Fork and Rewind while the thread is running', () => {
@@ -278,6 +298,17 @@ describe('MessageActions', () => {
 
         expect(screen.queryByRole('button', { name: 'Fork' })).toBeNull()
         expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
+    })
+
+    it('allows an eligible historical fork while keeping rewind locked during generation', async () => {
+        auiState.thread.isRunning = true
+        const onFork = vi.fn(async () => {})
+        renderActions({ align: 'end', showFork: true, allowForkWhileRunning: true,
+            showRewind: true, onFork, onRewind: async () => {} })
+        expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Fork' }))
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fork' }))
+        await waitFor(() => expect(onFork).toHaveBeenCalledTimes(1))
     })
 
     it('keeps the share action visible while the thread is running', () => {
@@ -359,6 +390,45 @@ describe('MessageActions', () => {
             'Fork',
             'Copy'
         ])
+    })
+
+    it('uses the shared compact style and matching accessible hover labels', () => {
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            messageElementId: 'message-1',
+            showFork: true,
+            showRewind: true,
+            onFork: async () => {},
+            onRewind: async () => {}
+        })
+
+        const buttons = ['Share turn as image', 'Rewind', 'Fork', 'Copy'].map((name) =>
+            screen.getByRole('button', { name })
+        )
+        expect(new Set(buttons.map((button) => button.className))).toEqual(new Set([MESSAGE_ACTION_BUTTON_CLASS]))
+        for (const button of buttons) {
+            expect(button).toHaveAttribute('title', button.getAttribute('aria-label'))
+        }
+        expect(buttons[0].querySelector('svg')).toHaveAttribute('class', 'h-3.5 w-3.5')
+    })
+
+    it('localizes every message action hover label in Simplified Chinese', () => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+
+        renderActions({
+            align: 'end',
+            copyText: 'body',
+            messageElementId: 'message-1',
+            showFork: true,
+            showRewind: true,
+            onFork: async () => {},
+            onRewind: async () => {}
+        })
+
+        for (const name of ['将本轮对话分享为图片', '回退', '分叉', '复制']) {
+            expect(screen.getByRole('button', { name })).toHaveAttribute('title', name)
+        }
     })
 
     it('shows Fork confirm dialog and calls onFork only after confirm', async () => {
