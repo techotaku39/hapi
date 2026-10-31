@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { ApiClient } from '@/api/client'
-import type { SessionSummary } from '@/types/api'
+import type { Machine, SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { SessionList } from './SessionList'
@@ -55,11 +55,39 @@ function renderWithProviders(children: ReactNode) {
     )
 }
 
+function makeMachine(overrides: Partial<Machine> & { id: string }): Machine {
+    return {
+        namespace: 'default',
+        seq: 1,
+        createdAt: 0,
+        updatedAt: 0,
+        active: true,
+        activeAt: 0,
+        metadata: null,
+        metadataVersion: 0,
+        runnerState: null,
+        runnerStateVersion: 0,
+        health: null,
+        ...overrides
+    }
+}
+
 function renderSessionList(
     sessions: SessionSummary[],
-    api: ApiClient | null = null,
-    onRefresh: () => Promise<unknown> | void = vi.fn()
+    apiOrMachinesById?: ApiClient | null | Record<string, Machine>,
+    onRefresh: () => Promise<unknown> | void = vi.fn(),
+    machinesByIdParam?: Record<string, Machine>
 ) {
+    const isApiClient = Boolean(
+        apiOrMachinesById &&
+        ('getScratchlistSessionIds' in apiOrMachinesById || typeof (apiOrMachinesById as any).fetch === 'function')
+    )
+    const api = isApiClient ? (apiOrMachinesById as ApiClient) : null
+    const machinesById = isApiClient
+        ? machinesByIdParam
+        : (apiOrMachinesById && !('getScratchlistSessionIds' in apiOrMachinesById)
+            ? (apiOrMachinesById as Record<string, Machine>)
+            : undefined)
     return renderWithProviders(
         <SessionList
             sessions={sessions}
@@ -71,6 +99,7 @@ function renderSessionList(
             renderHeader={false}
             api={api}
             machineLabelsById={{ 'machine-1': 'Mint', 'machine-2': 'Teemo' }}
+            machinesById={machinesById}
         />
     )
 }
@@ -93,7 +122,7 @@ describe('SessionList machine filter', () => {
         window.localStorage.clear()
     })
 
-    it('hides the filter bar when all sessions are on a single machine', () => {
+    it('shows a compact summary row instead of filter chips on a single machine', () => {
         renderSessionList([
             makeSession({
                 id: 'session-1',
@@ -102,9 +131,51 @@ describe('SessionList machine filter', () => {
             })
         ])
 
+        // One machine has nothing to filter — no bar, no mobile filter menu.
         expect(screen.queryByRole('group', { name: 'Filter by machine' })).toBeNull()
         expect(screen.queryByRole('button', { name: 'Filter by machine' })).toBeNull()
+        // The machine label and session count stay visible.
+        const summary = screen.getByText('Mint').parentElement!
+        expect(within(summary).getByText('(1)')).toBeTruthy()
         expect(screen.getByTitle('/work/hapi')).toBeTruthy()
+    })
+
+    it('shows machine health inline on the single-machine summary row', () => {
+        renderSessionList(
+            [
+                makeSession({
+                    id: 'session-1',
+                    updatedAt: 100,
+                    metadata: { path: '/work/hapi', machineId: 'machine-1', agentSessionId: 'thread-1' }
+                })
+            ],
+            {
+                'machine-1': makeMachine({
+                    id: 'machine-1',
+                    health: { collectedAt: 100, cpuPercent: 12, memoryPercent: 88 }
+                })
+            }
+        )
+
+        expect(screen.getByText('CPU 12% · RAM 88%')).toBeTruthy()
+    })
+
+    it('shows the summary row for a sole machine with no visible sessions', () => {
+        // Fresh install / "active only" filtering: zero session groups, but the
+        // sole machine is online and its health must stay visible.
+        renderSessionList(
+            [],
+            {
+                'machine-1': makeMachine({
+                    id: 'machine-1',
+                    health: { collectedAt: 100, cpuPercent: 12, memoryPercent: 88 }
+                })
+            }
+        )
+
+        const summary = screen.getByText('Mint').parentElement!
+        expect(within(summary).getByText('(0)')).toBeTruthy()
+        expect(screen.getByText('CPU 12% · RAM 88%')).toBeTruthy()
     })
 
     it('shows the filter bar and machine-suffixed group titles with multiple machines', () => {
