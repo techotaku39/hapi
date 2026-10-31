@@ -208,7 +208,7 @@ export function SessionDateRangePicker(props: {
             } : undefined}
             className={cn(
                 isFloating
-                    ? 'fixed z-40 w-72 max-w-[calc(100vw-1rem)] overflow-y-auto'
+                    ? 'fixed z-[60] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto'
                     : 'absolute top-full z-30 mt-2 w-72',
                 'rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-xl',
                 !isFloating && (props.align === 'left' ? 'left-0' : 'right-0')

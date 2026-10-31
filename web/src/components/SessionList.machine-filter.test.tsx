@@ -279,7 +279,7 @@ describe('SessionList session filter menu', () => {
         expect(screen.queryByRole('menu', { name: 'Filter sessions' })).toBeNull()
     })
 
-    it('opens the existing date picker from the unified filter menu', () => {
+    it('opens the existing date picker from the unified filter menu with high stacking context and navigates months', () => {
         renderSessionList([
             makeSession({ id: 'session-1', metadata: { path: '/work/hapi', name: 'Session one' } })
         ])
@@ -291,7 +291,22 @@ describe('SessionList session filter menu', () => {
         fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Date' }))
 
         expect(screen.getByRole('menu', { name: 'Filter sessions' })).toBeTruthy()
-        expect(screen.getByRole('dialog', { name: 'Filter sessions by last activity' })).toBeTruthy()
+        const dialog = screen.getByRole('dialog', { name: 'Filter sessions by last activity' })
+        expect(dialog).toBeTruthy()
+        expect(dialog.className).toContain('z-[60]')
+
+        const prevMonthButton = within(dialog).getByRole('button', { name: 'Previous month' })
+        const nextMonthButton = within(dialog).getByRole('button', { name: 'Next month' })
+        expect(prevMonthButton).toBeTruthy()
+        expect(nextMonthButton).toBeTruthy()
+        fireEvent.click(prevMonthButton)
+        fireEvent.click(nextMonthButton)
+
+        const dayButtons = within(dialog).getAllByRole('button').filter(b => /^\d+$/.test(b.textContent?.trim() || ''))
+        expect(dayButtons.length).toBeGreaterThan(0)
+        fireEvent.click(dayButtons[0])
+        fireEvent.click(dayButtons[Math.min(5, dayButtons.length - 1)])
+        expect(screen.queryByRole('dialog', { name: 'Filter sessions by last activity' })).toBeNull()
     })
 
     it('filters by scratchlist session ids using one batch request', async () => {
