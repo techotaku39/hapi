@@ -17,7 +17,7 @@ type RenameSessionDialogProps = {
     sessionId?: string
     onRename: (newName: string | undefined, titleLocked?: boolean) => Promise<void>
     onSuggestTitle?: () => Promise<string>
-    onUpdateSummary?: (text: string, clearName?: boolean, titleLocked?: boolean) => Promise<void>
+    onUpdateSummary?: (text: string, titleLocked?: boolean) => Promise<void>
     isPending: boolean
 }
 
@@ -229,7 +229,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
                 // Preserve summary/name ownership when only the lock changes.
                 await onRename(undefined, titleLocked)
             } else if (draftSource === 'generated' && onUpdateSummary) {
-                await onUpdateSummary(trimmed, true, titleLocked)
+                await onUpdateSummary(trimmed, titleLocked)
             } else {
                 await onRename(trimmed, titleLocked)
             }

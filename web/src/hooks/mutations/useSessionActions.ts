@@ -30,7 +30,7 @@ export function useSessionActions(
     setServiceTier: (serviceTier: string | null) => Promise<void>
     renameSession: (name: string | undefined, titleLocked?: boolean) => Promise<void>
     suggestSessionTitle: () => Promise<string>
-    updateSessionSummary: (text: string, clearNameOrOptions?: boolean | { clearName?: boolean; titleLocked?: boolean }, titleLocked?: boolean) => Promise<void>
+    updateSessionSummary: (text: string, titleLocked?: boolean) => Promise<void>
     setPinMode: (mode: 'none' | 'project' | 'global') => Promise<void>
     deleteSession: () => Promise<void>
     isPending: boolean
@@ -306,15 +306,7 @@ export function useSessionActions(
         setServiceTier: serviceTierMutation.mutateAsync,
         renameSession: (name: string | undefined, titleLocked?: boolean) => renameMutation.mutateAsync({ name, titleLocked }),
         suggestSessionTitle: titleSuggestionMutation.mutateAsync,
-        updateSessionSummary: (text: string, clearNameOrOptions?: boolean | { clearName?: boolean; titleLocked?: boolean }, titleLocked?: boolean) => {
-            const clearName = typeof clearNameOrOptions === 'object' && clearNameOrOptions !== null
-                ? clearNameOrOptions.clearName
-                : (typeof clearNameOrOptions === 'boolean' ? clearNameOrOptions : false)
-            const locked = typeof clearNameOrOptions === 'object' && clearNameOrOptions !== null
-                ? clearNameOrOptions.titleLocked
-                : titleLocked
-            return summaryMutation.mutateAsync({ text, clearName, titleLocked: locked })
-        },
+        updateSessionSummary: (text: string, titleLocked?: boolean) => summaryMutation.mutateAsync({ text, clearName: true, titleLocked }),
         setPinMode: pinMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
         isPending: abortMutation.isPending
