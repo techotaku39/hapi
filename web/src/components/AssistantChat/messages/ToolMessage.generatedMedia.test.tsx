@@ -8,7 +8,7 @@ import type { HappyChatContextValue } from '@/components/AssistantChat/context'
 
 function renderCard(options: {
     mimeType: string | null
-    locale?: 'en' | 'zh-CN'
+    locale?: 'en' | 'zh-CN' | 'ru'
     getGeneratedImageBlob?: ReturnType<typeof vi.fn>
 }) {
     if (options.locale) {
@@ -162,6 +162,17 @@ describe('GeneratedImageCard media fetch', () => {
         await waitFor(() => {
             expect(screen.getByText('展示图片暂不可用。')).toBeInTheDocument()
             expect(screen.getByText('重新加载')).toBeInTheDocument()
+        })
+        expect(screen.queryByText('HTTP 404')).not.toBeInTheDocument()
+    })
+
+    it('localizes the failed image retry state in Russian', async () => {
+        const getGeneratedImageBlob = vi.fn().mockRejectedValue(new Error('HTTP 404'))
+        renderCard({ mimeType: 'image/png', locale: 'ru', getGeneratedImageBlob })
+
+        await waitFor(() => {
+            expect(screen.getByText('Показано изображение недоступно.')).toBeInTheDocument()
+            expect(screen.getByText('Повторить')).toBeInTheDocument()
         })
         expect(screen.queryByText('HTTP 404')).not.toBeInTheDocument()
     })
