@@ -8,7 +8,6 @@ import { getSessionListStatusModeOptions, useSessionListStatusMode } from '@/hoo
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { getPinInProgressSessionsModeOptions, usePinInProgressSessionsMode } from '@/hooks/usePinInProgressSessionsMode'
-import { useFixedSessionOrder } from '@/hooks/useFixedSessionOrder'
 import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionPreviewLimit, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { useSessionHeaderMetadata, type SessionHeaderMetadataKey } from '@/hooks/useSessionHeaderMetadata'
@@ -143,13 +142,13 @@ export default function SettingsDisplayPage() {
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
     const { pinInProgressSessionsMode, setPinInProgressSessionsMode } = usePinInProgressSessionsMode()
-    const { fixedSessionOrder, setFixedSessionOrder } = useFixedSessionOrder()
     const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
     const { openExternalLinksInNewTab, setOpenExternalLinksInNewTab } = useOpenExternalLinksInNewTab()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
     const sessionHeaderOptions: ReadonlyArray<{ key: SessionHeaderMetadataKey; labelKey: string }> = [
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
         { key: 'agent', labelKey: 'settings.display.sessionHeader.agent' },
+        { key: 'project', labelKey: 'settings.display.sessionHeader.project' },
         { key: 'machine', labelKey: 'settings.display.sessionHeader.machine' },
         { key: 'lastActive', labelKey: 'settings.display.sessionHeader.lastActive' },
         { key: 'model', labelKey: 'settings.display.sessionHeader.model' },
@@ -193,7 +192,6 @@ export default function SettingsDisplayPage() {
                         onChange={setPinInProgressSessionsMode}
                     />
                 </div>
-                <SettingsSwitch label={t('settings.display.fixedSessionOrder')} description={t('settings.display.fixedSessionOrder.desc')} checked={fixedSessionOrder} onChange={setFixedSessionOrder} />
                 <SettingsSwitch label={t('settings.display.appBadge')} description={t('settings.display.appBadge.desc')} checked={appBadgeEnabled} onChange={setAppBadgeEnabled} />
                 <SettingsChoiceGroup
                     label={t('settings.display.sessionListStatus')}
