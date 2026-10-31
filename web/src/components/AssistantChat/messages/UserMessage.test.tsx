@@ -1,83 +1,154 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { PropsWithChildren } from 'react'
-import { describe, expect, it, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { I18nProvider } from '@/lib/i18n-context'
+import { findLatestCompletedBoundaryId, type HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { HappyUserMessage } from './UserMessage'
-import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 
-const auiState = {
+const onFork = vi.fn(async (_localId?: string) => {})
+const state = {
     message: {
+        id: 'user-text:interrupted',
         role: 'user' as const,
-        id: 'user-text:prompt',
-        content: [{ type: 'text' as const, text: 'prompt' }],
+        createdAt: new Date(10),
+        content: [{ type: 'text' as const, text: 'Interrupted prompt' }],
         metadata: {
             custom: {
                 kind: 'user' as const,
-                status: 'sent' as HappyChatMessageMetadata['status'],
+                localId: 'local-interrupted' as string | undefined,
+                status: undefined as HappyChatMessageMetadata['status'],
                 invokedAt: undefined as number | null | undefined
             }
         }
-    }
+    },
+    thread: { isRunning: true, messages: [] }
+}
+const ctx = {
+    metadata: {
+        flavor: 'codex',
+        capabilities: { conversationHistory: { forkCurrent: true, forkAtMessage: true, rewindToMessage: true } },
+        conversationHistoryPoints: { 'local-interrupted': true } as Record<string, true>
+    },
+    disabled: false,
+    historyActionPending: false,
+    isLatestCompletedBoundary: (_id: string) => true,
+    onForkConversation: onFork,
+    onRewindConversation: async () => {}
 }
 
 vi.mock('@assistant-ui/react', () => ({
-    MessagePrimitive: {
-        Root: ({ children, ...props }: PropsWithChildren<Record<string, unknown>>) => (
-            <div {...props}>{children}</div>
-        )
-    },
-    useAuiState: (selector: (state: typeof auiState) => unknown) => selector(auiState)
+    useAuiState: (selector: (value: typeof state) => unknown) => selector(state),
+    MessagePrimitive: { Root: ({ children, ...props }: PropsWithChildren<Record<string, unknown>>) => <div {...props}>{children}</div> }
 }))
-
 vi.mock('@/components/AssistantChat/context', () => ({
-    useHappyChatContext: () => ({
-        metadata: null,
-        disabled: false,
-        historyActionPending: false
-    })
+    useHappyChatContext: () => ctx,
+    useOptionalHappyChatContext: () => null
 }))
-
-vi.mock('@/components/AssistantChat/messages/MessageActions', () => ({
-    MessageActions: () => null
-}))
-
-vi.mock('@/components/AssistantChat/messages/MessageStatusIndicator', () => ({
-    MessageStatusIndicator: () => null
-}))
-
-vi.mock('@/components/AssistantChat/messages/MessageAttachments', () => ({
-    MessageAttachments: () => null
-}))
-
-vi.mock('@/components/AssistantChat/messages/user-bubble', () => ({
-    UserBubbleContent: () => null,
+vi.mock('./MessageAttachments', () => ({ MessageAttachments: () => null }))
+vi.mock('./MessageStatusIndicator', () => ({ MessageStatusIndicator: () => null }))
+vi.mock('./user-bubble', () => ({
+    UserBubbleContent: ({ text }: { text: string }) => <span>{text}</span>,
     getUserBubbleClassName: () => '',
     shouldShowMessageStatus: () => false
 }))
-
 vi.mock('@/components/CliOutputBlock', () => ({
     CliOutputBlock: () => null
 }))
-
-vi.mock('@/lib/use-translation', () => ({
-    useTranslation: () => ({ t: (key: string) => key })
+vi.mock('@/components/ui/ConfirmDialog', () => ({
+    ConfirmDialog: ({ isOpen, confirmLabel, onConfirm }: { isOpen: boolean; confirmLabel: string; onConfirm: () => Promise<void> }) =>
+        isOpen ? <div role="dialog"><button onClick={() => void onConfirm()}>{confirmLabel}</button></div> : null
 }))
 
+function mount() {
+    return render(<I18nProvider><HappyUserMessage /></I18nProvider>)
+}
+async function confirmFork() {
+    fireEvent.click(screen.getByRole('button', { name: 'Fork' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fork' }))
+    await waitFor(() => expect(onFork).toHaveBeenCalledTimes(1))
+}
+
 describe('HappyUserMessage turn-input anchor', () => {
+    beforeEach(() => {
+        state.message.metadata.custom = {
+            kind: 'user',
+            localId: 'local-interrupted',
+            status: 'sent',
+            invokedAt: undefined
+        }
+    })
+
     it('keeps omitted invokedAt values eligible as already-invoked prompts', () => {
-        const { container } = render(<HappyUserMessage />)
+        const { container } = mount()
 
         expect(container.querySelector('[data-hapi-turn-input="true"]')).not.toBeNull()
     })
 
     it('does not mark queued messages as turn inputs', () => {
-        auiState.message.metadata.custom = {
+        state.message.metadata.custom = {
             kind: 'user',
+            localId: 'local-interrupted',
             status: 'queued',
             invokedAt: null
         }
 
-        const { container } = render(<HappyUserMessage />)
+        const { container } = mount()
 
         expect(container.querySelector('[data-hapi-turn-input]')).toBeNull()
+    })
+})
+
+describe('user-only completed fork boundary', () => {
+    beforeEach(() => {
+        localStorage.clear()
+        onFork.mockClear()
+        state.message.metadata.custom = {
+            kind: 'user',
+            localId: 'local-interrupted',
+            status: undefined,
+            invokedAt: undefined
+        }
+        state.thread.isRunning = true
+        ctx.metadata.flavor = 'codex'
+        ctx.metadata.capabilities.conversationHistory.forkAtMessage = true
+        ctx.metadata.conversationHistoryPoints = { 'local-interrupted': true }
+        ctx.disabled = false
+        ctx.historyActionPending = false
+    })
+
+    it('forks before an interrupted user-only boundary while the next turn runs', async () => {
+        // No assistant block was produced by the interrupted first turn.
+        const boundary = findLatestCompletedBoundaryId([
+            { kind: 'user-text', id: 'interrupted', localId: 'local-interrupted', text: 'Interrupted prompt', createdAt: 10, invokedAt: 10 },
+            { kind: 'user-text', id: 'running', localId: 'local-running', text: 'Next prompt', createdAt: 20, invokedAt: 20 }
+        ], true, 20)
+        expect(boundary).toBe(state.message.id)
+        mount()
+        expect(screen.queryByRole('button', { name: 'Rewind' })).toBeNull()
+        await confirmFork()
+        expect(onFork).toHaveBeenCalledWith('local-interrupted')
+    })
+
+    it('retains current-fork semantics for the same card when idle', async () => {
+        state.thread.isRunning = false
+        mount()
+        await confirmFork()
+        expect(onFork.mock.calls[0]).toEqual([])
+    })
+
+    it.each(['claude', 'pi', 'agy', 'dsh'])('does not unlock a running %s current fork', flavor => {
+        ctx.metadata.flavor = flavor
+        mount()
+        expect(screen.queryByRole('button', { name: 'Fork' })).toBeNull()
+    })
+
+    it.each(['point', 'capability', 'disabled', 'pending'])('keeps the %s guard', guard => {
+        if (guard === 'point') ctx.metadata.conversationHistoryPoints = {}
+        if (guard === 'capability') ctx.metadata.capabilities.conversationHistory.forkAtMessage = false
+        if (guard === 'disabled') ctx.disabled = true
+        if (guard === 'pending') ctx.historyActionPending = true
+        mount()
+        expect(screen.queryByRole('button', { name: 'Fork' })).toBeNull()
+        expect(onFork).not.toHaveBeenCalled()
     })
 })

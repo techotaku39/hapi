@@ -23,6 +23,7 @@ type MessageActionsProps = {
     metadata?: Omit<MessageMetadataProps, 'className'>
     messageElementId?: string
     showFork?: boolean
+    allowForkWhileRunning?: boolean
     showRewind?: boolean
     historyActionPending?: boolean
     onFork?: () => Promise<void>
@@ -58,6 +59,7 @@ export function MessageActions({
     metadata,
     messageElementId,
     showFork = false,
+    allowForkWhileRunning = false,
     showRewind = false,
     historyActionPending = false,
     onFork,
@@ -78,7 +80,7 @@ export function MessageActions({
     const [rewindOpen, setRewindOpen] = useState(false)
     const [forkPending, setForkPending] = useState(false)
     const [rewindPending, setRewindPending] = useState(false)
-    const actionsLocked = historyActionPending || forkPending || rewindPending || threadIsRunning
+    const actionsLocked = historyActionPending || forkPending || rewindPending
 
     const shareButton = messageElementId ? (
         <ShareTurnButton
@@ -89,7 +91,7 @@ export function MessageActions({
 
     const historyButtons = !actionsLocked ? (
         <>
-            {showRewind && onRewind ? (
+            {showRewind && onRewind && !threadIsRunning ? (
                 <MessageActionButton
                     label={t('message.rewind')}
                     onClick={() => setRewindOpen(true)}
@@ -97,7 +99,7 @@ export function MessageActions({
                     <RewindIcon className="h-3.5 w-3.5" />
                 </MessageActionButton>
             ) : null}
-            {showFork && onFork ? (
+            {showFork && onFork && (!threadIsRunning || allowForkWhileRunning) ? (
                 <MessageActionButton
                     label={t('message.fork')}
                     onClick={() => setForkOpen(true)}
@@ -175,6 +177,7 @@ export function MessageActions({
                 confirmLabel={t('message.fork')}
                 confirmingLabel={t('message.fork.confirming')}
                 isPending={forkPending}
+                centerTitle
                 onConfirm={async () => {
                     if (!onFork) return
                     setForkPending(true)
@@ -198,6 +201,7 @@ export function MessageActions({
                 confirmingLabel={t('message.rewind.confirming')}
                 isPending={rewindPending}
                 destructive
+                centerTitle
                 onConfirm={async () => {
                     if (!onRewind) return
                     setRewindPending(true)
