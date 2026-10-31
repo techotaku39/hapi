@@ -213,6 +213,9 @@ export class SyncEngine {
     private readonly scratchlistUploadTails = new Map<string, Promise<unknown>>()
     /** Coalesce duplicate clear requests so retries cannot spawn two fresh sessions. */
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
+    /** Coalesce concurrent resume/reopen requests so parallel callers share in-flight startup. */
+    private readonly resumeTails = new Map<string, Promise<ResumeSessionResult>>()
+    private readonly reopenTails = new Map<string, Promise<ReopenSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
     /**
@@ -3443,13 +3446,26 @@ export class SyncEngine {
     }
 
     async resumeSession(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
-        if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId, namespace)) {
+        if (this.archivedForkPending(sessionId, namespace)) {
+            return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
+        }
+        const existing = this.resumeTails.get(sessionId)
+        if (existing) return await existing
+
+        if (this.historyActionsInFlight.has(sessionId)) {
             return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
         }
         this.historyActionsInFlight.add(sessionId)
-        try {
-            return await this.resumeSessionUnlocked(sessionId, namespace, opts)
-        } finally { this.historyActionsInFlight.delete(sessionId) }
+        const promise = (async () => {
+            try {
+                return await this.resumeSessionUnlocked(sessionId, namespace, opts)
+            } finally {
+                this.historyActionsInFlight.delete(sessionId)
+                this.resumeTails.delete(sessionId)
+            }
+        })()
+        this.resumeTails.set(sessionId, promise)
+        return await promise
     }
 
     private async resumeSessionUnlocked(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
@@ -3928,13 +3944,34 @@ export class SyncEngine {
      * needed to resume is missing.
      */
     async reopenSession(sessionId: string, namespace: string): Promise<ReopenSessionResult> {
-        if (this.historyActionsInFlight.has(sessionId) || this.archivedForkPending(sessionId, namespace)) {
+        if (this.archivedForkPending(sessionId, namespace)) {
+            return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
+        }
+        const existing = this.reopenTails.get(sessionId)
+        if (existing) return await existing
+
+        const existingResume = this.resumeTails.get(sessionId)
+        if (existingResume) {
+            const result = await existingResume
+            return result.type === 'error'
+                ? { type: 'error', message: result.message, code: result.code }
+                : { type: 'success', sessionId: result.sessionId, resumed: true }
+        }
+
+        if (this.historyActionsInFlight.has(sessionId)) {
             return { type: 'error', message: 'Archived fork is in progress; retry the fork before reopening', code: 'resume_failed' }
         }
         this.historyActionsInFlight.add(sessionId)
-        try {
-            return await this.reopenSessionUnlocked(sessionId, namespace)
-        } finally { this.historyActionsInFlight.delete(sessionId) }
+        const promise = (async () => {
+            try {
+                return await this.reopenSessionUnlocked(sessionId, namespace)
+            } finally {
+                this.historyActionsInFlight.delete(sessionId)
+                this.reopenTails.delete(sessionId)
+            }
+        })()
+        this.reopenTails.set(sessionId, promise)
+        return await promise
     }
 
     private async reopenSessionUnlocked(sessionId: string, namespace: string): Promise<ReopenSessionResult> {

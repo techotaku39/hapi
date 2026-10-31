@@ -161,6 +161,34 @@ describe('archived Codex fork coordination', () => {
         } finally { finish(); f.engine.stop() }
     })
 
+    it.each(['resume', 'reopen'])('coalesces concurrent %s requests so parallel callers share in-flight startup', async action => {
+        const f = fixture()
+        let finish!: () => void
+        let spawned!: () => void
+        const entered = new Promise<void>(resolve => { spawned = resolve })
+        const gate = new Promise<void>(resolve => { finish = resolve })
+        let spawnCount = 0
+        f.rpc.spawnSession = async (...args) => {
+            spawnCount++
+            spawned()
+            await gate
+            f.engine.handleSessionAlive({ sid: args[12]!, time: Date.now(), mode: 'remote' })
+            f.engine.handleSessionReady({ sid: args[12]!, time: Date.now() })
+            return { type: 'success', sessionId: args[12]! }
+        }
+        try {
+            const call = () => action === 'resume' ? f.engine.resumeSession(f.source.id, 'ns') : f.engine.reopenSession(f.source.id, 'ns')
+            const first = call()
+            await entered
+            const second = call()
+            finish()
+            const [r1, r2] = await Promise.all([first, second])
+            expect(r1.type).toBe('success')
+            expect(r2.type).toBe('success')
+            expect(spawnCount).toBe(1)
+        } finally { finish(); f.engine.stop() }
+    })
+
     it('releases a fresh ownership rejection so source reconnection cannot trap lifecycle actions', async () => {
         const f = fixture()
         try {
