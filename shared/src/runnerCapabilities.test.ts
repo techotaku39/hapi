@@ -15,6 +15,7 @@ describe('runnerCapabilities', () => {
         expect(CURRENT_MACHINE_CAPABILITIES).toContain(MACHINE_CAPABILITIES.UsageQuery)
         expect(CURRENT_MACHINE_CAPABILITIES).toEqual(expect.arrayContaining([
             ...REQUIRED_MACHINE_CAPABILITIES,
+            MACHINE_CAPABILITIES.WorkspaceFileAccess,
         ]))
     })
 

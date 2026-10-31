@@ -14,7 +14,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Quick Start', link: '/guide/quick-start' },
-      { text: 'App', link: 'https://app.hapi.run', target: '_blank' }
+      { text: 'Web App', link: 'https://app.hapi.run', target: '_blank' }
     ],
 
     sidebar: [
@@ -23,6 +23,7 @@ export default defineConfig({
         items: [
           { text: 'Quick Start', link: '/guide/quick-start' },
           { text: 'Installation', link: '/guide/installation' },
+          { text: 'Native Apps', link: '/guide/native-apps' },
           { text: 'PWA', link: '/guide/pwa' }
         ]
       },
@@ -30,6 +31,7 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'How it Works', link: '/guide/how-it-works' },
+          { text: 'Session List', link: '/guide/session-list' },
           { text: 'Agent quota queries', link: '/guide/usage-query' },
           { text: 'Voice Assistant', link: '/guide/voice-assistant' },
           { text: 'Why HAPI', link: '/guide/why-hapi' },
