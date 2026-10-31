@@ -2,6 +2,11 @@ package app.hapi.companion.feature.chat
 
 import androidx.annotation.MainThread
 import app.hapi.companion.feature.chat.attachments.ComposerAttachments
+import app.hapi.companion.feature.chat.attachments.PrepareResult
+import app.hapi.companion.feature.chat.composer.appendSharedText
+import app.hapi.companion.feature.share.PendingShare
+import app.hapi.companion.feature.share.SharedFile
+import app.hapi.companion.feature.share.SharedFileStatus
 import app.hapi.companion.feature.chat.blocks.planProposalMarkdown
 import app.hapi.companion.feature.chat.composer.ChatDrafts
 import app.hapi.companion.feature.chat.composer.SlashCommands
@@ -62,6 +67,8 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -88,6 +95,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.asStateFlow
@@ -155,7 +164,12 @@ data class ComposerUiState(
     val isSending: Boolean,
     /** A turn is active: long-press send offers Steer; an empty draft shows Stop. */
     val canSteer: Boolean,
+    /** Local focus intent; does not replace or send the draft. */
+    val focusRequest: Long = 0,
+    val isImportingShare: Boolean = false,
 )
+
+data class ShareImportFailure(val fileId: String, val status: SharedFileStatus)
 
 /** One row of the queued-messages bar (uninvoked sends). */
 data class QueuedRowUi(
@@ -400,6 +414,12 @@ class ChatViewModel(
 
     private val composerText = MutableStateFlow("")
     private val sendInFlight = MutableStateFlow(false)
+    private val importingShare = MutableStateFlow(false)
+    private val draftReady = CompletableDeferred<Unit>()
+    private val importedShares = mutableSetOf<String>()
+    private val importedShareTexts = mutableSetOf<String>()
+    private val importedSharedFiles = mutableSetOf<String>()
+    private val shareImportMutex = Mutex()
 
     /**
      * Composer attachment tray (B-M3f). The screen feeds prepared picks in
@@ -409,6 +429,14 @@ class ChatViewModel(
     private val queuedOpPending = MutableStateFlow(false)
     private val permissionOverrides = MutableStateFlow<Map<String, PermissionRowOverride>>(emptyMap())
     private val configOpPending = MutableStateFlow(false)
+    private val composerFocusRequest = MutableStateFlow(0L)
+    private data class CodexPlanOperations(
+        val pendingPlanId: String? = null,
+        val implementedPlanIds: Set<String> = emptySet(),
+        val continuedPlanIds: Set<String> = emptySet(),
+        val errors: Map<String, CodexPlanFailure> = emptyMap(),
+    )
+    private val codexPlanOperations = MutableStateFlow(CodexPlanOperations())
 
     private sealed interface CodexModels {
         data object Idle : CodexModels
@@ -480,11 +508,15 @@ class ChatViewModel(
         composerText,
         sendInFlight,
         sessionStateFlow(),
-    ) { text, sending, session ->
+        composerFocusRequest,
+        importingShare,
+    ) { text, sending, session, focusRequest, importing ->
         ComposerUiState(
             text = text,
             isSending = sending,
             canSteer = session.thinking && session.active,
+            focusRequest = focusRequest,
+            isImportingShare = importing,
         )
     }.stateIn(scope, SharingStarted.Eagerly, ComposerUiState(text = "", isSending = false, canSteer = false))
 
@@ -498,6 +530,13 @@ class ChatViewModel(
             }
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** Plan availability updates independently of the transcript pipeline. */
+    val codexPlanActions: StateFlow<CodexPlanActions> = combine(
+        sessionStore.sessionDetail(sessionId), codexPlanOperations, sendInFlight, configOpPending,
+    ) { detail, operations, sending, configuring ->
+        buildCodexPlanActions(detail, operations, sending || configuring)
+    }.stateIn(scope, SharingStarted.Eagerly, CodexPlanActions())
 
     /** Session config sheet model. */
     val config: StateFlow<SessionConfigUi> = combine(
@@ -809,6 +848,7 @@ class ChatViewModel(
     // ------------------------------------------------------------- composer --
 
     fun setComposerText(text: String) {
+        if (importingShare.value) return
         // Fetch the RPC command list on the transition INTO slash mode (the
         // web refetches when the menu opens) — not on every keystroke, so a
         // wedged CLI cannot be hammered while the user types a command.
@@ -821,6 +861,53 @@ class ChatViewModel(
         draftJob = scope.launch {
             delay(draftSaveDebounceMs)
             runCatching { store.save(sessionId, text) }
+        }
+    }
+
+    /** Commit the latest keystrokes before a share picker can reopen this session under a new ID. */
+    suspend fun persistComposerDraft() {
+        draftReady.await()
+        draftJob?.cancelAndJoin()
+        drafts?.save(sessionId, composerText.value)
+    }
+
+    /** Caller is the chat entry's Main-thread effect; cancellation preserves the inbox batch. */
+    suspend fun importShare(
+        share: PendingShare,
+        complete: suspend (ShareImportFailure?) -> Unit = {},
+        prepare: suspend (SharedFile) -> PrepareResult,
+    ): ShareImportFailure? = shareImportMutex.withLock {
+        check(share.canImport)
+        importingShare.value = true
+        try {
+            if (share.id in importedShares) {
+                complete(null)
+                return@withLock null
+            }
+            draftReady.await()
+            draftJob?.cancelAndJoin()
+            if (share.text.isNotBlank() && share.id !in importedShareTexts) {
+                composerText.value = drafts?.appendSharedText(sessionId, share.id, composerText.value, share.text)
+                    ?: appendSharedText(composerText.value, share.text)
+                importedShareTexts += share.id
+            }
+            for (file in share.files) {
+                if (file.id in importedSharedFiles) continue
+                when (val result = prepare(file)) {
+                    is PrepareResult.Ready -> {
+                        attachments.add(result.attachment)
+                        importedSharedFiles += file.id
+                    }
+                    is PrepareResult.TooLarge -> return@withLock ShareImportFailure(file.id, SharedFileStatus.TooLarge).also { complete(it) }
+                    is PrepareResult.Unreadable -> return@withLock ShareImportFailure(file.id, SharedFileStatus.Unreadable).also { complete(it) }
+                }
+            }
+            importedShares += share.id
+            complete(null)
+            composerFocusRequest.value += 1
+            null
+        } finally {
+            importingShare.value = false
         }
     }
 
@@ -904,7 +991,7 @@ class ChatViewModel(
      * Text may be empty when attachments exist (wire: text OR attachments).
      */
     fun sendMessage(steer: Boolean = false) {
-        if (sendInFlight.value) return
+        if (sendInFlight.value || importingShare.value) return
         if (attachments.hasUnsettled()) {
             _events.tryEmit(ChatEvent.Notice(ChatNotice.AttachmentsUploading))
             return
@@ -1442,10 +1529,91 @@ class ChatViewModel(
         }
     }
 
+    // ---------------------------------------------------- Codex plan actions --
+
+    private fun buildCodexPlanActions(
+        detail: Session?, operations: CodexPlanOperations, busy: Boolean,
+    ): CodexPlanActions = CodexPlanActions(
+        proposalId = detail?.agentState?.codexPlanProposalId?.takeIf {
+            detail.active && detail.metadata?.flavor == "codex"
+                && detail.metadata?.capabilities?.concurrentClients == true
+                && it !in operations.implementedPlanIds
+                && it !in operations.continuedPlanIds
+        },
+        pendingPlanId = operations.pendingPlanId,
+        disabled = busy || detail?.thinking == true,
+        errors = operations.errors,
+    )
+
+    // Re-read live inputs for callbacks; a combined StateFlow can lag a UI tap.
+    private fun currentCodexPlanActions() = buildCodexPlanActions(
+        sessionStore.currentDetail(sessionId), codexPlanOperations.value,
+        sendInFlight.value || configOpPending.value,
+    )
+
+    fun implementCodexPlan(planId: String) {
+        val previous = codexPlanOperations.value
+        if (!currentCodexPlanActions().forPlan(planId).canAct) return
+        if (!codexPlanOperations.compareAndSet(previous, previous.copy(
+                pendingPlanId = planId, errors = previous.errors - planId,
+            ))) return
+        scope.launch {
+            try {
+                try {
+                    api.implementCodexPlan(sessionId, planId)
+                    // Acceptance wins over a failed or temporarily stale refresh.
+                    codexPlanOperations.update { it.copy(implementedPlanIds = it.implementedPlanIds + planId) }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Exception) {
+                    val serverMessage = (error as? ApiError)?.body?.let {
+                        runCatching { HapiJson.parseToJsonElement(it).objOrNull?.get("error").stringOrNull }.getOrNull()
+                    }
+                    codexPlanOperations.update {
+                        it.copy(errors = it.errors + (planId to CodexPlanFailure(serverMessage ?: error.message)))
+                    }
+                }
+                // Another client may have consumed/withdrawn the proposal, even
+                // after a failure. Refresh without resubmitting an uncertain POST.
+                try {
+                    sessionStore.loadSessionDetail(sessionId)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    // Keep the last state; SSE/reconnection will refresh later.
+                }
+            } finally {
+                codexPlanOperations.update { it.copy(pendingPlanId = null) }
+            }
+        }
+    }
+
+    fun continueCodexPlan(planId: String) {
+        if (!currentCodexPlanActions().forPlan(planId).canAct) return
+        codexPlanOperations.update {
+            it.copy(continuedPlanIds = it.continuedPlanIds + planId, errors = it.errors - planId)
+        }
+        composerFocusRequest.update { it + 1 }
+    }
+
     // ---------------------------------------------------------------- config --
 
-    /** `POST /permission-mode` with an optimistic detail flip; server truth on error. */
+    /**
+     * Web's terminal-control flag (SessionChat.tsx:996):
+     * `controlledByUser && !concurrentClients` — shared-clients sessions
+     * report the flag but keep remote config switching.
+     */
+    private fun terminalControlled(detail: Session?): Boolean =
+        detail?.agentState?.controlledByUser == true && detail?.metadata?.capabilities?.concurrentClients != true
+
+    /**
+     * `POST /permission-mode` with an optimistic detail flip; server truth on
+     * error. Inactive sessions stay switchable (web parity — the send path
+     * auto-resumes); only copilot sessions under local terminal control lose
+     * the switcher (web withholds the callback, SessionChat.tsx:2159-2163).
+     */
     fun setPermissionMode(mode: PermissionMode) {
+        if (currentFlavor() == "copilot" && terminalControlled(currentDetail())) return
         runConfigChange(
             optimistic = { it.copy(permissionMode = mode.wireId) },
             call = { api.setPermissionMode(sessionId, mode.wireId) },
@@ -1569,11 +1737,9 @@ class ChatViewModel(
         return SessionConfigUi(
             flavor = flavor,
             active = detail?.active ?: summary?.active ?: false,
-            controlledByUser = detail?.agentState?.controlledByUser == true && detail?.metadata?.capabilities?.concurrentClients != true,
+            controlledByUser = terminalControlled(detail),
             permissionMode = detail?.permissionMode,
-            permissionModes = PermissionModes.forFlavor(flavor).filter {
-                detail?.metadata?.capabilities?.concurrentClients != true || it != PermissionMode.SafeYolo
-            },
+            permissionModes = PermissionModes.forFlavor(flavor),
             model = model,
             modelOptions = modelOptions,
             modelOptionsLoading = modelOptionsLoading,
@@ -1618,10 +1784,16 @@ class ChatViewModel(
         .distinctUntilChanged()
 
     private suspend fun restoreDraft() {
-        val store = drafts ?: return
-        val draft = runCatching { store.load(sessionId) }.getOrNull() ?: return
-        if (composerText.value.isEmpty()) {
-            composerText.value = draft
+        if (draftReady.isCompleted) return
+        try {
+            val draft = drafts?.load(sessionId)
+            if (composerText.value.isEmpty() && draft != null) composerText.value = draft
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Ordinary chat remains usable when local draft storage fails.
+        } finally {
+            draftReady.complete(Unit)
         }
     }
 

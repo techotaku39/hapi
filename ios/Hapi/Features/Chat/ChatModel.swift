@@ -3,6 +3,8 @@ import HapiClient
 import HapiProtocol
 import HapiUI
 import Observation
+import SwiftUI
+import UniformTypeIdentifiers
 
 /// Chat top-bar state: title cascade + status dot + meta line.
 struct ChatHeaderUI: Equatable {
@@ -61,10 +63,8 @@ final class ChatModel {
     private(set) var isJumpingToLatest = false
     private(set) var hasTrimmedTail = false
     private var isAwayFromBottom = false
-    private var resumeAfterInspection = false
     var showsJumpToLatest: Bool {
-        isJumpingToLatest || hasTrimmedTail
-            || (!followsTail && (isAwayFromBottom || resumeAfterInspection))
+        isJumpingToLatest || hasTrimmedTail || (!followsTail && isAwayFromBottom)
     }
     let toolInspection = ToolInspectionState()
     private(set) var visibleSurfaces = Set<String>()
@@ -82,6 +82,70 @@ final class ChatModel {
 
     /// Delayed session-pipe notice; stable until the hub handshake arrives.
     var isReconnecting: Bool { chat.reconnectNotice.isVisible }
+
+    // MARK: Export
+
+    /// A hub answer that needs the user's decision before saving.
+    enum ExportPrompt: Equatable {
+        case warning(count: Int, limit: Int, estimatedBytes: Int)
+        case tooLarge(count: Int, estimatedBytes: Int, maxBytes: Int)
+    }
+
+    private(set) var isExporting = false
+    var exportPrompt: ExportPrompt?
+    /// Set when the export is ready; drives the Files save panel.
+    var exportDocument: SessionExportDocument?
+
+    /// `GET /export` (web JSON download); a large export asks first and is
+    /// retried with `force`.
+    func exportConversation(force: Bool = false) {
+        guard !isExporting else { return }
+        isExporting = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isExporting = false }
+            do {
+                switch try await self.hub.api.exportSession(sessionId: self.sessionId, force: force) {
+                case .file(let file):
+                    self.exportDocument = SessionExportDocument(file: file)
+                case .warning(let count, let limit, let estimatedBytes):
+                    self.exportPrompt = .warning(count: count, limit: limit, estimatedBytes: estimatedBytes)
+                case .tooLarge(let count, let estimatedBytes, let maxBytes):
+                    self.exportPrompt = .tooLarge(count: count, estimatedBytes: estimatedBytes, maxBytes: maxBytes)
+                }
+            } catch {
+                self.showNotice(hubErrorMessage(error) ?? String(localized: "Failed to export conversation"))
+            }
+        }
+    }
+
+    func exportFinished(_ result: Result<URL, any Error>) {
+        exportDocument = nil
+        switch result {
+        case .success:
+            showNotice(String(localized: "Conversation exported"))
+        case .failure(let error as CocoaError) where error.code == .userCancelled:
+            break
+        case .failure:
+            showNotice(String(localized: "Failed to export conversation"))
+        }
+    }
+
+    /// Loaded user messages with a native fork/rewind point, newest first.
+    var historyPointMessages: [UserTextBlock] {
+        blocks.reversed().compactMap { visible in
+            guard case .block(.userText(let message)) = visible else { return nil }
+            let actions = interactor.historyActions(forMessageLocalId: message.localId)
+            return actions.fork || actions.rewind ? message : nil
+        }
+    }
+
+    /// Lifecycle actions need a known state: nil until the detail or the
+    /// list row is loaded (the header defaults to inactive before that).
+    var sessionIsActive: Bool? {
+        hub.sessionStore.detail(for: sessionId)?.active
+            ?? hub.sessionStore.sessions.first { $0.id == sessionId }?.active
+    }
 
     // MARK: Wiring
 
@@ -160,9 +224,12 @@ final class ChatModel {
 
     func releaseSurface(_ id: String) {
         visibleSurfaces.remove(id)
-        Task { [weak self] in
+        // Keep the model alive through the deferred teardown. A replaced
+        // split detail may otherwise deallocate before this task runs, leaving
+        // its SSE client running and the hub's open-chat marker stale.
+        Task { [self] in
             await Task.yield()
-            guard let self, self.visibleSurfaces.isEmpty else { return }
+            guard visibleSurfaces.isEmpty else { return }
             self.stop()
         }
     }
@@ -172,9 +239,8 @@ final class ChatModel {
         jumpTask?.cancel()
         jumpTask = nil
         isJumpingToLatest = false
-        // Closing an inspector must leave an explicit resume action even
-        // when no content has arrived and the reading anchor is at bottom.
-        resumeAfterInspection = true
+        // Pause following/paging without claiming the reader left the bottom.
+        // The latest action still depends on viewport distance or a trimmed tail.
         readingViewportChanged(followsTail: false, needsOlder: false, isAwayFromBottom: isAwayFromBottom)
     }
 
@@ -202,7 +268,9 @@ final class ChatModel {
             case .sessionSuperseded(let sessionId):
                 self.supersededSessionId = sessionId
             case .notice(let message):
-                self.showNotice(message)
+                // Scratchlist failures already have an inline banner with a
+                // retry action. A second toast obscures the same input area.
+                if message != self.interactor.scratchlistError { self.showNotice(message) }
             }
         }
         interactor.activate()
@@ -289,7 +357,6 @@ final class ChatModel {
         let changedMode = self.followsTail != followsTail
         self.followsTail = followsTail
         self.isAwayFromBottom = !followsTail && isAwayFromBottom
-        if followsTail && !hasTrimmedTail { resumeAfterInspection = false }
         viewportNeedsOlder = needsOlder
         if changedMode, !isJumpingToLatest, let controller = chat.windowController {
             if followsTail && hasTrimmedTail { jumpToLatest(); return }
@@ -419,7 +486,6 @@ final class ChatModel {
             guard !Task.isCancelled, self.chat === chat else { return }
             self.followsTail = true
             self.isAwayFromBottom = false
-            self.resumeAfterInspection = false
             self.jumpToLatestToken += 1
         }
     }
@@ -626,5 +692,24 @@ final class ChatModel {
             return String(tail)
         }
         return nil
+    }
+}
+
+/// The export as a Files document (`fileExporter`); never read back.
+struct SessionExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    let file: SessionExportFile
+
+    init(file: SessionExportFile) {
+        self.file = file
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        throw CocoaError(.featureUnsupported)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: file.data)
     }
 }
