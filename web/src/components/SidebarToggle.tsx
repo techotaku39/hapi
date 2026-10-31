@@ -1,6 +1,6 @@
 import type { PointerEventHandler } from 'react'
 
-function SidebarIcon(props: { direction: 'hide' | 'show' }) {
+function SidebarIcon(props: { direction: 'hide' | 'show'; className?: string }) {
     const arrowPath = props.direction === 'hide'
         ? 'M15 12l-6 8 6 8'
         : 'M9 12l6 8-6 8'
@@ -15,6 +15,7 @@ function SidebarIcon(props: { direction: 'hide' | 'show' }) {
             strokeLinecap="round"
             strokeLinejoin="round"
             shapeRendering="geometricPrecision"
+            className={props.className}
             aria-hidden="true"
         >
             <rect x="3" y="2" width="18" height="36" rx="3" fill="var(--app-bg)" />

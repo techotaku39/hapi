@@ -44,14 +44,16 @@ describe('SidebarResizeHandle', () => {
 })
 
 describe('SidebarShowButton', () => {
-    it('restores the hidden sidebar', () => {
+    it('restores the hidden session list', () => {
         const onShow = vi.fn()
         render(<SidebarShowButton showLabel="Show session list" onShow={onShow} />)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Show session list' }))
+        const button = screen.getByRole('button', { name: 'Show session list' })
+        fireEvent.click(button)
 
         expect(onShow).toHaveBeenCalledOnce()
-        const svg = screen.getByRole('button', { name: 'Show session list' }).querySelector('svg')
+        expect(button).toHaveClass('hidden', 'split:flex')
+        const svg = button.querySelector('svg')
         expect(svg).toHaveAttribute('viewBox', '0 0 24 40')
         expect(svg).not.toHaveAttribute('preserveAspectRatio')
         expect(svg).toHaveAttribute('shape-rendering', 'geometricPrecision')
