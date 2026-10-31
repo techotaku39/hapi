@@ -1,4 +1,4 @@
-import type { AgentEvent, CodexReview, CodexReviewFinding, NormalizedAgentContent, NormalizedMessage, ToolResultPermission } from '@/chat/types'
+import type { AgentEvent, CodexReview, CodexReviewFinding, NormalizedAgentContent, NormalizedMessage, RoundModelUsage, RoundSummary, ToolResultPermission, UsageData } from '@/chat/types'
 import { inlineMediaSourceFromWire } from '@/chat/inlineMediaSource'
 import { AGENT_MESSAGE_PAYLOAD_TYPE, asNumber, asString, isObject } from '@hapi/protocol'
 import { isClaudeChatVisibleMessage } from '@hapi/protocol/messages'
@@ -32,6 +32,66 @@ function normalizeToolResultPermissions(value: unknown): ToolResultPermission | 
 function normalizeAgentEvent(value: unknown): AgentEvent | null {
     if (!isObject(value) || typeof value.type !== 'string') return null
     return value as AgentEvent
+}
+
+function nonNegativeNumber(value: unknown): number | undefined {
+    const number = asNumber(value)
+    return number !== null && Number.isFinite(number) && number >= 0 ? number : undefined
+}
+
+function nonNegativeSafeInteger(value: unknown): number | undefined {
+    const number = asNumber(value)
+    return number !== null && Number.isSafeInteger(number) && number >= 0 ? number : undefined
+}
+
+function normalizeResultUsage(value: unknown): UsageData | undefined {
+    if (!isObject(value)) return undefined
+    const inputTokens = nonNegativeSafeInteger(value.input_tokens)
+    const outputTokens = nonNegativeSafeInteger(value.output_tokens)
+    if (inputTokens === undefined || outputTokens === undefined) return undefined
+    return {
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cache_creation_input_tokens: nonNegativeSafeInteger(value.cache_creation_input_tokens),
+        cache_read_input_tokens: nonNegativeSafeInteger(value.cache_read_input_tokens)
+    }
+}
+
+function normalizeRoundSummary(value: unknown): RoundSummary | undefined {
+    if (!isObject(value)) return undefined
+
+    const parsedModelUsage: Array<[string, RoundModelUsage]> = []
+    if (isObject(value.modelUsage)) {
+        for (const [model, rawUsage] of Object.entries(value.modelUsage)) {
+            if (!isObject(rawUsage)) continue
+            const usage: RoundModelUsage = {
+                inputTokens: nonNegativeSafeInteger(rawUsage.inputTokens),
+                outputTokens: nonNegativeSafeInteger(rawUsage.outputTokens),
+                cacheReadInputTokens: nonNegativeSafeInteger(rawUsage.cacheReadInputTokens),
+                cacheCreationInputTokens: nonNegativeSafeInteger(rawUsage.cacheCreationInputTokens)
+            }
+            parsedModelUsage.push([model, usage])
+        }
+    }
+
+    const hasModelTokens = parsedModelUsage.some(([, usage]) => Object.values(usage).some(token => token !== undefined))
+    const modelUsage = hasModelTokens ? Object.fromEntries(parsedModelUsage) : {}
+
+    const usage = normalizeResultUsage(value.usage)
+    const totalCostUsd = nonNegativeNumber(value.total_cost_usd)
+    const numTurns = nonNegativeSafeInteger(value.num_turns)
+    const durationMs = nonNegativeNumber(value.duration_ms)
+    if (!usage && Object.keys(modelUsage).length === 0 && totalCostUsd === undefined && numTurns === undefined && durationMs === undefined) {
+        return undefined
+    }
+
+    return {
+        usage,
+        modelUsage,
+        totalCostUsd: totalCostUsd && totalCostUsd > 0 ? totalCostUsd : undefined,
+        numTurns: numTurns && numTurns > 0 ? numTurns : undefined,
+        durationMs
+    }
 }
 
 function normalizeThreadGoal(value: unknown) {
@@ -673,6 +733,29 @@ export function normalizeAgentRecord(
         if (data.isCompactSummary) return null
         if (!isClaudeChatVisibleMessage({ type: data.type, subtype: data.subtype })) return null
 
+        // Claude Code reports a failed API call ("Prompt is too long", usage
+        // limits, logged out) as a synthetic assistant message with a top-level
+        // `error`. Render it as an error, and keep its all-zero usage out of
+        // the context gauge.
+        if (data.type === 'assistant' && typeof data.error === 'string') {
+            const message = isObject(data.message) ? data.message : null
+            const text = Array.isArray(message?.content)
+                ? message.content
+                    .flatMap((block) => isObject(block) && typeof block.text === 'string' ? [block.text] : [])
+                    .join('\n')
+                : asString(message?.content)
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'event',
+                content: { type: 'error', message: text?.trim() || data.error },
+                isSidechain: Boolean(data.isSidechain),
+                parentToolUseId: asString(data.parentToolUseId) ?? null,
+                meta
+            }
+        }
+
         if (data.type === 'assistant') {
             return normalizeAssistantOutput(messageId, localId, createdAt, data, meta)
         }
@@ -707,6 +790,21 @@ export function normalizeAgentRecord(
             }
         }
         if (data.type === 'system' && data.subtype === 'turn_duration') {
+            const summary = normalizeRoundSummary(data.resultSummary)
+            const isSidechain = Boolean(data.isSidechain)
+            const parentToolUseId = asString(data.parentToolUseId) ?? null
+            if (summary) {
+                return {
+                    id: messageId,
+                    localId,
+                    createdAt,
+                    role: 'event',
+                    content: { type: 'turn-summary', summary },
+                    isSidechain,
+                    parentToolUseId,
+                    meta
+                }
+            }
             return {
                 id: messageId,
                 localId,
@@ -717,7 +815,8 @@ export function normalizeAgentRecord(
                     durationMs: asNumber(data.durationMs) ?? 0,
                     targetMessageId: asString(data.messageId) ?? undefined
                 },
-                isSidechain: false,
+                isSidechain,
+                parentToolUseId,
                 meta
             }
         }
@@ -923,6 +1022,8 @@ export function normalizeAgentRecord(
     if (content.type === AGENT_MESSAGE_PAYLOAD_TYPE) {
         const data = isObject(content.data) ? content.data : null
         if (!data || typeof data.type !== 'string') return null
+        const turnId = asString(data.turn_id ?? data.turnId) ?? undefined
+        if (turnId) meta = { ...(isObject(meta) ? meta : {}), codexTurnId: turnId }
 
         if (
             data.type === 'agent-run-start'
@@ -1063,6 +1164,23 @@ export function normalizeAgentRecord(
             }
         }
 
+        if (data.type === 'turn_duration') {
+            const durationMs = nonNegativeNumber(data.durationMs)
+            const scope = isObject(data.scope) ? data.scope : null
+            const scopeRole = asString(data.scope_role ?? data.scopeRole ?? scope?.role)
+            if (data.flavor !== 'codex' || data.hapiUsageScope === 'imported-history'
+                || scopeRole === 'child' || !turnId || durationMs === undefined) return null
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'event',
+                content: { type: 'turn-duration', provider: 'codex', durationMs, turnId },
+                isSidechain: false,
+                meta
+            }
+        }
+
         if (data.type === 'token_count') {
             const usage = normalizeCodexTokenUsage(data.info, data)
             return usage ? {
@@ -1072,7 +1190,14 @@ export function normalizeAgentRecord(
                 role: 'event',
                 content: {
                     type: 'token-count',
-                    info: data.info
+                    info: data.info,
+                    ...(data.flavor === 'codex'
+                        ? {
+                            provider: 'codex' as const,
+                            turnId,
+                            model: asString(data.model) ?? undefined
+                        }
+                        : {})
                 },
                 isSidechain: false,
                 meta,
@@ -1140,6 +1265,18 @@ export function normalizeAgentRecord(
 
         if (data.type === 'tool-call-result' && typeof data.callId === 'string') {
             const uuid = asString(data.id) ?? messageId
+            const command = isObject(data.output) && data.output.type === 'exec_command_end' ? data.output : null
+            const commandFailed = command !== null && (
+                ['failed', 'cancelled', 'canceled', 'declined', 'interrupted'].includes(String(command.status))
+                || (typeof command.exit_code === 'number' && command.exit_code !== 0)
+                || Boolean(command.error)
+            )
+            const duration = command?.duration_ms
+            const commandExecution = command ? {
+                input: Object.fromEntries(['command', 'cwd', 'command_actions', 'command_source']
+                    .filter(key => command[key] !== undefined).map(key => [key, command[key]])),
+                ...(typeof duration === 'number' && Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {})
+            } : undefined
             return {
                 id: messageId,
                 localId,
@@ -1150,7 +1287,8 @@ export function normalizeAgentRecord(
                     type: 'tool-result',
                     tool_use_id: data.callId,
                     content: data.output,
-                    is_error: Boolean(data.is_error),
+                    is_error: Boolean(data.is_error) || commandFailed,
+                    ...(commandExecution ? { commandExecution } : {}),
                     uuid,
                     parentUUID: null
                 }],

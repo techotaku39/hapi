@@ -7,7 +7,7 @@ import { z } from 'zod'
  */
 export const AGENT_MESSAGE_PAYLOAD_TYPE = 'codex' as const
 
-export const AGENT_FLAVORS = ['agy', 'claude', 'codex', 'copilot', 'cursor', 'gemini', 'grok', 'kimi', 'opencode', 'pi'] as const
+export const AGENT_FLAVORS = ['agy', 'claude', 'codex', 'dsh', 'copilot', 'cursor', 'gemini', 'grok', 'kimi', 'opencode', 'pi'] as const
 export type AgentFlavor = typeof AGENT_FLAVORS[number]
 export const AgentFlavorSchema = z.enum(AGENT_FLAVORS)
 
@@ -25,7 +25,7 @@ export type AgyPermissionMode = typeof AGY_PERMISSION_MODES[number]
 export const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'auto', 'bypassPermissions', 'plan'] as const
 export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number]
 
-export const CODEX_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
+export const CODEX_PERMISSION_MODES = ['default', 'read-only', 'autoReview', 'yolo'] as const
 export type CodexPermissionMode = typeof CODEX_PERMISSION_MODES[number]
 
 export const CODEX_COLLABORATION_MODES = ['default', 'plan'] as const
@@ -74,7 +74,7 @@ export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
     plan: 'Plan Mode',
     ask: 'Ask Mode',
     debug: 'Debug Mode',
-    autoReview: 'Auto-review',
+    autoReview: 'Auto',
     bypassPermissions: 'Yolo',
     'read-only': 'Read Only',
     'safe-yolo': 'Safe Yolo',
@@ -138,6 +138,9 @@ export function getPermissionModesForFlavor(flavor?: string | null): readonly Pe
     }
     if (flavor === 'kimi') {
         return KIMI_PERMISSION_MODES
+    }
+    if (flavor === 'dsh') {
+        return []
     }
     if (flavor === 'copilot') {
         return COPILOT_PERMISSION_MODES
