@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useLayoutEffect, useRef, useState } from 'react'
 import {
     AttachmentPrimitive,
     useAui,
@@ -16,7 +16,7 @@ import { ImagePreview } from '@/components/ImagePreview'
 import { Spinner } from '@/components/Spinner'
 import { RefreshIcon } from '@/components/icons'
 import { useComposerParking } from '@/components/AssistantChat/composerParkingContext'
-import { useTranslation } from '@/lib/use-translation'
+import { I18nContext } from '@/lib/i18n-context'
 
 type ComposerAttachmentWithPreview = PendingAttachment & {
     previewUrl?: string
@@ -40,6 +40,16 @@ export type AttachmentRetryHandler = (
     retryId: string,
     originalIndex: number,
 ) => void
+
+const fallbackTranslations: Record<string, string> = {
+    'attachment.retryUpload': 'Retry upload',
+    'attachment.uploadFailed': 'Upload failed',
+}
+
+function useAttachmentTranslation() {
+    const context = useContext(I18nContext)
+    return context?.t ?? ((key: string) => fallbackTranslations[key] ?? key)
+}
 
 function ErrorIcon() {
     return (
@@ -126,7 +136,7 @@ export function AttachmentItem(props: {
     const aui = useAui()
     const composer = aui.composer()
     const isParking = useComposerParking()
-    const { t } = useTranslation()
+    const t = useAttachmentTranslation()
     const [isRetrying, setIsRetrying] = useState(false)
     const filenameRef = useRef<HTMLSpanElement>(null)
     const [isFilenameTruncated, setIsFilenameTruncated] = useState(false)
@@ -219,6 +229,7 @@ export function AttachmentItem(props: {
                     src={previewUrl}
                     fileName={name}
                     label={name}
+                    fileSize={file?.size}
                     galleryId="composer-attachments"
                     buttonClassName={`group h-full w-full cursor-zoom-in overflow-hidden rounded-lg text-left ${props.dragHandleProps ? 'touch-none' : ''}`}
                     imageClassName="h-full w-full object-cover"
@@ -256,7 +267,7 @@ export function AttachmentItem(props: {
 
     return (
         <AttachmentPrimitive.Root
-            className="relative flex items-center gap-1.5 rounded-lg bg-[var(--app-subtle-bg)] px-2 py-2 text-base text-[var(--app-fg)]"
+            className={`relative flex items-center gap-1.5 rounded-lg bg-[var(--app-subtle-bg)] py-2 pr-2 text-base text-[var(--app-fg)] ${!props.dragHandleProps && !isParking ? 'pl-3' : 'pl-2'}`}
             onPointerDown={surfacePointerDown}
             onContextMenu={props.dragHandleProps?.onSurfaceContextMenu}
         >
