@@ -841,6 +841,7 @@ export type MachinePathsExistsResponse = PathExistsResponse
 export type WorkspaceReadFileRequest = {
     cwd: string
     path: string
+    maxBytes?: number
 }
 
 export type WorkspaceListDirectoryRequest = {
