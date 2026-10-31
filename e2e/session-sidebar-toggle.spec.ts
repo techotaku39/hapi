@@ -52,6 +52,10 @@ test.describe('session sidebar toggle', () => {
                     const finePointerIndex = Array.from(rules).findIndex((candidate) => (
                         candidate instanceof CSSMediaRule
                         && candidate.conditionText === '(hover: hover) and (pointer: fine)'
+                        && Array.from(candidate.cssRules).some((inner) => (
+                            inner instanceof CSSStyleRule
+                            && inner.selectorText.includes('.sidebar-hide-button')
+                        ))
                     ))
                     const anyPointerIndex = Array.from(rules).findIndex((candidate) => (
                         candidate instanceof CSSMediaRule
