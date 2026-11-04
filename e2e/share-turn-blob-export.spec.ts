@@ -41,7 +41,7 @@ async function openBlobFixture(page: Page, mode: 'blob' | 'data'): Promise<void>
     await expect.poll(() => previewImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
 }
 
-test('confirms blob images disappear from inline-code share exports on official main', async ({ page }, testInfo) => {
+test('preserves blob images in inline-code share exports', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     await page.setViewportSize({ width: 1280, height: 2200 })
     await openBlobFixture(page, 'blob')
@@ -57,6 +57,6 @@ test('confirms blob images disappear from inline-code share exports on official 
     console.log(`blob_magenta_pixels=${blobMagentaPixels} data_magenta_pixels=${dataMagentaPixels}`)
     expect(blobBytes.subarray(1, 4).toString()).toBe('PNG')
     expect(dataBytes.subarray(1, 4).toString()).toBe('PNG')
-    expect(blobMagentaPixels).toBeLessThan(100)
+    expect(blobMagentaPixels).toBeGreaterThan(10_000)
     expect(dataMagentaPixels).toBeGreaterThan(10_000)
 })
