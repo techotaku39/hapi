@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 const path = String.raw`D:\Projects\demo\.front`
+const option = String.raw`--path=D:\_work\.front`
 
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
     test(`renders a literal Windows path in the user bubble at ${viewport.width}px`, async ({ page }) => {
@@ -16,8 +17,8 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
             await page.locator('main').screenshot({ path: `${screenshotDirectory}/user-bubble-${viewport.width}.png` })
         }
 
-        await expect(bubble).toHaveText(`Please check ${path}\nUse * as a literal asterisk.`, { useInnerText: true })
-        await expect(bubble.locator('br')).toHaveCount(1)
+        await expect(bubble).toHaveText(`Please check ${path}\n${option}\nUse * as a literal asterisk.`, { useInnerText: true })
+        await expect(bubble.locator('br')).toHaveCount(2)
         const selection = await bubble.evaluate((element) => {
             const range = document.createRange()
             range.selectNodeContents(element)
@@ -27,6 +28,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
             return selection.toString()
         })
         expect(selection).toContain(path)
+        expect(selection).toContain(option)
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
         expect(pageErrors).toEqual([])
     })

@@ -201,6 +201,10 @@ describe('user message Markdown — Windows paths', () => {
         String.raw`D:\Project\ai-analyse\.front`,
         String.raw`C:\.config`,
         String.raw`c:/work\.config\.local`,
+        String.raw`D:\_work\.front`,
+        String.raw`D:\-work\.front`,
+        String.raw`--path=D:\work\.front`,
+        String.raw`--path=D:\_work\.config\.front`,
         String.raw`查看（D:\项目\.配置）`,
     ])('keeps the backslash before dotted segments: %s', (path) => {
         expect(render(path, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>${path}</p>`)
@@ -211,6 +215,15 @@ describe('user message Markdown — Windows paths', () => {
         expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
             '<p>Use . and * or <code>D:\\work\\.config</code></p>'
         )
+    })
+
+    it.each([
+        String.raw`D:_work\.front`,
+        String.raw`D:\_work on its own`,
+        String.raw`D:\-work and a separate \.`,
+        String.raw`D:\_work and a separate \.`,
+    ])('does not infer or restore a root separator outside a dotted absolute path: %s', (markdown) => {
+        expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(render(markdown))
     })
 
     it('leaves existing automatic and explicit file links intact', () => {

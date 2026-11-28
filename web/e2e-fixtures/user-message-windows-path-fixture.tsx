@@ -3,7 +3,11 @@ import { getUserBubbleClassName, UserBubbleContent } from '../src/components/Ass
 import { I18nProvider } from '../src/lib/i18n-context'
 import '../src/index.css'
 
-const prompt = String.raw`Please check D:\Projects\demo\.front` + '\n' + String.raw`Use \* as a literal asterisk.`
+const prompt = [
+    String.raw`Please check D:\Projects\demo\.front`,
+    String.raw`--path=D:\_work\.front`,
+    String.raw`Use \* as a literal asterisk.`,
+].join('\n')
 
 createRoot(document.getElementById('root')!).render(
     <I18nProvider>
