@@ -34,6 +34,7 @@ type Probe = {
     requests: { sessionId?: string; direction: string; beforeSeq: number | null; limit: number | undefined; at: number }[]
     loadMore: () => Promise<unknown>
     refetch: () => Promise<void>
+    appendChatMessage: () => Promise<void>
     releaseLatest: () => void
     holdBefore: () => void
     releaseBefore: () => void
@@ -62,6 +63,13 @@ window.__probe = {
     requests: [],
     loadMore: async () => {},
     refetch: async () => {},
+    appendChatMessage: async () => {
+        allMessages.push(createFixtureMessage(allMessages.length + 1, {
+            role: 'user',
+            content: { type: 'text', text: 'New fixture message after wrap' },
+        }))
+        await window.__probe.refetch()
+    },
     releaseLatest: () => releaseLatestResponse(),
     holdBefore: () => {
         beforeResponseGate = new Promise<void>((resolve) => {
@@ -107,6 +115,7 @@ window.__probe = {
 // - ?navigationMedia=1 — include generated-image previews in older history.
 // - ?codeWrap=1 — include code blocks above and at a history reading position.
 // - ?codeWrap=reasoning — put the target code block inside a nested reasoning panel.
+// - ?codeWrap=reasoning-tail — a reasoning panel near the tail can become scrollable on wrap.
 // - ?sessionSwitch=1 — render session-switch buttons between a preload-margin
 //   overflow session and a short-tail collapsed-tools session while honoring
 //   the production 20-row latest page size.
@@ -257,6 +266,22 @@ function codeWrapLines(count: number): string[] {
 
 const allMessages: DecryptedMessage[] = Array.from({ length: TOTAL_MESSAGES }, (_, index) => {
     const seq = index + 1
+    if (codeWrap === 'reasoning-tail' && seq === TOTAL_MESSAGES - 1) {
+        return createFixtureMessage(seq, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'reasoning',
+                    message: [
+                        'Earlier reasoning code', '', '```text', ...codeWrapLines(2), '```', '',
+                        'Target reasoning code', '', '```text', 'target line', '```', '',
+                        'Later reasoning code', '', '```text', ...codeWrapLines(3), '```',
+                    ].join('\n')
+                }
+            }
+        })
+    }
     if (codeWrap === 'reasoning' && seq === 1150) {
         const lines = codeWrapLines(6)
         return createFixtureMessage(seq, {

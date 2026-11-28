@@ -99,10 +99,13 @@ export function useCodeWrap(): {
         // double-set. Toggle buttons fire from onClick handlers, which React
         // guarantees run after the mount effect, so this instance's listener
         // is always registered by the time this runs.
-        const viewport = trigger?.closest('.happy-thread-messages')?.closest<HTMLElement>('.chat-scroll-y')
+        // A corrective scroll inside reasoning also changes its follow state.
+        // Let the thread own both scroll positions while following the tail.
+        const viewport = isFollowingTail?.()
+            ? null
+            : trigger?.closest('.happy-thread-messages')?.closest<HTMLElement>('.chat-scroll-y')
         const nested = viewport && trigger?.closest<HTMLElement>('[data-hapi-nested-scroll="true"]')
-        const chatAnchor = viewport && !isFollowingTail?.()
-            && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1 ? viewport : null
+        const chatAnchor = viewport && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1 ? viewport : null
         const scrollers = [nested, chatAnchor].filter((element): element is HTMLElement => element != null)
         if (trigger && scrollers.length > 0) {
             // Restore from the inside out. Moving only the chat cannot bring
