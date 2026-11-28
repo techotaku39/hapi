@@ -106,13 +106,14 @@ window.__probe = {
 // - ?navigationShell=1 — add a pinned header/composer and outline controls.
 // - ?navigationMedia=1 — include generated-image previews in older history.
 // - ?codeWrap=1 — include code blocks above and at a history reading position.
+// - ?codeWrap=reasoning — put the target code block inside a nested reasoning panel.
 // - ?sessionSwitch=1 — render session-switch buttons between a preload-margin
 //   overflow session and a short-tail collapsed-tools session while honoring
 //   the production 20-row latest page size.
 const fixtureParams = new URLSearchParams(window.location.search)
 const navigationShell = fixtureParams.has('navigationShell')
 const navigationMedia = fixtureParams.has('navigationMedia')
-const codeWrap = fixtureParams.has('codeWrap')
+const codeWrap = fixtureParams.get('codeWrap')
 const sessionSwitch = fixtureParams.has('sessionSwitch')
 const shortPages = fixtureParams.has('shortPages')
 const failBeforeCount = Number(fixtureParams.get('failBefore') ?? '0')
@@ -248,13 +249,34 @@ const sessionMessagesById: Record<string, DecryptedMessage[]> = sessionSwitch
     }
     : {}
 
+function codeWrapLines(count: number): string[] {
+    return Array.from({ length: count }, (_, index) =>
+        `row ${index + 1}: ${'checkpoint pending, review details before continuing; '.repeat(6).trim()}`
+    )
+}
+
 const allMessages: DecryptedMessage[] = Array.from({ length: TOTAL_MESSAGES }, (_, index) => {
     const seq = index + 1
+    if (codeWrap === 'reasoning' && seq === 1150) {
+        const lines = codeWrapLines(6)
+        return createFixtureMessage(seq, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'reasoning',
+                    message: [
+                        'Earlier reasoning code', '', '```text', ...lines, '```', '',
+                        'Target reasoning code', '', '```text', 'target line', '```', '',
+                        ...Array.from({ length: 16 }, (_, index) => `Follow-up reasoning paragraph ${index + 1}\n`)
+                    ].join('\n')
+                }
+            }
+        })
+    }
     if (codeWrap && (seq === 1130 || seq === 1140 || seq === 1150)) {
         const text = seq === 1150 ? 'Code block to keep in view' : `Earlier code block ${seq}`
-        const lines = Array.from({ length: seq === 1150 ? 5 : 7 }, (_, index) =>
-            `row ${index + 1}: ${'checkpoint pending, review details before continuing; '.repeat(6).trim()}`
-        )
+        const lines = codeWrapLines(seq === 1150 ? 5 : 7)
         return createFixtureMessage(seq, {
             role: 'agent',
             content: {

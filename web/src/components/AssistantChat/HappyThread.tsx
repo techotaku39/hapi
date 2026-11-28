@@ -1766,6 +1766,9 @@ export function HappyThread(props: {
         }
     }, [])
 
+    const isFollowingTail = useCallback(() => tailScrollInProgressRef.current
+        || (autoScrollEnabledRef.current && atBottomRef.current), [])
+
     const handleNestedScrollFollowChange = useCallback((followLatest: boolean) => {
         if (!followLatest) {
             clearInitialScrollTimers()
@@ -2597,15 +2600,13 @@ export function HappyThread(props: {
             return
         }
 
-        const followingTail = () => tailScrollInProgressRef.current
-            || (autoScrollEnabledRef.current && atBottomRef.current)
         // While the tail is followed the other observer pins the bottom, so
         // skip the per-message scan.
         // Besides the pixel offset, keep how far into the anchored message the
         // viewport top sits: the message itself rewraps too, so a reader deep
         // inside a long reply must land at the same relative spot in it.
         const captureReadingAnchor = (): (ScrollAnchor & { height: number }) | null => {
-            if (followingTail()) return null
+            if (isFollowingTail()) return null
             const captured = captureScrollAnchor(viewport)
             const element = captured ? document.getElementById(captured.id) : null
             return captured && element ? { ...captured, height: element.getBoundingClientRect().height } : null
@@ -2631,7 +2632,7 @@ export function HappyThread(props: {
             lastWidth = width
             // A settled search result keeps its history lock, and its row is
             // the visible anchor, so it stays in view through the reflow too.
-            if (widthChanged && anchor && !followingTail() && !hasBlockingScrollRestore()) {
+            if (widthChanged && anchor && !isFollowingTail() && !hasBlockingScrollRestore()) {
                 const element = document.getElementById(anchor.id)
                 const height = element?.getBoundingClientRect().height ?? 0
                 const topOffset = anchor.topOffset < 0 && anchor.height > 0 && height > 0
@@ -2647,7 +2648,7 @@ export function HappyThread(props: {
             viewport.removeEventListener('scroll', handleScroll)
             if (frame !== null) cancelAnimationFrame(frame)
         }
-    }, [hasBlockingScrollRestore])
+    }, [hasBlockingScrollRestore, isFollowingTail])
 
     useEffect(() => {
         const content = contentRef.current
@@ -2887,6 +2888,7 @@ export function HappyThread(props: {
             isSyncingTail: props.isSyncingTail,
             isLoadingMoreMessages: props.isLoadingMoreMessages,
             onNestedScrollFollowChange: handleNestedScrollFollowChange,
+            isFollowingTail,
             loadOlderMessagesPreservingScroll: loadOlderFromConsumer
         }}>
             <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col relative">

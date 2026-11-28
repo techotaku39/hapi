@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
 
 function getCodeWrapStorageKey(): string {
     return 'hapi-code-wrap'
@@ -68,6 +69,7 @@ export function useCodeWrap(): {
     codeWrap: boolean
     setCodeWrap: (wrap: boolean, trigger?: HTMLElement) => void
 } {
+    const isFollowingTail = useOptionalHappyChatContext()?.isFollowingTail
     const [codeWrap, setCodeWrapState] = useState<boolean>(getInitialCodeWrap)
 
     useEffect(() => {
@@ -98,16 +100,21 @@ export function useCodeWrap(): {
         // guarantees run after the mount effect, so this instance's listener
         // is always registered by the time this runs.
         const viewport = trigger?.closest('.happy-thread-messages')?.closest<HTMLElement>('.chat-scroll-y')
-        if (trigger && viewport && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1) {
-            // Earlier blocks can all change height on this click. Keep the
-            // clicked control in place, without overriding live tail-follow.
-            const offset = () => trigger.getBoundingClientRect().top - viewport.getBoundingClientRect().top
-            const before = offset()
+        const nested = viewport && trigger?.closest<HTMLElement>('[data-hapi-nested-scroll="true"]')
+        const chatAnchor = viewport && !isFollowingTail?.()
+            && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1 ? viewport : null
+        const scrollers = [nested, chatAnchor].filter((element): element is HTMLElement => element != null)
+        if (trigger && scrollers.length > 0) {
+            // Restore from the inside out. Moving only the chat cannot bring
+            // a clipped button back into a reasoning panel's own viewport.
+            const offset = (scroller: HTMLElement) => trigger.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+            const anchors = scrollers.map(scroller => ({ scroller, before: offset(scroller) }))
             flushSync(() => broadcastSameTab(wrap))
-            if (viewport.contains(trigger)) {
-                const delta = offset() - before
+            for (const { scroller, before } of anchors) {
+                if (!scroller.contains(trigger)) continue
+                const delta = offset(scroller) - before
                 if (delta !== 0) {
-                    viewport.scrollTo({ top: viewport.scrollTop + delta, behavior: 'instant' })
+                    scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: 'instant' })
                 }
             }
         } else {
@@ -119,7 +126,7 @@ export function useCodeWrap(): {
         } else {
             safeRemoveItem(getCodeWrapStorageKey())
         }
-    }, [])
+    }, [isFollowingTail])
 
     return { codeWrap, setCodeWrap }
 }
