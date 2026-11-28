@@ -24,9 +24,45 @@ declare module 'mdast' {
     }
 }
 
+const CLOSING_WRAPPER = new Map([
+    ['(', ')'], ['[', ']'], ['{', '}'], ["'", "'"],
+    ['（', '）'], ['【', '】'], ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'],
+])
+
+const parseStops = new WeakMap<Processor, ReadonlyMap<string, unknown>>()
+
+/** Keep the actual bracket-math tokens intact during its synchronous reparse. */
+export function parseWithWindowsPathStops(
+    processor: Processor,
+    source: string,
+    stops: ReadonlyMap<string, unknown>,
+): ReturnType<Processor['parse']> {
+    parseStops.set(processor, stops)
+    try {
+        return processor.parse(source)
+    } finally {
+        parseStops.delete(processor)
+    }
+}
+
+function pathEnd(value: string, start: number, end: number, opening: string, stops?: ReadonlyMap<string, unknown>): number {
+    const closing = CLOSING_WRAPPER.get(opening)
+    if (!closing && !stops) return end
+    let depth = 1
+    for (let i = start; i < end; i++) {
+        const ch = value[i]
+        if (stops?.has(ch)) return i
+        if (closing) {
+            if (ch === closing && --depth === 0) return i
+            if (ch === opening && opening !== closing) depth++
+        }
+    }
+    return end
+}
+
 type Escape = { offset: number; dot: boolean }
 
-function restoreDottedPaths(value: string, escapes: Escape[]): RootContent[] {
+function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMap<string, unknown>): RootContent[] {
     const parts: RootContent[] = []
     let next = 0
     let lastEnd = 0
@@ -34,7 +70,7 @@ function restoreDottedPaths(value: string, escapes: Escape[]): RootContent[] {
         const boundary = match[1]
         const start = match.index + boundary.length
         const root = start + 2
-        const end = match.index + match[0].length
+        const end = pathEnd(value, root, match.index + match[0].length, boundary, stops)
         while (next < escapes.length && escapes[next].offset < root) next++
         const first = next
         let hasDotEscape = false
@@ -65,6 +101,7 @@ function restoreDottedPaths(value: string, escapes: Escape[]): RootContent[] {
 }
 
 export default function remarkPreserveWindowsPaths(this: Processor) {
+    const processor = this
     const pathEscapes = new WeakMap<Text, Escape[]>()
     const extensions = this.data('fromMarkdownExtensions') ?? []
     // Restore the spelling before other transforms can turn parts of the text
@@ -84,6 +121,7 @@ export default function remarkPreserveWindowsPaths(this: Processor) {
             },
         },
         transforms: [function restoreText(tree: Root) {
+            const stops = parseStops.get(processor)
             function visit(node: Root | RootContent): void {
                 if (!('children' in node) || node.type === 'link' || node.type === 'linkReference') return
                 const children: RootContent[] = node.children
@@ -92,7 +130,7 @@ export default function remarkPreserveWindowsPaths(this: Processor) {
                     if (child.type === 'text') {
                         const escapes = pathEscapes.get(child)
                         if (escapes?.some((escape) => escape.dot)) {
-                            const parts = restoreDottedPaths(child.value, escapes)
+                            const parts = restoreDottedPaths(child.value, escapes, stops)
                             if (parts.length) {
                                 updated.push(...parts)
                                 continue

@@ -270,6 +270,23 @@ describe('user message Markdown — Windows paths', () => {
         expect(html).not.toMatch(/[\uE000-\uF8FF]/u)
     })
 
+    it('does not split a multiline TeX placeholder at a restored path', () => {
+        const path = String.raw`D:\work\.front`
+        const html = render([String.raw`${path},\[`, 'x+1', String.raw`\]`].join('\n'), MARKDOWN_PLUGINS_WITH_BREAKS)
+        expect(html).toContain(`<p>${path},</p>`)
+        expect(html).toContain('class="katex-display"')
+        expect(html).not.toMatch(/[\uE000-\uF8FF]/u)
+    })
+
+    it.each([
+        ['(', ')'],
+        ['（', '）'],
+        ['“', '”'],
+    ])('preserves a wrapped path without restoring escapes after its closing %s %s', (open, close) => {
+        const path = String.raw`D:\work\(example)\.front`
+        expect(render(`See ${open}${path}${close}\\.`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>See ${open}${path}${close}.</p>`)
+    })
+
     it('keeps a complete restored path link and its line suffix after a newline', () => {
         const path = String.raw`D:\_work\.config\notes.md`
         const html = render(`Windows path:\n${path}:12:3`, MARKDOWN_PLUGINS_WITH_BREAKS)

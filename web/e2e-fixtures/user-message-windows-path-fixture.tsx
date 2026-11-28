@@ -43,6 +43,9 @@ function UserBubbleFixture() {
                 <div className={getUserBubbleClassName()} data-testid="user-message-with-math">
                     <UserBubbleContent text={String.raw`D:\_work\.front,\(x+1\)`} />
                 </div>
+                <div className={getUserBubbleClassName()} data-testid="user-message-with-display-math">
+                    <UserBubbleContent text={[String.raw`See (D:\_work\.front)\.`, String.raw`D:\_work\.front,\[`, 'x+1', String.raw`\]`].join('\n')} />
+                </div>
             </HappyChatProvider>
         </main>
     )

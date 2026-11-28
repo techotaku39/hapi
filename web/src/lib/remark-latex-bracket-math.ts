@@ -1,6 +1,6 @@
 import type { Processor } from 'unified'
 import { repairMarkdownTables } from './remark-repair-tables'
-import { RESTORED_WINDOWS_PATH } from './remark-preserve-windows-paths'
+import { parseWithWindowsPathStops } from './remark-preserve-windows-paths'
 
 interface MarkdownNode {
     type: string
@@ -421,13 +421,7 @@ function splitTextNode(node: MarkdownNode, placeholders: PlaceholderMap): Markdo
         const next = findNextPlaceholder(value, cursor, placeholders)
         if (!next) break
         found = true
-        if (next.start > cursor) {
-            const prefix = value.slice(cursor, next.start)
-            // Restore math adjacent to a path without losing its complete-link guard.
-            children.push(cursor === 0 && node.type === RESTORED_WINDOWS_PATH
-                ? { ...node, value: prefix }
-                : { type: 'text', value: prefix })
-        }
+        if (next.start > cursor) children.push({ type: 'text', value: value.slice(cursor, next.start) })
         children.push(createMathNode(next.entry.kind, next.entry.value))
         cursor = next.end
     }
@@ -478,7 +472,7 @@ function transformContainer(node: MarkdownNode, placeholders: PlaceholderMap): v
             continue
         }
 
-        if (child.type === 'text' || child.type === RESTORED_WINDOWS_PATH) {
+        if (child.type === 'text') {
             children.push(...splitTextNode(child, placeholders))
             continue
         }
@@ -521,7 +515,7 @@ export default function remarkLatexBracketMath(this: Processor) {
         const prepared = prepareBracketMathSource(source, sourceTree)
         if (!prepared) return
 
-        const reparsedTree = processor.parse(prepared.source) as MarkdownNode
+        const reparsedTree = parseWithWindowsPathStops(processor, prepared.source, prepared.placeholders) as MarkdownNode
         transformContainer(reparsedTree, prepared.placeholders)
         Object.assign(tree, reparsedTree)
     }
