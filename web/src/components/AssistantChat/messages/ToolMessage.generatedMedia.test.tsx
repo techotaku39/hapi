@@ -245,6 +245,37 @@ describe('GeneratedImageCard media fetch', () => {
         }
     })
 
+    it('does not take focus back when the retry control was blurred first', async () => {
+        let resolveRetry: (blob: Blob) => void = () => {}
+        const getGeneratedImageBlob = vi.fn()
+            .mockRejectedValueOnce(new Error('HTTP 404'))
+            .mockImplementationOnce(() => new Promise<Blob>((resolve) => {
+                resolveRetry = resolve
+            }))
+        renderCard({ mimeType: 'image/png', locale: 'en', getGeneratedImageBlob })
+
+        await waitFor(() => {
+            expect(screen.getByText('Displayed image is currently unavailable.')).toBeInTheDocument()
+        })
+
+        const retry = screen.getByRole('button', { name: 'Retry' })
+        retry.focus()
+        fireEvent.click(retry)
+        await waitFor(() => expect(retry).toHaveAttribute('aria-busy', 'true'))
+
+        // Clicking non-focusable chat text drops focus to the document body, which is
+        // indistinguishable from the retry control unmounting once the swap is done.
+        retry.blur()
+        expect(document.activeElement).toBe(document.body)
+
+        resolveRetry(new Blob(['x'], { type: 'image/png' }))
+        await waitFor(() => {
+            expect(screen.getByRole('img', { name: 'clip.mp4' })).toBeInTheDocument()
+        })
+        // The user moved on, so the late success must not pull focus back.
+        expect(document.activeElement).toBe(document.body)
+    })
+
     it('keeps the unavailable message outside the share-filtered retry action', async () => {
         const getGeneratedImageBlob = vi.fn().mockRejectedValue(new Error('HTTP 404'))
         renderCard({ mimeType: 'image/png', locale: 'en', getGeneratedImageBlob })

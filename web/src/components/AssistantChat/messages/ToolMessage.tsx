@@ -128,6 +128,12 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                     URL.revokeObjectURL(objectUrlRef.current)
                 }
                 objectUrlRef.current = nextObjectUrl
+                // Revalidate while the Retry button is still mounted: focus may have
+                // moved to another control, or been blurred, while the request ran.
+                // Both land on document.body once the error branch is replaced, so
+                // decide here instead of guessing afterwards.
+                restoreFocusRef.current = restoreFocusRef.current
+                    && document.activeElement === retryButtonRef.current
                 setObjectUrl(nextObjectUrl)
                 setFileSize(blob.size)
                 if (isImage) {
@@ -164,10 +170,8 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     useEffect(() => {
         if (!objectUrl || !restoreFocusRef.current) return
         restoreFocusRef.current = false
-        // The Retry control unmounted with the error branch, so focus falls back
-        // to the document body. Only reclaim it in that case: if the user tabbed
-        // to another control while the request was in flight, that is where
-        // focus belongs, and moving it back would undo their choice.
+        // Revalidated at swap time in the fetch handler; this second check only
+        // guards against focus landing somewhere else during the commit itself.
         const active = document.activeElement
         const focusWasLost = !active || active === document.body || active === retryButtonRef.current
         if (!focusWasLost) return
