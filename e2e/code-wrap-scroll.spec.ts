@@ -77,29 +77,34 @@ async function placeInHistory(page: Page, target: Locator) {
     return { viewport, jump }
 }
 
-test('keeps the target visible in a nested reasoning panel when both scroll containers reflow', async ({ page }) => {
-    await page.goto('/e2e-fixtures/history-load-fixture.html?navigationShell=1&codeWrap=reasoning')
-    const reasoningToggle = page.getByRole('button', { name: 'Reasoning', exact: true })
-    await placeInHistory(page, reasoningToggle)
-    await reasoningToggle.click()
-    const nested = page.locator('[data-hapi-nested-scroll="true"]')
-    const toggle = nested.locator('[data-hapi-code-wrap-toggle="true"]').nth(1)
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
-    const measure = () => toggle.evaluate(el => ({
-        top: el.getBoundingClientRect().top,
-        nestedOffset: el.getBoundingClientRect().top - el.closest('[data-hapi-nested-scroll="true"]')!.getBoundingClientRect().top,
-    }))
-    await expect(toggle).toBeInViewport({ ratio: 1 })
-    const before = await measure()
-    for (const wrap of [true, false]) {
-        await toggle.click()
-        await expect(toggle).toHaveAttribute('aria-pressed', String(wrap))
-        await expect.poll(async () => Math.abs((await measure()).nestedOffset - before.nestedOffset)).toBeLessThanOrEqual(2)
-        await expect.poll(async () => Math.abs((await measure()).top - before.top)).toBeLessThanOrEqual(2)
+for (const { mode, label, selector } of [
+    { mode: 'reasoning', label: 'Reasoning', selector: '.aui-reasoning-scroll' },
+    { mode: 'compaction', label: 'Context compacted', selector: '.max-h-96.overflow-y-auto' },
+]) {
+    test(`keeps the target visible inside a scrollable ${mode} panel when code rewraps`, async ({ page }) => {
+        await page.goto(`/e2e-fixtures/history-load-fixture.html?navigationShell=1&codeWrap=${mode}`)
+        const panelToggle = page.getByRole('button', { name: new RegExp(label) })
+        await placeInHistory(page, panelToggle)
+        await panelToggle.click()
+        const panel = page.locator(selector).filter({ hasText: 'Target nested code' })
+        const toggle = panel.locator('[data-hapi-code-wrap-toggle="true"]').nth(1)
+        const measure = () => toggle.evaluate(el => {
+            const top = el.getBoundingClientRect().top
+            return { top, nestedOffset: top - el.closest('.overflow-y-auto')!.getBoundingClientRect().top }
+        })
+        await expect(toggle).toHaveAttribute('aria-pressed', 'false')
         await expect(toggle).toBeInViewport({ ratio: 1 })
-        await saveScreenshot(page, `nested-reasoning-wrap-${wrap ? 'on' : 'off'}`)
-    }
-})
+        const before = await measure()
+        for (const wrap of [true, false]) {
+            await toggle.click()
+            await expect(toggle).toHaveAttribute('aria-pressed', String(wrap))
+            await expect.poll(async () => Math.abs((await measure()).nestedOffset - before.nestedOffset)).toBeLessThanOrEqual(2)
+            await expect.poll(async () => Math.abs((await measure()).top - before.top)).toBeLessThanOrEqual(2)
+            await expect(toggle).toBeInViewport({ ratio: 1 })
+            await saveScreenshot(page, `nested-${mode}-wrap-${wrap ? 'on' : 'off'}`)
+        }
+    })
+}
 
 test('lets an in-progress jump to the latest message finish when wrap is turned off', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('hapi-code-wrap', '1'))

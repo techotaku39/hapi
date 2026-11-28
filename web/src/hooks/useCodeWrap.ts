@@ -104,11 +104,16 @@ export function useCodeWrap(): {
         const viewport = isFollowingTail?.()
             ? null
             : trigger?.closest('.happy-thread-messages')?.closest<HTMLElement>('.chat-scroll-y')
-        const nested = viewport && trigger?.closest<HTMLElement>('[data-hapi-nested-scroll="true"]')
-        const scrollers = [nested, viewport].filter((element): element is HTMLElement => element != null)
-        if (trigger && scrollers.length > 0) {
-            // Restore from the inside out. Moving only the chat cannot bring
-            // a clipped button back into a reasoning panel's own viewport.
+        if (trigger && viewport) {
+            // Capture all vertical scroll containers from the inside out.
+            // Include panes whose content currently fits: wrapping may make
+            // them scrollable. Hidden overflow wrappers are not scroll panes.
+            const scrollers: HTMLElement[] = []
+            for (let parent = trigger.parentElement; parent && parent !== viewport; parent = parent.parentElement) {
+                const { overflowY } = getComputedStyle(parent)
+                if (overflowY === 'auto' || overflowY === 'scroll') scrollers.push(parent)
+            }
+            scrollers.push(viewport)
             const offset = (scroller: HTMLElement) => trigger.getBoundingClientRect().top - scroller.getBoundingClientRect().top
             const anchors = scrollers.map(scroller => ({ scroller, before: offset(scroller) }))
             flushSync(() => broadcastSameTab(wrap))

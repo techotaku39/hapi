@@ -114,7 +114,7 @@ window.__probe = {
 // - ?navigationShell=1 — add a pinned header/composer and outline controls.
 // - ?navigationMedia=1 — include generated-image previews in older history.
 // - ?codeWrap=1 — include code blocks above and at a history reading position.
-// - ?codeWrap=reasoning — put the target code block inside a nested reasoning panel.
+// - ?codeWrap=reasoning or compaction — put the target code block inside a nested chat panel.
 // - ?codeWrap=reasoning-tail — a reasoning panel near the tail can become scrollable on wrap.
 // - ?codeWrap=search-tail — open a search result at the bottom of a bounded history window.
 // - ?sessionSwitch=1 — render session-switch buttons between a preload-margin
@@ -283,21 +283,20 @@ const allMessages: DecryptedMessage[] = Array.from({ length: TOTAL_MESSAGES }, (
             }
         })
     }
-    if (codeWrap === 'reasoning' && seq === 1150) {
-        const lines = codeWrapLines(6)
+    if ((codeWrap === 'reasoning' || codeWrap === 'compaction') && seq === 1150) {
+        const text = [
+            'Earlier nested code', '', '```text', ...codeWrapLines(6), '```', '',
+            'Target nested code', '', '```text', 'target line', '```', '',
+            ...Array.from({ length: 16 }, (_, index) => `Follow-up paragraph ${index + 1}\n`)
+        ].join('\n')
         return createFixtureMessage(seq, {
             role: 'agent',
             content: {
                 type: 'codex',
-                data: {
-                    type: 'reasoning',
-                    message: [
-                        'Earlier reasoning code', '', '```text', ...lines, '```', '',
-                        'Target reasoning code', '', '```text', 'target line', '```', '',
-                        ...Array.from({ length: 16 }, (_, index) => `Follow-up reasoning paragraph ${index + 1}\n`)
-                    ].join('\n')
-                }
-            }
+                data: codeWrap === 'compaction'
+                    ? { type: 'compact-summary', summary: text }
+                    : { type: 'reasoning', message: text },
+            },
         })
     }
     if (codeWrap === 'search-tail' && (seq === 1196 || seq === 1199)) {
