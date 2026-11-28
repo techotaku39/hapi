@@ -269,9 +269,9 @@ function visit(
     for (const child of node.children) {
         if (child.type === RESTORED_WINDOWS_PATH) {
             const value = child.value ?? ''
-            // Periods at the end do not name a distinct Win32 file; other
-            // trailing punctuation can be literal and must not be stripped.
-            const displayPath = value.replace(/\.+$/, '')
+            // A bare final colon or periods do not name a distinct Win32 file.
+            // Other punctuation can be literal; named streams are not links.
+            const displayPath = value.replace(/(?:\.+|:)$/, '')
             const path = stripLineSuffix(displayPath)
             // Never link a prefix of a restored path, including where the
             // downstream href decoder would treat filename text as metadata.

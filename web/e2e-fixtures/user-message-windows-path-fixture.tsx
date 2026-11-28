@@ -14,7 +14,7 @@ const prompt = [
     String.raw`Path:D:\_work\.front`,
     String.raw`D:\_work\.env.local`,
     String.raw`D:\_work\.env#backup.md`,
-    String.raw`Open D:\_work\.env.`,
+    String.raw`Open D:\_work\.env: settings`,
     String.raw`Use \* as a literal asterisk.`,
 ].join('\n')
 
@@ -44,7 +44,7 @@ function UserBubbleFixture() {
                     <UserBubbleContent text={String.raw`D:\_work\.front,\(x+1\)`} />
                 </div>
                 <div className={getUserBubbleClassName()} data-testid="user-message-with-display-math">
-                    <UserBubbleContent text={[String.raw`See (D:\_work\.front)\.`, String.raw`D:\_work\.front,\[`, 'x+1', String.raw`\]`].join('\n')} />
+                    <UserBubbleContent text={[String.raw`See 《D:\_work\.front》\.`, String.raw`D:\_work\.front,\[`, 'x+1', String.raw`\]`].join('\n')} />
                 </div>
                 <div className={getUserBubbleClassName()} data-testid="user-message-adjacent-paths">
                     <UserBubbleContent text={String.raw`(D:\repo\.front),(E:\repo\.cache)`} />

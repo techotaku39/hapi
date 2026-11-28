@@ -257,10 +257,10 @@ describe('user message Markdown — Windows paths', () => {
         expect(render(path, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>${path}</p>`)
     })
 
-    it('leaves a sentence-ending period outside a complete restored file link', () => {
+    it.each(['.', ': then continue'])('keeps prose punctuation outside a complete restored link (%s)', (suffix) => {
         const path = String.raw`D:\_work\.env`
-        expect(render(`Open ${path}.`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
-            `<p>Open <a href="hapi-file-candidate:${encodeURIComponent(path)}">${path}</a>.</p>`
+        expect(render(`Open ${path}${suffix}`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
+            `<p>Open <a href="hapi-file-candidate:${encodeURIComponent(path)}">${path}</a>${suffix}</p>`
         )
     })
 
@@ -282,6 +282,7 @@ describe('user message Markdown — Windows paths', () => {
     it.each([
         ['(', ')'],
         ['（', '）'],
+        ['《', '》'],
         ['“', '”'],
     ])('preserves a wrapped path without restoring escapes after its closing %s %s', (open, close) => {
         const path = String.raw`D:\work\(example)\.front`

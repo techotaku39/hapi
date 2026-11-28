@@ -22,7 +22,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
             await page.locator('main').screenshot({ path: `${screenshotDirectory}/user-bubble-${viewport.width}.png` })
         }
 
-        await expect(bubble).toHaveText(`Please check ${path}\n${option}\n${localized}\n${labeled}\n${plain}\n${fragmentLike}\nOpen ${linkable}.\nUse * as a literal asterisk.`, { useInnerText: true })
+        await expect(bubble).toHaveText(`Please check ${path}\n${option}\n${localized}\n${labeled}\n${plain}\n${fragmentLike}\nOpen ${linkable}: settings\nUse * as a literal asterisk.`, { useInnerText: true })
         await expect(bubble.locator('br')).toHaveCount(7)
         const selection = await bubble.evaluate((element) => {
             const range = document.createRange()
@@ -41,7 +41,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(mathBubble.locator('.katex')).toHaveCount(1)
         await expect(mathBubble).not.toContainText(/[\uE000-\uF8FF]/u)
         const displayMath = page.getByTestId('user-message-with-display-math')
-        await expect(displayMath).toContainText(String.raw`See (D:\_work\.front).`)
+        await expect(displayMath).toContainText(String.raw`See 《D:\_work\.front》.`)
         await expect(displayMath.locator('.katex-display')).toHaveCount(1)
         await expect(displayMath).not.toContainText(/[\uE000-\uF8FF]/u)
         await expect(page.getByTestId('user-message-adjacent-paths')).toHaveText(String.raw`(D:\repo\.front),(E:\repo\.cache)`)
