@@ -48,7 +48,11 @@ function UserBubbleFixture() {
                     <UserBubbleContent text={[String.raw`See 《D:\_work\.front》\.`, String.raw`D:\_work\.front,\[`, 'x+1', String.raw`\]`].join('\n')} />
                 </div>
                 <div className={getUserBubbleClassName()} data-testid="user-message-adjacent-paths">
-                    <UserBubbleContent text={String.raw`(D:\repo\.front),(E:\repo\.cache)`} />
+                    <UserBubbleContent text={[
+                        String.raw`(D:\repo\.front),(E:\repo\.cache)`,
+                        String.raw`Compare "D:\repo\.front and E:\repo\.cache".`,
+                        String.raw`请检查，D:\repo\.front`,
+                    ].join('\n')} />
                 </div>
             </HappyChatProvider>
         </main>

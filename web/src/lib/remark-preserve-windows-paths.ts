@@ -4,7 +4,7 @@ import { matchNonHttpsUris } from './remark-non-https-autolink'
 
 // Keep matching scoped to space-free drive paths. The separator after the
 // drive may have been consumed by Markdown, so verify it against escape tokens.
-const DRIVE_PATH = /(^|[\s=:：'"\p{Ps}\p{Pi}])[A-Za-z]:[^\s<>:"|?*`]*(?::[^\s<>"|?*`]*)?/gu
+const DRIVE_PATH = /(^|[\s=:：，、；。'"\p{Ps}\p{Pi}])[A-Za-z]:[^\s<>:"|?*`]*(?::[^\s<>"|?*`]*)?/gu
 const INVALID_PATH_CHARACTER = /[<>:"|?*`\\]/u
 
 // Keep a restored path together through Markdown transforms such as line
@@ -25,14 +25,9 @@ declare module 'mdast' {
     }
 }
 
-const CLOSING_QUOTE = new Map([
-    ['"', '"'], ["'", "'"], ['“', '”'], ['‘', '’'], ['«', '»'], ['‹', '›'],
-    ['「', '」'], ['『', '』'], ['｢', '｣'],
-])
-
 const CLOSING_WRAPPER = new Map([
-    ...CLOSING_QUOTE,
-    ['(', ')'], ['[', ']'], ['{', '}'],
+    ['"', '"'], ["'", "'"], ['“', '”'], ['‘', '’'], ['«', '»'], ['‹', '›'],
+    ['「', '」'], ['『', '』'], ['｢', '｣'], ['(', ')'], ['[', ']'], ['{', '}'],
     ['（', '）'], ['［', '］'], ['｛', '｝'], ['｟', '｠'],
     ['【', '】'], ['〈', '〉'], ['《', '》'], ['〔', '〕'], ['〖', '〗'],
     ['〘', '〙'], ['〚', '〛'],
@@ -70,6 +65,19 @@ function pathEnd(value: string, start: number, end: number, opening: string, sto
 }
 
 type Escape = { offset: number; dot: boolean }
+function hasAnotherDrivePath(value: string, start: number, end: number, escapes: Escape[], firstEscape: number): boolean {
+    const candidates = new RegExp(DRIVE_PATH)
+    candidates.lastIndex = start
+    let match: RegExpExecArray | null
+    while ((match = candidates.exec(value)) !== null && match.index < end) {
+        const root = match.index + match[1].length + 2
+        while (firstEscape < escapes.length && escapes[firstEscape].offset < root) firstEscape++
+        if (root < end && (value[root] === '\\' || value[root] === '/' || escapes[firstEscape]?.offset === root)) return true
+        candidates.lastIndex = root
+    }
+    return false
+}
+
 
 function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMap<string, unknown>): RootContent[] {
     const parts: RootContent[] = []
@@ -78,6 +86,7 @@ function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMa
     let uri = uriMatches.next().value
     let next = 0
     let lastEnd = 0
+    let spacedWrapperEnd = 0
     let match: RegExpExecArray | null
     while ((match = drivePaths.exec(value)) !== null) {
         const boundary = match[1]
@@ -90,25 +99,33 @@ function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMa
             drivePaths.lastIndex = root
             continue
         }
-        // A closing quote after whitespace makes this a spaced path, which
-        // we do not restore. Do not hand its first word to the file linker.
-        const quote = CLOSING_QUOTE.get(boundary)
-        if (quote) {
-            const close = value.indexOf(quote, root)
-            const quoted = close < 0 ? '' : value.slice(root, close)
-            if (/[^\S\r\n]/.test(quoted) && !/[\r\n]/.test(quoted)) {
-                drivePaths.lastIndex = close + 1
-                continue
-            }
-        }
         // Do not split a bare URI (e.g. a path inside a custom URI query).
         while (uri && (uri.index ?? 0) + uri[0].length <= start) uri = uriMatches.next().value
         if (uri && (uri.index ?? 0) <= start) {
             drivePaths.lastIndex = (uri.index ?? 0) + uri[0].length
             continue
         }
-        const matchEnd = Math.min(match.index + match[0].length, uri?.index ?? value.length)
+        const inSpacedWrapper = start < spacedWrapperEnd
+        const matchEnd = Math.min(match.index + match[0].length, uri?.index ?? value.length,
+            inSpacedWrapper ? spacedWrapperEnd : value.length)
         const end = pathEnd(value, root, matchEnd, boundary, stops)
+        if (!inSpacedWrapper && end < value.length && /[^\S\r\n]/.test(value[end]) && CLOSING_WRAPPER.has(boundary)) {
+            const lineBreak = /[\r\n]/g
+            lineBreak.lastIndex = end
+            const lineEnd = lineBreak.exec(value)?.index ?? value.length
+            const close = pathEnd(value, root, lineEnd, boundary)
+            if (close < lineEnd) {
+                if (!hasAnotherDrivePath(value, end, close, escapes, next)) {
+                    // A single unbroken drive root in a spaced wrapper might
+                    // name one file with spaces; do not restore/link a prefix.
+                    drivePaths.lastIndex = close + 1
+                    continue
+                }
+                // Multiple roots denote separate paths. Restore each one but
+                // do not infer file targets from the enclosed prose.
+                spacedWrapperEnd = close
+            }
+        }
         // A closing wrapper or math token can end the path before the regex
         // match does. Resume there so adjacent paths are considered too.
         drivePaths.lastIndex = end
@@ -130,7 +147,7 @@ function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMa
         path.push(value.slice(cursor, end))
         if (start > lastEnd) parts.push({ type: 'text', value: value.slice(lastEnd, start) })
         // Preserve the autolinker's existing rejection after an ASCII colon.
-        parts.push({ type: RESTORED_WINDOWS_PATH, value: path.join(''), allowAutolink: boundary !== ':' })
+        parts.push({ type: RESTORED_WINDOWS_PATH, value: path.join(''), allowAutolink: boundary !== ':' && start >= spacedWrapperEnd })
         lastEnd = end
     }
     if (parts.length && lastEnd < value.length) parts.push({ type: 'text', value: value.slice(lastEnd) })

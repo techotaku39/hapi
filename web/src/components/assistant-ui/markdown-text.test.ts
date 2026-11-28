@@ -208,6 +208,9 @@ describe('user message Markdown — Windows paths', () => {
         String.raw`查看（D:\项目\.配置）`,
         String.raw`路径：D:\项目\.配置`,
         String.raw`Path:D:\work\.front`,
+        String.raw`请检查，D:\Projects\demo\.front`,
+        String.raw`Compare "D:\Projects\demo\.front and E:\repo\.cache".`,
+        String.raw`Compare 「D:\Projects\demo\.front and E:\_repo\.cache」.`,
         String.raw`(D:\repo\.front),(E:\repo\.cache)`,
         String.raw`D:\work\_cache\.front`,
         String.raw`D:\.front\_cache`,
@@ -321,7 +324,9 @@ describe('user message Markdown — Windows paths', () => {
         ['“', '”'],
         ['「', '」'],
         ['『', '』'],
-    ])('does not autolink a prefix of a quoted path containing spaces (%s %s)', (open, close) => {
+        ['(', ')'],
+        ['（', '）'],
+    ])('does not autolink a prefix of a wrapped path containing spaces (%s %s)', (open, close) => {
         const markdown = `Open ${open}${String.raw`D:\repo\.env files\README.md`}${close}`
         expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(render(markdown))
     })
