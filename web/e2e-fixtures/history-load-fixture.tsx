@@ -116,6 +116,7 @@ window.__probe = {
 // - ?codeWrap=1 — include code blocks above and at a history reading position.
 // - ?codeWrap=reasoning — put the target code block inside a nested reasoning panel.
 // - ?codeWrap=reasoning-tail — a reasoning panel near the tail can become scrollable on wrap.
+// - ?codeWrap=search-tail — open a search result at the bottom of a bounded history window.
 // - ?sessionSwitch=1 — render session-switch buttons between a preload-margin
 //   overflow session and a short-tail collapsed-tools session while honoring
 //   the production 20-row latest page size.
@@ -299,7 +300,17 @@ const allMessages: DecryptedMessage[] = Array.from({ length: TOTAL_MESSAGES }, (
             }
         })
     }
-    if (codeWrap && (seq === 1130 || seq === 1140 || seq === 1150)) {
+    if (codeWrap === 'search-tail' && (seq === 1196 || seq === 1199)) {
+        const text = seq === 1199 ? 'Code block to keep in view' : 'Earlier search-window code block'
+        return createFixtureMessage(seq, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', message: [text, '', '```text', ...codeWrapLines(2), '```'].join('\n') },
+            },
+        })
+    }
+    if (codeWrap !== null && codeWrap !== 'search-tail' && (seq === 1130 || seq === 1140 || seq === 1150)) {
         const text = seq === 1150 ? 'Code block to keep in view' : `Earlier code block ${seq}`
         const lines = codeWrapLines(seq === 1150 ? 5 : 7)
         return createFixtureMessage(seq, {
@@ -569,6 +580,8 @@ function FixtureThreadSession(props: { activeSessionId: string }) {
                 outlineOpen={navigationShell && outlineOpen}
                 outlineItems={navigationShell ? buildConversationOutline(reconciled.blocks) : []}
                 onOutlineOpenChange={setOutlineOpen}
+                initialTargetMessageId={codeWrap === 'search-tail' ? 'm-1200' : undefined}
+                hasMoreNewerMessages={codeWrap === 'search-tail'}
             />
             {navigationShell ? (
                 <footer data-testid="navigation-composer" className={`h-[150px] shrink-0 p-3 ${outlineOpen ? 'max-sm:hidden' : ''}`}>

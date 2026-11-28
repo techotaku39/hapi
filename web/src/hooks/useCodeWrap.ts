@@ -105,8 +105,7 @@ export function useCodeWrap(): {
             ? null
             : trigger?.closest('.happy-thread-messages')?.closest<HTMLElement>('.chat-scroll-y')
         const nested = viewport && trigger?.closest<HTMLElement>('[data-hapi-nested-scroll="true"]')
-        const chatAnchor = viewport && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1 ? viewport : null
-        const scrollers = [nested, chatAnchor].filter((element): element is HTMLElement => element != null)
+        const scrollers = [nested, viewport].filter((element): element is HTMLElement => element != null)
         if (trigger && scrollers.length > 0) {
             // Restore from the inside out. Moving only the chat cannot bring
             // a clipped button back into a reasoning panel's own viewport.
