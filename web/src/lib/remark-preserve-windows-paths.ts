@@ -1,18 +1,40 @@
-import type { Root, RootContent, Text } from 'mdast'
+import type { Literal, Root, RootContent, Text } from 'mdast'
 import type { Processor } from 'unified'
 
 // Keep matching scoped to space-free drive paths. The separator after the
 // drive may have been consumed by Markdown, so verify it against escape tokens.
-const DRIVE_PATH = /(^|[\s=：'"\p{Ps}\p{Pi}])[A-Za-z]:[^\s<>:"|?*`]*/gu
+const DRIVE_PATH = /(^|[\s=:：'"\p{Ps}\p{Pi}])[A-Za-z]:[^\s<>:"|?*`]*(?::[^\s<>"|?*`]*)?/gu
 const INVALID_PATH_CHARACTER = /[<>:"|?*`\\]/u
+
+// Keep a restored path together through Markdown transforms such as line
+// breaks, so the file autolinker can accept or reject it as a whole.
+export const RESTORED_WINDOWS_PATH = 'restoredWindowsPath'
+
+interface RestoredWindowsPath extends Literal {
+    type: typeof RESTORED_WINDOWS_PATH
+    allowAutolink: boolean
+}
+
+declare module 'mdast' {
+    interface RootContentMap {
+        restoredWindowsPath: RestoredWindowsPath
+    }
+    interface PhrasingContentMap {
+        restoredWindowsPath: RestoredWindowsPath
+    }
+}
 
 type Escape = { offset: number; dot: boolean }
 
-function restoreDottedPaths(value: string, escapes: Escape[]): string {
+function restoreDottedPaths(value: string, escapes: Escape[]): RootContent[] {
+    const parts: RootContent[] = []
     let next = 0
-    return value.replace(DRIVE_PATH, (path: string, boundary: string, start: number) => {
-        const root = start + boundary.length + 2
-        const end = start + path.length
+    let lastEnd = 0
+    for (const match of value.matchAll(DRIVE_PATH)) {
+        const boundary = match[1]
+        const start = match.index + boundary.length
+        const root = start + 2
+        const end = match.index + match[0].length
         while (next < escapes.length && escapes[next].offset < root) next++
         const first = next
         let hasDotEscape = false
@@ -22,19 +44,24 @@ function restoreDottedPaths(value: string, escapes: Escape[]): string {
         }
         const rootCharacter = value[root]
         if (!hasDotEscape || (rootCharacter !== '\\' && rootCharacter !== '/' && escapes[first]?.offset !== root)) {
-            return path
+            continue
         }
 
-        const parts: string[] = []
+        const path: string[] = []
         let cursor = start
         for (let i = first; i < next; i++) {
             const offset = escapes[i].offset
-            parts.push(value.slice(cursor, offset), '\\')
+            path.push(value.slice(cursor, offset), '\\')
             cursor = offset
         }
-        parts.push(value.slice(cursor, end))
-        return parts.join('')
-    })
+        path.push(value.slice(cursor, end))
+        if (start > lastEnd) parts.push({ type: 'text', value: value.slice(lastEnd, start) })
+        // Preserve the autolinker's existing rejection after an ASCII colon.
+        parts.push({ type: RESTORED_WINDOWS_PATH, value: path.join(''), allowAutolink: boundary !== ':' })
+        lastEnd = end
+    }
+    if (parts.length && lastEnd < value.length) parts.push({ type: 'text', value: value.slice(lastEnd) })
+    return parts
 }
 
 export default function remarkPreserveWindowsPaths(this: Processor) {
@@ -58,13 +85,28 @@ export default function remarkPreserveWindowsPaths(this: Processor) {
         },
         transforms: [function restoreText(tree: Root) {
             function visit(node: Root | RootContent): void {
-                if (node.type === 'text') {
-                    const escapes = pathEscapes.get(node)
-                    if (escapes?.some((escape) => escape.dot)) {
-                        node.value = restoreDottedPaths(node.value, escapes)
+                if (!('children' in node) || node.type === 'link' || node.type === 'linkReference') return
+                const children: RootContent[] = node.children
+                const updated: RootContent[] = []
+                for (const child of children) {
+                    if (child.type === 'text') {
+                        const escapes = pathEscapes.get(child)
+                        if (escapes?.some((escape) => escape.dot)) {
+                            const parts = restoreDottedPaths(child.value, escapes)
+                            if (parts.length) {
+                                updated.push(...parts)
+                                continue
+                            }
+                        }
+                    } else {
+                        visit(child)
                     }
-                } else if ('children' in node) {
-                    for (const child of node.children) visit(child)
+                    updated.push(child)
+                }
+                // All replacements have the same phrasing position as the text
+                // node they replace; no block or table structure is changed.
+                if (updated.length !== children.length || updated.some((child, i) => child !== children[i])) {
+                    node.children = updated as typeof node.children
                 }
             }
             visit(tree)

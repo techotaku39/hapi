@@ -207,6 +207,7 @@ describe('user message Markdown — Windows paths', () => {
         String.raw`--path=D:\_work\.config\.front`,
         String.raw`查看（D:\项目\.配置）`,
         String.raw`路径：D:\项目\.配置`,
+        String.raw`Path:D:\work\.front`,
         String.raw`D:\work\_cache\.front`,
         String.raw`D:\.front\_cache`,
         String.raw`D:\work\.front\_cache and --path=E:\_next\.front`,
@@ -242,6 +243,25 @@ describe('user message Markdown — Windows paths', () => {
         expect(render(fullPath, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
             `<p><a href="hapi-file-candidate:${encodeURIComponent(fullPath)}">${fullPath}</a></p>`
         )
+    })
+
+    it.each([
+        String.raw`D:\_work\.env.local`,
+        String.raw`D:\work\.env\notes.unknown`,
+        String.raw`D:\_work\.env:stream`,
+    ])('does not autolink a prefix of a restored path: %s', (path) => {
+        expect(render(path, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>${path}</p>`)
+    })
+
+    it('keeps a complete restored path link and its line suffix after a newline', () => {
+        const path = String.raw`D:\_work\.config\notes.md`
+        const html = render(`Windows path:\n${path}:12:3`, MARKDOWN_PLUGINS_WITH_BREAKS)
+        expect(html).toBe(`<p>Windows path:<br>\n<a href="hapi-file-candidate:${encodeURIComponent(path)}">${path}:12:3</a></p>`)
+    })
+
+    it('leaves an explicit Markdown link and its label unchanged', () => {
+        const markdown = `[${String.raw`D:\_work\.env`}](https://example.com/)`
+        expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(render(markdown))
     })
 
     it('keeps the existing Markdown structure around the path', () => {

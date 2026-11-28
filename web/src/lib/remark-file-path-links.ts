@@ -1,3 +1,5 @@
+import { RESTORED_WINDOWS_PATH } from './remark-preserve-windows-paths'
+
 const FILE_PATH_HREF_PREFIX = 'hapi-file:'
 // Encoded Windows abs handoff: raw `C:\…` is URI-normalized to `%5C` before <A>,
 // which breaks drive detection. Candidate scheme preserves the path through hast.
@@ -27,6 +29,7 @@ type MarkdownNode = {
     value?: string
     url?: string
     title?: string | null
+    allowAutolink?: boolean
     children?: MarkdownNode[]
 }
 
@@ -264,6 +267,16 @@ function visit(
 
     const nextChildren: MarkdownNode[] = []
     for (const child of node.children) {
+        if (child.type === RESTORED_WINDOWS_PATH) {
+            const text = { type: 'text', value: child.value ?? '' }
+            const path = stripLineSuffix(text.value)
+            // A restored path is already delimited. Never retry the normal
+            // substring matcher on it: .env.local is not a link to .env.
+            nextChildren.push(child.allowAutolink && isWindowsAbsolutePath(path) && !path.slice(2).includes(':') && shouldLinkPath(path)
+                ? { type: 'link', url: createAutolinkHref(path), children: [text] }
+                : text)
+            continue
+        }
         if (child.type === 'text') {
             nextChildren.push(...linkTextNode(child))
             continue
