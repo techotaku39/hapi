@@ -12,6 +12,13 @@ test.describe('generated media tiny preview geometry', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto(fixtureUrl)
         await expect(page.locator(image)).toBeVisible()
+        // The card commits the enlarged inline size from a separate image probe
+        // (ToolMessage.tsx), so the img can be visible at its intrinsic 16x32
+        // first. Poll for the scaled box before either test measures geometry.
+        await expect.poll(async () => page.locator(image).evaluate((element) => {
+            const rect = element.getBoundingClientRect()
+            return `${Math.round(rect.width)}x${Math.round(rect.height)}`
+        })).toBe('32x64')
     })
 
     test('reserves the painted size in layout flow for a skinny tiny image', async ({ page }) => {

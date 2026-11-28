@@ -73,7 +73,9 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     const [imageStyle, setImageStyle] = useState<CSSProperties | undefined>(undefined)
     const [loadMedia, setLoadMedia] = useState(false)
     const [loadRetryCount, setLoadRetryCount] = useState(0)
+    const [isFetching, setIsFetching] = useState(false)
     const objectUrlRef = useRef<string | null>(null)
+    const loadedImageIdRef = useRef(props.block.imageId)
     const isVideo = isInlineVideoMimeType(props.block.mimeType)
     const isAudio = isInlineAudioMimeType(props.block.mimeType)
     const isImage = isInlineImageMimeType(props.block.mimeType)
@@ -106,7 +108,14 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
         setObjectUrl(null)
         setFileSize(undefined)
         setImageStyle(undefined)
-        setHasError(false)
+        setIsFetching(true)
+        // Clear a previous failure only when we moved to a different block. On a
+        // retry the error state stays, which keeps the Retry button mounted so
+        // keyboard focus survives the second failure.
+        if (loadedImageIdRef.current !== props.block.imageId) {
+            loadedImageIdRef.current = props.block.imageId
+            setHasError(false)
+        }
 
         void ctx.api.getGeneratedImageBlob(ctx.sessionId, props.block.imageId)
             .then((blob) => {
@@ -138,6 +147,10 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
             .catch(() => {
                 if (disposed) return
                 setHasError(true)
+            })
+            .finally(() => {
+                if (disposed) return
+                setIsFetching(false)
             })
 
         return () => {
@@ -196,18 +209,24 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                     </div>
                 )
             ) : hasError ? (
-                <button
-                    type="button"
-                    onClick={() => setLoadRetryCount((count) => count + 1)}
-                    className="flex min-h-32 w-72 max-w-full min-w-[12rem] items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-4 text-center text-sm text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                >
-                    <span className="flex flex-col gap-1">
-                        <span>{t('media.displayed.unavailable', { label: mediaLabel })}</span>
-                        <span className="text-xs font-medium text-[var(--app-fg)] underline underline-offset-2">
-                            {t('media.displayed.retry')}
-                        </span>
-                    </span>
-                </button>
+                <div className="flex min-h-32 w-72 max-w-full min-w-[12rem] flex-col items-center justify-center gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-4 py-3 text-center text-sm text-[var(--app-hint)]">
+                    <span>{t('media.displayed.unavailable', { label: mediaLabel })}</span>
+                    <button
+                        type="button"
+                        // Share Turn snapshots copy markup without React handlers, so the
+                        // sanitizer drops this action and keeps the message above it.
+                        data-hapi-share-action="true"
+                        aria-busy={isFetching ? 'true' : undefined}
+                        aria-disabled={isFetching || undefined}
+                        onClick={() => {
+                            if (isFetching) return
+                            setLoadRetryCount((count) => count + 1)
+                        }}
+                        className="rounded text-xs font-medium text-[var(--app-fg)] underline underline-offset-2 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] aria-disabled:opacity-60"
+                    >
+                        {t('media.displayed.retry')}
+                    </button>
+                </div>
             ) : !isImage && !loadMedia ? (
                 <button
                     type="button"

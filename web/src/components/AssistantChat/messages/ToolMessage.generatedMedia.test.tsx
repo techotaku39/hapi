@@ -147,12 +147,59 @@ describe('GeneratedImageCard media fetch', () => {
         })
         expect(screen.queryByText('HTTP 404')).not.toBeInTheDocument()
 
-        fireEvent.click(screen.getByRole('button', { name: /Displayed image is currently unavailable\. Retry/ }))
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
         await waitFor(() => {
             expect(getGeneratedImageBlob).toHaveBeenCalledTimes(2)
             expect(screen.getByRole('img', { name: 'clip.mp4' })).toBeInTheDocument()
         })
+    })
+
+    it('keeps the retry control mounted and focused when a retry fails again', async () => {
+        let rejectRetry: (error: Error) => void = () => {}
+        const getGeneratedImageBlob = vi.fn()
+            .mockRejectedValueOnce(new Error('HTTP 404'))
+            .mockImplementationOnce(() => new Promise<Blob>((_resolve, reject) => {
+                rejectRetry = reject
+            }))
+        renderCard({ mimeType: 'image/png', locale: 'en', getGeneratedImageBlob })
+
+        await waitFor(() => {
+            expect(screen.getByText('Displayed image is currently unavailable.')).toBeInTheDocument()
+        })
+
+        const retry = screen.getByRole('button', { name: 'Retry' })
+        retry.focus()
+        fireEvent.click(retry)
+
+        await waitFor(() => expect(retry).toHaveAttribute('aria-busy', 'true'))
+        // Repeat activation while the request is in flight must not queue a second fetch.
+        fireEvent.click(retry)
+        expect(getGeneratedImageBlob).toHaveBeenCalledTimes(2)
+
+        rejectRetry(new Error('HTTP 404'))
+        await waitFor(() => expect(retry).not.toHaveAttribute('aria-busy'))
+        expect(screen.getByText('Displayed image is currently unavailable.')).toBeInTheDocument()
+        // Same DOM node, so a keyboard user keeps the focus position they had.
+        expect(screen.getByRole('button', { name: 'Retry' })).toBe(retry)
+        expect(document.activeElement).toBe(retry)
+    })
+
+    it('keeps the unavailable message outside the share-filtered retry action', async () => {
+        const getGeneratedImageBlob = vi.fn().mockRejectedValue(new Error('HTTP 404'))
+        renderCard({ mimeType: 'image/png', locale: 'en', getGeneratedImageBlob })
+
+        await waitFor(() => {
+            expect(screen.getByText('Displayed image is currently unavailable.')).toBeInTheDocument()
+        })
+
+        const retry = screen.getByRole('button', { name: 'Retry' })
+        // Share Turn snapshots strip [data-hapi-share-action="true"] because the copied
+        // markup carries no click handler; the message has to survive that removal.
+        expect(retry).toHaveAttribute('data-hapi-share-action', 'true')
+        const message = screen.getByText('Displayed image is currently unavailable.')
+        expect(retry.contains(message)).toBe(false)
+        expect(message.closest('[data-hapi-share-action="true"]')).toBeNull()
     })
 
     it('localizes the failed image retry state in Simplified Chinese', async () => {
