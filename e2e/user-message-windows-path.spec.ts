@@ -6,7 +6,7 @@ const localized = String.raw`路径：D:\_work\_cache\.front`
 const labeled = String.raw`Path:D:\_work\.front`
 const plain = String.raw`D:\_work\.env.local`
 const fragmentLike = String.raw`D:\_work\.env#backup.md`
-const quotedWithSpaces = String.raw`Open "D:_work.env files\README.md"`
+const quotedWithSpaces = String.raw`Open 「D:_work.env files\README.md」`
 const linkable = String.raw`D:\_work\.env`
 
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {

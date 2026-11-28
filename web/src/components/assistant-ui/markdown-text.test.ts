@@ -319,9 +319,16 @@ describe('user message Markdown — Windows paths', () => {
         ['"', '"'],
         ["'", "'"],
         ['“', '”'],
+        ['「', '」'],
+        ['『', '』'],
     ])('does not autolink a prefix of a quoted path containing spaces (%s %s)', (open, close) => {
         const markdown = `Open ${open}${String.raw`D:\repo\.env files\README.md`}${close}`
         expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(render(markdown))
+    })
+
+    it('does not confuse a quoted drive label with the start of a spaced path', () => {
+        const markdown = String.raw`The error says "C: is offline. Try D:\Projects\demo\.front".`
+        expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>${markdown}</p>`)
     })
 
     it('still autolinks an unambiguous quoted path without spaces', () => {

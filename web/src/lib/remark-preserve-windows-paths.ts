@@ -27,14 +27,15 @@ declare module 'mdast' {
 
 const CLOSING_QUOTE = new Map([
     ['"', '"'], ["'", "'"], ['“', '”'], ['‘', '’'], ['«', '»'], ['‹', '›'],
+    ['「', '」'], ['『', '』'], ['｢', '｣'],
 ])
 
 const CLOSING_WRAPPER = new Map([
-    ['(', ')'], ['[', ']'], ['{', '}'], ["'", "'"],
+    ...CLOSING_QUOTE,
+    ['(', ')'], ['[', ']'], ['{', '}'],
     ['（', '）'], ['［', '］'], ['｛', '｝'], ['｟', '｠'],
     ['【', '】'], ['〈', '〉'], ['《', '》'], ['〔', '〕'], ['〖', '〗'],
-    ['〘', '〙'], ['〚', '〛'], ['「', '」'], ['『', '』'], ['｢', '｣'],
-    ['“', '”'], ['‘', '’'], ['«', '»'], ['‹', '›'],
+    ['〘', '〙'], ['〚', '〛'],
 ])
 
 const parseStops = new WeakMap<Processor, ReadonlyMap<string, unknown>>()
@@ -82,6 +83,13 @@ function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMa
         const boundary = match[1]
         const start = match.index + boundary.length
         const root = start + 2
+        while (next < escapes.length && escapes[next].offset < root) next++
+        const rootCharacter = value[root]
+        if (rootCharacter !== '\\' && rootCharacter !== '/' && escapes[next]?.offset !== root) {
+            // A drive label (C:) is not a path and must not swallow a later one.
+            drivePaths.lastIndex = root
+            continue
+        }
         // A closing quote after whitespace makes this a spaced path, which
         // we do not restore. Do not hand its first word to the file linker.
         const quote = CLOSING_QUOTE.get(boundary)
@@ -104,17 +112,13 @@ function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMa
         // A closing wrapper or math token can end the path before the regex
         // match does. Resume there so adjacent paths are considered too.
         drivePaths.lastIndex = end
-        while (next < escapes.length && escapes[next].offset < root) next++
         const first = next
         let hasDotEscape = false
         while (next < escapes.length && escapes[next].offset < end) {
             hasDotEscape ||= escapes[next].dot
             next++
         }
-        const rootCharacter = value[root]
-        if (!hasDotEscape || (rootCharacter !== '\\' && rootCharacter !== '/' && escapes[first]?.offset !== root)) {
-            continue
-        }
+        if (!hasDotEscape) continue
 
         const path: string[] = []
         let cursor = start
