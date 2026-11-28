@@ -1,5 +1,6 @@
 import type { Literal, Root, RootContent, Text } from 'mdast'
 import type { Processor } from 'unified'
+import { matchNonHttpsUris } from './remark-non-https-autolink'
 
 // Keep matching scoped to space-free drive paths. The separator after the
 // drive may have been consumed by Markdown, so verify it against escape tokens.
@@ -64,13 +65,27 @@ type Escape = { offset: number; dot: boolean }
 
 function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMap<string, unknown>): RootContent[] {
     const parts: RootContent[] = []
+    const drivePaths = new RegExp(DRIVE_PATH)
+    const uriMatches = matchNonHttpsUris(value)
+    let uri = uriMatches.next().value
     let next = 0
     let lastEnd = 0
-    for (const match of value.matchAll(DRIVE_PATH)) {
+    let match: RegExpExecArray | null
+    while ((match = drivePaths.exec(value)) !== null) {
         const boundary = match[1]
         const start = match.index + boundary.length
         const root = start + 2
-        const end = pathEnd(value, root, match.index + match[0].length, boundary, stops)
+        // Do not split a bare URI (e.g. a path inside a custom URI query).
+        while (uri && (uri.index ?? 0) + uri[0].length <= start) uri = uriMatches.next().value
+        if (uri && (uri.index ?? 0) <= start) {
+            drivePaths.lastIndex = (uri.index ?? 0) + uri[0].length
+            continue
+        }
+        const matchEnd = Math.min(match.index + match[0].length, uri?.index ?? value.length)
+        const end = pathEnd(value, root, matchEnd, boundary, stops)
+        // A closing wrapper or math token can end the path before the regex
+        // match does. Resume there so adjacent paths are considered too.
+        drivePaths.lastIndex = end
         while (next < escapes.length && escapes[next].offset < root) next++
         const first = next
         let hasDotEscape = false

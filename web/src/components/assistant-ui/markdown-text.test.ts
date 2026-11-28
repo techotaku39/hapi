@@ -208,6 +208,7 @@ describe('user message Markdown — Windows paths', () => {
         String.raw`查看（D:\项目\.配置）`,
         String.raw`路径：D:\项目\.配置`,
         String.raw`Path:D:\work\.front`,
+        String.raw`(D:\repo\.front),(E:\repo\.cache)`,
         String.raw`D:\work\_cache\.front`,
         String.raw`D:\.front\_cache`,
         String.raw`D:\work\.front\_cache and --path=E:\_next\.front`,
@@ -296,6 +297,26 @@ describe('user message Markdown — Windows paths', () => {
     it('leaves an explicit Markdown link and its label unchanged', () => {
         const markdown = `[${String.raw`D:\_work\.env`}](https://example.com/)`
         expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(render(markdown))
+    })
+
+    it('leaves a bare URI with a Windows path query intact', () => {
+        const markdown = String.raw`obsidian://open?path=D:\work\.front`
+        const html = render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)
+        expect(html).toBe(render(markdown))
+        expect(html).toContain('obsidian://open?path=D:%5Cwork.front')
+    })
+
+    it('keeps an adjacent bare URI outside the restored path span', () => {
+        const path = String.raw`D:\work\.front`
+        const uri = 'obsidian://open?note=demo'
+        expect(render(`${path},${uri}`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
+            `<p>${path},<a href="${uri}">${uri}</a></p>`
+        )
+    })
+
+    it('does not truncate a restored filename ending in a literal comma', () => {
+        const path = String.raw`D:\repo\src\.env,`
+        expect(render(`Open ${path} then continue`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>Open ${path} then continue</p>`)
     })
 
     it('keeps the existing Markdown structure around the path', () => {

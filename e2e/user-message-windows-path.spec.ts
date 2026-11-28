@@ -44,6 +44,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(displayMath).toContainText(String.raw`See (D:\_work\.front).`)
         await expect(displayMath.locator('.katex-display')).toHaveCount(1)
         await expect(displayMath).not.toContainText(/[\uE000-\uF8FF]/u)
+        await expect(page.getByTestId('user-message-adjacent-paths')).toHaveText(String.raw`(D:\repo\.front),(E:\repo\.cache)`)
         const link = bubble.getByRole('link', { name: linkable, exact: true })
         await expect(bubble.getByRole('link')).toHaveCount(1)
         await link.click()
