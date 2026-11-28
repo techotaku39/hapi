@@ -164,9 +164,14 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     useEffect(() => {
         if (!objectUrl || !restoreFocusRef.current) return
         restoreFocusRef.current = false
-        // The Retry control that held focus has just been replaced by the media
-        // control; land the keyboard user on it instead of dropping focus to the
-        // document body.
+        // The Retry control unmounted with the error branch, so focus falls back
+        // to the document body. Only reclaim it in that case: if the user tabbed
+        // to another control while the request was in flight, that is where
+        // focus belongs, and moving it back would undo their choice.
+        const active = document.activeElement
+        const focusWasLost = !active || active === document.body || active === retryButtonRef.current
+        if (!focusWasLost) return
+        // Land the keyboard user on the control that replaced Retry.
         const target = cardRef.current?.querySelector<HTMLElement>(
             '[data-image-preview-trigger], a[data-hapi-generated-media-download="true"], video, audio'
         )
