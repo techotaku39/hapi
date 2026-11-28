@@ -14,6 +14,7 @@ const prompt = [
     String.raw`Path:D:\_work\.front`,
     String.raw`D:\_work\.env.local`,
     String.raw`D:\_work\.env#backup.md`,
+    String.raw`Open "D:\_work\.env files\README.md"`,
     String.raw`Open D:\_work\.env: settings`,
     String.raw`Use \* as a literal asterisk.`,
 ].join('\n')

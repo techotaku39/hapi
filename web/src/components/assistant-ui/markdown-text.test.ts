@@ -315,6 +315,22 @@ describe('user message Markdown — Windows paths', () => {
         )
     })
 
+    it.each([
+        ['"', '"'],
+        ["'", "'"],
+        ['“', '”'],
+    ])('does not autolink a prefix of a quoted path containing spaces (%s %s)', (open, close) => {
+        const markdown = `Open ${open}${String.raw`D:\repo\.env files\README.md`}${close}`
+        expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(render(markdown))
+    })
+
+    it('still autolinks an unambiguous quoted path without spaces', () => {
+        const path = String.raw`D:\_work\.env`
+        expect(render(`Open "${path}"`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
+            `<p>Open "<a href="hapi-file-candidate:${encodeURIComponent(path)}">${path}</a>"</p>`
+        )
+    })
+
     it('does not truncate a restored filename ending in a literal comma', () => {
         const path = String.raw`D:\repo\src\.env,`
         expect(render(`Open ${path} then continue`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>Open ${path} then continue</p>`)

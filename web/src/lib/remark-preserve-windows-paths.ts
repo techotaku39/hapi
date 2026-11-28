@@ -25,6 +25,10 @@ declare module 'mdast' {
     }
 }
 
+const CLOSING_QUOTE = new Map([
+    ['"', '"'], ["'", "'"], ['“', '”'], ['‘', '’'], ['«', '»'], ['‹', '›'],
+])
+
 const CLOSING_WRAPPER = new Map([
     ['(', ')'], ['[', ']'], ['{', '}'], ["'", "'"],
     ['（', '）'], ['［', '］'], ['｛', '｝'], ['｟', '｠'],
@@ -78,6 +82,17 @@ function restoreDottedPaths(value: string, escapes: Escape[], stops?: ReadonlyMa
         const boundary = match[1]
         const start = match.index + boundary.length
         const root = start + 2
+        // A closing quote after whitespace makes this a spaced path, which
+        // we do not restore. Do not hand its first word to the file linker.
+        const quote = CLOSING_QUOTE.get(boundary)
+        if (quote) {
+            const close = value.indexOf(quote, root)
+            const quoted = close < 0 ? '' : value.slice(root, close)
+            if (/[^\S\r\n]/.test(quoted) && !/[\r\n]/.test(quoted)) {
+                drivePaths.lastIndex = close + 1
+                continue
+            }
+        }
         // Do not split a bare URI (e.g. a path inside a custom URI query).
         while (uri && (uri.index ?? 0) + uri[0].length <= start) uri = uriMatches.next().value
         if (uri && (uri.index ?? 0) <= start) {

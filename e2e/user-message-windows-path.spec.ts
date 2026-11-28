@@ -6,6 +6,7 @@ const localized = String.raw`路径：D:\_work\_cache\.front`
 const labeled = String.raw`Path:D:\_work\.front`
 const plain = String.raw`D:\_work\.env.local`
 const fragmentLike = String.raw`D:\_work\.env#backup.md`
+const quotedWithSpaces = String.raw`Open "D:_work.env files\README.md"`
 const linkable = String.raw`D:\_work\.env`
 
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
@@ -22,8 +23,8 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
             await page.locator('main').screenshot({ path: `${screenshotDirectory}/user-bubble-${viewport.width}.png` })
         }
 
-        await expect(bubble).toHaveText(`Please check ${path}\n${option}\n${localized}\n${labeled}\n${plain}\n${fragmentLike}\nOpen ${linkable}: settings\nUse * as a literal asterisk.`, { useInnerText: true })
-        await expect(bubble.locator('br')).toHaveCount(7)
+        await expect(bubble).toHaveText(`Please check ${path}\n${option}\n${localized}\n${labeled}\n${plain}\n${fragmentLike}\n${quotedWithSpaces}\nOpen ${linkable}: settings\nUse * as a literal asterisk.`, { useInnerText: true })
+        await expect(bubble.locator('br')).toHaveCount(8)
         const selection = await bubble.evaluate((element) => {
             const range = document.createRange()
             range.selectNodeContents(element)
