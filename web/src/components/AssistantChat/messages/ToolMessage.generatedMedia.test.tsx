@@ -245,6 +245,34 @@ describe('GeneratedImageCard media fetch', () => {
         }
     })
 
+    it('moves focus to the preview without scrolling the chat', async () => {
+        const getGeneratedImageBlob = vi.fn()
+            .mockRejectedValueOnce(new Error('HTTP 404'))
+            .mockResolvedValueOnce(new Blob(['x'], { type: 'image/png' }))
+        renderCard({ mimeType: 'image/png', locale: 'en', getGeneratedImageBlob })
+
+        await waitFor(() => {
+            expect(screen.getByText('Displayed image is currently unavailable.')).toBeInTheDocument()
+        })
+
+        const retry = screen.getByRole('button', { name: 'Retry' })
+        retry.focus()
+        // Scrolling with a wheel keeps Retry focused, so the hand-off has to take
+        // focus without yanking the chat back to the card.
+        const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus')
+        try {
+            fireEvent.click(retry)
+            await waitFor(() => {
+                expect(screen.getByRole('img', { name: 'clip.mp4' })).toBeInTheDocument()
+            })
+            const preview = document.querySelector('[data-image-preview-trigger]')
+            await waitFor(() => expect(document.activeElement).toBe(preview))
+            expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+        } finally {
+            focusSpy.mockRestore()
+        }
+    })
+
     it('does not take focus back when the retry control was blurred first', async () => {
         let resolveRetry: (blob: Blob) => void = () => {}
         const getGeneratedImageBlob = vi.fn()

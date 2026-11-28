@@ -175,11 +175,13 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
         const active = document.activeElement
         const focusWasLost = !active || active === document.body || active === retryButtonRef.current
         if (!focusWasLost) return
-        // Land the keyboard user on the control that replaced Retry.
+        // Land the keyboard user on the control that replaced Retry. A wheel scroll
+        // keeps Retry focused, so a plain focus() would yank the chat back to the
+        // card; take focus without touching the reading position.
         const target = cardRef.current?.querySelector<HTMLElement>(
             '[data-image-preview-trigger], a[data-hapi-generated-media-download="true"], video, audio'
         )
-        target?.focus()
+        target?.focus({ preventScroll: true })
     }, [objectUrl])
 
     return (
