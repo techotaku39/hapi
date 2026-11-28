@@ -56,7 +56,7 @@ function DiffWrapToggle() {
             data-hapi-share-export-exclude="true"
             onClick={(event) => {
                 event.stopPropagation()
-                setCodeWrap(!codeWrap)
+                setCodeWrap(!codeWrap, event.currentTarget)
             }}
             className={cn(
                 'rounded-md p-1 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)]',

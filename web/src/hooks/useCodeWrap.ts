@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 
 function getCodeWrapStorageKey(): string {
     return 'hapi-code-wrap'
@@ -65,7 +66,7 @@ export function getInitialCodeWrap(): boolean {
 
 export function useCodeWrap(): {
     codeWrap: boolean
-    setCodeWrap: (wrap: boolean) => void
+    setCodeWrap: (wrap: boolean, trigger?: HTMLElement) => void
 } {
     const [codeWrap, setCodeWrapState] = useState<boolean>(getInitialCodeWrap)
 
@@ -89,14 +90,29 @@ export function useCodeWrap(): {
         }
     }, [])
 
-    const setCodeWrap = useCallback((wrap: boolean) => {
+    const setCodeWrap = useCallback((wrap: boolean, trigger?: HTMLElement) => {
         // Broadcast only: every mounted instance (including this one, which
         // registered its own `setCodeWrapState` as a listener on mount)
         // updates through the same path, so the initiating instance is not
         // double-set. Toggle buttons fire from onClick handlers, which React
         // guarantees run after the mount effect, so this instance's listener
         // is always registered by the time this runs.
-        broadcastSameTab(wrap)
+        const viewport = trigger?.closest('.happy-thread-messages')?.closest<HTMLElement>('.chat-scroll-y')
+        if (trigger && viewport && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1) {
+            // Earlier blocks can all change height on this click. Keep the
+            // clicked control in place, without overriding live tail-follow.
+            const offset = () => trigger.getBoundingClientRect().top - viewport.getBoundingClientRect().top
+            const before = offset()
+            flushSync(() => broadcastSameTab(wrap))
+            if (viewport.contains(trigger)) {
+                const delta = offset() - before
+                if (delta !== 0) {
+                    viewport.scrollTo({ top: viewport.scrollTop + delta, behavior: 'instant' })
+                }
+            }
+        } else {
+            broadcastSameTab(wrap)
+        }
 
         if (wrap) {
             safeSetItem(getCodeWrapStorageKey(), '1')

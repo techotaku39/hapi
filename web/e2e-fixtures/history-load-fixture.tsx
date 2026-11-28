@@ -105,12 +105,14 @@ window.__probe = {
 //   is called, making the cached first paint observable.
 // - ?navigationShell=1 — add a pinned header/composer and outline controls.
 // - ?navigationMedia=1 — include generated-image previews in older history.
+// - ?codeWrap=1 — include code blocks above and at a history reading position.
 // - ?sessionSwitch=1 — render session-switch buttons between a preload-margin
 //   overflow session and a short-tail collapsed-tools session while honoring
 //   the production 20-row latest page size.
 const fixtureParams = new URLSearchParams(window.location.search)
 const navigationShell = fixtureParams.has('navigationShell')
 const navigationMedia = fixtureParams.has('navigationMedia')
+const codeWrap = fixtureParams.has('codeWrap')
 const sessionSwitch = fixtureParams.has('sessionSwitch')
 const shortPages = fixtureParams.has('shortPages')
 const failBeforeCount = Number(fixtureParams.get('failBefore') ?? '0')
@@ -248,6 +250,19 @@ const sessionMessagesById: Record<string, DecryptedMessage[]> = sessionSwitch
 
 const allMessages: DecryptedMessage[] = Array.from({ length: TOTAL_MESSAGES }, (_, index) => {
     const seq = index + 1
+    if (codeWrap && (seq === 1130 || seq === 1140 || seq === 1150)) {
+        const text = seq === 1150 ? 'Code block to keep in view' : `Earlier code block ${seq}`
+        const lines = Array.from({ length: seq === 1150 ? 5 : 7 }, (_, index) =>
+            `row ${index + 1}: ${'checkpoint pending, review details before continuing; '.repeat(6).trim()}`
+        )
+        return createFixtureMessage(seq, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', message: [text, '', '```text', ...lines, '```'].join('\n') },
+            },
+        })
+    }
     const filtered = filteredOlder && seq <= TOTAL_MESSAGES - 200
     return {
         id: `m-${seq}`,
@@ -526,7 +541,7 @@ function FixtureThread() {
             {navigationShell ? (
                 <aside className="hidden w-64 shrink-0 sm:block">Session sidebar</aside>
             ) : null}
-            <div className="flex h-full min-h-0 flex-1 flex-col">
+            <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
                 {sessionSwitch ? (
                     <header data-testid="session-switch-header" className="flex h-12 shrink-0 items-center gap-2 border-b p-2">
                         <button

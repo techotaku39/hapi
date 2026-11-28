@@ -18,6 +18,7 @@ jobs:
               run: >-
                   bun run test:e2e --
                   terminal-wrap-fidelity.spec.ts
+                  code-wrap-scroll.spec.ts
                   session-list-fork-menu.spec.ts
                   composer-copy.spec.ts
                   session-list-scroll.spec.ts

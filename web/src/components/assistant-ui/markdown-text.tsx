@@ -416,7 +416,7 @@ function CodeHeader(props: CodeHeaderProps) {
                     data-hapi-wrap-enable-label={t('code.wrap.enable')}
                     data-hapi-wrap-disable-label={t('code.wrap.disable')}
                     data-hapi-share-export-exclude="true"
-                    onClick={() => setCodeWrap(!codeWrap)}
+                    onClick={(event) => setCodeWrap(!codeWrap, event.currentTarget)}
                     className={`rounded-md p-1 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)] ${codeWrap ? 'text-[var(--app-fg)]' : 'text-[var(--app-code-header-fg)]'}`}
                     title={t(codeWrap ? 'code.wrap.disable' : 'code.wrap.enable')}
                     aria-pressed={codeWrap}
