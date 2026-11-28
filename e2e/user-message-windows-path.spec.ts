@@ -1,0 +1,33 @@
+import { expect, test } from '@playwright/test'
+
+const path = String.raw`D:\Projects\demo\.front`
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
+    test(`renders a literal Windows path in the user bubble at ${viewport.width}px`, async ({ page }) => {
+        const pageErrors: string[] = []
+        page.on('pageerror', (error) => pageErrors.push(error.message))
+        await page.setViewportSize(viewport)
+        await page.goto('/e2e-fixtures/user-message-windows-path-fixture.html')
+
+        const bubble = page.getByTestId('user-message')
+        await expect(bubble).toBeVisible()
+        const screenshotDirectory = process.env.HAPI_WINDOWS_PATH_SCREENSHOTS
+        if (screenshotDirectory) {
+            await page.locator('main').screenshot({ path: `${screenshotDirectory}/user-bubble-${viewport.width}.png` })
+        }
+
+        await expect(bubble).toHaveText(`Please check ${path}\nUse * as a literal asterisk.`, { useInnerText: true })
+        await expect(bubble.locator('br')).toHaveCount(1)
+        const selection = await bubble.evaluate((element) => {
+            const range = document.createRange()
+            range.selectNodeContents(element)
+            const selection = window.getSelection()!
+            selection.removeAllRanges()
+            selection.addRange(range)
+            return selection.toString()
+        })
+        expect(selection).toContain(path)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        expect(pageErrors).toEqual([])
+    })
+}

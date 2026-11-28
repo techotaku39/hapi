@@ -10,6 +10,7 @@ import {
 } from '@assistant-ui/react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import remarkPreserveWindowsPaths from '@/lib/remark-preserve-windows-paths'
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -140,6 +141,7 @@ export const MARKDOWN_PLUGINS_WITH_BREAKS = [
     remarkRepairTables,
     remarkCjkFriendly,
     remarkLatexBracketMath,
+    remarkPreserveWindowsPaths,
     remarkBreaks,
     ...MARKDOWN_PLUGIN_TAIL,
 ] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>

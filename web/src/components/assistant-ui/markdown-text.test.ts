@@ -195,3 +195,40 @@ describe('isExternalHttpHref', () => {
         expect(isExternalHttpHref(undefined)).toBe(false)
     })
 })
+
+describe('user message Markdown — Windows paths', () => {
+    it.each([
+        String.raw`D:\Project\ai-analyse\.front`,
+        String.raw`C:\.config`,
+        String.raw`c:/work\.config\.local`,
+        String.raw`查看（D:\项目\.配置）`,
+    ])('keeps the backslash before dotted segments: %s', (path) => {
+        expect(render(path, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>${path}</p>`)
+    })
+
+    it('keeps ordinary Markdown escapes and code spans unchanged', () => {
+        const markdown = 'Use \\. and \\* or `D:\\work\\.config`'
+        expect(render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
+            '<p>Use . and * or <code>D:\\work\\.config</code></p>'
+        )
+    })
+
+    it('leaves existing automatic and explicit file links intact', () => {
+        const markdown = String.raw`D:\work\test.md [docs](D:\work\.config\readme.md)`
+        const html = render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)
+        expect(html).toContain(`hapi-file-candidate:${encodeURIComponent(String.raw`D:\work\test.md`)}`)
+        expect(html).toBe(render(markdown))
+    })
+
+    it('keeps the existing Markdown structure around the path', () => {
+        const path = String.raw`D:\work\.front`
+        expect(render(`**${path}**`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p><strong>${path}</strong></p>`)
+        expect(render('```\n' + path + '\n```', MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(render('```\n' + path + '\n```'))
+    })
+
+    it('does not change the assistant or standalone Markdown parse', () => {
+        const markdown = String.raw`D:\work\.front`
+        expect(render(markdown)).toBe(String.raw`<p>D:\work.front</p>`)
+        expect(render(markdown, MARKDOWN_PLUGINS_STANDALONE_WITH_BREAKS)).toBe(render(markdown))
+    })
+})
