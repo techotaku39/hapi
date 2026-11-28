@@ -206,6 +206,10 @@ describe('user message Markdown — Windows paths', () => {
         String.raw`--path=D:\work\.front`,
         String.raw`--path=D:\_work\.config\.front`,
         String.raw`查看（D:\项目\.配置）`,
+        String.raw`路径：D:\项目\.配置`,
+        String.raw`D:\work\_cache\.front`,
+        String.raw`D:\.front\_cache`,
+        String.raw`D:\work\.front\_cache and --path=E:\_next\.front`,
     ])('keeps the backslash before dotted segments: %s', (path) => {
         expect(render(path, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>${path}</p>`)
     })
@@ -231,6 +235,13 @@ describe('user message Markdown — Windows paths', () => {
         const html = render(markdown, MARKDOWN_PLUGINS_WITH_BREAKS)
         expect(html).toContain(`hapi-file-candidate:${encodeURIComponent(String.raw`D:\work\test.md`)}`)
         expect(html).toBe(render(markdown))
+    })
+
+    it('gives the file autolinker the complete spelling of a dotted path', () => {
+        const fullPath = String.raw`D:\_work\_cache\.env`
+        expect(render(fullPath, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
+            `<p><a href="hapi-file-candidate:${encodeURIComponent(fullPath)}">${fullPath}</a></p>`
+        )
     })
 
     it('keeps the existing Markdown structure around the path', () => {

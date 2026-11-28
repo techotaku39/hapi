@@ -6,6 +6,7 @@ import '../src/index.css'
 const prompt = [
     String.raw`Please check D:\Projects\demo\.front`,
     String.raw`--path=D:\_work\.front`,
+    String.raw`路径：D:\_work\_cache\.front`,
     String.raw`Use \* as a literal asterisk.`,
 ].join('\n')
 
