@@ -34,8 +34,16 @@ function tinyPngBlob(): Blob {
 
 const blob = tinyPngBlob()
 
+const params = new URLSearchParams(window.location.search)
+// The browser suite also exercises the unavailable state and narrow chat columns.
+const shouldFail = params.has('fail')
+const narrowWidth = Number(params.get('width') ?? 0)
+
 const api = {
-    getGeneratedImageBlob: async () => blob
+    getGeneratedImageBlob: async () => {
+        if (shouldFail) throw new Error('HTTP 404')
+        return blob
+    }
 } as unknown as ApiClient
 
 const context: HappyChatContextValue = {
@@ -55,7 +63,10 @@ const context: HappyChatContextValue = {
 function Fixture() {
     return (
         <HappyChatProvider value={context}>
-            <main className="mx-auto flex max-w-3xl flex-col gap-3 p-5">
+            <main
+                className="mx-auto flex max-w-3xl flex-col gap-3 p-5"
+                style={narrowWidth > 0 ? { width: narrowWidth, marginLeft: 0, marginRight: 0 } : undefined}
+            >
                 <p className="text-xs text-[var(--app-hint)]">
                     Real GeneratedImageCard with a real 16x32 PNG; synthetic session data.
                 </p>

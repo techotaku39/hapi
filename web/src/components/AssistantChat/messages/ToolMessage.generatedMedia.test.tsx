@@ -185,6 +185,29 @@ describe('GeneratedImageCard media fetch', () => {
         expect(document.activeElement).toBe(retry)
     })
 
+    it('moves focus to the loaded preview when a retry succeeds', async () => {
+        const getGeneratedImageBlob = vi.fn()
+            .mockRejectedValueOnce(new Error('HTTP 404'))
+            .mockResolvedValueOnce(new Blob(['x'], { type: 'image/png' }))
+        renderCard({ mimeType: 'image/png', locale: 'en', getGeneratedImageBlob })
+
+        await waitFor(() => {
+            expect(screen.getByText('Displayed image is currently unavailable.')).toBeInTheDocument()
+        })
+
+        const retry = screen.getByRole('button', { name: 'Retry' })
+        retry.focus()
+        fireEvent.click(retry)
+
+        await waitFor(() => {
+            expect(screen.getByRole('img', { name: 'clip.mp4' })).toBeInTheDocument()
+        })
+        // The retry control unmounts on success; focus must land on the preview control.
+        await waitFor(() => {
+            expect(document.activeElement).toBe(document.querySelector('[data-image-preview-trigger]'))
+        })
+    })
+
     it('keeps the unavailable message outside the share-filtered retry action', async () => {
         const getGeneratedImageBlob = vi.fn().mockRejectedValue(new Error('HTTP 404'))
         renderCard({ mimeType: 'image/png', locale: 'en', getGeneratedImageBlob })

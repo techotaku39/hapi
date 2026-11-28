@@ -76,6 +76,9 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     const [isFetching, setIsFetching] = useState(false)
     const objectUrlRef = useRef<string | null>(null)
     const loadedImageIdRef = useRef(props.block.imageId)
+    const cardRef = useRef<HTMLDivElement | null>(null)
+    const retryButtonRef = useRef<HTMLButtonElement | null>(null)
+    const restoreFocusRef = useRef(false)
     const isVideo = isInlineVideoMimeType(props.block.mimeType)
     const isAudio = isInlineAudioMimeType(props.block.mimeType)
     const isImage = isInlineImageMimeType(props.block.mimeType)
@@ -158,8 +161,21 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
         }
     }, [ctx.api, ctx.sessionId, props.block.imageId, isImage, shouldFetch, loadRetryCount])
 
+    useEffect(() => {
+        if (!objectUrl || !restoreFocusRef.current) return
+        restoreFocusRef.current = false
+        // The Retry control that held focus has just been replaced by the media
+        // control; land the keyboard user on it instead of dropping focus to the
+        // document body.
+        const target = cardRef.current?.querySelector<HTMLElement>(
+            '[data-image-preview-trigger], a[data-hapi-generated-media-download="true"], video, audio'
+        )
+        target?.focus()
+    }, [objectUrl])
+
     return (
         <div
+            ref={cardRef}
             className="w-fit max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3"
             data-hapi-generated-media-id={props.block.imageId}
             data-hapi-generated-media-file-name={props.block.fileName}
@@ -209,7 +225,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                     </div>
                 )
             ) : hasError ? (
-                <div className="flex min-h-32 w-72 max-w-full min-w-[12rem] flex-col items-center justify-center gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-4 py-3 text-center text-sm text-[var(--app-hint)]">
+                <div className="flex min-h-32 w-72 max-w-full flex-col items-center justify-center gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-4 py-3 text-center text-sm text-[var(--app-hint)]">
                     <span>{t('media.displayed.unavailable', { label: mediaLabel })}</span>
                     <button
                         type="button"
@@ -218,8 +234,10 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                         data-hapi-share-action="true"
                         aria-busy={isFetching ? 'true' : undefined}
                         aria-disabled={isFetching || undefined}
+                        ref={retryButtonRef}
                         onClick={() => {
                             if (isFetching) return
+                            restoreFocusRef.current = retryButtonRef.current === document.activeElement
                             setLoadRetryCount((count) => count + 1)
                         }}
                         className="rounded text-xs font-medium text-[var(--app-fg)] underline underline-offset-2 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] aria-disabled:opacity-60"
