@@ -104,7 +104,7 @@ function render(markdown: string, plugins: PluggableList = MARKDOWN_PLUGINS): st
         .use(plugins)
         .use(remarkRehype)
         .use(MARKDOWN_REHYPE_PLUGINS)
-    const tree = processor.runSync(processor.parse(markdown))
+    const tree = processor.runSync(processor.parse(markdown), { value: markdown })
     return toHtml(tree as never)
 }
 
@@ -249,8 +249,25 @@ describe('user message Markdown — Windows paths', () => {
         String.raw`D:\_work\.env.local`,
         String.raw`D:\work\.env\notes.unknown`,
         String.raw`D:\_work\.env:stream`,
+        String.raw`D:\_work\.env#backup.md`,
+        String.raw`D:\_work\.env%23backup.md`,
+        String.raw`D:\_work\.env]`,
     ])('does not autolink a prefix of a restored path: %s', (path) => {
         expect(render(path, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(`<p>${path}</p>`)
+    })
+
+    it('leaves a sentence-ending period outside a complete restored file link', () => {
+        const path = String.raw`D:\_work\.env`
+        expect(render(`Open ${path}.`, MARKDOWN_PLUGINS_WITH_BREAKS)).toBe(
+            `<p>Open <a href="hapi-file-candidate:${encodeURIComponent(path)}">${path}</a>.</p>`
+        )
+    })
+
+    it('renders bracket-delimited inline math immediately after a restored path', () => {
+        const path = String.raw`D:\work\.front`
+        const html = render(String.raw`${path},\(x+1\)`, MARKDOWN_PLUGINS_WITH_BREAKS)
+        expect(html).toContain(`${path},<span class="katex">`)
+        expect(html).not.toMatch(/[\uE000-\uF8FF]/u)
     })
 
     it('keeps a complete restored path link and its line suffix after a newline', () => {

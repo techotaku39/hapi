@@ -13,7 +13,8 @@ const prompt = [
     String.raw`路径：D:\_work\_cache\.front`,
     String.raw`Path:D:\_work\.front`,
     String.raw`D:\_work\.env.local`,
-    String.raw`D:\_work\.env`,
+    String.raw`D:\_work\.env#backup.md`,
+    String.raw`Open D:\_work\.env.`,
     String.raw`Use \* as a literal asterisk.`,
 ].join('\n')
 
@@ -38,6 +39,9 @@ function UserBubbleFixture() {
             <HappyChatProvider value={chat}>
                 <div className={getUserBubbleClassName()} data-testid="user-message">
                     <UserBubbleContent text={prompt} />
+                </div>
+                <div className={getUserBubbleClassName()} data-testid="user-message-with-math">
+                    <UserBubbleContent text={String.raw`D:\_work\.front,\(x+1\)`} />
                 </div>
             </HappyChatProvider>
         </main>

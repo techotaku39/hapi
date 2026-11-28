@@ -268,13 +268,19 @@ function visit(
     const nextChildren: MarkdownNode[] = []
     for (const child of node.children) {
         if (child.type === RESTORED_WINDOWS_PATH) {
-            const text = { type: 'text', value: child.value ?? '' }
-            const path = stripLineSuffix(text.value)
-            // A restored path is already delimited. Never retry the normal
-            // substring matcher on it: .env.local is not a link to .env.
-            nextChildren.push(child.allowAutolink && isWindowsAbsolutePath(path) && !path.slice(2).includes(':') && shouldLinkPath(path)
-                ? { type: 'link', url: createAutolinkHref(path), children: [text] }
-                : text)
+            const value = child.value ?? ''
+            // Periods at the end do not name a distinct Win32 file; other
+            // trailing punctuation can be literal and must not be stripped.
+            const displayPath = value.replace(/\.+$/, '')
+            const path = stripLineSuffix(displayPath)
+            // Never link a prefix of a restored path, including where the
+            // downstream href decoder would treat filename text as metadata.
+            if (child.allowAutolink && isWindowsAbsolutePath(path) && !/[:#%]/.test(path.slice(2)) && shouldLinkPath(path)) {
+                nextChildren.push({ type: 'link', url: createAutolinkHref(path), children: [{ type: 'text', value: displayPath }] })
+                if (displayPath.length < value.length) nextChildren.push({ type: 'text', value: value.slice(displayPath.length) })
+            } else {
+                nextChildren.push({ type: 'text', value })
+            }
             continue
         }
         if (child.type === 'text') {

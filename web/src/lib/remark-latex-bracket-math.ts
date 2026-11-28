@@ -1,5 +1,6 @@
 import type { Processor } from 'unified'
 import { repairMarkdownTables } from './remark-repair-tables'
+import { RESTORED_WINDOWS_PATH } from './remark-preserve-windows-paths'
 
 interface MarkdownNode {
     type: string
@@ -420,7 +421,13 @@ function splitTextNode(node: MarkdownNode, placeholders: PlaceholderMap): Markdo
         const next = findNextPlaceholder(value, cursor, placeholders)
         if (!next) break
         found = true
-        if (next.start > cursor) children.push({ type: 'text', value: value.slice(cursor, next.start) })
+        if (next.start > cursor) {
+            const prefix = value.slice(cursor, next.start)
+            // Restore math adjacent to a path without losing its complete-link guard.
+            children.push(cursor === 0 && node.type === RESTORED_WINDOWS_PATH
+                ? { ...node, value: prefix }
+                : { type: 'text', value: prefix })
+        }
         children.push(createMathNode(next.entry.kind, next.entry.value))
         cursor = next.end
     }
@@ -471,7 +478,7 @@ function transformContainer(node: MarkdownNode, placeholders: PlaceholderMap): v
             continue
         }
 
-        if (child.type === 'text') {
+        if (child.type === 'text' || child.type === RESTORED_WINDOWS_PATH) {
             children.push(...splitTextNode(child, placeholders))
             continue
         }
